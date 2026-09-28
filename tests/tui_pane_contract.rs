@@ -620,15 +620,12 @@ fn d0_current_device_capacity_uses_thick_full_disk_map() {
     assert!(text.contains("容量布局"), "{text}");
     assert!(text.contains("全盘容量地图"), "{text}");
     assert!(!text.contains("当前设备·disk6"), "{text}");
-    assert!(text.contains('┌') && text.contains('┬'), "{text}");
-    assert!(text.contains('└') && text.contains('┴'), "{text}");
+    assert!(text.contains('╭') && text.contains('┬'), "{text}");
+    assert!(text.contains('╰') && text.contains('┴'), "{text}");
     assert!(text.contains("启动区"), "{text}");
     assert!(text.contains("交换区"), "{text}");
     assert!(text.contains("保密区"), "{text}");
-    assert!(
-        text.contains("视觉宽度为极小区域保留最小可见宽度"),
-        "{text}"
-    );
+    assert!(text.contains("极小区域使用最小可视宽度"), "{text}");
 }
 
 #[test]
@@ -851,6 +848,22 @@ fn device_tree_gg_and_g_jump_to_first_and_last_visible_nodes() {
 }
 
 #[test]
+fn device_tree_g_keeps_context_visible_instead_of_scrolling_to_one_line() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+    state.navigate(NavCommand::Bottom, 12);
+
+    let text = render_text(&state, 150, 30);
+    for label in ["协议摘要", "备份关系", "状态与诊断"] {
+        assert!(
+            text.contains(label),
+            "G must keep surrounding tree rows visible; missing {label}: {text}"
+        );
+    }
+}
+
+#[test]
 fn device_capacity_map_stays_visible_and_tracks_selected_region() {
     use edpcli::application::disk_layout::DiskRegionKind;
     use edpcli::tui::state::DeviceInfoNodeKey;
@@ -875,7 +888,7 @@ fn device_capacity_map_stays_visible_and_tracks_selected_region() {
     let capacity_text = capacity.join("\n");
     let compact_capacity = capacity_text.replace(' ', "");
     assert!(compact_capacity.contains("全盘容量地图"), "{capacity_text}");
-    assert!(capacity_text.contains('┌') && capacity_text.contains('└'));
+    assert!(capacity_text.contains('╭') && capacity_text.contains('╰'));
     assert!(!include_str!("../src/tui/devices/presentation.rs").contains("尾部区域可直接"));
 
     let boot = state
@@ -952,7 +965,7 @@ fn device_tail_children_keep_the_same_full_disk_map_and_move_marker_inside_tail(
     let tail_lines = render_lines(&state, 180, 46);
     let tail_border = tail_lines
         .iter()
-        .find(|line| line.contains('┌') && line.contains('┬'))
+        .find(|line| line.contains('╭') && line.contains('┬'))
         .expect("tail map border")
         .clone();
     let tail_marker = tail_lines
@@ -982,7 +995,7 @@ fn device_tail_children_keep_the_same_full_disk_map_and_move_marker_inside_tail(
     let lce_lines = render_lines(&state, 180, 46);
     let lce_border = lce_lines
         .iter()
-        .find(|line| line.contains('┌') && line.contains('┬'))
+        .find(|line| line.contains('╭') && line.contains('┬'))
         .expect("LCE map border");
     let lce_marker = lce_lines
         .iter()
@@ -1005,20 +1018,30 @@ fn device_tail_children_keep_the_same_full_disk_map_and_move_marker_inside_tail(
 }
 
 #[test]
-fn device_capacity_map_uses_a_three_row_region_band() {
+fn device_capacity_map_uses_axis_thick_band_and_selection_card() {
     let mut state = AppState::new();
     state.replace_devices(vec![edp_device_with_layout()]);
     state.focus_devices_pane(PaneId::DevicesTree);
     state.navigate(NavCommand::Down, 20);
 
     let lines = render_lines(&state, 180, 46);
+    let joined = lines.join("\n").replace(' ', "");
+    for tick in ["0%", "25%", "50%", "75%", "100%"] {
+        assert!(joined.contains(tick), "missing disk-map tick {tick}");
+    }
+
     let top = lines
         .iter()
-        .position(|line| line.contains('┌') && line.contains('┬'))
-        .expect("disk map top border");
-    assert!(lines[top + 1].contains('│'), "map middle row missing");
+        .position(|line| line.contains('╭') && line.contains('┬'))
+        .expect("disk map rounded top border");
+    assert!(lines[top + 1].contains('│'), "map label row missing");
+    assert!(lines[top + 2].contains('│'), "map value row missing");
     assert!(
-        lines[top + 2].contains('└') && lines[top + 2].contains('┴'),
-        "map bottom border missing"
+        lines[top + 3].contains('╰') && lines[top + 3].contains('┴'),
+        "map rounded bottom border missing"
+    );
+    assert!(
+        joined.contains("当前选中") || joined.contains("全盘布局"),
+        "selection card missing"
     );
 }

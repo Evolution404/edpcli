@@ -18,16 +18,36 @@ pub(super) fn draw_device_tree(frame: &mut Frame, area: ratatui::layout::Rect, s
         .iter()
         .map(|row| device_tree_line(row, selected, focused))
         .collect::<Vec<_>>();
+    let selected_index = rows.iter().position(|row| row.key == selected).unwrap_or(0);
+    let visible_rows = area.height.saturating_sub(2).max(1) as usize;
+    let stored_offset = state.pane_viewport(PaneId::DevicesTree).scroll_y.offset;
+    let scroll_offset = tree_scroll_offset(rows.len(), selected_index, stored_offset, visible_rows);
     frame.render_widget(
         Paragraph::new(lines)
             .block(crate::tui::ui::card("设备信息", focused))
-            .scroll((
-                state.pane_viewport(PaneId::DevicesTree).scroll_y.offset as u16,
-                0,
-            ))
+            .scroll((scroll_offset.min(u16::MAX as usize) as u16, 0))
             .wrap(Wrap { trim: false }),
         area,
     );
+}
+
+fn tree_scroll_offset(
+    content_len: usize,
+    selected_index: usize,
+    stored_offset: usize,
+    visible_rows: usize,
+) -> usize {
+    let visible_rows = visible_rows.max(1);
+    let max_offset = content_len.saturating_sub(visible_rows);
+    let mut offset = stored_offset.min(max_offset);
+    if selected_index < offset {
+        offset = selected_index;
+    } else if selected_index >= offset.saturating_add(visible_rows) {
+        offset = selected_index
+            .saturating_add(1)
+            .saturating_sub(visible_rows);
+    }
+    offset.min(max_offset)
 }
 
 fn device_tree_line(

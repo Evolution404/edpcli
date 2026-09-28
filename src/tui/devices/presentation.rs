@@ -200,8 +200,8 @@ fn capacity_map_lines(
     let active = active_capacity_extent(model, key);
     let visual = model.collapsed_tail_model();
     let segment_count = visual.segments.len().max(1);
-    let band_width = width.max(24);
     let separators = segment_count.saturating_add(1);
+    let band_width = width.max(separators.saturating_add(segment_count));
     let cell_budget = band_width.saturating_sub(separators).max(segment_count);
     let allocations = disk_map_allocations(&visual, cell_budget);
     let map_width = allocations.iter().sum::<usize>() + separators;
@@ -227,10 +227,14 @@ fn capacity_map_lines(
             Span::raw(" ".repeat(coordinate_gap)),
             Span::styled(right, muted()),
         ]),
-        disk_map_border_line(&visual, &allocations, active.as_ref(), true),
-        disk_map_body_line(&visual, &allocations, active.as_ref()),
-        disk_map_border_line(&visual, &allocations, active.as_ref(), false),
     ];
+    lines.extend(disk_map_axis_lines(map_width));
+    lines.extend([
+        disk_map_border_line(&visual, &allocations, active.as_ref(), true),
+        disk_map_label_line(&visual, &allocations, active.as_ref()),
+        disk_map_value_line(&visual, &allocations, active.as_ref()),
+        disk_map_border_line(&visual, &allocations, active.as_ref(), false),
+    ]);
 
     if let Some(active) = active.as_ref() {
         let marker = disk_map_marker_column(&visual, &allocations, active);
@@ -238,9 +242,72 @@ fn capacity_map_lines(
             Span::raw(" ".repeat(marker)),
             Span::styled("▲", accent()),
         ]));
-        lines.push(Line::from(Span::styled(
+    } else {
+        lines.push(Line::from(""));
+    }
+
+    lines.extend(disk_map_selection_card_lines(
+        model,
+        active.as_ref(),
+        map_width,
+    ));
+    lines.push(Line::from(Span::styled(
+        "极小区域使用最小可视宽度；LBA、容量与占比保持真实。",
+        muted(),
+    )));
+    lines
+}
+
+fn disk_map_axis_lines(width: usize) -> Vec<Line<'static>> {
+    let width = width.max(1);
+    let mut labels = vec![' '; width];
+    for (percent, label) in [
+        (0usize, "0%"),
+        (25, "25%"),
+        (50, "50%"),
+        (75, "75%"),
+        (100, "100%"),
+    ] {
+        let target = width.saturating_sub(1).saturating_mul(percent) / 100;
+        let label_width = label.len().min(width);
+        let start = if percent == 0 {
+            0
+        } else if percent == 100 {
+            width.saturating_sub(label_width)
+        } else {
+            target
+                .saturating_sub(label_width / 2)
+                .min(width.saturating_sub(label_width))
+        };
+        for (index, ch) in label.chars().take(label_width).enumerate() {
+            labels[start + index] = ch;
+        }
+    }
+
+    let mut ticks = vec!['─'; width];
+    for percent in [0usize, 25, 50, 75, 100] {
+        let index = width.saturating_sub(1).saturating_mul(percent) / 100;
+        ticks[index] = '┊';
+    }
+    vec![
+        Line::from(Span::styled(
+            labels.into_iter().collect::<String>(),
+            muted(),
+        )),
+        Line::from(Span::styled(ticks.into_iter().collect::<String>(), muted())),
+    ]
+}
+
+fn disk_map_selection_card_lines(
+    model: &crate::tui::disk_layout::DiskLayoutModel,
+    active: Option<&ActiveCapacityExtent>,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let (title, body, style) = if let Some(active) = active {
+        (
+            "当前选中",
             format!(
-                "当前区域：{} · LBA [{}..{}] · {} · {}",
+                "● 当前区域：{}  │  LBA {}..{}  │  {}  │  {}",
                 active.label,
                 active.start_lba,
                 active.end_exclusive.saturating_sub(1),
@@ -256,27 +323,47 @@ fn capacity_map_lines(
                 )
             ),
             accent(),
-        )));
+        )
     } else {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
+        (
+            "全盘布局",
             format!(
-                "当前：全盘布局 · {} · {} sectors",
+                "{}  │  {} sectors  │  LBA 0..{}",
                 format_bytes(
                     model
                         .total_sectors
                         .saturating_mul(crate::common::SECTOR as u64)
                 ),
-                model.total_sectors
+                model.total_sectors,
+                model.total_sectors.saturating_sub(1)
             ),
             secondary(),
-        )));
-    }
-    lines.push(Line::from(Span::styled(
-        "视觉宽度为极小区域保留最小可见宽度；LBA、容量与占比保持真实。",
-        muted(),
-    )));
-    lines
+        )
+    };
+
+    let width = width.max(8);
+    let top_prefix = format!("╭─ {title} ");
+    let top_used = crate::tui::table_layout::display_width(&top_prefix).saturating_add(1);
+    let top = format!(
+        "{}{}╮",
+        top_prefix,
+        "─".repeat(width.saturating_sub(top_used))
+    );
+    let inner_width = width.saturating_sub(4);
+    let clipped = crate::tui::table_layout::truncate_cell(
+        &body,
+        inner_width,
+        crate::tui::table_layout::TruncatePolicy::Ellipsis,
+    );
+    let padding = inner_width.saturating_sub(crate::tui::table_layout::display_width(&clipped));
+    let body_line = format!("│ {}{} │", clipped, " ".repeat(padding));
+    let bottom = format!("╰{}╯", "─".repeat(width.saturating_sub(2)));
+
+    vec![
+        Line::from(Span::styled(top, muted())),
+        Line::from(Span::styled(body_line, style)),
+        Line::from(Span::styled(bottom, muted())),
+    ]
 }
 
 #[derive(Debug, Clone)]
@@ -366,7 +453,7 @@ fn disk_map_border_line(
     active: Option<&ActiveCapacityExtent>,
     top: bool,
 ) -> Line<'static> {
-    let mut spans = vec![Span::styled(if top { "┌" } else { "└" }, muted())];
+    let mut spans = vec![Span::styled(if top { "╭" } else { "╰" }, muted())];
     for (index, (segment, width)) in model
         .segments
         .iter()
@@ -379,9 +466,9 @@ fn disk_map_border_line(
         ));
         let edge = if index + 1 == model.segments.len() {
             if top {
-                "┐"
+                "╮"
             } else {
-                "┘"
+                "╯"
             }
         } else if top {
             "┬"
@@ -393,7 +480,7 @@ fn disk_map_border_line(
     Line::from(spans)
 }
 
-fn disk_map_body_line(
+fn disk_map_label_line(
     model: &crate::tui::disk_layout::DiskLayoutModel,
     allocations: &[usize],
     active: Option<&ActiveCapacityExtent>,
@@ -402,12 +489,37 @@ fn disk_map_body_line(
     for (segment, width) in model.segments.iter().zip(allocations.iter().copied()) {
         let is_active = capacity_segment_active(segment, active);
         let label = if is_active {
-            format!("●{}", segment.label)
+            format!("● {}", segment.label)
         } else {
             segment.label.clone()
         };
         spans.push(Span::styled(
             center_disk_map_label(&label, width),
+            disk_map_segment_style(segment, active),
+        ));
+        spans.push(Span::styled("│", muted()));
+    }
+    Line::from(spans)
+}
+
+fn disk_map_value_line(
+    model: &crate::tui::disk_layout::DiskLayoutModel,
+    allocations: &[usize],
+    active: Option<&ActiveCapacityExtent>,
+) -> Line<'static> {
+    let mut spans = vec![Span::styled("│", muted())];
+    for (segment, width) in model.segments.iter().zip(allocations.iter().copied()) {
+        let value = format!(
+            "{} · {}",
+            format_bytes(
+                segment
+                    .sector_count
+                    .saturating_mul(crate::common::SECTOR as u64)
+            ),
+            percentage(segment.sector_count, model.total_sectors)
+        );
+        spans.push(Span::styled(
+            center_disk_map_label(&value, width),
             disk_map_segment_style(segment, active),
         ));
         spans.push(Span::styled("│", muted()));

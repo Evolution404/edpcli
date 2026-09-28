@@ -1666,11 +1666,7 @@ impl AppState {
             .pane_focus
             .viewport_mut(crate::tui::pane::PaneId::DevicesTree);
         viewport.selected = Some(index);
-        if to_end {
-            viewport.scroll_y.offset = index;
-        } else {
-            viewport.scroll_y.top();
-        }
+        viewport.scroll_y.top();
     }
 
     pub fn device_info_toggle_selected(&mut self) {
