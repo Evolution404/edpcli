@@ -458,7 +458,17 @@ fn disk_map_border_line(
         .first()
         .is_some_and(|segment| capacity_segment_active(segment, active));
     let mut spans = vec![Span::styled(
-        if top { "╭" } else { "╰" },
+        if first_active {
+            if top {
+                "┏"
+            } else {
+                "┗"
+            }
+        } else if top {
+            "╭"
+        } else {
+            "╰"
+        },
         disk_map_boundary_style(first_active),
     )];
 
@@ -470,7 +480,7 @@ fn disk_map_border_line(
     {
         let is_active = capacity_segment_active(segment, active);
         let horizontal = if is_active {
-            active_border_run(width)
+            "━".repeat(width)
         } else {
             "─".repeat(width)
         };
@@ -485,15 +495,28 @@ fn disk_map_border_line(
             .is_some_and(|next| capacity_segment_active(next, active));
         let edge_active = is_active || next_active;
         let edge = if index + 1 == model.segments.len() {
-            if top {
+            if is_active {
+                if top {
+                    "┓"
+                } else {
+                    "┛"
+                }
+            } else if top {
                 "╮"
             } else {
                 "╯"
             }
-        } else if top {
-            "┬"
         } else {
-            "┴"
+            match (is_active, next_active, top) {
+                (true, false, true) => "┓",
+                (true, false, false) => "┛",
+                (false, true, true) => "┏",
+                (false, true, false) => "┗",
+                (true, true, true) => "┳",
+                (true, true, false) => "┻",
+                (false, false, true) => "┬",
+                (false, false, false) => "┴",
+            }
         };
         spans.push(Span::styled(edge, disk_map_boundary_style(edge_active)));
     }
@@ -580,7 +603,7 @@ fn disk_map_segment_label(
     if crate::tui::table_layout::display_width(&segment.label) <= width {
         return segment.label.clone();
     }
-    "▌".into()
+    String::new()
 }
 
 fn disk_map_segment_value(
@@ -637,15 +660,6 @@ fn disk_map_boundary_style(is_active: bool) -> ratatui::style::Style {
         crate::tui::theme::current().accent()
     } else {
         muted()
-    }
-}
-
-fn active_border_run(width: usize) -> String {
-    match width {
-        0 => String::new(),
-        1 => "━".into(),
-        2 => "━━".into(),
-        _ => format!("╺{}╸", "━".repeat(width - 2)),
     }
 }
 

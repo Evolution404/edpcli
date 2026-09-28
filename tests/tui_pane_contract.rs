@@ -1066,26 +1066,64 @@ fn device_capacity_map_active_region_uses_terminal_native_outline_not_selection_
 }
 
 #[test]
-fn device_capacity_map_tiny_regions_do_not_render_truncated_numeric_fragments() {
+fn device_capacity_root_has_no_false_active_glyphs_or_tiny_placeholders() {
     let mut state = AppState::new();
     state.replace_devices(vec![edp_device_with_layout()]);
     state.focus_devices_pane(PaneId::DevicesTree);
-    state.navigate(NavCommand::Down, 20);
+    state.device_info_move_tree(1);
+    assert_eq!(
+        state.device_info_selected_key(),
+        edpcli::tui::state::DeviceInfoNodeKey::Capacity
+    );
 
     let lines = render_lines(&state, 180, 46);
     let top = lines
         .iter()
         .position(|line| line.contains('╭') && line.contains('┬'))
         .expect("disk map top border");
-    let label_row = &lines[top + 1];
-    let value_row = &lines[top + 2];
+    let map = lines[top..=top + 3].join("\n");
+    for glyph in ['━', '┃', '┏', '┓', '┗', '┛'] {
+        assert!(
+            !map.contains(glyph),
+            "capacity root must not look partially active; found {glyph}: {map}"
+        );
+    }
+    let presentation = include_str!("../src/tui/devices/presentation.rs");
+    assert!(
+        !presentation.contains("\"▌\".into()"),
+        "tiny disk-map regions must not use the single-bar placeholder"
+    );
+    assert!(
+        !lines[top + 2].contains("6.6") && !lines[top + 2].contains("25."),
+        "tiny regions must not show clipped numeric fragments: {}",
+        lines[top + 2]
+    );
+}
 
-    assert!(
-        label_row.contains('▌'),
-        "extremely narrow regions should collapse to a semantic block marker: {label_row}"
-    );
-    assert!(
-        !value_row.contains("6.6") && !value_row.contains("25."),
-        "tiny regions must not show clipped numeric fragments: {value_row}"
-    );
+#[test]
+fn device_capacity_active_region_has_complete_heavy_outline() {
+    use edpcli::tui::state::DeviceInfoNodeKey;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+
+    let target_index = state
+        .device_info_tree_rows()
+        .iter()
+        .position(|row| {
+            matches!(row.key, DeviceInfoNodeKey::LayoutSegment { .. }) && row.depth == 1
+        })
+        .expect("top-level layout segment");
+    state.navigate(NavCommand::Top, 20);
+    state.device_info_move_tree(target_index as isize);
+
+    let lines = render_lines(&state, 180, 46);
+    let joined = lines.join("\n");
+    for glyph in ['┏', '┓', '┃', '┗', '┛'] {
+        assert!(
+            joined.contains(glyph),
+            "active region must render the complete heavy outline; missing {glyph}: {joined}"
+        );
+    }
 }
