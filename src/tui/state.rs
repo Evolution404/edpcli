@@ -1641,10 +1641,7 @@ impl AppState {
             return;
         }
         let selected = self.device_info_selected_key();
-        let current = rows
-            .iter()
-            .position(|row| row.key == selected)
-            .unwrap_or(0);
+        let current = rows.iter().position(|row| row.key == selected).unwrap_or(0);
         let next = if delta < 0 {
             current.saturating_sub(delta.unsigned_abs())
         } else {
@@ -2138,8 +2135,7 @@ impl AppState {
             }
             NavCommand::Top
                 if self.shell.workspace == Workspace::Devices
-                    && self.devices_focused_pane()
-                        == crate::tui::pane::PaneId::DevicesDetail =>
+                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesDetail =>
             {
                 self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
                     .scroll_y
@@ -2147,8 +2143,7 @@ impl AppState {
             }
             NavCommand::Bottom
                 if self.shell.workspace == Workspace::Devices
-                    && self.devices_focused_pane()
-                        == crate::tui::pane::PaneId::DevicesDetail =>
+                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesDetail =>
             {
                 let content_len = self.device_info_detail_line_count();
                 self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
@@ -2157,8 +2152,7 @@ impl AppState {
             }
             NavCommand::HalfPageDown
                 if self.shell.workspace == Workspace::Devices
-                    && self.devices_focused_pane()
-                        == crate::tui::pane::PaneId::DevicesDetail =>
+                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesDetail =>
             {
                 let content_len = self.device_info_detail_line_count();
                 self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
@@ -2167,8 +2161,7 @@ impl AppState {
             }
             NavCommand::HalfPageUp
                 if self.shell.workspace == Workspace::Devices
-                    && self.devices_focused_pane()
-                        == crate::tui::pane::PaneId::DevicesDetail =>
+                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesDetail =>
             {
                 self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
                     .scroll_y
