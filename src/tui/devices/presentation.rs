@@ -472,7 +472,7 @@ fn disk_map_border_line(
         } else {
             "╰"
         },
-        disk_map_boundary_style(None, model.segments.first(), active),
+        disk_map_border_boundary_style(None, model.segments.first(), active),
     )];
 
     for (index, (segment, width)) in model
@@ -522,7 +522,7 @@ fn disk_map_border_line(
         };
         spans.push(Span::styled(
             edge,
-            disk_map_boundary_style(Some(segment), model.segments.get(index + 1), active),
+            disk_map_border_boundary_style(Some(segment), model.segments.get(index + 1), active),
         ));
     }
     Line::from(spans)
@@ -646,6 +646,28 @@ fn disk_map_boundary_style(
     right: Option<&crate::tui::disk_layout::DiskLayoutSegment>,
     active: Option<&ActiveCapacityExtent>,
 ) -> ratatui::style::Style {
+    let Some((owner, owner_active)) = disk_map_boundary_owner(left, right, active) else {
+        return muted();
+    };
+    crate::tui::theme::current().disk_region_boundary(owner.kind, owner_active)
+}
+
+fn disk_map_border_boundary_style(
+    left: Option<&crate::tui::disk_layout::DiskLayoutSegment>,
+    right: Option<&crate::tui::disk_layout::DiskLayoutSegment>,
+    active: Option<&ActiveCapacityExtent>,
+) -> ratatui::style::Style {
+    let Some((owner, owner_active)) = disk_map_boundary_owner(left, right, active) else {
+        return muted();
+    };
+    crate::tui::theme::current().disk_region_outline(owner.kind, owner_active)
+}
+
+fn disk_map_boundary_owner<'a>(
+    left: Option<&'a crate::tui::disk_layout::DiskLayoutSegment>,
+    right: Option<&'a crate::tui::disk_layout::DiskLayoutSegment>,
+    active: Option<&ActiveCapacityExtent>,
+) -> Option<(&'a crate::tui::disk_layout::DiskLayoutSegment, bool)> {
     let left_active = left.is_some_and(|segment| capacity_segment_active(segment, active));
     let right_active = right.is_some_and(|segment| capacity_segment_active(segment, active));
     let (owner, owner_active) = if left_active {
@@ -657,10 +679,7 @@ fn disk_map_boundary_style(
     } else {
         (right, false)
     };
-    let Some(owner) = owner else {
-        return muted();
-    };
-    crate::tui::theme::current().disk_region_outline(owner.kind, owner_active)
+    owner.map(|owner| (owner, owner_active))
 }
 
 fn capacity_segment_active(

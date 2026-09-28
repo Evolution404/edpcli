@@ -1228,7 +1228,7 @@ fn device_capacity_tree_and_region_list_use_partition_semantic_colors() {
 }
 
 #[test]
-fn device_capacity_map_border_cells_inherit_region_backgrounds_without_gap() {
+fn device_capacity_map_horizontal_border_stays_clean_and_vertical_boundaries_keep_fill() {
     use edpcli::tui::disk_layout::DiskRegionKind;
     use edpcli::tui::theme::Theme;
 
@@ -1242,9 +1242,14 @@ fn device_capacity_map_border_cells_inherit_region_backgrounds_without_gap() {
         for active in [false, true] {
             let fill = theme.disk_region_fill(kind, active);
             let outline = theme.disk_region_outline(kind, active);
+            let boundary = theme.disk_region_boundary(kind, active);
             assert_eq!(
-                outline.bg, fill.bg,
-                "border cells must inherit the same background as the region body: {kind:?} active={active}"
+                outline.bg, None,
+                "top/bottom border cells must not paint region background outside the map: {kind:?} active={active}"
+            );
+            assert_eq!(
+                boundary.bg, fill.bg,
+                "content-row vertical boundaries must inherit the region background: {kind:?} active={active}"
             );
         }
     }
@@ -1252,10 +1257,14 @@ fn device_capacity_map_border_cells_inherit_region_backgrounds_without_gap() {
     let presentation = include_str!("../src/tui/devices/presentation.rs");
     assert!(
         presentation.contains("disk_region_outline(segment.kind, is_active)"),
-        "segment border must use the centralized region outline style"
+        "horizontal segment border must use background-free region outline style"
+    );
+    assert!(
+        presentation.contains("disk_region_boundary(owner.kind, owner_active)"),
+        "content-row shared boundary must inherit the owning region background"
     );
     assert!(
         presentation.contains("disk_region_outline(owner.kind, owner_active)"),
-        "shared boundary must inherit the owning region background"
+        "top/bottom shared boundary must use background-free region outline style"
     );
 }
