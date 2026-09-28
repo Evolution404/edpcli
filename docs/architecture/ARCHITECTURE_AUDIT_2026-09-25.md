@@ -1438,6 +1438,10 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 内部实现默认 `pub(crate)`，仅稳定业务接口保持公开；
 - 不因模块整理破坏 `CLI`/`TUI` 当前能力和已有测试契约。
 
+**COMPLETE。** 对照 `tests/`、`examples/` 和二进制入口的外部 `edpcli::` 使用审计 `lib.rs`。`backup_cli`、`build_info`、`elevate`、`plist` 仅为内部实现，改为 `pub(crate) mod`；备份命令通过原有 `cli` 再导出继续可用。提权参数夹具 helper 仅在单元测试编译。应用服务、协议、制盘、容器、设备 I/O 以及 CLI/TUI 测试直接使用的公开模块保持原路径。测试先因四个内部模块仍公开而失败，收敛后通过。
+
+本次最终门禁实测：`cargo clippy --all-targets --locked -- -D warnings` PASS；`python3 scripts/test-full.py --profile full` 为 **8 suites / 10 artifacts + doctest / 0 failures**，最终 exit code 0；`cargo fmt --all -- --check` 与 `git diff --check` PASS；`scripts/ci/macos-plain-virtual-disk-hil.sh` 使用 disposable raw image/virtual disk 完成 **1/1 PASS**，未使用真实 U 盘。此前同一 D8-G 工作区的 `scripts/test-fast.sh` 已为 **8 suites / 10 artifacts / 0 failures**。
+
 D8 全阶段冻结以下语义：LBA0～12/LCE、四模式、K6、LBA10 尾随 384B、LBA13 不使用、媒体身份判定、`TargetSession`/`EvidenceSource` 以及系统盘保护、USB 整盘确认、写前备份、锁卷、重新打开身份复核、原子写、读回、回滚。真实历史协议和 `EDPB` 历史读取兼容不得因命名含 `legacy` 被删除。
 
 ---

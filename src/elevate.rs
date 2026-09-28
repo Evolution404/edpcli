@@ -40,7 +40,8 @@ pub fn ensure_elevated(argv: &[String]) {
 }
 
 /// 构建重执行 argv(测试用): 原参数 + 哨兵, 不含已在其中的哨兵重复。
-pub fn elevated_argv(argv: &[String]) -> Vec<String> {
+#[cfg(test)]
+fn elevated_argv(argv: &[String]) -> Vec<String> {
     let mut v: Vec<String> = argv
         .iter()
         .filter(|a| a.as_str() != ELEVATED_FLAG)

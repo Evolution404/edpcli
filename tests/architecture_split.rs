@@ -142,6 +142,37 @@ fn complete_dependency_direction_is_guarded() {
 }
 
 #[test]
+fn library_root_exposes_stable_interfaces_only() {
+    let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
+        .expect("read library root");
+    for module in ["backup_cli", "build_info", "elevate", "plist"] {
+        assert!(
+            source.contains(&format!("pub(crate) mod {module};")),
+            "{module} is an internal implementation module"
+        );
+    }
+    for module in [
+        "application",
+        "cli",
+        "cli_args",
+        "command_spec",
+        "completion",
+        "diskio",
+        "edpb",
+        "inspect",
+        "platform",
+        "protocol",
+        "provision",
+        "tui",
+    ] {
+        assert!(
+            source.contains(&format!("pub mod {module};")),
+            "{module} is a maintained external integration surface"
+        );
+    }
+}
+
+#[test]
 fn large_modules_are_split_by_domain_boundary() {
     for path in [
         "src/application/provision/prepare.rs",

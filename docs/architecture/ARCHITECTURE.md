@@ -6,6 +6,8 @@
 
 `CLI / TUI -> application/service -> domain + provision + protocol + backup -> platform + disk I/O`
 
+`lib.rs` 只公开被 CLI/TUI、集成测试及 HIL 示例直接使用的稳定业务边界；`backup_cli`、`build_info`、`elevate`、`plist` 等入口内部实现为 crate 内可见。
+
 - `src/cli*.rs`：CLI 参数解析与文本入口；公开命令目录统一由 `src/command_spec.rs` 描述，并供 help/completion 共用。
 - `src/tui/`：交互式前端；`controller` 统一解释生产与演示模式的 `TuiAction` 和当前控件角色，真实外部副作用由生产任务适配器执行，演示模式只能消费内存夹具；制盘、检查、备份、设备工作区不直接实现裸盘安全策略。
 - `src/application/`：CLI/TUI 共用应用服务；制盘按 `prepare/commit/export` 分离，`TargetSession` 统一写盘状态转换，`EvidenceSource` 统一物理盘/EDPB 只读证据入口。
