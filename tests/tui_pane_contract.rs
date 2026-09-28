@@ -1045,3 +1045,47 @@ fn device_capacity_map_uses_axis_thick_band_and_selection_card() {
         "selection card missing"
     );
 }
+
+#[test]
+fn device_capacity_map_active_region_uses_terminal_native_outline_not_selection_fill() {
+    let source = include_str!("../src/tui/devices/presentation.rs");
+    assert!(
+        !source.contains(".bg(theme.palette().selection)"),
+        "disk map active region must not use a large selection background"
+    );
+    for glyph in ["━", "┃"] {
+        assert!(
+            source.contains(glyph),
+            "active disk-map outline must use {glyph}"
+        );
+    }
+    assert!(
+        source.contains("'┈'"),
+        "axis should use a lightweight dashed line"
+    );
+}
+
+#[test]
+fn device_capacity_map_tiny_regions_do_not_render_truncated_numeric_fragments() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+    state.navigate(NavCommand::Down, 20);
+
+    let lines = render_lines(&state, 180, 46);
+    let top = lines
+        .iter()
+        .position(|line| line.contains('╭') && line.contains('┬'))
+        .expect("disk map top border");
+    let label_row = &lines[top + 1];
+    let value_row = &lines[top + 2];
+
+    assert!(
+        label_row.contains('▌'),
+        "extremely narrow regions should collapse to a semantic block marker: {label_row}"
+    );
+    assert!(
+        !value_row.contains("6.6") && !value_row.contains("25."),
+        "tiny regions must not show clipped numeric fragments: {value_row}"
+    );
+}
