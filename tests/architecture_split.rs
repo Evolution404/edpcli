@@ -83,6 +83,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/form_render.rs",
         "src/tui/provision/review_render.rs",
         "src/tui/provision/running_render.rs",
+        "src/tui/runtime_updates.rs",
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
         "src/tui/inspect/search_state.rs",
@@ -119,9 +120,10 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
     assert!(
-        lines("src/tui/mod.rs") < 1_800,
+        lines("src/tui/mod.rs") < 1_260,
         "TUI module root must remain lifecycle-oriented; action dispatch belongs in dispatch.rs"
     );
+    assert!(lines("src/tui/runtime_updates.rs") < 160);
     assert!(
         lines("src/tui/dispatch.rs") < 600,
         "TUI dispatch module must stay responsibility-bounded"

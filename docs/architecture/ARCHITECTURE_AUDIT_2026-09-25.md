@@ -1383,6 +1383,12 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 
 **COMPLETE。** 两次代码提交后复审：`state.rs` **457 行**只协调工作区阶段与任务，`field_model.rs` **72 行**定义字段模式，`fields.rs` **307 行**构造字段描述与导航，`fields_access.rs` **205 行**负责字段值访问，`field_presentation.rs` **361 行**负责标签与提示，`field_input.rs` **191 行**负责输入，`password_verification.rs` **150 行**负责来源密码状态。`render.rs` **355 行**统筹布局；选择、表单、复核、运行子渲染器分别为 **211 / 236 / 134 / 182 行**。所有新旧规模门禁均通过，未发现必须留在 D8-D2 继续拆分的跨职责实现。
 
+#### D8-D3.1：后台任务结果适配下沉
+
+**COMPLETE；D8-D3 继续。** 将设备、备份、制盘、检查任务结果的状态更新与后续扫描请求迁入 `src/tui/runtime_updates.rs`，事件循环只负责轮询、重绘判断及退出检查；原状态更新顺序和任务请求保持不变。`tui/mod.rs` 从 **1359** 降至 **1248 行**，结果适配模块为 **124 行**。测试先行门禁先因新模块缺失失败，迁移后架构 **30/30**、TUI **266/266** 通过。
+
+`cargo check --all-targets --locked`、全目标 Clippy、fast **4 suites / 6 artifacts / 0 failures**、full **8 suites / 10 artifacts + doctest / 0 failures** 与 diff 检查通过。
+
 ### D8-E：第二批领域/入口模块化
 
 - D8-E1：`CLI` 参数解析与命令处理按领域拆分；
