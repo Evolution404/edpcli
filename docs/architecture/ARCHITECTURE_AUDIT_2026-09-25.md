@@ -1316,6 +1316,13 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - `INSPECT_DETAIL_HEADINGS`、`InspectDetailRow` 与十六进制字段展示辅助函数随详情职责迁移，并由检查状态门面重新导出，现有渲染和表格调用接口不变。
 - `inspect/state.rs` 已降至约 **1055 行**，硬上限进一步收紧至 **1100**；详情状态模块约 **403 行**，硬上限 **500**。本阶段不改变检查树语义、搜索/跳转、扇区检查器或任何输入输出。
 
+#### D8-D1.3：检查树模型与导航拆分
+
+- 新增 `src/tui/inspect/tree_state.rs`，集中承载检查树行模型、树视图缓存、惰性扇区分页、展开/折叠以及父子/首尾/上下导航。
+- `AdvancedInspectTreeRow` 与 `AdvancedInspectTreeAction` 继续由检查状态门面重新导出，渲染层与测试调用路径保持不变；树选中上下文复位辅助函数仅以父模块可见形式暴露。
+- `inspect/state.rs` 已进一步降至约 **628 行**，硬上限 **700**；树状态模块约 **434 行**，硬上限 **600**。本阶段不修改拓扑构造语义、协议解析、搜索、详情或磁盘输入输出。
+
+
 
 
 

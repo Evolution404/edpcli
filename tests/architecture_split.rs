@@ -79,6 +79,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/inspect/state.rs",
         "src/tui/inspect/search_state.rs",
         "src/tui/inspect/detail_state.rs",
+        "src/tui/inspect/tree_state.rs",
         "src/tui/inspect/sector_state.rs",
         "src/tui/inspect/render.rs",
         "src/tui/inspect/sector_render.rs",
@@ -120,7 +121,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "shared TUI action controller must stay responsibility-bounded"
     );
     assert!(
-        lines("src/tui/inspect/state.rs") < 1_100,
+        lines("src/tui/inspect/state.rs") < 700,
         "Inspect workspace state must stay orchestration-oriented"
     );
     assert!(
@@ -130,6 +131,10 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(
         lines("src/tui/inspect/detail_state.rs") < 500,
         "Inspect detail/pane state must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/inspect/tree_state.rs") < 600,
+        "Inspect tree state must stay responsibility-bounded"
     );
     assert!(
         lines("src/tui/inspect/sector_state.rs") < 450,
@@ -746,6 +751,31 @@ fn app_state_owns_backups_through_backups_substate() {
         assert!(
             backups.contains(owned_field),
             "BackupsState must own field: {owned_field}"
+        );
+    }
+}
+
+#[test]
+fn inspect_tree_model_and_navigation_are_split_from_workspace_root() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state =
+        fs::read_to_string(root.join("src/tui/inspect/state.rs")).expect("read inspect state");
+    let tree = fs::read_to_string(root.join("src/tui/inspect/tree_state.rs"))
+        .expect("read inspect tree state");
+
+    for marker in [
+        "pub struct AdvancedInspectTreeRow",
+        "pub fn advanced_inspect_tree_rows",
+        "pub fn advanced_inspect_move_tree",
+        "pub fn advanced_inspect_toggle_selected",
+    ] {
+        assert!(
+            !state.contains(marker),
+            "{marker} leaked back into inspect/state.rs"
+        );
+        assert!(
+            tree.contains(marker),
+            "{marker} missing from inspect/tree_state.rs"
         );
     }
 }
