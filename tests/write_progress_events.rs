@@ -75,7 +75,13 @@ fn render_restore_events() {
     );
     assert_eq!(
         plain(&WriteEvent::RestoreWriteCompleted),
-        "已还原, 读回校验通过。请拔出重插。\n"
+        "元数据恢复成功，读回校验通过。\n文件系统未恢复；部分分区可能需要格式化。\n"
+    );
+    assert_eq!(
+        plain(&WriteEvent::PostRestoreAssessment {
+            assessment: edpcli::application::post_restore::PostRestoreAssessment::default(),
+        }),
+        "恢复后状态：无法可靠判断\n"
     );
 }
 
@@ -124,6 +130,7 @@ fn tag(event: &WriteEvent) -> &'static str {
         WriteEvent::RestoreDryRunNotice { .. } => "restore-dry-run-notice",
         WriteEvent::RestoreTargetHeader { .. } => "restore-target-header",
         WriteEvent::RestoreWriteCompleted => "restore-write-completed",
+        WriteEvent::PostRestoreAssessment { .. } => "post-restore-assessment",
     }
 }
 
@@ -218,6 +225,7 @@ fn backup_create_and_restore_event_sequence() {
             "backup-sha-verified",
             "restore-target-header",
             "restore-write-completed",
+            "post-restore-assessment",
         ],
         "{:?}",
         restore_prompt.events
