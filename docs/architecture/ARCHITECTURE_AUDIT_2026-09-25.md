@@ -1397,6 +1397,10 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - 迁移保留原按键分支顺序、输入模式、确认提示、任务请求与退出返回；扇区检查器键位的源码契约随入口迁移。测试先行门禁先因模块缺失与阶段匹配失败，拆分后架构 **31/31**、TUI **266/266** 通过。
 - `cargo check --all-targets --locked`、全目标 Clippy、fast **4 suites / 6 artifacts / 0 failures**、full **8 suites / 10 artifacts + doctest / 0 failures** 与 diff 检查通过。
 
+#### D8-D3 与 D8-D 提交后复审
+
+**D8-D3 COMPLETE；D8-D COMPLETE。** `tui/mod.rs` **421 行**仅保留终端与提权生命周期、受控事件循环、重绘节流和退出收尾；生产按键优先级由 `runtime_input.rs` **72 行**编排，七个工作区/向导按键模块分别为 **203 / 202 / 44 / 81 / 100 / 121 / 89 行**；任务结果适配为 **124 行**。生产与 Demo 仍共用 `controller::dispatch_action()`，写盘请求仍由既有任务及 application 边界执行。D8-D1 检查、D8-D2 制盘和 D8-D3 事件循环均已按职责完成，不进入 D8-E 的范围。
+
 ### D8-E：第二批领域/入口模块化
 
 - D8-E1：`CLI` 参数解析与命令处理按领域拆分；
