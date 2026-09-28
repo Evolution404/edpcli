@@ -1,5 +1,5 @@
-use super::*;
 use super::presentation::device_detail_lines;
+use super::*;
 
 pub(super) fn draw_device_detail(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let focused = state.devices_focused_pane() == PaneId::DevicesDetail;
@@ -30,4 +30,3 @@ pub(super) fn draw_device_detail(frame: &mut Frame, area: ratatui::layout::Rect,
         area,
     );
 }
-

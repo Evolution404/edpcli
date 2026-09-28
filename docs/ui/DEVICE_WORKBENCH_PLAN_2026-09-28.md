@@ -1,6 +1,6 @@
 # 设备工作台重构计划（2026-09-28）
 
-状态：IN PROGRESS  
+状态：本机实现与验证完成，等待远端 CI
 实施分支：`feat/device-workbench-20260928`  
 基线：`82234bea2b58db1dc3025f27e157d0c9fac27382`
 
@@ -17,8 +17,19 @@
 - P6：备份关系先使用现有已加载的确认/可能关联计数，不增加目录扫描；
 - P7：协议摘要已接入，深度字段解析仍保留独立检查入口；
 - P8：宽屏、中等宽度和紧凑宽度均使用现有响应式规则；
-- P9：帮助文本和展示文件拆分正在收口；
-- P10：GitHub CI 正在持续验证；本阶段按用户要求不连接 Mac，不执行本机安装。
+- P9：帮助文本与展示层拆分已完成；设备页渲染已拆为列表、信息树、详情与展示模型；
+- P10：Mac 已恢复连接，本机格式、受影响测试、快速门禁、完整门禁、release 构建、本地安装与真实 PTY 启动/退出 smoke 均已通过；提交推送后继续等待 GitHub CI 最终验证。
+
+### 本机验证证据
+
+- `cargo fmt --all -- --check`：通过；
+- `cargo test --locked --test tui_suite`：273/273 通过；
+- `scripts/test-fast.sh`：4 个测试套件、6 个测试产物、0 失败；
+- `python3 scripts/test-full.py --profile full`：8 个测试套件、10 个测试产物，加 doctest，0 失败；
+- `cargo build --release --locked`：通过；
+- `scripts/install-local.sh target/release/edpcli`：安装到 `~/.local/bin/edpcli`，版本 `2.5.0`；
+- release 源二进制与已安装二进制 SHA-256 均为 `65be3512603cc6a6052227200517e9c226b723c5fd28bec53c2bccd3dcc2c778`；
+- Python PTY smoke：检测到终端光标位置查询并正确回应，随后发送 `q`，进程正常以 `RC=0` 退出。
 
 ## 1. 目标
 
@@ -487,10 +498,10 @@ Renderer 不做业务 I/O。
 收口 Wide/Medium/Compact。
 
 ### P9 — Help/docs
-同步 footer、`?` help、当前计划状态。
+已同步 footer、`?` help、当前计划状态，并完成设备展示层拆分。
 
 ### P10 — Validation
-GitHub CI/远端可执行门禁先跑；恢复 Mac 后再执行本机 release install 和真实终端人工验收。Mac 不可用于本阶段远端实现。
+本机快速/完整门禁、release 构建、本地安装和 PTY 启动/退出验证已完成；最终以本分支推送后的 GitHub CI 结果作为关闭条件。
 
 ## 18. 完成标准
 

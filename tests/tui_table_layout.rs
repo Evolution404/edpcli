@@ -289,7 +289,7 @@ fn every_interactive_table_renderer_uses_unified_active_column_layout() {
     for (name, source, minimum) in [
         (
             "devices",
-            include_str!("../src/tui/devices/render.rs"),
+            include_str!("../src/tui/devices/list_render.rs"),
             1usize,
         ),
         (
