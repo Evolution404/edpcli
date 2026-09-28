@@ -10,7 +10,10 @@ use crate::common::SECTOR;
 use crate::diskio::SectorDev;
 use crate::edpb::ManifestPartition;
 use crate::inspect_target::{detect_plain_filesystem, FilesystemBootKind};
-use crate::provision::{parse_existing_provision, FileKeyWrapMode, ProvisionImage, SecretBytes};
+use crate::provision::{
+    build_empty_exfat, build_empty_fat16, parse_existing_provision, FileKeyWrapMode,
+    OfficialFilesystemFormat, ProvisionImage, SecretBytes,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MetadataBackupReport {
@@ -78,7 +81,14 @@ impl PostRestoreAssessment {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PartitionFormatRequest {
     pub partition_index: u32,
-    pub filesystem: FilesystemBootKind,
+    pub filesystem: OfficialFilesystemFormat,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PostRestoreFormatResult {
+    pub partition_index: u32,
+    pub filesystem: OfficialFilesystemFormat,
+    pub result: Result<(), String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -109,6 +119,79 @@ impl EncryptedPartitionReinitializeRequest {
 
     pub fn password(&self) -> &[u8] {
         self.new_password.as_bytes()
+    }
+}
+
+pub fn format_partition_after_restore(
+    dev: &mut dyn SectorDev,
+    assessment: &PostRestoreAssessment,
+    partition: &ManifestPartition,
+    request: &PartitionFormatRequest,
+    volume_label: &str,
+    volume_serial: u32,
+) -> PostRestoreFormatResult {
+    let result = (|| {
+        if request.partition_index != partition.index {
+            return Err("格式化请求与目标分区索引不一致".to_string());
+        }
+        let state = assessment
+            .partitions
+            .iter()
+            .find(|candidate| candidate.index == partition.index)
+            .ok_or_else(|| "恢复后评估中找不到目标分区".to_string())?
+            .state;
+        if state != PostRestorePartitionState::NeedsFormat {
+            return Err(format!(
+                "分区当前状态为 {state:?}，只有 NeedsFormat 可进入明文格式化"
+            ));
+        }
+        let image = match request.filesystem {
+            OfficialFilesystemFormat::Fat16 => build_empty_fat16(
+                partition.start_lba,
+                partition.sector_count,
+                volume_serial,
+                volume_label,
+            ),
+            OfficialFilesystemFormat::ExFat => build_empty_exfat(
+                partition.start_lba,
+                partition.sector_count,
+                volume_serial,
+                volume_label,
+            ),
+            OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => Err(format!(
+                "portable filesystem writer does not yet implement {}",
+                request.filesystem.config_token()
+            )),
+        }
+        .map_err(|error| format!("格式化镜像生成失败: {error}"))?;
+        super::filesystem_format::write_sparse_filesystem_image(
+            dev,
+            partition.start_lba,
+            &image,
+            &mut |_| {},
+        )
+        .map_err(|error| error.msg)?;
+        let boot = read_sector(dev, partition.start_lba)?;
+        let detected = detect_plain_filesystem(partition.sector_count, &boot)
+            .ok_or_else(|| "格式化后文件系统 boot sector 未通过严格校验".to_string())?;
+        let expected = match request.filesystem {
+            OfficialFilesystemFormat::Fat16 => FilesystemBootKind::Fat16,
+            OfficialFilesystemFormat::ExFat => FilesystemBootKind::Exfat,
+            OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => unreachable!(),
+        };
+        if detected != expected {
+            return Err(format!(
+                "格式化后文件系统类型不一致: expected {}, got {}",
+                request.filesystem.config_token(),
+                detected.label()
+            ));
+        }
+        Ok(())
+    })();
+    PostRestoreFormatResult {
+        partition_index: request.partition_index,
+        filesystem: request.filesystem,
+        result,
     }
 }
 

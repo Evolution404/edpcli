@@ -9,6 +9,7 @@ pub mod backup_coverage;
 pub mod device;
 pub mod disk_layout;
 pub mod evidence;
+pub(crate) mod filesystem_format;
 pub mod identity;
 pub mod inspect;
 pub mod inspect_summary;

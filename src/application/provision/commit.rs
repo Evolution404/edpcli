@@ -787,52 +787,12 @@ fn execute_partition_format_observed(
     {
         return Err(err(EXIT_TARGET, "错误: 预生成格式化镜像与目标几何不一致"));
     }
-    let format_sectors = built.image.sectors().len() as u64;
-    for (index, (&relative, sector)) in built.image.sectors().iter().enumerate() {
-        let absolute = choice
-            .target
-            .geometry
-            .start_sector
-            .checked_add(relative)
-            .and_then(|lba| u32::try_from(lba).ok())
-            .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化写入 LBA 溢出"))?;
-        dev.write_sector(absolute, sector).map_err(|error| {
-            err(
-                EXIT_IO,
-                format!("错误: 格式化 LBA{absolute} 写入失败: {error}"),
-            )
-        })?;
-        let event = diskio::TransactionActivity {
-            phase: diskio::TransactionActivityPhase::FormatWrite,
-            current: index as u64 + 1,
-            total: format_sectors,
-        };
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer(event)));
-    }
-    dev.sync()
-        .map_err(|error| err(EXIT_IO, format!("错误: 格式化同步失败: {error}")))?;
-    for (index, (&relative, expected)) in built.image.sectors().iter().enumerate() {
-        let absolute = u32::try_from(choice.target.geometry.start_sector + relative)
-            .map_err(|_| err(EXIT_TARGET, "错误: 格式化读回 LBA 溢出"))?;
-        let actual = dev.read_sector(absolute).map_err(|error| {
-            err(
-                EXIT_IO,
-                format!("错误: 格式化 LBA{absolute} 读回失败: {error}"),
-            )
-        })?;
-        if actual.as_slice() != expected {
-            return Err(err(
-                EXIT_IO,
-                format!("错误: 格式化 LBA{absolute} 读回不一致"),
-            ));
-        }
-        let event = diskio::TransactionActivity {
-            phase: diskio::TransactionActivityPhase::FormatReadback,
-            current: index as u64 + 1,
-            total: format_sectors,
-        };
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer(event)));
-    }
+    super::super::filesystem_format::write_sparse_filesystem_image(
+        dev,
+        choice.target.geometry.start_sector,
+        &built.image,
+        observer,
+    )?;
     let raw_boot = dev
         .read_sector(
             u32::try_from(choice.target.geometry.start_sector)
