@@ -1420,6 +1420,10 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 
 **COMPLETE。** `provision/reprovision.rs` 收敛为兼容导出；容量与目标类型模型、来源协议解析、容量预填、几何覆写和校验、区域处置、目标迁移计划分别迁入 `reprovision/` 的六个职责模块。保持原 `provision::*` 公开路径和所有几何、密码及迁移判定。架构门禁先因目标模块缺失失败，拆分后通过；fast 门禁通过。
 
+#### D8-E4：备份容器拆分
+
+**COMPLETE；D8-E COMPLETE。** `edpb.rs` 收敛为兼容导出；容器模式定义、二进制编解码、身份绑定、写入、读取、图校验与历史 v1 兼容分别位于 `edpb/`。真实历史读取兼容和仅用于历史夹具的 v1 写入入口均保留。普通备份仍写 v2；格式常量与公开函数路径未变。架构门禁先因目标模块缺失失败，拆分后通过；fast 门禁通过。
+
 ### D8-F：架构门禁升级
 
 - 增加完整依赖方向检查；

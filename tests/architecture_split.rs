@@ -418,6 +418,36 @@ fn reprovision_domain_is_split_by_responsibility() {
 }
 
 #[test]
+fn edpb_container_is_split_by_protocol_responsibility() {
+    for path in [
+        "src/edpb/model.rs",
+        "src/edpb/codec.rs",
+        "src/edpb/identity.rs",
+        "src/edpb/write.rs",
+        "src/edpb/read.rs",
+        "src/edpb/validate.rs",
+        "src/edpb/legacy.rs",
+    ] {
+        exists(path);
+    }
+    assert!(lines("src/edpb.rs") < 100);
+    for path in [
+        "src/edpb/write.rs",
+        "src/edpb/read.rs",
+        "src/edpb/validate.rs",
+    ] {
+        assert!(
+            lines(path) < 400,
+            "EDPB responsibility module oversized: {path}"
+        );
+    }
+    let root = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/edpb.rs"))
+        .expect("read EDPB root");
+    assert!(!root.contains("fn verify_file("));
+    assert!(!root.contains("fn write_container("));
+}
+
+#[test]
 fn workspace_modules_do_not_import_platform_or_diskio_directly() {
     for path in [
         "src/tui/provision/state.rs",
@@ -1179,7 +1209,8 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
     let selector = source("src/selectors.rs");
     let observer = source("src/media_identity_observer.rs");
     let matcher = source("src/media_identity.rs");
-    let edpb = source("src/edpb.rs");
+    let edpb_writer = source("src/edpb/write.rs");
+    let edpb_legacy = source("src/edpb/legacy.rs");
     let backup_writer = source("src/diskio/backup_create.rs");
     let lineage = source("src/application/provision/identity_lineage.rs");
 
@@ -1196,14 +1227,10 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
     assert!(!restore.contains("for_onlyid"));
     assert!(!restore.contains("matches_onlyid"));
 
-    let writer = edpb
-        .split("const LEGACY_HARDWARE_SERIAL_NOTE_PREFIX")
-        .next()
-        .expect("EDPB writer before legacy adapter");
-    assert!(!writer.contains("hardware_serial_sha256="));
+    assert!(!edpb_writer.contains("hardware_serial_sha256="));
     assert!(!backup_writer.contains("hardware_serial_sha256="));
-    assert!(edpb.contains("fn legacy_hardware_serial_digest("));
-    assert!(edpb.contains("edpb.manifest.v2"));
+    assert!(edpb_legacy.contains("fn legacy_hardware_serial_digest("));
+    assert!(edpb_writer.contains("edpb.manifest.v2"));
 
     for forbidden in ["prepare_write(", "reopen_rdwr(", "write_sector("] {
         assert!(
