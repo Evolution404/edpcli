@@ -87,6 +87,47 @@ fn confirm_kind(row: &mut edpcli::disk_scan::Row, kind: edpcli::provision::DiskP
     ));
 }
 
+fn edp_device_with_layout() -> edpcli::disk_scan::Row {
+    use edpcli::sectors::EdpfPartition;
+
+    let mut row = device();
+    row.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
+    confirm_kind(&mut row, edpcli::provision::DiskProvisionKind::Mode0);
+    row.partitions = Some(vec![
+        EdpfPartition {
+            ptype: 1,
+            active: 1,
+            enc: 0,
+            start_lba: 63,
+            size_bytes: 20_417 * 512,
+        },
+        EdpfPartition {
+            ptype: 2,
+            active: 1,
+            enc: 1,
+            start_lba: 20_480,
+            size_bytes: 80_000_000,
+        },
+        EdpfPartition {
+            ptype: 4,
+            active: 1,
+            enc: 1,
+            start_lba: 176_730,
+            size_bytes: 120_000_000,
+        },
+    ]);
+    let total_sectors = row.size / edpcli::common::SECTOR as u64;
+    row.lce = Some(edpcli::backup_metadata::Lba7CompatibilityGeometry {
+        start_lba: total_sectors - 2_000,
+        sector_count: 6,
+        lba7_pointer_entries: Vec::new(),
+        official_partition_mode: None,
+        chs_expected_start_lba: None,
+    });
+    row
+}
+
+
 fn inspect_state() -> AppState {
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
@@ -561,42 +602,7 @@ fn d0_three_pane_focus_cycle_never_changes_selected_device() {
 
 #[test]
 fn d0_current_device_summary_renders_capacity_layout_bar() {
-    use edpcli::sectors::EdpfPartition;
-
-    let mut row = device();
-    row.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
-    confirm_kind(&mut row, edpcli::provision::DiskProvisionKind::Mode0);
-    row.partitions = Some(vec![
-        EdpfPartition {
-            ptype: 1,
-            active: 1,
-            enc: 0,
-            start_lba: 63,
-            size_bytes: 20_417 * 512,
-        },
-        EdpfPartition {
-            ptype: 2,
-            active: 1,
-            enc: 1,
-            start_lba: 20_480,
-            size_bytes: 80_000_000,
-        },
-        EdpfPartition {
-            ptype: 4,
-            active: 1,
-            enc: 1,
-            start_lba: 176_730,
-            size_bytes: 120_000_000,
-        },
-    ]);
-    let total_sectors = row.size / edpcli::common::SECTOR as u64;
-    row.lce = Some(edpcli::backup_metadata::Lba7CompatibilityGeometry {
-        start_lba: total_sectors - 2_000,
-        sector_count: 6,
-        lba7_pointer_entries: Vec::new(),
-        official_partition_mode: None,
-        chs_expected_start_lba: None,
-    });
+    let row = edp_device_with_layout();
 
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
@@ -620,6 +626,97 @@ fn d0_current_device_summary_renders_capacity_layout_bar() {
         }),
         "wide capacity legend should place multiple cells on one aligned row: {text}"
     );
+}
+
+#[test]
+fn device_capacity_tail_expands_in_place_to_real_canonical_children() {
+    use edpcli::tui::state::DeviceInfoNodeKey;
+
+    let row = edp_device_with_layout();
+    let canonical = row.canonical_layout().expect("canonical EDP layout");
+    let tail = canonical.tail_group().expect("tail group");
+    let expected_children = tail
+        .children
+        .iter()
+        .map(|child| (child.start_lba, child.kind))
+        .collect::<Vec<_>>();
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+
+    while state.device_info_selected_key() != DeviceInfoNodeKey::TailGroup {
+        state.device_info_move_tree(1);
+    }
+    let collapsed = state.device_info_tree_rows();
+    assert!(!collapsed.iter().any(|row| row.depth == 2));
+
+    state.device_info_toggle_selected();
+    let expanded = state.device_info_tree_rows();
+    let actual_children = expanded
+        .iter()
+        .filter_map(|row| match row.key {
+            DeviceInfoNodeKey::LayoutSegment { start_lba, kind } if row.depth == 2 => {
+                Some((start_lba, kind))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(actual_children, expected_children);
+}
+
+#[test]
+fn switching_devices_falls_back_from_missing_dynamic_segment_to_capacity() {
+    use edpcli::tui::state::DeviceInfoNodeKey;
+
+    let first = edp_device_with_layout();
+    let mut second = device();
+    second.disk = 7;
+    second.partition_table = None;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![first, second]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+    state.device_info_move_tree(2);
+    assert!(matches!(
+        state.device_info_selected_key(),
+        DeviceInfoNodeKey::LayoutSegment { .. }
+    ));
+
+    state
+        .pane_viewport_mut(PaneId::DevicesDetail)
+        .scroll_y
+        .offset = 5;
+    state.focus_devices_pane(PaneId::DevicesList);
+    state.navigate(NavCommand::Down, 20);
+
+    assert_eq!(state.selected_device_disk(), Some(7));
+    assert_eq!(
+        state.device_info_selected_key(),
+        DeviceInfoNodeKey::Capacity
+    );
+    assert_eq!(
+        state.pane_viewport(PaneId::DevicesDetail).scroll_y.offset,
+        0
+    );
+}
+
+#[test]
+fn devices_renderer_has_no_direct_disk_or_filesystem_io() {
+    let source = include_str!("../src/tui/devices/render.rs");
+    for forbidden in [
+        "std::fs",
+        "File::open",
+        "OpenOptions",
+        "scan_disks(",
+        "read_disk(",
+        "find_backups(",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "device renderer must stay presentation-only: {forbidden}"
+        );
+    }
 }
 
 #[test]
