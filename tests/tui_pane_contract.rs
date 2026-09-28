@@ -698,7 +698,13 @@ fn switching_devices_falls_back_from_missing_dynamic_segment_to_capacity() {
 
 #[test]
 fn devices_renderer_has_no_direct_disk_or_filesystem_io() {
-    let source = include_str!("../src/tui/devices/render.rs");
+    let source = concat!(
+        include_str!("../src/tui/devices/render.rs"),
+        include_str!("../src/tui/devices/list_render.rs"),
+        include_str!("../src/tui/devices/tree_render.rs"),
+        include_str!("../src/tui/devices/detail_render.rs"),
+        include_str!("../src/tui/devices/presentation.rs"),
+    );
     for forbidden in [
         "std::fs",
         "File::open",

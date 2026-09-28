@@ -3,6 +3,7 @@ use crate::tui::{pane::PaneId, ui::ViewportClass};
 
 mod detail_render;
 mod list_render;
+mod presentation;
 mod tree_render;
 
 use detail_render::draw_device_detail;
