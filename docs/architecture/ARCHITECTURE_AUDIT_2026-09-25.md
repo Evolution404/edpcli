@@ -1408,6 +1408,10 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 - D8-E3：`provision/reprovision` 拆成解析、预填、几何、处置与计划模块；
 - D8-E4：`EDPB` 拆成模式定义、编解码、读取、写入、校验与历史兼容模块。
 
+#### D8-E1：CLI 入口按命令领域拆分
+
+**COMPLETE。** `cli_args.rs` 保留公开参数类型、帮助文本、通用旗标工具与顶层分派；制盘、检查、信息和备份参数分别在 `cli_args/` 子模块解析。`cli.rs` 保留终端入口、提示器、提权参数桥接及结果出口；制盘、备份和设备列表命令处理迁入 `cli/commands/`，原 CLI 单元测试迁入 `cli/tests.rs`。参数错误文字、命令顺序、提权与应用服务调用保持不变。架构门禁先因目标模块缺失失败，拆分后通过；fast 门禁通过。
+
 ### D8-F：架构门禁升级
 
 - 增加完整依赖方向检查；

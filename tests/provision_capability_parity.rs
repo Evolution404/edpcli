@@ -8,7 +8,7 @@ fn source(path: &str) -> String {
 
 #[test]
 fn cli_and_tui_share_provision_prepare_commit_and_export_entrypoints() {
-    let cli = source("src/cli.rs");
+    let cli = source("src/cli/commands/provision.rs");
     let task = source("src/tui/provision/task.rs");
 
     for entrypoint in [

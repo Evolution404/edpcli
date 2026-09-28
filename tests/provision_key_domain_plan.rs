@@ -305,7 +305,7 @@ fn chapter_12_review_must_expose_domain_disposition_and_password_state() {
 
 #[test]
 fn chapter_12_cli_must_not_restore_global_password_fallback() {
-    let cli = include_str!("../src/cli_args.rs");
+    let cli = include_str!("../src/cli_args/provision.rs");
     assert!(!cli.contains("\"--password\" =>"));
     assert!(cli.contains("--share-source-password"));
     assert!(cli.contains("--share-target-password"));

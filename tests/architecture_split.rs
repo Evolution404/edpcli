@@ -347,6 +347,29 @@ fn large_modules_are_split_by_domain_boundary() {
 }
 
 #[test]
+fn cli_entry_is_split_by_command_domain() {
+    for path in [
+        "src/cli_args/provision.rs",
+        "src/cli_args/inspect.rs",
+        "src/cli_args/backup.rs",
+        "src/cli/commands/provision.rs",
+        "src/cli/commands/backup.rs",
+    ] {
+        exists(path);
+    }
+    assert!(lines("src/cli_args.rs") < 550);
+    assert!(lines("src/cli.rs") < 350);
+    let args = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli_args.rs"))
+        .expect("read CLI parser root");
+    assert!(!args.contains("fn parse_new_provision_opts("));
+    assert!(!args.contains("fn parse_lbas("));
+    let cli = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli.rs"))
+        .expect("read CLI command root");
+    assert!(!cli.contains("fn provision_flow("));
+    assert!(!cli.contains("fn real_flow("));
+}
+
+#[test]
 fn workspace_modules_do_not_import_platform_or_diskio_directly() {
     for path in [
         "src/tui/provision/state.rs",
@@ -388,8 +411,12 @@ fn entire_tui_uses_application_boundary_for_platform_and_raw_disk_access() {
 
 #[test]
 fn cli_uses_application_boundary_for_raw_disk_access() {
-    let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli.rs"))
-        .expect("read cli");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = rust_sources_under("src/cli")
+        .into_iter()
+        .chain([root.join("src/cli.rs")])
+        .map(|path| fs::read_to_string(path).expect("read CLI source"))
+        .collect::<String>();
     for forbidden in [
         "crate::diskio",
         "FileDev::open_rdonly",
@@ -412,7 +439,8 @@ fn provision_write_frontends_cannot_bypass_mandatory_application_backup() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let application = fs::read_to_string(root.join("src/application/provision.rs"))
         .expect("read provision application");
-    let cli = fs::read_to_string(root.join("src/cli.rs")).expect("read cli");
+    let cli = fs::read_to_string(root.join("src/cli/commands/provision.rs"))
+        .expect("read CLI provision command");
     let tui = fs::read_to_string(root.join("src/tui/provision/task.rs"))
         .expect("read tui provision task");
 
