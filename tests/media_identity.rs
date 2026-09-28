@@ -480,7 +480,7 @@ impl SectorDev for ReadOnlyAuditDev {
 }
 
 #[test]
-fn readonly_observation_collects_plain_identity_without_any_write_transition() {
+fn readonly_observation_never_writes_and_classifies_plain_with_fixture_geometry() {
     let runner = ObservationRunner;
     let mut dev = ReadOnlyAuditDev::plain();
 
@@ -502,6 +502,11 @@ fn readonly_observation_collects_plain_identity_without_any_write_transition() {
     assert_eq!(observed.protocol_image.len(), 13 * 512);
     assert_eq!(observed.snapshot.protocol.device_id, None);
     assert_eq!(observed.snapshot.protocol.onlyid, None);
+    // ObservationRunner stubs macOS `diskutil` geometry. Linux and Windows obtain
+    // whole-disk geometry through native platform APIs instead of CmdRunner, so this
+    // synthetic fixture cannot truthfully prove Plain classification on those targets.
+    // The cross-platform zero-write/read-only assertions above remain active everywhere.
+    #[cfg(target_os = "macos")]
     assert_eq!(
         observed.snapshot.protocol.provision_kind,
         Some(DiskProvisionKind::Plain)
