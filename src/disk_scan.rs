@@ -26,6 +26,8 @@ pub struct Row {
     pub proto: String,
     /// Raw hardware serial for the current scan session only. Do not persist this field.
     pub serial: Option<String>,
+    /// Best-effort hardware model from native inquiry; available even for Plain media.
+    pub hardware_model: Option<String>,
     pub device_id: Option<String>,
     /// Read-only canonical snapshot pinned to the protocol image seen by this scan.
     pub identity_pin: Option<crate::media_identity::MediaIdentityPin>,
@@ -132,6 +134,26 @@ impl Row {
     }
 }
 
+fn hardware_model(runner: &dyn CmdRunner, disk: u32) -> Option<String> {
+    let inquiry = runner.hardware_probe(disk)?.inquiry?;
+    let vendor = inquiry.vendor.trim();
+    let product = inquiry.product.trim();
+    let model = match (vendor.is_empty(), product.is_empty()) {
+        (false, false)
+            if product
+                .to_ascii_lowercase()
+                .starts_with(&vendor.to_ascii_lowercase()) =>
+        {
+            product.to_string()
+        }
+        (false, false) => format!("{vendor} {product}"),
+        (false, true) => vendor.to_string(),
+        (true, false) => product.to_string(),
+        (true, true) => return None,
+    };
+    Some(model)
+}
+
 /// 外接盘一览数据: 编号/容量/接口; USB 盘再尽力识别 cems 身份、
 /// EDPF 分区与备份份数。权限不足和读取异常分开记录。
 pub fn scan_disks(
@@ -148,6 +170,7 @@ pub fn scan_disks(
             pid: d.pid.clone(),
             proto: d.proto.clone(),
             serial: runner.hardware_serial(d.n),
+            hardware_model: hardware_model(runner, d.n),
             device_id: None,
             identity_pin: None,
             onlyid: None,

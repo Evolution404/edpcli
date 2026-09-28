@@ -210,7 +210,7 @@ Protocol
 ├─ LCE
 ├─ 空闲/保留区域
 ├─ 历史备份镜像
-└─ restore-node
+└─ 盘尾恢复节点
 ```
 
 动态节点必须由 `DiskLayoutModel` 生成，不允许在 Devices 页面重新推导分区几何。

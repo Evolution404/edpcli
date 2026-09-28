@@ -9,6 +9,7 @@ fn device() -> Row {
         pid: "5678".into(),
         proto: "USB".into(),
         serial: Some("SERIAL-TEST-0001".into()),
+        hardware_model: None,
         device_id: Some("disk&ven_demo&prod_u335".into()),
         identity_pin: None,
         onlyid: Some("ABCDEF0123456789".into()),
@@ -51,7 +52,7 @@ fn device_dashboard_renders_identity_detail_fields() {
         include_str!("../src/tui/devices/presentation.rs"),
         include_str!("../src/tui/state.rs")
     );
-    for field in ["onlyid", "device_id", "序列号", "容量布局", "备份关系"] {
+    for field in ["onlyid", "device_id", "序列号", "容量布局", "状态与备份"] {
         assert!(
             source.contains(field),
             "device workbench must expose {field}"

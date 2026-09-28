@@ -1532,25 +1532,47 @@ impl AppState {
             }
         }
 
+        fn reliability_label(row: &crate::disk_scan::Row) -> &'static str {
+            use crate::application::media_identity::SerialQuality;
+            match row
+                .identity_pin
+                .as_ref()
+                .map(|pin| pin.snapshot.hardware.serial_quality)
+            {
+                Some(SerialQuality::Usable) => "强",
+                Some(SerialQuality::Suspicious) => "中",
+                Some(SerialQuality::Missing) if row.device_id.is_some() && row.onlyid.is_some() => {
+                    "中"
+                }
+                Some(SerialQuality::Missing) => "弱",
+                None if row.serial.is_some() || row.device_id.is_some() || row.onlyid.is_some() => {
+                    "待确认"
+                }
+                None => "未知",
+            }
+        }
+
+        fn backup_summary(row: &crate::disk_scan::Row) -> String {
+            let status = if row.probe_error.is_some() || row.denied {
+                "异常"
+            } else {
+                "正常"
+            };
+            match row.n_possible_baks {
+                0 => format!("{status} · {}", row.n_baks),
+                possible => format!("{status} · {}+{possible}", row.n_baks),
+            }
+        }
+
         let expanded = |key| self.devices.info_expanded.contains(&key);
-        let mut rows = vec![
-            DeviceInfoTreeNode {
-                key: DeviceInfoNodeKey::Identity,
-                depth: 0,
-                label: "身份信息".into(),
-                value: None,
-                expandable: false,
-                expanded: false,
-            },
-            DeviceInfoTreeNode {
-                key: DeviceInfoNodeKey::Capacity,
-                depth: 0,
-                label: "容量布局".into(),
-                value: self.selected_device().map(|row| size_text(row.size)),
-                expandable: true,
-                expanded: expanded(DeviceInfoNodeKey::Capacity),
-            },
-        ];
+        let mut rows = vec![DeviceInfoTreeNode {
+            key: DeviceInfoNodeKey::Capacity,
+            depth: 0,
+            label: "容量布局".into(),
+            value: self.selected_device().map(|row| size_text(row.size)),
+            expandable: true,
+            expanded: expanded(DeviceInfoNodeKey::Capacity),
+        }];
 
         if expanded(DeviceInfoNodeKey::Capacity) {
             if let Some(row) = self.selected_device() {
@@ -1606,28 +1628,20 @@ impl AppState {
 
         rows.extend([
             DeviceInfoTreeNode {
-                key: DeviceInfoNodeKey::Status,
+                key: DeviceInfoNodeKey::Identity,
                 depth: 0,
-                label: "状态与诊断".into(),
-                value: None,
-                expandable: false,
-                expanded: false,
-            },
-            DeviceInfoTreeNode {
-                key: DeviceInfoNodeKey::Backups,
-                depth: 0,
-                label: "备份关系".into(),
+                label: "身份与协议".into(),
                 value: self
                     .selected_device()
-                    .map(|row| format!("{} 份", row.n_baks)),
+                    .map(|row| reliability_label(row).into()),
                 expandable: false,
                 expanded: false,
             },
             DeviceInfoTreeNode {
-                key: DeviceInfoNodeKey::Protocol,
+                key: DeviceInfoNodeKey::Status,
                 depth: 0,
-                label: "协议摘要".into(),
-                value: None,
+                label: "状态与备份".into(),
+                value: self.selected_device().map(backup_summary),
                 expandable: false,
                 expanded: false,
             },
@@ -1696,7 +1710,7 @@ impl AppState {
 
     fn device_info_detail_line_count(&self) -> usize {
         match self.device_info_selected_key() {
-            DeviceInfoNodeKey::Identity => 17,
+            DeviceInfoNodeKey::Identity => 20,
             DeviceInfoNodeKey::Capacity => self
                 .selected_device()
                 .and_then(|row| row.canonical_layout().ok())
@@ -1708,9 +1722,12 @@ impl AppState {
                 .and_then(|model| model.tail_group().map(|tail| tail.children.len() + 13))
                 .unwrap_or(3),
             DeviceInfoNodeKey::LayoutSegment { .. } => 18,
-            DeviceInfoNodeKey::Status => 10,
-            DeviceInfoNodeKey::Backups => 5,
-            DeviceInfoNodeKey::Protocol => 10,
+            DeviceInfoNodeKey::Status => self
+                .selected_device()
+                .map(|row| 12 + row.n_baks + row.n_possible_baks)
+                .unwrap_or(12),
+            DeviceInfoNodeKey::Backups => 12,
+            DeviceInfoNodeKey::Protocol => 20,
         }
     }
 

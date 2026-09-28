@@ -562,29 +562,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         }
     } else {
         match state.workspace() {
-            Workspace::Devices => {
-                use crate::tui::pane::PaneId;
-                match state.devices_focused_pane() {
-                    PaneId::DevicesList if state.selected_device().is_some() => {
-                        let kind = crate::tui::table_layout::TableKind::Devices;
-                        let total = crate::tui::table_layout::layout_for(kind).specs().len();
-                        format!(
-                            "Tab/Shift-Tab 或 gt/gT 标签 · Ctrl-w 切 Pane · j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s/S 排序 · {}/{} 列 · Enter 设备信息 · p 制盘 · i 检查 · b 备份 · q 退出",
-                            state.table_active_column(kind) + 1,
-                            total
-                        )
-                    }
-                    PaneId::DevicesTree => {
-                        "Ctrl-w 切 Pane · j/k 选择节点 · gg/G 首尾节点 · o 展开/折叠 · Enter 详情 · i 检查 · p 制盘 · b 备份 · Esc 设备列表 · q 退出"
-                            .to_string()
-                    }
-                    PaneId::DevicesDetail => {
-                        "Ctrl-w 切 Pane · j/k 滚动 · gg/G 顶部/底部 · Ctrl-u/Ctrl-d 半页 · i 检查 · p 制盘 · b 备份 · Esc 信息树 · q 退出"
-                            .to_string()
-                    }
-                    _ => "Tab/Shift-Tab 或 gt/gT 标签 · r 刷新 · q 退出".to_string(),
-                }
-            }
+            Workspace::Devices => "? 帮助".to_string(),
             Workspace::Inspect => {
                 if state.active_table_kind()
                     == Some(crate::tui::table_layout::TableKind::InspectFields)
@@ -674,6 +652,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     };
     let status = if state.input_mode() == InputMode::Normal
         && state.active_table_kind().is_some()
+        && state.workspace() != Workspace::Devices
         && !state.is_critical_operation()
     {
         format!("y 单元格 · Y 整行 · {status}")

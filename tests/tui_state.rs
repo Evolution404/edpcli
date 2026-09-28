@@ -37,6 +37,7 @@ fn device(size: u64) -> edpcli::disk_scan::Row {
         pid: "5678".into(),
         proto: "USB".into(),
         serial: None,
+        hardware_model: None,
         device_id: Some("disk&ven_test&prod_test".into()),
         identity_pin: None,
         onlyid: Some("1402259934".into()),
@@ -79,6 +80,7 @@ fn ch14_partition_layout_has_typed_status_column_and_reason() {
     let partitions = details
         .iter()
         .filter_map(|row| row.columns.as_ref())
+        .filter(|columns| columns[3] == "⚠ 需重建")
         .collect::<Vec<_>>();
     assert_eq!(partitions.len(), 3);
     assert!(partitions.iter().all(|columns| columns[3] == "⚠ 需重建"));

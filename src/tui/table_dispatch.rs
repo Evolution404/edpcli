@@ -88,6 +88,7 @@ mod tests {
             pid: "5678".into(),
             proto: "USB".into(),
             serial: None,
+            hardware_model: None,
             device_id: None,
             identity_pin: None,
             onlyid: None,

@@ -121,6 +121,7 @@ pub(super) fn disk(disk: u32, kind: DiskProvisionKind) -> Row {
         pid: format!("{disk:04x}"),
         proto: "USB".into(),
         serial: Some(format!("DEMO-SERIAL-{disk}")),
+        hardware_model: None,
         device_id: edp.then(|| format!("demo&ven_edp&prod_scene{disk}")),
         identity_pin: None,
         onlyid: edp.then(|| format!("14022599{disk:02}")),

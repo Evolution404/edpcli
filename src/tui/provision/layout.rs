@@ -47,7 +47,7 @@ impl AppState {
         lines
     }
 
-    pub(super) fn format_sector_size(sectors: u64) -> String {
+    pub(crate) fn format_sector_size(sectors: u64) -> String {
         let mib = sectors as f64 / 2048.0;
         if mib >= 1024.0 {
             format!("{:.2} GiB", mib / 1024.0)

@@ -1,6 +1,30 @@
 use super::*;
+use crate::application::inspect_tree::DiskRegionSemantic;
 use crate::application::inspect_tree::InspectNodeKind;
+use crate::tui::disk_layout::DiskRegionKind;
 use crate::tui::state::AdvancedInspectTreeRow;
+
+fn region_kind(semantic: Option<DiskRegionSemantic>) -> Option<DiskRegionKind> {
+    match semantic? {
+        DiskRegionSemantic::Protocol => Some(DiskRegionKind::Protocol),
+        DiskRegionSemantic::PartitionTable => Some(DiskRegionKind::Metadata),
+        DiskRegionSemantic::PlainPartition | DiskRegionSemantic::MbrPartition { .. } => {
+            Some(DiskRegionKind::Plain)
+        }
+        DiskRegionSemantic::Unallocated => Some(DiskRegionKind::Free),
+        DiskRegionSemantic::Lce => Some(DiskRegionKind::Lce),
+        DiskRegionSemantic::Tail => Some(DiskRegionKind::Tail),
+        DiskRegionSemantic::TailMetadataMirror => Some(DiskRegionKind::BackupMirror),
+        DiskRegionSemantic::TailRestoreNode => Some(DiskRegionKind::RestoreNode),
+        DiskRegionSemantic::Partition { partition_type } => match partition_type {
+            1 => Some(DiskRegionKind::Boot),
+            2 => Some(DiskRegionKind::Share),
+            4 => Some(DiskRegionKind::Encrypt),
+            _ => Some(DiskRegionKind::Compatibility),
+        },
+        DiskRegionSemantic::Unknown | DiskRegionSemantic::Conflict => Some(DiskRegionKind::Unknown),
+    }
+}
 
 pub(super) fn draw_inspect_tree_pane(
     frame: &mut Frame,
@@ -33,13 +57,16 @@ pub(super) fn draw_inspect_tree_pane(
             InspectNodeKind::Partition => "▣ ",
             InspectNodeKind::UnknownRange => "? ",
         };
-        let kind_style = match row.kind {
+        let active = index == selected_index;
+        let region_style = region_kind(row.region_semantic)
+            .map(|kind| crate::tui::theme::current().disk_region_tree(kind, active));
+        let kind_style = region_style.unwrap_or_else(|| match row.kind {
             InspectNodeKind::Device => secondary().add_modifier(Modifier::BOLD),
             InspectNodeKind::Region | InspectNodeKind::Partition => accent(),
             InspectNodeKind::Extent | InspectNodeKind::Structure => success(),
             InspectNodeKind::Sector | InspectNodeKind::Field => Style::default(),
             InspectNodeKind::Group | InspectNodeKind::UnknownRange => muted(),
-        };
+        });
         let content = if row.kind == InspectNodeKind::Sector {
             format!("{marker}{icon}{}", safe(&row.label))
         } else {
@@ -60,18 +87,25 @@ pub(super) fn draw_inspect_tree_pane(
             available,
             crate::tui::table_layout::TruncatePolicy::Ellipsis,
         );
-        let focused = tree_focus && index == selected_index;
+        let focused = tree_focus && active;
+        let content_style = if region_style.is_some() {
+            kind_style.add_modifier(Modifier::BOLD)
+        } else if focused {
+            selected()
+        } else {
+            kind_style
+        };
+        let marker_style = if let Some(style) = region_style {
+            style
+        } else if focused {
+            selection_marker()
+        } else {
+            Style::default()
+        };
         Line::from(vec![
             Span::raw(indent),
-            Span::styled(
-                if focused { "▌ " } else { "  " },
-                if focused {
-                    selection_marker()
-                } else {
-                    Style::default()
-                },
-            ),
-            Span::styled(content, if focused { selected() } else { kind_style }),
+            Span::styled(if focused { "▌ " } else { "  " }, marker_style),
+            Span::styled(content, content_style),
             Span::raw(" "),
         ])
     });
@@ -90,4 +124,49 @@ pub(super) fn draw_inspect_tree_pane(
             .wrap(Wrap { trim: false }),
         tree_area,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inspect_region_semantics_reuse_capacity_map_region_kinds() {
+        assert_eq!(
+            region_kind(Some(DiskRegionSemantic::Protocol)),
+            Some(DiskRegionKind::Protocol)
+        );
+        assert_eq!(
+            region_kind(Some(DiskRegionSemantic::Unallocated)),
+            Some(DiskRegionKind::Free)
+        );
+        assert_eq!(
+            region_kind(Some(DiskRegionSemantic::Partition { partition_type: 1 })),
+            Some(DiskRegionKind::Boot)
+        );
+        assert_eq!(
+            region_kind(Some(DiskRegionSemantic::Partition { partition_type: 2 })),
+            Some(DiskRegionKind::Share)
+        );
+        assert_eq!(
+            region_kind(Some(DiskRegionSemantic::Partition { partition_type: 4 })),
+            Some(DiskRegionKind::Encrypt)
+        );
+        assert_eq!(
+            region_kind(Some(DiskRegionSemantic::Tail)),
+            Some(DiskRegionKind::Tail)
+        );
+        assert_eq!(
+            region_kind(Some(DiskRegionSemantic::Lce)),
+            Some(DiskRegionKind::Lce)
+        );
+        assert_eq!(
+            region_kind(Some(DiskRegionSemantic::TailMetadataMirror)),
+            Some(DiskRegionKind::BackupMirror)
+        );
+        assert_eq!(
+            region_kind(Some(DiskRegionSemantic::TailRestoreNode)),
+            Some(DiskRegionKind::RestoreNode)
+        );
+    }
 }

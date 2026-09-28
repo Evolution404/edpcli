@@ -39,12 +39,6 @@ fn demo_fixtures_expose_typed_inspect_layout_backups_and_running_progress() {
     let layout = plain.selected_device().unwrap().canonical_layout().unwrap();
     assert!(layout.tail_group().is_none());
 
-    let tail = demo::build_scene("inspect-tail-expanded").unwrap();
-    assert_eq!(
-        tail.disk_layout_tail_expansion(),
-        edpcli::tui::disk_layout::TailExpansion::Expanded
-    );
-
     let backups = demo::build_scene("backups").unwrap();
     assert!(backups.backups().len() >= 2);
     let target = backups.selected_device().expect("demo target device");

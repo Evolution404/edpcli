@@ -496,11 +496,7 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
         state.advanced_inspect_breadcrumb().unwrap().escape_hint(),
         "Esc 返回：Inspect"
     );
-    for expected in [
-        AdvancedInspectPanel::DiskLayout,
-        AdvancedInspectPanel::Tree,
-        AdvancedInspectPanel::Overview,
-    ] {
+    for expected in [AdvancedInspectPanel::Tree, AdvancedInspectPanel::Overview] {
         state.advanced_inspect_shift_panel(false);
         assert_eq!(state.advanced_inspect().unwrap().panel, expected);
         assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 37);
@@ -720,7 +716,17 @@ fn sector_inspector_loads_on_demand_navigates_bytes_and_bounds_cache() {
 fn sector_inspector_renders_32x16_offsets_ascii_typed_and_unknown_views() {
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
-    state.advanced_inspect_finish(Ok(workspace(vec![item(0, true)])));
+    let mut inspect = workspace(vec![item(0, true)]);
+    inspect.disk_layout = Some(edpcli::tui::disk_layout::DiskLayoutModel::new(
+        4_096,
+        vec![edpcli::tui::disk_layout::DiskLayoutSegment {
+            label: "EDP 主协议区".into(),
+            start_lba: 0,
+            sector_count: 4_096,
+            kind: edpcli::tui::disk_layout::DiskRegionKind::Protocol,
+        }],
+    ));
+    state.advanced_inspect_finish(Ok(inspect));
     select_protocol_lba0(&mut state);
     assert!(state.advanced_inspect_open_selected_sector().is_none());
     state.advanced_inspect_sector_toggle_field();
@@ -737,6 +743,10 @@ fn sector_inspector_renders_32x16_offsets_ascii_typed_and_unknown_views() {
         .collect::<String>();
     let compact = text.replace(' ', "");
     assert!(compact.contains("SectorInspector"), "{text}");
+    assert!(
+        compact.contains("磁盘概览·当前LBA0"),
+        "sector detail must keep the permanent mini capacity map: {text}"
+    );
     assert!(compact.contains("+0x000"), "{text}");
     assert!(compact.contains("+0x1F0"), "{text}");
     assert!(compact.contains("KnownField"), "{text}");

@@ -36,7 +36,6 @@ pub enum AdvancedInspectStage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdvancedInspectPanel {
-    DiskLayout,
     Tree,
     Overview,
     Detail,
@@ -46,7 +45,6 @@ impl AdvancedInspectPanel {
     pub const fn pane_id(self) -> crate::tui::pane::PaneId {
         use crate::tui::pane::PaneId;
         match self {
-            Self::DiskLayout => PaneId::InspectDiskLayout,
             Self::Tree => PaneId::InspectTree,
             Self::Overview => PaneId::InspectOverview,
             Self::Detail => PaneId::InspectDetail,
@@ -56,7 +54,6 @@ impl AdvancedInspectPanel {
     pub const fn from_pane_id(pane: crate::tui::pane::PaneId) -> Option<Self> {
         use crate::tui::pane::PaneId;
         match pane {
-            PaneId::InspectDiskLayout => Some(Self::DiskLayout),
             PaneId::InspectTree => Some(Self::Tree),
             PaneId::InspectOverview => Some(Self::Overview),
             PaneId::InspectDetail => Some(Self::Detail),

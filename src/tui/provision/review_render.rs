@@ -66,9 +66,9 @@ pub(super) fn draw_provision_review(
     if let Some(layout_area) = layout_area {
         let layout_model = state.provision_layout_model();
         let layout_summary = format!(
-            "{} · {} sectors",
+            "{} · {}",
             provision.kind.title(),
-            layout_model.total_sectors
+            AppState::format_sector_size(layout_model.total_sectors)
         );
         layout_model.render_pane(
             frame,

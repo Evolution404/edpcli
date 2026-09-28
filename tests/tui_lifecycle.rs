@@ -15,6 +15,7 @@ fn usb_device() -> edpcli::disk_scan::Row {
         pid: "2005".into(),
         proto: "USB".into(),
         serial: None,
+        hardware_model: None,
         device_id: None,
         identity_pin: None,
         onlyid: None,
@@ -69,7 +70,7 @@ fn redraw_handles_small_and_large_terminal_sizes_without_panicking() {
 }
 
 #[test]
-fn device_list_shows_model_and_identity_summary_and_enter_shortcut() {
+fn device_list_shows_model_default_capacity_and_help_only_hint() {
     let mut state = AppState::new();
     let mut row = usb_device();
     row.device_id = Some("disk&ven_aigo&prod_u335".into());
@@ -87,8 +88,12 @@ fn device_list_shows_model_and_identity_summary_and_enter_shortcut() {
         .collect::<String>();
     assert!(text.replace(' ', "").contains("型号"), "{text}");
     assert!(text.contains("aigo_u335"), "{text}");
-    assert!(text.contains("1987718388"), "{text}");
-    assert!(text.replace(' ', "").contains("Enter设备信息"), "{text}");
+    assert!(
+        text.replace(' ', "").contains("无法建立可靠容量布局"),
+        "default device detail must be capacity layout: {text}"
+    );
+    assert!(text.replace(' ', "").contains("?帮助"), "{text}");
+    assert!(!text.replace(' ', "").contains("Enter设备信息"), "{text}");
     assert!(!text.replace(' ', "").contains("当前设备·"), "{text}");
     assert!(
         text.contains("▌"),
@@ -143,8 +148,9 @@ fn active_department_column_expands_fully_without_ellipsis_and_sort_keeps_disk_s
         !compact.contains("江苏省电力有限公司/南京供电公…"),
         "{text}"
     );
-    assert!(compact.contains("h/l激活"), "{text}");
-    assert!(compact.contains("H/L视口"), "{text}");
+    assert!(!compact.contains("h/l激活"), "{text}");
+    assert!(!compact.contains("H/L视口"), "{text}");
+    assert!(compact.contains("?帮助"), "{text}");
 
     state.toggle_table_sort(TableKind::Devices);
     assert_eq!(state.selected_device_disk(), Some(5));
@@ -218,7 +224,7 @@ fn transient_notice_has_its_own_area_and_expires() {
     assert!(
         lines
             .iter()
-            .any(|line| line.replace(' ', "").contains("Tab/Shift-Tab或gt/gT标签")),
+            .any(|line| line.replace(' ', "").contains("?帮助")),
         "{lines:?}"
     );
     std::thread::sleep(std::time::Duration::from_millis(4_050));
@@ -355,19 +361,23 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
         "group separators must be independently aligned"
     );
 
-    let ratio_row = cells
+    use edpcli::tui::disk_layout::DiskRegionKind;
+    let theme = edpcli::tui::theme::current();
+    let boot_bg = theme.disk_region_fill(DiskRegionKind::Boot, false).bg;
+    let share_bg = theme.disk_region_fill(DiskRegionKind::Share, false).bg;
+    let encrypt_bg = theme.disk_region_fill(DiskRegionKind::Encrypt, false).bg;
+    let capacity_row = cells
         .chunks(width as usize)
-        .find(|row| row.iter().any(|cell| cell.symbol() == "━"))
-        .expect("shared disk layout ratio row");
-    assert!(ratio_row
+        .find(|row| {
+            row.iter().any(|cell| cell.style().bg == share_bg)
+                && row.iter().any(|cell| cell.style().bg == encrypt_bg)
+        })
+        .expect("shared compact capacity-map row");
+    assert!(capacity_row.iter().any(|cell| cell.style().bg == boot_bg));
+    assert!(capacity_row.iter().any(|cell| cell.style().bg == share_bg));
+    assert!(capacity_row
         .iter()
-        .any(|cell| cell.style().fg == Some(palette.partition_boot)));
-    assert!(ratio_row
-        .iter()
-        .any(|cell| cell.style().fg == Some(palette.partition_share)));
-    assert!(ratio_row
-        .iter()
-        .any(|cell| cell.style().fg == Some(palette.partition_encrypt)));
+        .any(|cell| cell.style().bg == encrypt_bg));
 }
 
 #[test]
@@ -624,23 +634,22 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
     let expanded_len = state.advanced_inspect_tree_rows().len();
     assert!(expanded_len > collapsed_len);
 
-    state.advanced_inspect_focus_pane(edpcli::tui::pane::PaneId::InspectDiskLayout);
-    state.advanced_inspect_shift_panel(false);
-    assert_eq!(
-        state.advanced_inspect().unwrap().panel,
-        AdvancedInspectPanel::Tree
-    );
+    state.advanced_inspect_focus_pane(edpcli::tui::pane::PaneId::InspectTree);
     state.advanced_inspect_shift_panel(false);
     assert_eq!(
         state.advanced_inspect().unwrap().panel,
         AdvancedInspectPanel::Overview
     );
+    state.advanced_inspect_shift_panel(false);
+    assert_eq!(
+        state.advanced_inspect().unwrap().panel,
+        AdvancedInspectPanel::Detail
+    );
     state.advanced_inspect_shift_panel(true);
     assert_eq!(
         state.advanced_inspect().unwrap().panel,
-        AdvancedInspectPanel::Tree
+        AdvancedInspectPanel::Overview
     );
-    state.advanced_inspect_shift_panel(false);
     state.advanced_inspect_shift_panel(false);
     state.advanced_inspect_move_focused_vertical(10, 1, 100);
     assert_eq!(

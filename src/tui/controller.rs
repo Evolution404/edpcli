@@ -116,20 +116,8 @@ fn navigate_pure(
     }
 }
 
-fn show_inspect_layout_detail(state: &mut AppState) {
-    let detail = state
-        .advanced_inspect()
-        .and_then(|advanced| advanced.result.as_ref())
-        .and_then(|workspace| workspace.disk_layout.as_ref())
-        .and_then(|model| state.disk_layout_detail(model));
-    if let Some(detail) = detail {
-        state.set_notice(detail);
-    }
-}
-
 fn open_inspect_selection(state: &mut AppState) {
     match state.advanced_inspect_focused_pane() {
-        Some(PaneId::InspectDiskLayout) => state.toggle_disk_layout_tail(),
         Some(PaneId::InspectDetail) if state.advanced_inspect_detail_selected_row().is_some() => {
             state.advanced_inspect_detail_toggle_selected();
         }
@@ -216,12 +204,7 @@ fn dispatch_inspect(
             }
         }
         TuiAction::Activate => {
-            if state.advanced_inspect_focused_pane() == Some(PaneId::InspectDiskLayout) {
-                show_inspect_layout_detail(state);
-                ActionOutcome::handled()
-            } else {
-                ActionOutcome::request(ActionRequest::InspectSelection { force_hex: false })
-            }
+            ActionOutcome::request(ActionRequest::InspectSelection { force_hex: false })
         }
         TuiAction::InspectBusiness => {
             state.advanced_inspect_focus_pane(PaneId::InspectOverview);
@@ -235,10 +218,6 @@ fn dispatch_inspect(
         }
         TuiAction::InspectHex => {
             ActionOutcome::request(ActionRequest::InspectSelection { force_hex: true })
-        }
-        TuiAction::InspectDiskLayout => {
-            state.advanced_inspect_focus_pane(PaneId::InspectDiskLayout);
-            ActionOutcome::handled()
         }
         TuiAction::PanelNext | TuiAction::PanelPrevious => {
             state.advanced_inspect_shift_panel(action == TuiAction::PanelPrevious);

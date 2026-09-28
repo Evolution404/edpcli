@@ -44,7 +44,7 @@ impl DiskRegionKind {
             Self::Compatibility => "兼容保留区",
             Self::Lce => "LCE",
             Self::BackupMirror => "历史备份镜像",
-            Self::RestoreNode => "restore-node",
+            Self::RestoreNode => "盘尾恢复节点",
             Self::Tail => "尾部区域",
         }
     }
@@ -248,7 +248,7 @@ impl DiskLayoutModel {
         }
         if total_sectors > TAIL_END4_MIRROR_OFFSET_SECTORS {
             known.push(DiskLayoutSegment {
-                label: "restore-node".into(),
+                label: "盘尾恢复节点".into(),
                 start_lba: total_sectors - TAIL_END4_MIRROR_OFFSET_SECTORS,
                 sector_count: 1,
                 kind: DiskRegionKind::RestoreNode,

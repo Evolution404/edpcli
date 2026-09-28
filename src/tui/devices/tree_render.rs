@@ -73,30 +73,49 @@ fn device_tree_line(
     };
     let region_style = match row.key {
         DeviceInfoNodeKey::LayoutSegment { kind, .. } => {
-            Some(crate::tui::theme::current().disk_region(kind))
+            Some(crate::tui::theme::current().disk_region_tree(kind, active))
         }
         DeviceInfoNodeKey::TailGroup => Some(
-            crate::tui::theme::current().disk_region(crate::tui::disk_layout::DiskRegionKind::Tail),
+            crate::tui::theme::current()
+                .disk_region_tree(crate::tui::disk_layout::DiskRegionKind::Tail, active),
         ),
         _ => None,
     };
     let style = region_style.unwrap_or_else(|| if active { accent() } else { secondary() });
-    let marker_style = if active { accent() } else { style };
+    let marker_style = style;
+    let structural_style = if active && region_style.is_some() {
+        style
+    } else {
+        ratatui::style::Style::default()
+    };
+    let branch_style = if active && region_style.is_some() {
+        style
+    } else {
+        muted()
+    };
     let mut spans = vec![
         Span::styled(marker, marker_style),
-        Span::raw(" "),
-        Span::raw("  ".repeat(row.depth as usize)),
+        Span::styled(" ", structural_style),
+        Span::styled("  ".repeat(row.depth as usize), structural_style),
         Span::styled(disclosure, style),
-        Span::raw(" "),
-        Span::styled(branch, muted()),
+        Span::styled(" ", structural_style),
+        Span::styled(branch, branch_style),
         Span::styled(row.label.clone(), style.add_modifier(Modifier::BOLD)),
     ];
     if let Some(value) = &row.value {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            value.clone(),
-            region_style.unwrap_or_else(muted),
-        ));
+        spans.push(Span::styled("  ", structural_style));
+        let value_style = match row.key {
+            DeviceInfoNodeKey::Identity => match value.as_str() {
+                "强" => success().add_modifier(Modifier::BOLD),
+                "中" | "待确认" => warning().add_modifier(Modifier::BOLD),
+                "弱" => danger().add_modifier(Modifier::BOLD),
+                _ => muted(),
+            },
+            DeviceInfoNodeKey::Status if value.starts_with("正常") => success(),
+            DeviceInfoNodeKey::Status if value.starts_with("异常") => danger(),
+            _ => region_style.unwrap_or_else(muted),
+        };
+        spans.push(Span::styled(value.clone(), value_style));
     }
     Line::from(spans)
 }

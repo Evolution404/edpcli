@@ -16,8 +16,6 @@ pub const SCENES: &[&str] = &[
     "device-plain",
     "inspect-lba8",
     "inspect-elabel-expanded",
-    "inspect-disk-layout",
-    "inspect-tail-expanded",
     "inspect-sector-raw",
     "inspect-sector-decode",
     "inspect-sector-meta",
@@ -67,14 +65,8 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
             state.begin_advanced_inspect(AdvancedInspectSource::Disk(6));
             state.advanced_inspect_finish(Ok(inspect_fixture));
             let _ = select_lba8(&mut state);
-            if name.contains("disk-layout") || name.contains("tail-expanded") {
-                state.advanced_inspect_focus_pane(PaneId::InspectDiskLayout);
-            } else {
-                state.advanced_inspect_focus_pane(PaneId::InspectDetail);
-            }
-            if name == "inspect-tail-expanded" {
-                state.toggle_disk_layout_tail();
-            } else if name == "inspect-elabel-expanded" {
+            state.advanced_inspect_focus_pane(PaneId::InspectDetail);
+            if name == "inspect-elabel-expanded" {
                 state.pane_viewport_mut(PaneId::InspectDetail).selected = Some(1);
                 state.advanced_inspect_detail_toggle_selected();
             } else if name.starts_with("inspect-sector-") {

@@ -14,6 +14,7 @@ fn device(disk: u32, user: &str, dept: &str) -> Row {
         pid: "5678".into(),
         proto: "USB".into(),
         serial: None,
+        hardware_model: None,
         device_id: Some(format!("disk&ven_test&prod_{user}")),
         identity_pin: None,
         onlyid: Some(format!("{disk}001")),

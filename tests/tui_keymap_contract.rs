@@ -541,7 +541,8 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
 fn user_visible_inspect_hints_point_to_full_disk_tree_entry() {
     let shell = include_str!("../src/tui/render.rs");
     assert!(shell.contains("i 检查"));
-    assert!(shell.contains("Enter 设备信息"));
+    assert!(shell.contains("? 帮助"));
+    assert!(shell.contains("Enter 从列表进入信息树"));
     assert!(!shell.contains("i Inspect"));
     assert!(!shell.contains("gi Inspect"));
 

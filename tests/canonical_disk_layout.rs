@@ -161,7 +161,7 @@ fn presentation_profiles_preserve_canonical_geometry_and_tail_expansion() {
         assert!(expanded
             .legend_lines()
             .iter()
-            .any(|line| line.contains("restore-node")));
+            .any(|line| line.contains("盘尾恢复节点")));
     }
     assert_eq!(model.segments, canonical);
 }

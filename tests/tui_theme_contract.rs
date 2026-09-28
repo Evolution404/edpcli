@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use edpcli::tui::disk_layout::DiskRegionKind;
 use edpcli::tui::{
     render,
     state::AppState,
@@ -39,7 +40,7 @@ fn chapter_ten_truecolor_palette_is_exact() {
     assert_eq!(palette.success, Color::Rgb(0x7F, 0xA6, 0x8A));
     assert_eq!(palette.warning, Color::Rgb(0xB4, 0x9A, 0x68));
     assert_eq!(palette.danger, Color::Rgb(0xB7, 0x7C, 0x7C));
-    assert_eq!(palette.violet, Color::Rgb(0xA6, 0x8B, 0xC7));
+    assert_eq!(palette.violet, Color::Rgb(0x7F, 0xA3, 0xB8));
     assert_eq!(palette.partition_plain, Color::Rgb(0x6F, 0xA8, 0xDC));
     assert_eq!(palette.partition_boot, Color::Rgb(0x63, 0xC7, 0xBE));
     assert_eq!(palette.partition_share, Color::Rgb(0x78, 0xBE, 0x7E));
@@ -53,6 +54,140 @@ fn chapter_ten_truecolor_palette_is_exact() {
     assert_eq!(palette.animation_accent, Color::Rgb(0x6F, 0x91, 0xA5));
     assert_eq!(palette.animation_core, Color::Rgb(0x8C, 0xB1, 0xC3));
     assert_eq!(palette.animation_guard, Color::Rgb(0xB7, 0x7C, 0x7C));
+}
+
+#[test]
+fn disk_region_truecolor_fills_are_high_contrast_and_semantically_distinct() {
+    let theme = Theme::truecolor_dark();
+    let cases = [
+        (
+            DiskRegionKind::Protocol,
+            Color::Rgb(0x2C, 0x62, 0x70),
+            Color::Rgb(0x39, 0x7A, 0x89),
+            Color::Rgb(0xB0, 0xD3, 0xDA),
+        ),
+        (
+            DiskRegionKind::Free,
+            Color::Rgb(0x50, 0x58, 0x61),
+            Color::Rgb(0x68, 0x72, 0x7C),
+            Color::Rgb(0xCB, 0xD2, 0xD8),
+        ),
+        (
+            DiskRegionKind::Unknown,
+            Color::Rgb(0x55, 0x4C, 0x49),
+            Color::Rgb(0x6B, 0x5D, 0x58),
+            Color::Rgb(0xD2, 0xC5, 0xC0),
+        ),
+        (
+            DiskRegionKind::Plain,
+            Color::Rgb(0x34, 0x5B, 0x72),
+            Color::Rgb(0x44, 0x73, 0x8C),
+            Color::Rgb(0xB7, 0xD2, 0xE0),
+        ),
+        (
+            DiskRegionKind::Boot,
+            Color::Rgb(0x35, 0x6B, 0x66),
+            Color::Rgb(0x43, 0x83, 0x7D),
+            Color::Rgb(0xB7, 0xD8, 0xD3),
+        ),
+        (
+            DiskRegionKind::Share,
+            Color::Rgb(0x3A, 0x76, 0x58),
+            Color::Rgb(0x49, 0x8D, 0x6B),
+            Color::Rgb(0xBE, 0xDB, 0xC6),
+        ),
+        (
+            DiskRegionKind::Encrypt,
+            Color::Rgb(0x67, 0x50, 0x78),
+            Color::Rgb(0x7D, 0x63, 0x91),
+            Color::Rgb(0xD1, 0xC2, 0xDB),
+        ),
+        (
+            DiskRegionKind::Compatibility,
+            Color::Rgb(0x5B, 0x50, 0x3B),
+            Color::Rgb(0x74, 0x66, 0x4A),
+            Color::Rgb(0xD8, 0xC9, 0xA6),
+        ),
+        (
+            DiskRegionKind::Lce,
+            Color::Rgb(0x35, 0x5D, 0x68),
+            Color::Rgb(0x46, 0x74, 0x80),
+            Color::Rgb(0xB9, 0xD0, 0xD6),
+        ),
+        (
+            DiskRegionKind::BackupMirror,
+            Color::Rgb(0x5D, 0x50, 0x3A),
+            Color::Rgb(0x76, 0x66, 0x4A),
+            Color::Rgb(0xD7, 0xC9, 0xA8),
+        ),
+        (
+            DiskRegionKind::Tail,
+            Color::Rgb(0x38, 0x54, 0x6D),
+            Color::Rgb(0x49, 0x6C, 0x88),
+            Color::Rgb(0xBC, 0xD0, 0xDF),
+        ),
+    ];
+
+    for (kind, normal_bg, active_bg, active_fg) in cases {
+        let normal = theme.disk_region_fill(kind, false);
+        let active = theme.disk_region_fill(kind, true);
+        assert_eq!(normal.bg, Some(normal_bg), "normal fill for {kind:?}");
+        assert_eq!(active.bg, Some(active_bg), "active fill for {kind:?}");
+        assert_eq!(active.fg, Some(active_fg), "active text for {kind:?}");
+        assert_ne!(
+            normal_bg,
+            theme.palette().background,
+            "{kind:?} must stand out from the page"
+        );
+        assert_ne!(
+            normal_bg, active_bg,
+            "{kind:?} active fill must visibly change"
+        );
+        let tree_active = theme.disk_region_tree(kind, true);
+        assert_eq!(tree_active.fg, Some(active_fg));
+        assert_eq!(
+            tree_active.bg, None,
+            "tree selection must not paint a background for {kind:?}"
+        );
+        assert!(tree_active
+            .add_modifier
+            .contains(ratatui::style::Modifier::BOLD));
+    }
+}
+
+#[test]
+fn disk_region_content_text_is_light_and_high_contrast_on_semantic_fills() {
+    let theme = Theme::truecolor_dark();
+    let share = theme.disk_region_content_text(DiskRegionKind::Share, false);
+    let share_active = theme.disk_region_content_text(DiskRegionKind::Share, true);
+    let encrypt = theme.disk_region_content_text(DiskRegionKind::Encrypt, false);
+    let free = theme.disk_region_content_text(DiskRegionKind::Free, false);
+
+    assert_eq!(share.fg, Some(Color::Rgb(0xE3, 0xEE, 0xE6)));
+    assert_eq!(share_active.fg, Some(Color::Rgb(0xF1, 0xF8, 0xF3)));
+    assert_eq!(encrypt.fg, Some(Color::Rgb(0xEC, 0xE5, 0xF0)));
+    assert_eq!(free.fg, Some(Color::Rgb(0xE1, 0xE5, 0xE9)));
+    assert_eq!(share.bg, None);
+    assert!(share_active
+        .add_modifier
+        .contains(ratatui::style::Modifier::BOLD));
+}
+
+#[test]
+fn generic_secondary_accent_is_steel_blue_and_encrypt_keeps_purple_semantics() {
+    let theme = Theme::truecolor_dark();
+    assert_eq!(
+        theme.secondary_accent().fg,
+        Some(Color::Rgb(0x7F, 0xA3, 0xB8))
+    );
+    assert_eq!(
+        theme.disk_region(DiskRegionKind::Encrypt).fg,
+        Some(theme.palette().partition_encrypt)
+    );
+    assert_ne!(
+        theme.secondary_accent().fg,
+        theme.disk_region(DiskRegionKind::Encrypt).fg
+    );
 }
 
 #[test]

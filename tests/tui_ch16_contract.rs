@@ -97,6 +97,7 @@ fn device() -> edpcli::disk_scan::Row {
         pid: "5678".into(),
         proto: "USB".into(),
         serial: None,
+        hardware_model: None,
         device_id: Some("disk&ven_demo&prod_u335".into()),
         identity_pin: None,
         onlyid: Some("ABCDEF0123456789".into()),
@@ -285,12 +286,10 @@ fn ch16_devices_wide_is_list_plus_tree_plus_detail_without_redundant_current_dev
     for value in [
         "设备列表",
         "设备信息",
-        "身份信息",
         "容量布局",
-        "状态与诊断",
-        "备份关系",
-        "协议摘要",
-        "onlyid",
+        "身份与协议",
+        "状态与备份",
+        "无法建立可靠容量布局",
     ] {
         assert!(text.contains(value), "missing {value}");
     }
@@ -307,7 +306,7 @@ fn ch16_devices_compact_enter_opens_tree_then_detail_and_escape_walks_back() {
     assert_eq!(state.activate_device_for_viewport(40).unwrap(), None);
     assert_eq!(state.devices_focused_pane(), PaneId::DevicesTree);
     let text = rendered_lines(&state, 40, 10).join("\n").replace(' ', "");
-    for value in ["设备信息", "身份信息", "容量布局"] {
+    for value in ["设备信息", "身份与协议", "容量布局"] {
         assert!(text.contains(value), "missing {value} at 40x10");
     }
     assert!(!text.contains("当前设备·disk6"));
@@ -321,15 +320,23 @@ fn ch16_devices_compact_enter_opens_tree_then_detail_and_escape_walks_back() {
 
 #[test]
 fn ch16_device_detail_pane_remains_reachable_at_standard_width() {
-    use edpcli::tui::pane::PaneId;
+    use edpcli::tui::{pane::PaneId, state::NavCommand};
 
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
     state.focus_devices_pane(PaneId::DevicesDetail);
-    let text = rendered_lines(&state, 100, 30).join("\n").replace(' ', "");
-    assert!(text.contains("身份信息"));
-    assert!(text.contains("device_id"));
-    assert!(!text.contains("总设备1"));
+    let default_text = rendered_lines(&state, 100, 30).join("\n").replace(' ', "");
+    assert!(default_text.contains("容量布局"));
+    assert!(default_text.contains("无法建立可靠容量布局"));
+
+    state.focus_devices_pane(PaneId::DevicesTree);
+    state.navigate(NavCommand::Bottom, 10);
+    state.device_info_move_tree(-1);
+    state.focus_devices_pane(PaneId::DevicesDetail);
+    let identity_text = rendered_lines(&state, 100, 30).join("\n").replace(' ', "");
+    assert!(identity_text.contains("身份与协议"));
+    assert!(identity_text.contains("device_id"));
+    assert!(!identity_text.contains("总设备1"));
 }
 
 #[test]
@@ -474,7 +481,6 @@ fn ch16_inspect_view_shortcuts_are_explicit() {
         ('1', TuiAction::InspectBusiness),
         ('2', TuiAction::InspectRawFields),
         ('3', TuiAction::InspectHex),
-        ('4', TuiAction::InspectDiskLayout),
     ] {
         assert_eq!(
             mapper.map(
@@ -484,6 +490,14 @@ fn ch16_inspect_view_shortcuts_are_explicit() {
             Some(expected)
         );
     }
+    assert_eq!(
+        mapper.map(
+            InputMode::Normal,
+            KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE)
+        ),
+        None,
+        "Inspect no longer has a standalone disk-layout page"
+    );
 }
 
 #[test]

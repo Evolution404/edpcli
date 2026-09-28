@@ -41,7 +41,7 @@ pub(super) fn draw_device_list(
             (
                 "未发现可用设备",
                 "当前没有检测到外接存储设备。",
-                "按 r 刷新；插入 U 盘后可再次扫描。",
+                "插入 U 盘后刷新设备列表。",
             )
         };
         frame.render_widget(
@@ -132,7 +132,7 @@ pub(super) fn draw_device_list(
             .collect::<Vec<_>>(),
     );
     let table_title = format!(
-        "{title} · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
+        "{title} · {}",
         table_position_label(&layout, interaction, &viewport)
     );
     let table = crate::tui::ui::data_table(

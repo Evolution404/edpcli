@@ -42,7 +42,7 @@ impl Default for DevicesState {
             table_view: super::super::table_layout::TableViewData::default(),
             scan_pending: false,
             pane_focus: crate::tui::pane::PaneFocus::devices(),
-            info_selected: DeviceInfoNodeKey::Identity,
+            info_selected: DeviceInfoNodeKey::Capacity,
             info_expanded,
         }
     }

@@ -10,7 +10,6 @@ pub enum PaneId {
     BackupsList,
     BackupSummary,
     BackupCoverage,
-    InspectDiskLayout,
     InspectTree,
     InspectOverview,
     InspectDetail,
@@ -26,11 +25,10 @@ impl PaneId {
         [Self::DevicesList, Self::DevicesTree, Self::DevicesDetail];
     pub const BACKUPS_ORDER: [Self; 3] =
         [Self::BackupsList, Self::BackupSummary, Self::BackupCoverage];
-    pub const INSPECT_ORDER: [Self; 4] = [
+    pub const INSPECT_ORDER: [Self; 3] = [
         Self::InspectTree,
         Self::InspectOverview,
         Self::InspectDetail,
-        Self::InspectDiskLayout,
     ];
     pub const PROVISION_FORM_ORDER: [Self; 2] =
         [Self::ProvisionParameters, Self::ProvisionDiskLayout];
@@ -43,10 +41,7 @@ impl PaneId {
     pub const fn is_inspect(self) -> bool {
         matches!(
             self,
-            Self::InspectDiskLayout
-                | Self::InspectTree
-                | Self::InspectOverview
-                | Self::InspectDetail
+            Self::InspectTree | Self::InspectOverview | Self::InspectDetail
         )
     }
 
@@ -218,10 +213,8 @@ impl PaneFocus {
     pub fn spatial_inspect(&mut self, dx: i8, dy: i8) {
         use PaneId::*;
         let next = match (self.focused, dx.signum(), dy.signum()) {
-            (InspectDiskLayout, _, -1) => Some(InspectDetail),
             (InspectTree | InspectOverview, _, 1) => Some(InspectDetail),
             (InspectDetail, _, -1) => Some(InspectOverview),
-            (InspectDetail, _, 1) => Some(InspectDiskLayout),
             (InspectTree, 1, _) => Some(InspectOverview),
             (InspectOverview, -1, _) => Some(InspectTree),
             _ => None,

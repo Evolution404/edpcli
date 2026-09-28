@@ -64,7 +64,7 @@ impl SectorRegion {
                 ..
             } => format!("分区[{index}] type{partition_type} +{relative_lba}"),
             Self::TailMetadataMirror { index } => format!("盘尾历史 9 扇区镜像 +{index}/9"),
-            Self::RestoreNodeEnd4 => "盘尾 end-4 restore-node".into(),
+            Self::RestoreNodeEnd4 => "盘尾恢复节点（末端前第4扇区）".into(),
             Self::Unknown => "未知物理扇区".into(),
         }
     }

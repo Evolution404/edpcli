@@ -223,20 +223,6 @@ impl AppState {
         };
         match state.pane_focus.focused() {
             PaneId::InspectTree => self.advanced_inspect_tree_rows().len(),
-            PaneId::InspectDiskLayout => state
-                .result
-                .as_ref()
-                .map(|workspace| {
-                    workspace.disk_layout.as_ref().map_or(2, |layout| {
-                        crate::tui::disk_layout::DiskLayoutPresentation::new(
-                            layout,
-                            crate::tui::disk_layout::DiskLayoutProfile::DetailedExact,
-                            self.disk_layout_tail_expansion(),
-                        )
-                        .pane_line_count("summary", &[])
-                    })
-                })
-                .unwrap_or(0),
             PaneId::InspectOverview => {
                 let rows = self.advanced_inspect_tree_rows();
                 let Some(row) = rows.get(state.tree_selected) else {
@@ -373,24 +359,6 @@ impl AppState {
                 }
                 return;
             }
-        }
-        if pane == crate::tui::pane::PaneId::InspectDiskLayout {
-            let count = self
-                .advanced_inspect()
-                .and_then(|advanced| advanced.result.as_ref())
-                .and_then(|workspace| workspace.disk_layout.as_ref())
-                .map(|model| {
-                    crate::tui::disk_layout::DiskLayoutPresentation::new(
-                        model,
-                        crate::tui::disk_layout::DiskLayoutProfile::DetailedExact,
-                        self.disk_layout_tail_expansion(),
-                    )
-                    .visible_model()
-                    .segments
-                    .len()
-                })
-                .unwrap_or(0);
-            self.disk_layout_move_selection(delta, count);
         }
         if let Some(state) = self.inspect.advanced.as_mut() {
             state.pane_focus.viewport_mut(pane).scroll_y.move_lines(

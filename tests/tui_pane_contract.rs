@@ -33,6 +33,7 @@ fn device() -> edpcli::disk_scan::Row {
         pid: "5678".into(),
         proto: "USB".into(),
         serial: Some("SERIAL-D0-1234".into()),
+        hardware_model: None,
         device_id: Some("disk&ven_test&prod_test".into()),
         identity_pin: None,
         onlyid: Some("1402259934".into()),
@@ -154,7 +155,7 @@ fn plain_provision_state() -> AppState {
 }
 
 #[test]
-fn inspect_tab_cycle_is_tree_overview_detail_disk_layout() {
+fn inspect_tab_cycle_is_tree_overview_detail_only() {
     let mut state = inspect_state();
     assert_eq!(
         state.advanced_inspect_focused_pane(),
@@ -163,7 +164,6 @@ fn inspect_tab_cycle_is_tree_overview_detail_disk_layout() {
     for expected in [
         PaneId::InspectOverview,
         PaneId::InspectDetail,
-        PaneId::InspectDiskLayout,
         PaneId::InspectTree,
     ] {
         state.advanced_inspect_shift_panel(false);
@@ -172,7 +172,7 @@ fn inspect_tab_cycle_is_tree_overview_detail_disk_layout() {
     state.advanced_inspect_shift_panel(true);
     assert_eq!(
         state.advanced_inspect_focused_pane(),
-        Some(PaneId::InspectDiskLayout)
+        Some(PaneId::InspectDetail)
     );
 }
 
@@ -180,7 +180,9 @@ fn inspect_tab_cycle_is_tree_overview_detail_disk_layout() {
 fn table_footer_advertises_cell_and_row_copy_across_workspaces() {
     let mut devices = AppState::new();
     devices.replace_devices(vec![device()]);
-    assert!(render_text(&devices, 240, 60).contains("y单元格·Y整行"));
+    let device_text = render_text(&devices, 240, 60);
+    assert!(!device_text.contains("y单元格·Y整行"));
+    assert!(device_text.contains("?帮助"));
 
     devices.navigate(NavCommand::WorkspaceBackups, 20);
     assert!(render_text(&devices, 240, 60).contains("y单元格·Y整行"));
@@ -211,11 +213,7 @@ fn inspect_non_tree_jk_never_changes_tree_selection() {
     state.advanced_inspect_move_focused_vertical(1, 8, 100);
     let selected = state.advanced_inspect().unwrap().tree_selected;
 
-    for pane in [
-        PaneId::InspectDiskLayout,
-        PaneId::InspectOverview,
-        PaneId::InspectDetail,
-    ] {
+    for pane in [PaneId::InspectOverview, PaneId::InspectDetail] {
         state.advanced_inspect_focus_pane(pane);
         let before = state.pane_viewport(pane).scroll_y.offset;
         state.advanced_inspect_move_focused_vertical(1, 8, 100);
@@ -380,10 +378,10 @@ fn provision_disk_layout_tail_starts_collapsed_and_expands_without_changing_geom
     );
     let collapsed = render_text(&state, 160, 45);
     assert!(collapsed.contains("尾部区域"));
-    assert!(!collapsed.contains("restore-node"));
+    assert!(!collapsed.contains("盘尾恢复节点"));
     state.toggle_disk_layout_tail();
     let expanded = render_text(&state, 160, 45);
-    assert!(expanded.contains("restore-node"));
+    assert!(expanded.contains("盘尾恢复节点"));
     assert!(state
         .disk_layout_detail(&canonical)
         .unwrap()
@@ -468,6 +466,21 @@ fn render_lines(state: &AppState, width: u16, height: u16) -> Vec<String> {
                 .collect::<String>()
         })
         .collect()
+}
+
+#[test]
+fn plain_device_row_uses_native_hardware_model_when_protocol_device_id_is_absent() {
+    let mut row = device();
+    row.device_id = None;
+    row.hardware_model = Some("HIKSEMI Portable SSD".into());
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+
+    let text = render_text(&state, 200, 40);
+    assert!(
+        text.contains("HIKSEMIPortableSSD"),
+        "plain device model should come from native inquiry: {text}"
+    );
 }
 
 #[test]
@@ -566,19 +579,13 @@ fn d0_device_info_tree_is_semantic_and_capacity_is_expandable_in_place() {
 
     assert_eq!(
         state.device_info_selected_key(),
-        DeviceInfoNodeKey::Identity
+        DeviceInfoNodeKey::Capacity
     );
     assert!(state
         .device_info_tree_rows()
         .iter()
         .find(|row| row.key == DeviceInfoNodeKey::Capacity)
         .is_some_and(|row| row.expanded));
-
-    state.device_info_move_tree(1);
-    assert_eq!(
-        state.device_info_selected_key(),
-        DeviceInfoNodeKey::Capacity
-    );
     state.device_info_toggle_selected();
     assert!(state
         .device_info_tree_rows()
@@ -620,18 +627,15 @@ fn d0_current_device_capacity_uses_thick_full_disk_map() {
     assert!(text.contains("容量布局"), "{text}");
     assert!(text.contains("全盘容量地图"), "{text}");
     assert!(!text.contains("当前设备·disk6"), "{text}");
-    assert!(
-        text.contains('▗') && text.contains('▄') && text.contains('▖'),
-        "{text}"
-    );
-    assert!(
-        text.contains('▝') && text.contains('▀') && text.contains('▘'),
-        "{text}"
-    );
+    assert!(text.contains('▄'), "{text}");
+    assert!(text.contains('▀'), "{text}");
     assert!(text.contains("启动区"), "{text}");
     assert!(text.contains("交换区"), "{text}");
     assert!(text.contains("保密区"), "{text}");
-    assert!(text.contains("极小区域使用最小可视宽度"), "{text}");
+    assert!(!text.contains("极小区域使用最小可视宽度"), "{text}");
+    let presentation = include_str!("../src/tui/devices/presentation.rs");
+    assert!(!presentation.contains("let left = \"LBA 0\""));
+    assert!(!presentation.contains("LBA {last_lba} · {}"));
 }
 
 #[test]
@@ -807,11 +811,6 @@ fn device_tree_selection_is_semantic_and_detail_has_independent_scroll() {
     state.focus_devices_pane(PaneId::DevicesTree);
     assert_eq!(
         state.device_info_selected_key(),
-        edpcli::tui::state::DeviceInfoNodeKey::Identity
-    );
-    state.navigate(NavCommand::Down, 8);
-    assert_eq!(
-        state.device_info_selected_key(),
         edpcli::tui::state::DeviceInfoNodeKey::Capacity
     );
     let selected = state.device_info_selected_key();
@@ -840,7 +839,7 @@ fn device_tree_gg_and_g_jump_to_first_and_last_visible_nodes() {
     state.navigate(NavCommand::Top, 12);
     assert_eq!(
         state.device_info_selected_key(),
-        DeviceInfoNodeKey::Identity
+        DeviceInfoNodeKey::Capacity
     );
 
     let last = state
@@ -850,7 +849,7 @@ fn device_tree_gg_and_g_jump_to_first_and_last_visible_nodes() {
         .key;
     state.navigate(NavCommand::Bottom, 12);
     assert_eq!(state.device_info_selected_key(), last);
-    assert_eq!(last, DeviceInfoNodeKey::Protocol);
+    assert_eq!(last, DeviceInfoNodeKey::Status);
 }
 
 #[test]
@@ -861,7 +860,7 @@ fn device_tree_g_keeps_context_visible_instead_of_scrolling_to_one_line() {
     state.navigate(NavCommand::Bottom, 12);
 
     let text = render_text(&state, 150, 30);
-    for label in ["协议摘要", "备份关系", "状态与诊断"] {
+    for label in ["容量布局", "身份与协议", "状态与备份"] {
         assert!(
             text.contains(label),
             "G must keep surrounding tree rows visible; missing {label}: {text}"
@@ -894,8 +893,12 @@ fn device_capacity_map_stays_visible_and_tracks_selected_region() {
     let capacity_text = capacity.join("\n");
     let compact_capacity = capacity_text.replace(' ', "");
     assert!(compact_capacity.contains("全盘容量地图"), "{capacity_text}");
-    assert!(capacity_text.contains('▗') && capacity_text.contains('▝'));
-    assert!(!include_str!("../src/tui/devices/presentation.rs").contains("尾部区域可直接"));
+    assert!(capacity_text.contains('▄') && capacity_text.contains('▀'));
+    assert!(!capacity_text.contains('▲'));
+    let presentation_source = include_str!("../src/tui/devices/presentation.rs");
+    assert!(!presentation_source.contains("尾部区域可直接"));
+    assert!(!presentation_source.contains("极小区域使用最小可视宽度"));
+    assert!(!presentation_source.contains("let left = \"LBA 0\""));
 
     let boot = state
         .device_info_tree_rows()
@@ -946,12 +949,12 @@ fn device_capacity_map_stays_visible_and_tracks_selected_region() {
         .contains("当前区域：保密区"));
     assert!(
         encrypt_col > boot_col,
-        "selected marker must move right with the later disk region: boot={boot_col}, encrypt={encrypt_col}"
+        "marker must track the selected region: boot={boot_col}, encrypt={encrypt_col}"
     );
 }
 
 #[test]
-fn device_tail_children_keep_the_same_full_disk_map_and_move_marker_inside_tail() {
+fn device_tail_children_keep_the_same_full_disk_map_and_move_marker() {
     use edpcli::application::disk_layout::DiskRegionKind;
     use edpcli::tui::state::DeviceInfoNodeKey;
 
@@ -969,11 +972,8 @@ fn device_tail_children_keep_the_same_full_disk_map_and_move_marker_inside_tail(
     state.device_info_toggle_selected();
 
     let tail_lines = render_lines(&state, 180, 46);
-    let tail_border = tail_lines
-        .iter()
-        .find(|line| line.contains('▗') && line.contains('▄') && line.contains('▖'))
-        .expect("tail map border")
-        .clone();
+    assert!(tail_lines.iter().any(|line| line.contains('▄')));
+    assert!(tail_lines.iter().any(|line| line.contains('▀')));
     let tail_marker = tail_lines
         .iter()
         .find(|line| line.contains('▲'))
@@ -999,32 +999,25 @@ fn device_tail_children_keep_the_same_full_disk_map_and_move_marker_inside_tail(
     state.device_info_move_tree(lce_index as isize);
 
     let lce_lines = render_lines(&state, 180, 46);
-    let lce_border = lce_lines
-        .iter()
-        .find(|line| line.contains('▗') && line.contains('▄') && line.contains('▖'))
-        .expect("LCE map border");
+    assert!(lce_lines.iter().any(|line| line.contains('▄')));
+    assert!(lce_lines.iter().any(|line| line.contains('▀')));
     let lce_marker = lce_lines
         .iter()
         .find(|line| line.contains('▲'))
         .and_then(|line| line.find('▲'))
         .expect("LCE marker");
-
-    assert_eq!(
-        &tail_border, lce_border,
-        "tail drill-down must keep one map"
-    );
     assert!(lce_lines
         .join("\n")
         .replace(' ', "")
         .contains("当前区域：LCE"));
     assert!(
         lce_marker <= tail_marker,
-        "LCE starts near the beginning of the aggregate tail: lce={lce_marker}, tail={tail_marker}"
+        "LCE child marker should resolve within the aggregate tail: lce={lce_marker}, tail={tail_marker}"
     );
 }
 
 #[test]
-fn device_capacity_map_uses_axis_thick_band_and_selection_card() {
+fn device_capacity_map_uses_axis_three_visual_rows_and_selection_card() {
     let mut state = AppState::new();
     state.replace_devices(vec![edp_device_with_layout()]);
     state.focus_devices_pane(PaneId::DevicesTree);
@@ -1038,22 +1031,12 @@ fn device_capacity_map_uses_axis_thick_band_and_selection_card() {
 
     let top = lines
         .iter()
-        .position(|line| line.contains('▗') && line.contains('▄') && line.contains('▖'))
-        .expect("disk map quadrant-inside top border");
-    assert!(
-        lines[top + 1].contains('▐') && lines[top + 1].contains('▌'),
-        "map label row half-cell boundaries missing"
-    );
-    assert!(
-        lines[top + 2].contains('▐') && lines[top + 2].contains('▌'),
-        "map value row half-cell boundaries missing"
-    );
-    assert!(
-        lines[top + 3].contains('▝')
-            && lines[top + 3].contains('▀')
-            && lines[top + 3].contains('▘'),
-        "map quadrant-inside bottom border missing"
-    );
+        .position(|line| line.contains('▄'))
+        .expect("disk map upper half-band");
+    assert!(lines[top].chars().filter(|&ch| ch == '▄').count() > 20);
+    assert!(!lines[top + 1].contains(['▐', '▌']));
+    assert!(!lines[top + 2].contains(['▐', '▌']));
+    assert!(lines[top + 3].chars().filter(|&ch| ch == '▀').count() > 20);
     assert!(
         joined.contains("当前选中") || joined.contains("全盘布局"),
         "selection card missing"
@@ -1061,33 +1044,24 @@ fn device_capacity_map_uses_axis_thick_band_and_selection_card() {
 }
 
 #[test]
-fn device_capacity_map_uses_semantic_fill_and_keeps_selection_out_of_the_map() {
-    let source = include_str!("../src/tui/devices/presentation.rs");
+fn device_capacity_map_uses_shared_semantic_component_without_partition_borders() {
+    let devices = include_str!("../src/tui/devices/presentation.rs");
+    let layout = include_str!("../src/tui/disk_layout.rs");
     let theme = include_str!("../src/tui/theme.rs");
+    assert!(devices.contains("DiskCapacityMapProfile::Full"));
+    assert!(layout.contains("pub struct DiskCapacityMap"));
+    assert!(layout.contains("capacity_map_half_band_line"));
+    assert!(layout.contains("disk_region_fill("));
     assert!(
-        !source.contains("palette().selection"),
-        "disk map must not reuse the generic selection background"
+        layout.contains("'┈'"),
+        "full map axis should stay lightweight"
     );
-    assert!(
-        source.contains("disk_region_fill(segment.kind, is_active)"),
-        "disk map content cells must use the centralized semantic fill"
-    );
-    assert!(
-        theme.contains("pub fn disk_region_fill"),
-        "semantic disk backgrounds must live in the centralized theme"
-    );
-    assert!(
-        source.contains("ratatui::symbols::border::QUADRANT_INSIDE"),
-        "disk map must use Ratatui's quadrant-inside border set"
-    );
-    assert!(
-        source.contains("disk_region_outline"),
-        "active disk-map outline must keep semantic region styling"
-    );
-    assert!(
-        source.contains("'┈'"),
-        "axis should use a lightweight dashed line"
-    );
+    assert!(theme.contains("pub fn disk_region_fill"));
+    for source in [devices, layout] {
+        assert!(!source.contains("QUADRANT_INSIDE"));
+        assert!(!source.contains("disk_map_internal_boundary_span"));
+        assert!(!source.contains("disk_map_outer_vertical_span"));
+    }
 }
 
 #[test]
@@ -1095,7 +1069,6 @@ fn device_capacity_root_has_no_false_active_glyphs_or_tiny_placeholders() {
     let mut state = AppState::new();
     state.replace_devices(vec![edp_device_with_layout()]);
     state.focus_devices_pane(PaneId::DevicesTree);
-    state.device_info_move_tree(1);
     assert_eq!(
         state.device_info_selected_key(),
         edpcli::tui::state::DeviceInfoNodeKey::Capacity
@@ -1104,18 +1077,14 @@ fn device_capacity_root_has_no_false_active_glyphs_or_tiny_placeholders() {
     let lines = render_lines(&state, 180, 46);
     let top = lines
         .iter()
-        .position(|line| line.contains('▗') && line.contains('▄') && line.contains('▖'))
-        .expect("disk map top border");
+        .position(|line| line.contains('▄'))
+        .expect("disk map upper half-band");
     let map = lines[top..=top + 3].join("\n");
     assert!(
-        !map.contains('●'),
+        !map.contains('●') && !map.contains('▲'),
         "capacity root must not look partially active: {map}"
     );
-    let presentation = include_str!("../src/tui/devices/presentation.rs");
-    assert!(
-        !presentation.contains("\"▌\".into()"),
-        "tiny disk-map regions must not use the single-bar placeholder"
-    );
+    assert!(!map.contains('▐') && !map.contains('▌'));
     assert!(
         !lines[top + 2].contains("6.6") && !lines[top + 2].contains("25."),
         "tiny regions must not show clipped numeric fragments: {}",
@@ -1124,7 +1093,8 @@ fn device_capacity_root_has_no_false_active_glyphs_or_tiny_placeholders() {
 }
 
 #[test]
-fn device_capacity_active_region_uses_quadrant_inside_outline() {
+fn device_capacity_active_region_uses_fill_and_semantic_marker_without_borders() {
+    use edpcli::application::disk_layout::DiskRegionKind;
     use edpcli::tui::state::DeviceInfoNodeKey;
 
     let mut state = AppState::new();
@@ -1135,20 +1105,29 @@ fn device_capacity_active_region_uses_quadrant_inside_outline() {
         .device_info_tree_rows()
         .iter()
         .position(|row| {
-            matches!(row.key, DeviceInfoNodeKey::LayoutSegment { .. }) && row.depth == 1
+            matches!(
+                row.key,
+                DeviceInfoNodeKey::LayoutSegment {
+                    kind: DiskRegionKind::Encrypt,
+                    ..
+                }
+            )
         })
-        .expect("top-level layout segment");
+        .expect("encrypt layout segment");
     state.navigate(NavCommand::Top, 20);
     state.device_info_move_tree(target_index as isize);
 
     let lines = render_lines(&state, 180, 46);
     let joined = lines.join("\n");
-    for glyph in ['▗', '▄', '▖', '▐', '▌', '▝', '▀', '▘'] {
-        assert!(
-            joined.contains(glyph),
-            "active region must render the quadrant-inside outline; missing {glyph}: {joined}"
-        );
-    }
+    assert!(joined.contains('▄') && joined.contains('▀'));
+    assert!(
+        joined.contains('▲'),
+        "active region must expose its marker: {joined}"
+    );
+    let source = include_str!("../src/tui/devices/presentation.rs");
+    assert!(!source.contains("QUADRANT_INSIDE"));
+    assert!(!source.contains("disk_map_internal_boundary_span"));
+    assert!(!source.contains("disk_map_outer_vertical_span"));
 }
 
 #[test]
@@ -1177,8 +1156,8 @@ fn device_capacity_active_region_keeps_original_label_without_dot_prefix() {
     let lines = render_lines(&state, 180, 46);
     let top = lines
         .iter()
-        .position(|line| line.contains('▗') && line.contains('▄') && line.contains('▖'))
-        .expect("disk map top border");
+        .position(|line| line.contains('▄'))
+        .expect("disk map upper half-band");
     assert!(
         !lines[top + 1].contains('●'),
         "active map label must not be rewritten with a dot prefix: {}",
@@ -1219,8 +1198,8 @@ fn device_capacity_tree_and_region_list_use_partition_semantic_colors() {
     let tree_source = include_str!("../src/tui/devices/tree_render.rs");
     assert!(
         tree_source.contains("DeviceInfoNodeKey::LayoutSegment { kind, .. }")
-            && tree_source.contains("disk_region(kind)"),
-        "device capacity tree children must derive their text color from DiskRegionKind"
+            && tree_source.contains("disk_region_tree(kind, active)"),
+        "device capacity tree children must derive normal/active styling from DiskRegionKind"
     );
     let presentation_source = include_str!("../src/tui/devices/presentation.rs");
     assert!(
@@ -1242,7 +1221,54 @@ fn device_capacity_tree_and_region_list_use_partition_semantic_colors() {
 }
 
 #[test]
-fn device_capacity_map_uses_quadrant_inside_half_cells_without_gap_or_spill() {
+fn device_capacity_tree_selected_partition_uses_brighter_text_without_fill() {
+    use ratatui::style::Modifier;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+
+    let target_index = state
+        .device_info_tree_rows()
+        .iter()
+        .position(|row| {
+            matches!(
+                row.key,
+                edpcli::tui::state::DeviceInfoNodeKey::LayoutSegment {
+                    kind: DiskRegionKind::Encrypt,
+                    ..
+                }
+            )
+        })
+        .expect("encrypt layout segment");
+    state.navigate(NavCommand::Top, 20);
+    state.device_info_move_tree(target_index as isize);
+
+    let mut terminal = Terminal::new(TestBackend::new(200, 60)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let expected = edpcli::tui::theme::current().disk_region_tree(DiskRegionKind::Encrypt, true);
+    assert_eq!(
+        expected.bg, None,
+        "selected capacity-tree child must not add a semantic background"
+    );
+    let selected_encrypt_cells = buffer
+        .content()
+        .iter()
+        .filter(|cell| {
+            cell.symbol() == "保"
+                && cell.style().fg == expected.fg
+                && cell.style().add_modifier.contains(Modifier::BOLD)
+        })
+        .count();
+    assert!(
+        selected_encrypt_cells >= 1,
+        "selected capacity-tree child must brighten its semantic text without painting the row"
+    );
+}
+
+#[test]
+fn device_capacity_map_half_bands_align_exactly_with_content_fills() {
     let mut state = AppState::new();
     state.replace_devices(vec![edp_device_with_layout()]);
     state.focus_devices_pane(PaneId::DevicesTree);
@@ -1255,60 +1281,60 @@ fn device_capacity_map_uses_quadrant_inside_half_cells_without_gap_or_spill() {
     let background = edpcli::tui::theme::current().palette().background;
 
     let top_y = (0..60)
-        .find(|&y| {
-            let symbols = (0..200)
-                .map(|x| buffer[(x, y)].symbol())
-                .collect::<String>();
-            symbols.contains('▗') && symbols.contains('▄') && symbols.contains('▖')
-        })
-        .expect("quadrant-inside disk-map top border");
-
-    let top_cells = (0..200)
-        .filter(|&x| matches!(buffer[(x, top_y)].symbol(), "▗" | "▄" | "▖"))
+        .find(|&y| (0..200).filter(|&x| buffer[(x, y)].symbol() == "▄").count() > 20)
+        .expect("disk-map upper half-band");
+    let band_cells = (0..200)
+        .filter(|&x| buffer[(x, top_y)].symbol() == "▄")
         .collect::<Vec<_>>();
-    assert!(!top_cells.is_empty());
-    for x in top_cells {
+    let left = *band_cells.first().expect("half-band start");
+    let right = *band_cells.last().expect("half-band end");
+    let label_y = top_y + 1;
+    let value_y = top_y + 2;
+    let bottom_y = top_y + 3;
+
+    for x in left..=right {
         assert_eq!(
-            buffer[(x, top_y)].style().bg,
-            Some(background),
-            "top border half-cell must keep the outer half on the page background at x={x}"
+            buffer[(x, top_y)].symbol(),
+            "▄",
+            "upper half-band gap at x={x}"
         );
+        assert_eq!(
+            buffer[(x, bottom_y)].symbol(),
+            "▀",
+            "lower half-band gap at x={x}"
+        );
+        let top_style = buffer[(x, top_y)].style();
+        let label_style = buffer[(x, label_y)].style();
+        let value_style = buffer[(x, value_y)].style();
+        let bottom_style = buffer[(x, bottom_y)].style();
+        assert_eq!(
+            top_style.bg,
+            Some(background),
+            "upper outer half must be page background at x={x}"
+        );
+        assert_eq!(
+            bottom_style.bg,
+            Some(background),
+            "lower outer half must be page background at x={x}"
+        );
+        assert_eq!(
+            top_style.fg, value_style.bg,
+            "upper half-band must use the same fill as the stable value row at x={x}"
+        );
+        assert_eq!(
+            value_style.bg, bottom_style.fg,
+            "lower half-band must use the same fill as the stable value row at x={x}"
+        );
+        if label_style.bg != Some(ratatui::style::Color::Reset) {
+            assert_eq!(
+                label_style.bg, value_style.bg,
+                "label row must share the fill except on wide-glyph continuation cells at x={x}"
+            );
+        }
     }
 
-    let content_y = top_y + 1;
-    let left = (0..200)
-        .find(|&x| buffer[(x, content_y)].symbol() == "▐")
-        .expect("left quadrant-inside outer edge");
-    let right = (left + 1..200)
-        .rev()
-        .find(|&x| buffer[(x, content_y)].symbol() == "▌")
-        .expect("right quadrant-inside outer edge");
-    assert_eq!(buffer[(left, content_y)].style().bg, Some(background));
-    assert_eq!(buffer[(right, content_y)].style().bg, Some(background));
-
-    let internal_half_cells = (left + 1..right)
-        .filter(|&x| matches!(buffer[(x, content_y)].symbol(), "▐" | "▌"))
-        .collect::<Vec<_>>();
-    assert!(
-        internal_half_cells.iter().any(|&x| {
-            let style = buffer[(x, content_y)].style();
-            style.fg.is_some() && style.bg.is_some() && style.fg != style.bg
-        }),
-        "shared partition boundaries must encode two half-cell colors"
-    );
-
     let presentation = include_str!("../src/tui/devices/presentation.rs");
-    assert!(
-        presentation.contains("ratatui::symbols::border::QUADRANT_INSIDE"),
-        "capacity map must use Ratatui quadrant-inside border symbols"
-    );
-    assert!(
-        presentation.contains("disk_map_internal_boundary_span"),
-        "shared boundaries must use explicit half-cell foreground/background composition"
-    );
-    assert!(
-        presentation.contains("disk_region_outline(right.kind, right_active)")
-            && presentation.contains("disk_region_outline(left.kind, left_active)"),
-        "shared half-cell foreground/background must come from the adjacent partition semantic border colors"
-    );
+    assert!(!presentation.contains("QUADRANT_INSIDE"));
+    assert!(!presentation.contains("disk_map_internal_boundary_span"));
+    assert!(!presentation.contains("disk_map_outer_vertical_span"));
 }
