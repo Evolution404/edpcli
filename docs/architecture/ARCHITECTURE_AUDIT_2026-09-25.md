@@ -1389,6 +1389,14 @@ application 返回结构化 `ProvisionReport/BackupReport/InspectReport`，CLI/T
 
 `cargo check --all-targets --locked`、全目标 Clippy、fast **4 suites / 6 artifacts / 0 failures**、full **8 suites / 10 artifacts + doctest / 0 failures** 与 diff 检查通过。
 
+#### D8-D3.2：工作区按键处理移出终端事件循环
+
+**COMPLETE；待提交后复审 D8-D3。** `runtime_input.rs` 只按既有优先级分派按键；检查浏览器、制盘阶段、备份创建选择、批删、清理、确认向导及搜索/命令输入分别由独立子模块处理。终端事件循环仍负责可操作按键过滤、终端尺寸、绘制节流、退出与提权交接，不再匹配工作区业务阶段。
+
+- `tui/mod.rs` 降至 **421 行**，`runtime_input.rs` 为 **72 行**；七个按键子模块均低于 **300 行**。架构门禁锁定事件循环不得解释 `Inspect`、`Provision` 和备份向导阶段。
+- 迁移保留原按键分支顺序、输入模式、确认提示、任务请求与退出返回；扇区检查器键位的源码契约随入口迁移。测试先行门禁先因模块缺失与阶段匹配失败，拆分后架构 **31/31**、TUI **266/266** 通过。
+- `cargo check --all-targets --locked`、全目标 Clippy、fast **4 suites / 6 artifacts / 0 failures**、full **8 suites / 10 artifacts + doctest / 0 failures** 与 diff 检查通过。
+
 ### D8-E：第二批领域/入口模块化
 
 - D8-E1：`CLI` 参数解析与命令处理按领域拆分；

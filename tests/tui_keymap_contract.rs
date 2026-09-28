@@ -297,7 +297,10 @@ fn tab_switches_top_level_tabs_and_ctrl_w_owns_panel_navigation() {
 
 #[test]
 fn top_level_workspace_actions_are_never_reused_for_local_pane_switching() {
-    let source = include_str!("../src/tui/mod.rs");
+    let source = concat!(
+        include_str!("../src/tui/runtime_input/inspect.rs"),
+        include_str!("../src/tui/runtime_input/provision.rs"),
+    );
     assert!(
         !source.contains("TuiAction::WorkspaceNext => state.provision_shift_pane(false)"),
         "Tab must not be captured by Provision pane navigation"
@@ -575,7 +578,15 @@ fn legacy_flat_inspect_state_worker_and_renderer_are_removed() {
 
 #[test]
 fn event_loop_does_not_parse_text_or_confirmation_chars_outside_keymap() {
-    let source = include_str!("../src/tui/mod.rs");
+    let source = concat!(
+        include_str!("../src/tui/mod.rs"),
+        include_str!("../src/tui/runtime_input/inspect.rs"),
+        include_str!("../src/tui/runtime_input/provision.rs"),
+        include_str!("../src/tui/runtime_input/backup_batch.rs"),
+        include_str!("../src/tui/runtime_input/backup_prune.rs"),
+        include_str!("../src/tui/runtime_input/backup_wizard.rs"),
+        include_str!("../src/tui/runtime_input/shell.rs"),
+    );
     assert!(
         !source.contains("ct_event::KeyCode::Char(ch)"),
         "text/confirmation character handling must go through KeyMapper"
@@ -615,7 +626,7 @@ fn sector_inspector_sector_navigation_is_separate_from_page_scroll() {
 
 #[test]
 fn sector_inspector_dispatches_the_documented_vim_actions() {
-    let source = include_str!("../src/tui/mod.rs");
+    let source = include_str!("../src/tui/runtime_input/inspect.rs");
     let page_section = source_section(
         source,
         "TuiAction::PageUp => {",

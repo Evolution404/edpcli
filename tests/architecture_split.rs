@@ -84,6 +84,14 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/review_render.rs",
         "src/tui/provision/running_render.rs",
         "src/tui/runtime_updates.rs",
+        "src/tui/runtime_input.rs",
+        "src/tui/runtime_input/inspect.rs",
+        "src/tui/runtime_input/provision.rs",
+        "src/tui/runtime_input/backup_choice.rs",
+        "src/tui/runtime_input/backup_batch.rs",
+        "src/tui/runtime_input/backup_prune.rs",
+        "src/tui/runtime_input/backup_wizard.rs",
+        "src/tui/runtime_input/shell.rs",
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
         "src/tui/inspect/search_state.rs",
@@ -120,10 +128,25 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
     assert!(
-        lines("src/tui/mod.rs") < 1_260,
+        lines("src/tui/mod.rs") < 500,
         "TUI module root must remain lifecycle-oriented; action dispatch belongs in dispatch.rs"
     );
     assert!(lines("src/tui/runtime_updates.rs") < 160);
+    assert!(lines("src/tui/runtime_input.rs") < 180);
+    for path in [
+        "src/tui/runtime_input/inspect.rs",
+        "src/tui/runtime_input/provision.rs",
+        "src/tui/runtime_input/backup_choice.rs",
+        "src/tui/runtime_input/backup_batch.rs",
+        "src/tui/runtime_input/backup_prune.rs",
+        "src/tui/runtime_input/backup_wizard.rs",
+        "src/tui/runtime_input/shell.rs",
+    ] {
+        assert!(
+            lines(path) < 300,
+            "runtime input handler is oversized: {path}"
+        );
+    }
     assert!(
         lines("src/tui/dispatch.rs") < 600,
         "TUI dispatch module must stay responsibility-bounded"
@@ -1003,6 +1026,26 @@ fn app_state_is_only_shell_plus_four_workspace_states() {
             "provision: ProvisionState,",
         ]
     );
+}
+
+#[test]
+fn tui_event_loop_does_not_interpret_workspace_stages() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = fs::read_to_string(root.join("src/tui/mod.rs")).expect("read TUI module root");
+    let production = source.split("#[cfg(test)]").next().unwrap_or(&source);
+    assert!(production.contains("runtime_input::handle_key"));
+    for stage in [
+        "AdvancedInspectStage",
+        "ProvisionStage",
+        "BackupBatchDeleteStage",
+        "BackupPruneStage",
+        "WizardStage",
+    ] {
+        assert!(
+            !production.contains(stage),
+            "event loop still interprets {stage}"
+        );
+    }
 }
 
 #[test]
