@@ -456,23 +456,18 @@ fn disk_map_border_line(
     active: Option<&ActiveCapacityExtent>,
     top: bool,
 ) -> Line<'static> {
+    let border = ratatui::symbols::border::QUADRANT_INSIDE;
     let first_active = model
         .segments
         .first()
         .is_some_and(|segment| capacity_segment_active(segment, active));
     let mut spans = vec![Span::styled(
-        if first_active {
-            if top {
-                "┏"
-            } else {
-                "┗"
-            }
-        } else if top {
-            "╭"
+        if top {
+            border.top_left
         } else {
-            "╰"
+            border.bottom_left
         },
-        disk_map_border_boundary_style(None, model.segments.first(), active),
+        disk_map_outer_border_style(model.segments.first(), first_active),
     )];
 
     for (index, (segment, width)) in model
@@ -482,50 +477,112 @@ fn disk_map_border_line(
         .enumerate()
     {
         let is_active = capacity_segment_active(segment, active);
-        let horizontal = if is_active {
-            "━".repeat(width)
+        let horizontal_symbol = if top {
+            border.horizontal_top
         } else {
-            "─".repeat(width)
+            border.horizontal_bottom
         };
         spans.push(Span::styled(
-            horizontal,
-            disk_map_border_style(segment, is_active),
+            horizontal_symbol.repeat(width),
+            disk_map_outer_border_style(Some(segment), is_active),
         ));
 
-        let next_active = model
-            .segments
-            .get(index + 1)
-            .is_some_and(|next| capacity_segment_active(next, active));
-        let edge = if index + 1 == model.segments.len() {
-            if is_active {
+        if index + 1 == model.segments.len() {
+            spans.push(Span::styled(
                 if top {
-                    "┓"
+                    border.top_right
                 } else {
-                    "┛"
-                }
-            } else if top {
-                "╮"
-            } else {
-                "╯"
-            }
+                    border.bottom_right
+                },
+                disk_map_outer_border_style(Some(segment), is_active),
+            ));
         } else {
-            match (is_active, next_active, top) {
-                (true, false, true) => "┓",
-                (true, false, false) => "┛",
-                (false, true, true) => "┏",
-                (false, true, false) => "┗",
-                (true, true, true) => "┳",
-                (true, true, false) => "┻",
-                (false, false, true) => "┬",
-                (false, false, false) => "┴",
-            }
-        };
-        spans.push(Span::styled(
-            edge,
-            disk_map_border_boundary_style(Some(segment), model.segments.get(index + 1), active),
-        ));
+            let next = &model.segments[index + 1];
+            spans.push(Span::styled(
+                horizontal_symbol,
+                disk_map_outer_boundary_style(segment, next, active),
+            ));
+        }
     }
     Line::from(spans)
+}
+
+fn disk_map_outer_border_style(
+    segment: Option<&crate::tui::disk_layout::DiskLayoutSegment>,
+    active: bool,
+) -> ratatui::style::Style {
+    let theme = crate::tui::theme::current();
+    let Some(segment) = segment else {
+        return muted().bg(theme.palette().background);
+    };
+    theme
+        .disk_region_outline(segment.kind, active)
+        .bg(theme.palette().background)
+}
+
+fn disk_map_outer_boundary_style(
+    left: &crate::tui::disk_layout::DiskLayoutSegment,
+    right: &crate::tui::disk_layout::DiskLayoutSegment,
+    active: Option<&ActiveCapacityExtent>,
+) -> ratatui::style::Style {
+    let left_active = capacity_segment_active(left, active);
+    let right_active = capacity_segment_active(right, active);
+    let owner = if right_active && !left_active {
+        right
+    } else {
+        left
+    };
+    let owner_active = capacity_segment_active(owner, active);
+    disk_map_outer_border_style(Some(owner), owner_active)
+}
+
+fn disk_map_internal_boundary_span(
+    left: &crate::tui::disk_layout::DiskLayoutSegment,
+    right: &crate::tui::disk_layout::DiskLayoutSegment,
+    active: Option<&ActiveCapacityExtent>,
+) -> Span<'static> {
+    let border = ratatui::symbols::border::QUADRANT_INSIDE;
+    let theme = crate::tui::theme::current();
+    let left_active = capacity_segment_active(left, active);
+    let right_active = capacity_segment_active(right, active);
+
+    if right_active && !left_active {
+        let background = theme
+            .disk_region_fill(left.kind, left_active)
+            .bg
+            .unwrap_or(theme.palette().background);
+        Span::styled(
+            border.vertical_left,
+            theme.disk_region_outline(right.kind, true).bg(background),
+        )
+    } else {
+        let background = theme
+            .disk_region_fill(right.kind, right_active)
+            .bg
+            .unwrap_or(theme.palette().background);
+        Span::styled(
+            border.vertical_right,
+            theme
+                .disk_region_outline(left.kind, left_active)
+                .bg(background),
+        )
+    }
+}
+
+fn disk_map_outer_vertical_span(
+    segment: &crate::tui::disk_layout::DiskLayoutSegment,
+    active: bool,
+    left: bool,
+) -> Span<'static> {
+    let border = ratatui::symbols::border::QUADRANT_INSIDE;
+    Span::styled(
+        if left {
+            border.vertical_left
+        } else {
+            border.vertical_right
+        },
+        disk_map_outer_border_style(Some(segment), active),
+    )
 }
 
 fn disk_map_label_line(
@@ -550,14 +607,11 @@ fn disk_map_content_line(
     active: Option<&ActiveCapacityExtent>,
     label_row: bool,
 ) -> Line<'static> {
-    let first_active = model
-        .segments
-        .first()
-        .is_some_and(|segment| capacity_segment_active(segment, active));
-    let mut spans = vec![Span::styled(
-        if first_active { "┃" } else { "│" },
-        disk_map_boundary_style(None, model.segments.first(), active),
-    )];
+    let Some(first) = model.segments.first() else {
+        return Line::default();
+    };
+    let first_active = capacity_segment_active(first, active);
+    let mut spans = vec![disk_map_outer_vertical_span(first, first_active, true)];
 
     for (index, (segment, width)) in model
         .segments
@@ -576,15 +630,11 @@ fn disk_map_content_line(
             disk_map_segment_style(segment, active),
         ));
 
-        let next_active = model
-            .segments
-            .get(index + 1)
-            .is_some_and(|next| capacity_segment_active(next, active));
-        let edge_active = is_active || next_active;
-        spans.push(Span::styled(
-            if edge_active { "┃" } else { "│" },
-            disk_map_boundary_style(Some(segment), model.segments.get(index + 1), active),
-        ));
+        if let Some(next) = model.segments.get(index + 1) {
+            spans.push(disk_map_internal_boundary_span(segment, next, active));
+        } else {
+            spans.push(disk_map_outer_vertical_span(segment, is_active, false));
+        }
     }
     Line::from(spans)
 }
@@ -632,54 +682,6 @@ fn disk_map_segment_style(
 ) -> ratatui::style::Style {
     let is_active = capacity_segment_active(segment, active);
     crate::tui::theme::current().disk_region_fill(segment.kind, is_active)
-}
-
-fn disk_map_border_style(
-    segment: &crate::tui::disk_layout::DiskLayoutSegment,
-    is_active: bool,
-) -> ratatui::style::Style {
-    crate::tui::theme::current().disk_region_outline(segment.kind, is_active)
-}
-
-fn disk_map_boundary_style(
-    left: Option<&crate::tui::disk_layout::DiskLayoutSegment>,
-    right: Option<&crate::tui::disk_layout::DiskLayoutSegment>,
-    active: Option<&ActiveCapacityExtent>,
-) -> ratatui::style::Style {
-    let Some((owner, owner_active)) = disk_map_boundary_owner(left, right, active) else {
-        return muted();
-    };
-    crate::tui::theme::current().disk_region_boundary(owner.kind, owner_active)
-}
-
-fn disk_map_border_boundary_style(
-    left: Option<&crate::tui::disk_layout::DiskLayoutSegment>,
-    right: Option<&crate::tui::disk_layout::DiskLayoutSegment>,
-    active: Option<&ActiveCapacityExtent>,
-) -> ratatui::style::Style {
-    let Some((owner, owner_active)) = disk_map_boundary_owner(left, right, active) else {
-        return muted();
-    };
-    crate::tui::theme::current().disk_region_outline(owner.kind, owner_active)
-}
-
-fn disk_map_boundary_owner<'a>(
-    left: Option<&'a crate::tui::disk_layout::DiskLayoutSegment>,
-    right: Option<&'a crate::tui::disk_layout::DiskLayoutSegment>,
-    active: Option<&ActiveCapacityExtent>,
-) -> Option<(&'a crate::tui::disk_layout::DiskLayoutSegment, bool)> {
-    let left_active = left.is_some_and(|segment| capacity_segment_active(segment, active));
-    let right_active = right.is_some_and(|segment| capacity_segment_active(segment, active));
-    let (owner, owner_active) = if left_active {
-        (left, true)
-    } else if right_active {
-        (right, true)
-    } else if left.is_some() {
-        (left, false)
-    } else {
-        (right, false)
-    };
-    owner.map(|owner| (owner, owner_active))
 }
 
 fn capacity_segment_active(

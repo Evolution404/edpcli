@@ -620,8 +620,14 @@ fn d0_current_device_capacity_uses_thick_full_disk_map() {
     assert!(text.contains("容量布局"), "{text}");
     assert!(text.contains("全盘容量地图"), "{text}");
     assert!(!text.contains("当前设备·disk6"), "{text}");
-    assert!(text.contains('╭') && text.contains('┬'), "{text}");
-    assert!(text.contains('╰') && text.contains('┴'), "{text}");
+    assert!(
+        text.contains('▗') && text.contains('▄') && text.contains('▖'),
+        "{text}"
+    );
+    assert!(
+        text.contains('▝') && text.contains('▀') && text.contains('▘'),
+        "{text}"
+    );
     assert!(text.contains("启动区"), "{text}");
     assert!(text.contains("交换区"), "{text}");
     assert!(text.contains("保密区"), "{text}");
@@ -888,7 +894,7 @@ fn device_capacity_map_stays_visible_and_tracks_selected_region() {
     let capacity_text = capacity.join("\n");
     let compact_capacity = capacity_text.replace(' ', "");
     assert!(compact_capacity.contains("全盘容量地图"), "{capacity_text}");
-    assert!(capacity_text.contains('╭') && capacity_text.contains('╰'));
+    assert!(capacity_text.contains('▗') && capacity_text.contains('▝'));
     assert!(!include_str!("../src/tui/devices/presentation.rs").contains("尾部区域可直接"));
 
     let boot = state
@@ -965,7 +971,7 @@ fn device_tail_children_keep_the_same_full_disk_map_and_move_marker_inside_tail(
     let tail_lines = render_lines(&state, 180, 46);
     let tail_border = tail_lines
         .iter()
-        .find(|line| line.contains('╭') && line.contains('┬'))
+        .find(|line| line.contains('▗') && line.contains('▄') && line.contains('▖'))
         .expect("tail map border")
         .clone();
     let tail_marker = tail_lines
@@ -995,7 +1001,7 @@ fn device_tail_children_keep_the_same_full_disk_map_and_move_marker_inside_tail(
     let lce_lines = render_lines(&state, 180, 46);
     let lce_border = lce_lines
         .iter()
-        .find(|line| line.contains('╭') && line.contains('┬'))
+        .find(|line| line.contains('▗') && line.contains('▄') && line.contains('▖'))
         .expect("LCE map border");
     let lce_marker = lce_lines
         .iter()
@@ -1032,13 +1038,21 @@ fn device_capacity_map_uses_axis_thick_band_and_selection_card() {
 
     let top = lines
         .iter()
-        .position(|line| line.contains('╭') && line.contains('┬'))
-        .expect("disk map rounded top border");
-    assert!(lines[top + 1].contains('│'), "map label row missing");
-    assert!(lines[top + 2].contains('│'), "map value row missing");
+        .position(|line| line.contains('▗') && line.contains('▄') && line.contains('▖'))
+        .expect("disk map quadrant-inside top border");
     assert!(
-        lines[top + 3].contains('╰') && lines[top + 3].contains('┴'),
-        "map rounded bottom border missing"
+        lines[top + 1].contains('▐') && lines[top + 1].contains('▌'),
+        "map label row half-cell boundaries missing"
+    );
+    assert!(
+        lines[top + 2].contains('▐') && lines[top + 2].contains('▌'),
+        "map value row half-cell boundaries missing"
+    );
+    assert!(
+        lines[top + 3].contains('▝')
+            && lines[top + 3].contains('▀')
+            && lines[top + 3].contains('▘'),
+        "map quadrant-inside bottom border missing"
     );
     assert!(
         joined.contains("当前选中") || joined.contains("全盘布局"),
@@ -1062,12 +1076,14 @@ fn device_capacity_map_uses_semantic_fill_and_keeps_selection_out_of_the_map() {
         theme.contains("pub fn disk_region_fill"),
         "semantic disk backgrounds must live in the centralized theme"
     );
-    for glyph in ["━", "┃"] {
-        assert!(
-            source.contains(glyph),
-            "active disk-map outline must use {glyph}"
-        );
-    }
+    assert!(
+        source.contains("ratatui::symbols::border::QUADRANT_INSIDE"),
+        "disk map must use Ratatui's quadrant-inside border set"
+    );
+    assert!(
+        source.contains("disk_region_outline"),
+        "active disk-map outline must keep semantic region styling"
+    );
     assert!(
         source.contains("'┈'"),
         "axis should use a lightweight dashed line"
@@ -1088,15 +1104,13 @@ fn device_capacity_root_has_no_false_active_glyphs_or_tiny_placeholders() {
     let lines = render_lines(&state, 180, 46);
     let top = lines
         .iter()
-        .position(|line| line.contains('╭') && line.contains('┬'))
+        .position(|line| line.contains('▗') && line.contains('▄') && line.contains('▖'))
         .expect("disk map top border");
     let map = lines[top..=top + 3].join("\n");
-    for glyph in ['━', '┃', '┏', '┓', '┗', '┛'] {
-        assert!(
-            !map.contains(glyph),
-            "capacity root must not look partially active; found {glyph}: {map}"
-        );
-    }
+    assert!(
+        !map.contains('●'),
+        "capacity root must not look partially active: {map}"
+    );
     let presentation = include_str!("../src/tui/devices/presentation.rs");
     assert!(
         !presentation.contains("\"▌\".into()"),
@@ -1110,7 +1124,7 @@ fn device_capacity_root_has_no_false_active_glyphs_or_tiny_placeholders() {
 }
 
 #[test]
-fn device_capacity_active_region_has_complete_heavy_outline() {
+fn device_capacity_active_region_uses_quadrant_inside_outline() {
     use edpcli::tui::state::DeviceInfoNodeKey;
 
     let mut state = AppState::new();
@@ -1129,10 +1143,10 @@ fn device_capacity_active_region_has_complete_heavy_outline() {
 
     let lines = render_lines(&state, 180, 46);
     let joined = lines.join("\n");
-    for glyph in ['┏', '┓', '┃', '┗', '┛'] {
+    for glyph in ['▗', '▄', '▖', '▐', '▌', '▝', '▀', '▘'] {
         assert!(
             joined.contains(glyph),
-            "active region must render the complete heavy outline; missing {glyph}: {joined}"
+            "active region must render the quadrant-inside outline; missing {glyph}: {joined}"
         );
     }
 }
@@ -1163,7 +1177,7 @@ fn device_capacity_active_region_keeps_original_label_without_dot_prefix() {
     let lines = render_lines(&state, 180, 46);
     let top = lines
         .iter()
-        .position(|line| line.contains('┏') || (line.contains('╭') && line.contains('┬')))
+        .position(|line| line.contains('▗') && line.contains('▄') && line.contains('▖'))
         .expect("disk map top border");
     assert!(
         !lines[top + 1].contains('●'),
@@ -1228,43 +1242,73 @@ fn device_capacity_tree_and_region_list_use_partition_semantic_colors() {
 }
 
 #[test]
-fn device_capacity_map_horizontal_border_stays_clean_and_vertical_boundaries_keep_fill() {
-    use edpcli::tui::disk_layout::DiskRegionKind;
-    use edpcli::tui::theme::Theme;
+fn device_capacity_map_uses_quadrant_inside_half_cells_without_gap_or_spill() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+    state.navigate(NavCommand::Top, 20);
+    state.device_info_move_tree(1);
 
-    let theme = Theme::truecolor_dark();
-    for kind in [
-        DiskRegionKind::Boot,
-        DiskRegionKind::Share,
-        DiskRegionKind::Encrypt,
-        DiskRegionKind::Tail,
-    ] {
-        for active in [false, true] {
-            let fill = theme.disk_region_fill(kind, active);
-            let outline = theme.disk_region_outline(kind, active);
-            let boundary = theme.disk_region_boundary(kind, active);
-            assert_eq!(
-                outline.bg, None,
-                "top/bottom border cells must not paint region background outside the map: {kind:?} active={active}"
-            );
-            assert_eq!(
-                boundary.bg, fill.bg,
-                "content-row vertical boundaries must inherit the region background: {kind:?} active={active}"
-            );
-        }
+    let mut terminal = Terminal::new(TestBackend::new(200, 60)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let background = edpcli::tui::theme::current().palette().background;
+
+    let top_y = (0..60)
+        .find(|&y| {
+            let symbols = (0..200)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>();
+            symbols.contains('▗') && symbols.contains('▄') && symbols.contains('▖')
+        })
+        .expect("quadrant-inside disk-map top border");
+
+    let top_cells = (0..200)
+        .filter(|&x| matches!(buffer[(x, top_y)].symbol(), "▗" | "▄" | "▖"))
+        .collect::<Vec<_>>();
+    assert!(!top_cells.is_empty());
+    for x in top_cells {
+        assert_eq!(
+            buffer[(x, top_y)].style().bg,
+            Some(background),
+            "top border half-cell must keep the outer half on the page background at x={x}"
+        );
     }
+
+    let content_y = top_y + 1;
+    let left = (0..200)
+        .find(|&x| buffer[(x, content_y)].symbol() == "▐")
+        .expect("left quadrant-inside outer edge");
+    let right = (left + 1..200)
+        .rev()
+        .find(|&x| buffer[(x, content_y)].symbol() == "▌")
+        .expect("right quadrant-inside outer edge");
+    assert_eq!(buffer[(left, content_y)].style().bg, Some(background));
+    assert_eq!(buffer[(right, content_y)].style().bg, Some(background));
+
+    let internal_half_cells = (left + 1..right)
+        .filter(|&x| matches!(buffer[(x, content_y)].symbol(), "▐" | "▌"))
+        .collect::<Vec<_>>();
+    assert!(
+        internal_half_cells.iter().any(|&x| {
+            let style = buffer[(x, content_y)].style();
+            style.fg.is_some() && style.bg.is_some() && style.fg != style.bg
+        }),
+        "shared partition boundaries must encode two half-cell colors"
+    );
 
     let presentation = include_str!("../src/tui/devices/presentation.rs");
     assert!(
-        presentation.contains("disk_region_outline(segment.kind, is_active)"),
-        "horizontal segment border must use background-free region outline style"
+        presentation.contains("ratatui::symbols::border::QUADRANT_INSIDE"),
+        "capacity map must use Ratatui quadrant-inside border symbols"
     );
     assert!(
-        presentation.contains("disk_region_boundary(owner.kind, owner_active)"),
-        "content-row shared boundary must inherit the owning region background"
+        presentation.contains("disk_map_internal_boundary_span"),
+        "shared boundaries must use explicit half-cell foreground/background composition"
     );
     assert!(
-        presentation.contains("disk_region_outline(owner.kind, owner_active)"),
-        "top/bottom shared boundary must use background-free region outline style"
+        presentation.contains("disk_region_fill(right.kind, right_active)")
+            && presentation.contains("disk_region_fill(left.kind, left_active)"),
+        "shared half-cell background must come from the adjacent partition fill"
     );
 }

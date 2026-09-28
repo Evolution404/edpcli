@@ -520,15 +520,6 @@ impl Theme {
         }
     }
 
-    pub fn disk_region_boundary(self, kind: DiskRegionKind, active: bool) -> Style {
-        let foreground = if active {
-            self.disk_region_active_color(kind)
-        } else {
-            self.palette.border_subtle
-        };
-        self.disk_region_fill(kind, active).fg(foreground)
-    }
-
     pub fn provision_kind(self, kind: ProvisionKind) -> Style {
         let color = match kind {
             ProvisionKind::Mode0 => self.palette.accent,
@@ -662,11 +653,8 @@ mod tests {
         ] {
             let active = theme.disk_region_fill(kind, true);
             let outline = theme.disk_region_outline(kind, true);
-            let boundary = theme.disk_region_boundary(kind, true);
             assert_eq!(outline.bg, None);
             assert_eq!(outline.fg, active.fg);
-            assert_eq!(boundary.bg, active.bg);
-            assert_eq!(boundary.fg, active.fg);
             assert_ne!(outline.fg, Some(theme.palette.accent));
         }
     }
