@@ -489,7 +489,7 @@ fn confirm_mode_has_uniform_yes_no_escape_contract_without_weakening_typed_yes()
 
 #[test]
 fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
-    let controller = include_str!("../src/tui/controller.rs");
+    let controller = include_str!("../src/tui/controller/provision.rs");
     let form = source_section(
         controller,
         "ProvisionStage::Form if state.input_mode()",

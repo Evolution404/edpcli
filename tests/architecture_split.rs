@@ -229,6 +229,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/devices/state.rs",
         "src/tui/dispatch.rs",
         "src/tui/controller.rs",
+        "src/tui/controller/provision.rs",
         "src/inspect/model.rs",
         "src/inspect_adapter.rs",
         "src/application/inspect_text.rs",
@@ -273,8 +274,12 @@ fn large_modules_are_split_by_domain_boundary() {
         "TUI dispatch module must stay responsibility-bounded"
     );
     assert!(
-        lines("src/tui/controller.rs") < 750,
+        lines("src/tui/controller.rs") < 600,
         "shared TUI action controller must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/controller/provision.rs") < 350,
+        "Provision action routing must stay isolated from the shared controller"
     );
     assert!(
         lines("src/tui/inspect/state.rs") < 700,
