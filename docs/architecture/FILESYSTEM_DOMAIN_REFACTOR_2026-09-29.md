@@ -351,9 +351,11 @@ EDP 备份继续以协议为事实源：原始 LBA0-12、验证后的 LBA7 兼�
 
 ### F6 — 迁移 analysis 并清理技术债
 
-状态：`IN_PROGRESS`
+状态：`COMPLETE`
 
-把分析能力迁到 `src/filesystem/analysis/`；把 FAT/exFAT 专用 migration writer 迁入 `src/filesystem/migration.rs`，仅在 provision 保留 manifest、region mapping、key-domain 和 staged-entry 等真实业务编排；更新正式迁移消费者，删除旧模块、适配层、别名和重复辅助函数，并执行 grep 门禁证明具体文件系统知识不再泄漏到业务域。
+把分析能力迁到 `src/filesystem/analysis/`；把 FAT/exFAT 专用迁移写入实现迁入 `src/filesystem/migration.rs`，仅在制盘领域保留清单、区域映射、密钥域和暂存项等真实业务编排；更新正式迁移消费者，删除旧模块、适配层、别名和重复辅助函数，并执行搜索门禁证明具体文件系统知识不再泄漏到业务域。
+
+最终收口已完成：旧类型、旧检测函数、provision 兼容导出和迁移纯代理均已删除；业务格式化与读回验证统一经文件系统注册表和驱动；专项测试、`cargo check --all-targets`、快速门禁、完整门禁和 macOS 临时虚拟磁盘验收均通过。虚拟磁盘验收只使用临时磁盘镜像，没有执行真实 USB 破坏性写盘。
 
 ## 14. 最终 grep 门禁
 
