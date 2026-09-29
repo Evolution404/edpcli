@@ -1,9 +1,9 @@
 use edpcli::{
-    backup_deep::{
+    backup_metadata::PartitionGeometry,
+    filesystem_analysis::{
         analyze_partition, stream_file_payload, AnalysisStatus, FileEntry, FilePayloadExtent,
         FilePayloadLocator, PartitionReader,
     },
-    backup_metadata::PartitionGeometry,
     protocol::edpf::EdpPartitionType,
     provision::{
         build_migrated_filesystem, build_migration_manifest, Extent, FilesystemProfile,

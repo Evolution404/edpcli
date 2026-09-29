@@ -147,14 +147,6 @@ fn read_extent(
     Ok(out)
 }
 
-fn extent_id(partition_index: usize, name: &str) -> String {
-    format!("extent.partition.{partition_index}.{name}")
-}
-
-fn artifact_id(partition_index: usize, name: &str) -> String {
-    format!("raw.partition.{partition_index}.{name}")
-}
-
 // Mirrors one raw-evidence record into the extent/artifact model; keeping the
 // fields explicit makes call sites auditable against the on-disk capture schema.
 #[allow(clippy::too_many_arguments)]
@@ -518,38 +510,6 @@ pub(crate) fn probe_filesystem(partition: &PartitionGeometry, prefix: &[u8]) -> 
     probe
 }
 
-fn add_key_sector(
-    out: &mut MetadataAcquisition,
-    dev: &mut dyn SectorDev,
-    partition: &PartitionGeometry,
-    region_id: &str,
-    ordinal: usize,
-    lba: u64,
-) -> Result<(), String> {
-    let partition_end = partition
-        .start_sector
-        .checked_add(partition.sector_count)
-        .ok_or_else(|| format!("partition {} end overflow", partition.index))?;
-    if lba < partition.start_sector || lba >= partition_end {
-        out.notes.push(format!(
-            "filesystem key LBA {lba} falls outside partition {} and was not captured",
-            partition.index
-        ));
-        return Ok(());
-    }
-    let _ = add_raw_extent(
-        out,
-        dev,
-        region_id,
-        extent_id(partition.index, &format!("fskey{ordinal}")),
-        artifact_id(partition.index, &format!("fskey{ordinal}")),
-        lba,
-        1,
-        "filesystem_key_sector",
-    )?;
-    Ok(())
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PlainGptHeader {
     current_lba: u64,
@@ -775,80 +735,6 @@ fn manifest_partition_from_edp(partition: &PartitionGeometry) -> ManifestPartiti
     }
 }
 
-pub(crate) fn append_legacy_deep_filesystem_evidence(
-    out: &mut MetadataAcquisition,
-    dev: &mut dyn SectorDev,
-    partitions: &[PartitionGeometry],
-) -> Result<(), String> {
-    for partition in partitions {
-        let region_id = format!(
-            "region.partition.{}.type{}",
-            partition.index, partition.partition_type
-        );
-        let prefix_count = partition.sector_count.min(PARTITION_PREFIX_SECTORS);
-        let prefix_start = partition.start_sector;
-        let prefix_extent_id = extent_id(partition.index, "prefix");
-        let prefix_artifact_id = artifact_id(partition.index, "prefix");
-        let prefix = add_raw_extent(
-            out,
-            dev,
-            &region_id,
-            prefix_extent_id.clone(),
-            prefix_artifact_id.clone(),
-            prefix_start,
-            prefix_count,
-            "partition_metadata_prefix",
-        )?;
-
-        if partition.sector_count > prefix_count {
-            let suffix_count = PARTITION_SUFFIX_SECTORS.min(partition.sector_count - prefix_count);
-            if suffix_count > 0 {
-                let suffix_start = partition.start_sector + partition.sector_count - suffix_count;
-                let _ = add_raw_extent(
-                    out,
-                    dev,
-                    &region_id,
-                    extent_id(partition.index, "suffix"),
-                    artifact_id(partition.index, "suffix"),
-                    suffix_start,
-                    suffix_count,
-                    "partition_metadata_suffix",
-                )?;
-            }
-        }
-
-        let probe = probe_filesystem(partition, prefix.as_deref().unwrap_or(&[]));
-        let mut seen = std::collections::BTreeSet::new();
-        for (ordinal, lba) in probe
-            .key_lbas
-            .iter()
-            .copied()
-            .filter(|lba| seen.insert(*lba))
-            .enumerate()
-        {
-            add_key_sector(out, dev, partition, &region_id, ordinal, lba)?;
-        }
-        if prefix.is_some() {
-            let probe_json = serde_json::to_vec_pretty(&probe)
-                .map_err(|e| format!("serialize filesystem probe failed: {e}"))?;
-            out.artifacts.push(ArtifactInput {
-                id: format!("derived.partition.{}.filesystem_probe", partition.index),
-                kind: "filesystem_probe".into(),
-                media_type: "application/json".into(),
-                source_extent_ids: vec![prefix_extent_id],
-                derivation: Some(Derivation {
-                    method: "filesystem_boot_probe_v1".into(),
-                    source_artifact_ids: vec![prefix_artifact_id],
-                }),
-                restore_policy: RestorePolicy::DerivedOnly,
-                completeness: ArtifactCompleteness::Complete,
-                data: probe_json,
-            });
-        }
-    }
-    Ok(())
-}
-
 pub fn acquire_metadata(
     dev: &mut dyn SectorDev,
     lba0_12: &[u8],
@@ -915,7 +801,7 @@ pub fn acquire_metadata(
             // This extent is not merely forensic: LBA7 points to it as active protocol
             // state, and official provisioning may rewrite it. Once the pointer geometry has
             // passed parse_lba7_compatibility_geometry(), keep the exact ciphertext restorable
-            // so a Deep EDPB can roll the protocol back coherently with LBA0-12.
+            // so a metadata restore can roll the protocol back coherently with LBA0-12.
             if raw.is_some() {
                 let artifact = out
                     .artifacts

@@ -38,17 +38,19 @@ fn classify_live_source_identity(
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<crate::media_identity::MediaIdentitySnapshot> {
     let identity = media_identity_from_protocol_image(runner, disk, source_metadata)?;
-    Ok(crate::media_identity_observer::apply_runtime_plain_override(
-        identity,
-        source_metadata,
-        total_sectors,
-        |lba| {
-            let lba = u32::try_from(lba)
-                .map_err(|_| format!("Plain runtime evidence LBA{lba} exceeds u32"))?;
-            dev.read_sector(lba)
-                .map_err(|error| format!("read Plain runtime evidence LBA{lba}: {error}"))
-        },
-    ))
+    Ok(
+        crate::media_identity_observer::apply_runtime_plain_override(
+            identity,
+            source_metadata,
+            total_sectors,
+            |lba| {
+                let lba = u32::try_from(lba)
+                    .map_err(|_| format!("Plain runtime evidence LBA{lba} exceeds u32"))?;
+                dev.read_sector(lba)
+                    .map_err(|error| format!("read Plain runtime evidence LBA{lba}: {error}"))
+            },
+        ),
+    )
 }
 
 fn resolved_source_password<'a>(
@@ -108,7 +110,7 @@ fn inspect_source_profile(
                 let Ok(key) = source.records[index].verified_sm4_file_key(password) else {
                     continue;
                 };
-                let Ok(value) = crate::backup_deep::keys::decrypt_mode2(&raw, &key) else {
+                let Ok(value) = crate::provision::decrypt_mode2(&raw, &key) else {
                     continue;
                 };
                 value

@@ -11,7 +11,8 @@ use std::collections::BTreeMap;
 mod migration;
 pub use migration::build_migrated_filesystem;
 
-use crate::{backup_deep::keys::sm4_encrypt_block, crypto::crc32_bare};
+use super::sm4_encrypt_block;
+use crate::crypto::crc32_bare;
 use encoding_rs::GBK;
 
 use super::{

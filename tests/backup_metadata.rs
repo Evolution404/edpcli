@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use common::load_disk_image;
 use edpcli::backup_metadata::{
     acquire_metadata, acquire_plain_metadata, parse_lba7_compatibility_geometry,
-    parse_partition_geometry, FilesystemKind, LBA7_COMPAT_EXTENT_SECTORS, PARTITION_PREFIX_SECTORS,
+    parse_partition_geometry, FilesystemKind, LBA7_COMPAT_EXTENT_SECTORS,
 };
 use edpcli::common::SECTOR;
 use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling};
@@ -684,72 +684,6 @@ fn chapter_18_b3_edp_metadata_capture_excludes_filesystem_and_keeps_protocol_ext
             "{id} must remain exact restorable protocol/recovery metadata"
         );
     }
-}
-
-#[test]
-fn legacy_deep_filesystem_evidence_is_only_read_when_explicitly_requested() {
-    let Some(image) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实协议夹具不可用");
-        return;
-    };
-    let partitions =
-        parse_partition_geometry(&image, NETAC_DEVICE_ID, NETAC_TOTAL_SECTORS).unwrap();
-    let fs_partition = partitions
-        .iter()
-        .find(|partition| matches!(partition.partition_type, 1 | 2))
-        .unwrap_or(&partitions[0]);
-
-    let mut dev = ReadOnlySparseDev::new();
-    dev.insert(fs_partition.start_sector, ntfs_boot(4, 8));
-
-    let acquired =
-        acquire_metadata(&mut dev, &image, NETAC_DEVICE_ID, NETAC_TOTAL_SECTORS).unwrap();
-    assert_eq!(dev.writes, 0);
-    assert!(
-        !dev.reads
-            .contains(&u32::try_from(fs_partition.start_sector).unwrap()),
-        "metadata-only path must not read the filesystem"
-    );
-    let deep =
-        edpcli::backup_deep::acquire_deep(&mut dev, &image, NETAC_DEVICE_ID, NETAC_TOTAL_SECTORS)
-            .unwrap();
-    assert!(
-        dev.reads
-            .contains(&u32::try_from(fs_partition.start_sector).unwrap()),
-        "explicit Deep compatibility capture may read filesystem evidence"
-    );
-
-    assert!(acquired
-        .artifacts
-        .iter()
-        .any(|artifact| artifact.id == "raw.tail.metadata_mirror_512k"));
-    assert!(acquired
-        .artifacts
-        .iter()
-        .any(|artifact| artifact.id == "raw.tail.restore_node_end4"));
-
-    let prefix = deep
-        .extents
-        .iter()
-        .find(|extent| {
-            extent.start_lba == fs_partition.start_sector
-                && extent.purpose == "partition_metadata_prefix"
-        })
-        .unwrap();
-    assert_eq!(
-        prefix.sector_count,
-        fs_partition.sector_count.min(PARTITION_PREFIX_SECTORS)
-    );
-    let probe_artifact = deep
-        .artifacts
-        .iter()
-        .find(|artifact| {
-            artifact.id == format!("derived.partition.{}.filesystem_probe", fs_partition.index)
-        })
-        .unwrap();
-    let probe: serde_json::Value = serde_json::from_slice(&probe_artifact.data).unwrap();
-    assert_eq!(probe["kind"], "ntfs");
-    assert!(probe["key_lbas"].as_array().unwrap().len() >= 2);
 }
 
 #[test]

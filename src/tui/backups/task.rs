@@ -270,7 +270,6 @@ impl TaskHub {
                     backup_dir,
                     &mut prompt,
                     expected,
-                    false,
                 )
                 .map(|_| ())
                 .map_err(|error| error.msg)

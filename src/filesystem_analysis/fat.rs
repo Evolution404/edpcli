@@ -128,7 +128,7 @@ pub(super) fn parse(
     let clusters = (total - data) / spc;
     // Explicit work budget: 4M clusters / 16MiB FAT, 64MiB read evidence.
     if !(4085..=4_194_304).contains(&clusters) {
-        return Err("unsupported FAT12 or cluster count exceeds Deep budget".into());
+        return Err("unsupported FAT12 or cluster count exceeds filesystem analysis budget".into());
     }
     let is32 = clusters >= 65525;
     if (is32 && (fat16 != 0 || root_entries != 0 || u16le(boot, 42) != 0))
@@ -196,7 +196,7 @@ pub(super) fn parse(
     let mut dir_bytes = 0usize;
     while let Some((path, chain)) = pending.pop_front() {
         if chain.len() as u64 * spc > 65_536 {
-            return Err("directory chain exceeds Deep budget".into());
+            return Err("directory chain exceeds filesystem analysis budget".into());
         }
         let lbas: Vec<u64> = if !is32 && path == "/" {
             (reserved + copies * fat_sectors..data).collect()
@@ -214,7 +214,7 @@ pub(super) fn parse(
         for lba in lbas {
             dir_bytes += 512;
             if dir_bytes > 32 * 1024 * 1024 {
-                return Err("directory metadata exceeds Deep budget".into());
+                return Err("directory metadata exceeds filesystem analysis budget".into());
             }
             let sector = read(r, lba, total)?;
             for e in sector.as_chunks::<32>().0 {

@@ -20,7 +20,6 @@ pub(super) const FOOTER_MAGIC: &[u8; 8] = b"EDPBFTR\n";
 pub enum CaptureLevel {
     Core,
     Metadata,
-    Deep,
     LegacyMigrated,
 }
 

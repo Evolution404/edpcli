@@ -6,11 +6,11 @@
 
 use std::path::PathBuf;
 
-use crate::backup_deep::keys::decrypt_mode2;
 use crate::common::SECTOR;
 use crate::diskio::SectorDev;
 use crate::edpb::ManifestPartition;
 use crate::inspect_target::{detect_plain_filesystem, FilesystemBootKind};
+use crate::provision::decrypt_mode2;
 use crate::provision::{
     build_empty_exfat, build_empty_fat16, encrypt_sparse_mode2, parse_existing_provision,
     ExistingFileKeyError, FileKeyWrapMode, OfficialFilesystemFormat, ProvisionImage, SecretBytes,

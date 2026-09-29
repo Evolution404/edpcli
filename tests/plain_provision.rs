@@ -1,6 +1,8 @@
 use edpcli::{
-    backup_deep::{analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader},
     backup_metadata::PartitionGeometry,
+    filesystem_analysis::{
+        analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
+    },
     provision::{
         build_plain_migrated_provision_write_plan, build_plain_provision_write_plan,
         max_plain_sector_count, MigrationStagedEntry, MigrationTransform, OfficialFilesystemFormat,

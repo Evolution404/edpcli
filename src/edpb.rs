@@ -33,6 +33,6 @@ use validate::validate_manifest_graph;
 use write::write_container;
 pub use write::{
     write_core_backup, write_core_backup_with_identity, write_core_backup_with_notes,
-    write_deep_backup, write_deep_backup_with_identity, write_legacy_v2_core_backup_with_identity,
-    write_metadata_backup, write_metadata_backup_with_identity,
+    write_legacy_v2_core_backup_with_identity, write_metadata_backup,
+    write_metadata_backup_with_identity,
 };

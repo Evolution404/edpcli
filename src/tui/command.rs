@@ -54,7 +54,6 @@ mod tests {
             parse_command(":provision").unwrap(),
             PaletteAction::Provision
         );
-        assert!(parse_command("deep-backup").is_err());
         assert_eq!(parse_command("prune").unwrap(), PaletteAction::BackupPrune);
         assert_eq!(
             parse_command("batch-delete").unwrap(),

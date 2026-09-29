@@ -76,12 +76,7 @@ const INSPECT_OPTIONS: &[OptionSpec] = &[
     HELP,
 ];
 
-const BACKUP_CREATE_OPTIONS: &[OptionSpec] = &[
-    value("--disk"),
-    switch("--deep"),
-    value("--backup-dir"),
-    HELP,
-];
+const BACKUP_CREATE_OPTIONS: &[OptionSpec] = &[value("--disk"), value("--backup-dir"), HELP];
 const BACKUP_LIST_OPTIONS: &[OptionSpec] = &[value("--backup-dir"), HELP];
 const BACKUP_RESTORE_OPTIONS: &[OptionSpec] = &[
     value("--disk"),

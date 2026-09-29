@@ -266,17 +266,12 @@ pub fn observe_media_identity_readonly(
     let protocol_image = read_protocol_image_readonly(dev)?;
     let mut snapshot = media_identity_from_protocol_image(runner, disk, &protocol_image)?;
     if let Some(total_sectors) = snapshot.hardware.total_sectors {
-        snapshot = apply_runtime_plain_override(
-            snapshot,
-            &protocol_image,
-            total_sectors,
-            |lba| {
-                let lba = u32::try_from(lba)
-                    .map_err(|_| format!("Plain runtime evidence LBA{lba} exceeds u32"))?;
-                dev.read_sector(lba)
-                    .map_err(|error| format!("read Plain runtime evidence LBA{lba}: {error}"))
-            },
-        );
+        snapshot = apply_runtime_plain_override(snapshot, &protocol_image, total_sectors, |lba| {
+            let lba = u32::try_from(lba)
+                .map_err(|_| format!("Plain runtime evidence LBA{lba} exceeds u32"))?;
+            dev.read_sector(lba)
+                .map_err(|error| format!("read Plain runtime evidence LBA{lba}: {error}"))
+        });
     }
     Ok(ReadonlyMediaObservation {
         snapshot,

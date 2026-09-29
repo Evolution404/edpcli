@@ -622,22 +622,6 @@ pub fn backup_create_flow(
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<BackupReport> {
-    backup_create_level_flow(disk, ctx, dev, false)
-}
-
-/// Explicit Deep opt-in; shares the existing read-only device and identity path.
-pub fn backup_create_level_flow(
-    disk: u32,
-    ctx: &mut Ctx,
-    dev: &mut dyn SectorDev,
-    deep: bool,
-) -> EdpCliResult<BackupReport> {
-    if deep {
-        return Err(err(
-            EXIT_USAGE,
-            "错误: --deep 已移除；最新版只允许创建 metadata-only EDPB v3",
-        ));
-    }
     guard_usb_disk(ctx.runner, disk)?;
     let observed =
         super::media_identity_observer::observe_media_identity_readonly(ctx.runner, disk, dev)?;
@@ -770,7 +754,6 @@ pub fn backup_create_on_disk(
     prompt: &mut dyn Prompter,
     expected_onlyid: Option<&str>,
     expected_device_id: Option<&str>,
-    deep: bool,
 ) -> EdpCliResult<BackupReport> {
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     verify_expected_identity(runner, disk, expected_onlyid, expected_device_id, &mut dev)?;
@@ -780,7 +763,7 @@ pub fn backup_create_on_disk(
         prompt,
         backup_dir,
     };
-    backup_create_level_flow(disk, &mut ctx, &mut dev, deep)
+    backup_create_flow(disk, &mut ctx, &mut dev)
 }
 
 pub fn backup_create_on_disk_with_pin(
@@ -789,7 +772,6 @@ pub fn backup_create_on_disk_with_pin(
     backup_dir: PathBuf,
     prompt: &mut dyn Prompter,
     expected: &MediaIdentityResumePin,
-    deep: bool,
 ) -> EdpCliResult<BackupReport> {
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     verify_resume_identity_pin(runner, disk, expected, &mut dev)?;
@@ -799,7 +781,7 @@ pub fn backup_create_on_disk_with_pin(
         prompt,
         backup_dir,
     };
-    backup_create_level_flow(disk, &mut ctx, &mut dev, deep)
+    backup_create_flow(disk, &mut ctx, &mut dev)
 }
 
 /// restore 主流程: bin=None 时交互列出本盘备份并选择。
@@ -824,8 +806,7 @@ pub fn restore_flow_typed(
     let observed = observe_media_identity_readonly(ctx.runner, disk, dev)?;
     let img = observed.protocol_image;
     let target_identity = observed.snapshot;
-    let raw_target_device_id =
-        identify(ctx.runner, disk, &img[7 * SECTOR..8 * SECTOR]).device_id;
+    let raw_target_device_id = identify(ctx.runner, disk, &img[7 * SECTOR..8 * SECTOR]).device_id;
     let lba4 = &img[4 * SECTOR..5 * SECTOR];
     let label_id = target_identity.protocol.onlyid.clone();
     let tag16 = diskio::lba4_tag16_from(lba4)

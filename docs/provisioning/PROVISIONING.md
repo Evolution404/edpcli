@@ -1970,7 +1970,7 @@ j/k            移动
 gg/G           首尾
 Space          选中/取消
 i / Enter      进入 Inspect
-a              创建备份，类型在 modal 中选择 Metadata/Deep
+a              创建元数据备份
 v              Verify
 R              进入 Restore 安全向导
 d              删除当前或已选
@@ -3377,7 +3377,7 @@ K0 基线审计曾确认：
 
 - **K6.1 typed migration planning COMPLETE**：`RegionMappingPlanner` 接入 `TargetProvisionPlan`，跨语义目标记录 typed `MigrationSource { source_index, region, transform }` 并进入 `RegionDisposition::Migrate`。mode0→mode1 combined 明确记录 Boot + Share 两个来源；planner 映射种类已由旧名 `MigrateUnsupported` 收敛为 `Migrate`。
 - **K6.2 typed migration transforms COMPLETE**：覆盖 `BootToBootShareCombined / ShareToBootShareCombined / BootShareCombinedToBoot / BootShareCombinedToShare / EncryptToShare / ShareToEncrypt`，并为 application 层 Plain 双向迁移增加 `PlainToEdp / EdpToPlain`。executor 不再根据 role 组合重新猜语义。
-- **K6.3 payload locator/stream COMPLETE**：FAT16/FAT32/exFAT inventory 在解析 cluster chain 时记录 partition-relative `FilePayloadLocator`；`stream_file_payload()` 按 logical bytes + budget 读取碎片 extent，并计算 exact logical bytes SHA-256。普通 Deep inventory 默认仍不读取文件 payload，locator 使用 `serde(skip)`，不改变备份序列化格式。
+- **K6.3 payload locator/stream COMPLETE**：FAT16/FAT32/exFAT inventory 在解析 cluster chain 时记录 partition-relative `FilePayloadLocator`；`stream_file_payload()` 按 logical bytes + budget 读取碎片 extent，并计算 exact logical bytes SHA-256。文件系统 inventory 默认不读取普通文件 payload；locator 使用 `serde(skip)`，只服务于运行期迁移。
 - **K6.4 manifest / preflight COMPLETE**：新增 typed `MigrationInventory / MigrationBudgets / MigrationManifest / MigrationManifestEntry / MigrationPreflightError`。写盘前检查来源 inventory 一致性、transform 一致性、路径规范化、大小写路径冲突、文件缺失 locator、locator 越界、logical size、entry count、staging/target 容量及整数溢出；任一失败均在写盘前 fail-closed。
 - **K6.5 staging COMPLETE**：EDP 来源先解析完整文件系统，再按 locator 把文件完整 staging；物理加密区只允许在 source password knowledge 为 `DefaultVerified/UserVerified` 且 FileKey CRC/SM4 验证成功后解密读取，Unknown 密码拒绝迁移。Plain 来源先验证 MBR 分区边界/重叠并完整解析文件系统；多个 Plain 分区导入 EDP 时使用 `/P<n>/` 前缀避免冲突，多个 EDP role 导出 Plain 时使用 `/EDP_BOOT/ /EDP_SHARE/ /EDP_ENCRYPT/ /EDP_COMBINED/` 前缀。
 - **K6.6 populated filesystem writer COMPLETE**：first-party FAT16/exFAT writer 可从 staged tree 生成包含目录、Unicode/长文件名和真实 file payload 的目标文件系统，重建 FAT/cluster allocation、exFAT bitmap/upcase/root/entry-set/boot checksum；生成后立即通过 canonical `analyze_partition + stream_file_payload` 做语义与逐字节 payload readback。目标 FAT32/NTFS writer 仍不在 portable provision writer 支持范围内，必须在写盘前显式拒绝，禁止静默降级。
@@ -3404,7 +3404,7 @@ K6 当前安全语义：
 - **源状态证据**：自动备份 `..._mode1_20260927_145206.edpb` 显示写前为已识别 mode1 EDP，LBA12 type2 Share 从 LBA63 开始、type4 Encrypt 从 LBA13627392 开始；源交换区实际为可挂载 exFAT。
 - **源 payload 基线**：`files/` 共 3002 个文件、120,615,912 bytes。完整 manifest 聚合 SHA-256=`8687837a8727e6820fa14a3d1db33d330982037036662b1f742000a5a965e56d`。其中 3001 个用户文件共 120,611,816 bytes，聚合 SHA-256=`127998c5ebd6177391bc0c347d0f796be835ea32f9a8fa3d7c4ad11ba7379646`；另 1 个 macOS AppleDouble sidecar 为 4096 bytes，聚合 SHA-256=`ca6d9bf193da8cb0ae203afe548bd393fb7895df234f59d2106374c58d6df8c9`。主机 `/Users/zhangyuxi/unzip/files` 对 3001 个用户文件逐路径/大小/hash 与源 manifest 完全一致，作为独立 pristine baseline。
 - **中间 Plain 证据**：下一次 mandatory backup `..._plain_20260927_150316.edpb` 明确记录同一物理介质已处于 Plain，证明 EDP→Plain 的破坏性 K6 转换实际完成；该备份通过现有介质 lineage 归到同一盘。
-- **回到 EDP 证据**：随后同一介质完成 Plain→mode3，当前协议为 Boot type1 `LBA63..20479` + Share type2 `LBA20480..15725842`；deep read-only backup `..._20260927_152711.edpb` 已创建并 `backup verify` PASS。
+- **回到 EDP 证据**：随后同一介质完成 Plain→mode3，当前协议为 Boot type1 `LBA63..20479` + Share type2 `LBA20480..15725842`；当时的只读备份已通过完整性校验。
 - **最终 payload readback**：新增只读 `examples/real_usb_k6_verify.rs`，固定 VID/PID/容量/device_id 门禁，仅 `FileDev::open_rdonly`，通过生产 `analyze_partition + stream_file_payload` 对隐藏 Share 解密/解析，不提供任何写接口。最终 Share 路径 `/EDP_COMBINED/files` 下 3001 个用户文件全部逐文件 size + SHA-256 PASS，bytes=`120611816`，aggregate=`127998c5ebd6177391bc0c347d0f796be835ea32f9a8fa3d7c4ad11ba7379646`；AppleDouble sidecar 单独逐字节 PASS，bytes=`4096`，aggregate=`ca6d9bf193da8cb0ae203afe548bd393fb7895df234f59d2106374c58d6df8c9`。最终再用完整 manifest 单次复跑得到 `files=3002 bytes=120615912 aggregate_sha256=8687837a8727e6820fa14a3d1db33d330982037036662b1f742000a5a965e56d`，与最初源盘完整基线精确一致，因此 3002/3002 源文件在 EDP→Plain→mode3 round-trip 后 byte-for-byte 保持。
 - **额外跨模式 preflight**：当前 mode3→mode2 完整只读 staging plan PASS：type1 CompatibilityReserve=`LBA63..125`，type4 Encrypt=`LBA126..15725842`，Share→Encrypt 明确为 `Migrate`，计划写入 389,867 sectors；mode3→Plain 完整只读 staging plan 亦 PASS，P1=`LBA2048..15728639` exFAT，计划写入 390,122 sectors。
 - **真实验收发现并修复的入口缺陷**：Plain target 原先错误拒绝 `--share-source-password/--encrypt-source-password`，真实盘 dry-run 首次触发该缺陷；提交 `1b0459d` 修复为 Plain 允许 source credential、仍拒绝 target credential，并加入 parser regression。
@@ -6952,7 +6952,7 @@ src/provision/filesystem.rs::choose_cluster_shift()
 cluster_count <= 4_194_304
 ```
 
-而 `backup_deep/exfat.rs` 的 exFAT parser 也使用相同的 `4_194_304` clusters 验证预算。因此问题不是用户输入非法，也不是 exFAT 无法支持该容量，而是：
+而 `filesystem_analysis/exfat.rs` 的 exFAT parser 也使用相同的 `4_194_304` clusters 验证预算。因此问题不是用户输入非法，也不是 exFAT 无法支持该容量，而是：
 
 > **formatter 的 cluster-size policy 可以构造出一个超出 edpcli 自己 parser 验证预算的 geometry。**
 
@@ -6975,7 +6975,7 @@ ReadbackVerifierAccepts(formatter_output)
 ```text
 build_exfat_sparse_image(...)
   -> geometry.cluster_count <= EXFAT_MAX_VALIDATED_CLUSTERS
-  -> backup_deep::exfat parser 接受同一 boot geometry
+  -> filesystem_analysis::exfat parser 接受同一 boot geometry
 ```
 
 如果 formatter 无法在当前验证能力内找到合法 geometry，则必须在**计划生成阶段**返回明确的“当前 edpcli 不支持该 geometry”错误，绝不能先构造一个自己后续无法验证的文件系统。
@@ -6988,7 +6988,7 @@ build_exfat_sparse_image(...)
 
 ```text
 provision/filesystem.rs
-backup_deep/exfat.rs
+filesystem_analysis/exfat.rs
 ```
 
 本次治理将它提升为 UI-neutral / filesystem-domain 的共享 capability 常量或结构，例如：
@@ -7012,7 +7012,7 @@ EXFAT_MAX_VALIDATED_CLUSTERS
 
 - formatter 与 parser 使用同一事实源；
 - 常量命名必须表达“edpcli 当前验证预算”，不能冒充 exFAT 规范本身的理论上限；
-- 如果未来 Deep parser 扩大预算，只修改 canonical capability 定义并跑 compatibility tests；
+- 如果未来 filesystem parser 扩大预算，只修改 canonical capability 定义并跑 compatibility tests；
 - 禁止 generator/parser 两侧再次复制相同 magic number。
 
 #### 14.13.3 cluster size 选择改为 geometry-driven，而不是只看容量阈值
@@ -7113,7 +7113,7 @@ boot checksum
 
 测试不能只断言“build 返回 Ok”；必须证明**生成结果能被自己的 consumer 重新读取**。
 
-如果 Deep parser 需要块设备接口，使用测试内的 sparse/fake SectorDev 映射 formatter 输出，不写真实盘。
+如果 filesystem parser 需要块设备接口，使用测试内的 sparse/fake SectorDev 映射 formatter 输出，不写真实盘。
 
 #### 14.13.6 exFAT 容量边界矩阵
 
@@ -7342,7 +7342,7 @@ src/provision/filesystem.rs
   choose_cluster_shift()
   cluster_count > 4_194_304
 
-src/backup_deep/exfat.rs
+src/filesystem_analysis/exfat.rs
   cluster_count > 4_194_304
 ```
 

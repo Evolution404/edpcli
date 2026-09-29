@@ -69,14 +69,6 @@ fn usage_errors_exit_two() {
 }
 
 #[test]
-fn deprecated_deep_backup_flag_never_creates_a_new_backup() {
-    let r = bin().args(["backup", "create", "--deep"]).output().unwrap();
-    assert_eq!(r.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&r.stderr);
-    assert!(stderr.contains("--deep") && stderr.contains("不再创建"), "{stderr}");
-}
-
-#[test]
 fn provision_write_bridges_the_same_backup_dir_across_elevation_and_commit() {
     let source = include_str!("../src/cli/commands/provision.rs");
     assert!(source.contains("argv_with_backup_dir_for_elevation(backup_dir.as_deref())"));
@@ -397,7 +389,7 @@ fn backup_create_is_read_only_and_verifiable() {
                 && !artifact.id.contains("fskey")
                 && !artifact.kind.contains("filesystem")
         }),
-        "normal EDP metadata backup must not depend on filesystem/Deep evidence"
+        "normal EDP metadata backup must not depend on filesystem evidence"
     );
     assert!(manual_verified
         .manifest
@@ -1488,7 +1480,7 @@ impl SectorDev for RestorableSparseDev {
 }
 
 #[test]
-fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
+fn restore_metadata_edpb_restores_lba0_12_and_validated_lce_together() {
     use edpcli::edpb::{
         ArtifactCompleteness, ArtifactInput, Extent, MetadataCapture, Region, RestorePolicy,
         SemanticStatus,
@@ -1688,34 +1680,5 @@ fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
             .get(&u32::try_from(tail_restore_start).unwrap())
             .unwrap(),
         &tail_restore_backup
-    );
-}
-
-#[test]
-fn deep_backup_creation_is_removed_at_application_boundary() {
-    let orig = load_disk_image("netac").expect("committed netac fixture");
-    let mut runner = netac_runner(6);
-    runner.canned.remove("diskutil unmountDisk force disk6");
-    let tmp = TmpDir::new("deep_removed_flow");
-    let mut prompt = ScriptPrompter {
-        inputs: vec![],
-        idx: 0,
-    };
-    let mut dev = SwapOnReopenDev::new(orig.clone(), orig);
-    let error = edpcli::application::write::backup_create_level_flow(
-        6,
-        &mut ctx(&runner, &mut prompt, &tmp.0),
-        &mut dev,
-        true,
-    )
-    .unwrap_err();
-    assert_eq!(error.code, EXIT_USAGE);
-    assert!(error.msg.contains("metadata-only EDPB v3"));
-    assert!(!dev.switched);
-    assert_eq!(dev.writes, 0);
-    assert_eq!(prompt.idx, 0);
-    assert!(
-        !tmp.0.exists() || std::fs::read_dir(&tmp.0).unwrap().next().is_none(),
-        "removed Deep path must create no files"
     );
 }

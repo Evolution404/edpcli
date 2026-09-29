@@ -8,9 +8,9 @@ use edpcli::application::media_identity::{
     MediaRelationship, ProtocolIdentityEvidence, RestoreAuthorizationDecision,
     RestoreAuthorizationPolicy, RestoreGeometryRequirements, RestoreRejection, SerialQuality,
 };
-use edpcli::application::media_identity_observer::observe_media_identity_readonly;
 #[cfg(target_os = "macos")]
 use edpcli::application::media_identity_observer::media_identity_from_protocol_image;
+use edpcli::application::media_identity_observer::observe_media_identity_readonly;
 use edpcli::diskio::SectorDev;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::provision::DiskProvisionKind;
@@ -496,7 +496,9 @@ impl CmdRunner for StaleEdpRunner {
                     .into(),
             );
         }
-        Err(io::Error::other("platform query unavailable in stale fixture"))
+        Err(io::Error::other(
+            "platform query unavailable in stale fixture",
+        ))
     }
 
     fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
@@ -542,7 +544,9 @@ impl SectorDev for StaleEdpPlainDev {
 
     fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
         self.writes += 1;
-        Err(io::Error::other("stale identity observation attempted a write"))
+        Err(io::Error::other(
+            "stale identity observation attempted a write",
+        ))
     }
 }
 
@@ -574,13 +578,8 @@ fn formatted_plain_layout_overrides_stale_valid_edp_protocol_for_readonly_identi
         .copy_from_slice(&u32::try_from(TOTAL - 2_048).unwrap().to_le_bytes());
     protocol[510..512].copy_from_slice(&[0x55, 0xaa]);
 
-    let fs = edpcli::provision::build_empty_exfat(
-        2_048,
-        TOTAL - 2_048,
-        0x1234_5678,
-        "PLAIN",
-    )
-    .expect("build strict exFAT boot");
+    let fs = edpcli::provision::build_empty_exfat(2_048, TOTAL - 2_048, 0x1234_5678, "PLAIN")
+        .expect("build strict exFAT boot");
     let boot = fs.sectors().get(&0).expect("exFAT boot sector").to_vec();
     let mut dev = StaleEdpPlainDev {
         protocol,
@@ -598,7 +597,10 @@ fn formatted_plain_layout_overrides_stale_valid_edp_protocol_for_readonly_identi
     assert_eq!(observed.snapshot.protocol.device_id, None);
     assert_eq!(observed.snapshot.protocol.onlyid, None);
     assert_eq!(dev.writes, 0);
-    assert!(dev.reads > 13, "runtime Plain proof must inspect the live filesystem boot");
+    assert!(
+        dev.reads > 13,
+        "runtime Plain proof must inspect the live filesystem boot"
+    );
 }
 
 #[test]

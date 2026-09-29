@@ -10,10 +10,12 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::backup_deep::{analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader};
 use crate::backup_metadata::{parse_lba7_compatibility_geometry, PartitionGeometry};
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_OK, EXIT_TARGET, SECTOR};
 use crate::diskio::{self, SectorDev};
+use crate::filesystem_analysis::{
+    analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
+};
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
     apply_target_geometry_overrides, build_empty_exfat, build_empty_fat16,
@@ -924,7 +926,6 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
         prompt,
         expected_onlyid.as_deref(),
         Some(prepared.device_id()),
-        false,
     )?;
     current += 1;
     emit_isolated(

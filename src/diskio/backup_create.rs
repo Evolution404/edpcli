@@ -173,31 +173,6 @@ pub fn create_metadata_backup(
     Ok(path)
 }
 
-/// Save an acquired Deep superset; this writes only the destination container.
-pub fn create_deep_backup(
-    facts: &DiskFacts,
-    data: &[u8],
-    device_id: &str,
-    deep: crate::backup_metadata::MetadataAcquisition,
-    identity: &crate::media_identity::MediaIdentitySnapshot,
-    bak_dir: &Path,
-    clock: &dyn Clock,
-) -> EdpCliResult<PathBuf> {
-    let (path, core) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
-    let capture = crate::edpb::MetadataCapture {
-        core,
-        partitions: deep.partitions,
-        regions: deep.regions,
-        extents: deep.extents,
-        artifacts: deep.artifacts,
-        notes: deep.notes,
-    };
-    crate::edpb::write_deep_backup_with_identity(&path, &capture, identity)
-        .map_err(|e| EdpCliError::new(EXIT_BACKUP, format!("错误: {e}")))?;
-    sync_dir(bak_dir)?;
-    Ok(path)
-}
-
 pub fn mtime_epoch(path: &Path) -> i64 {
     path.metadata()
         .and_then(|m| m.modified())

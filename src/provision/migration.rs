@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::backup_deep::{FileEntry, FilePayloadLocator};
+use crate::filesystem_analysis::{FileEntry, FilePayloadLocator};
 
 use super::{
     migration_transform, MigrationSource, MigrationTransform, SourceRegion, TargetPartitionGeometry,

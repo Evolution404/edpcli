@@ -228,10 +228,7 @@ fn parse_bare_and_subcommands() {
     assert!(matches!(
         parse_args(&["backup".into(), "create".into(), "--disk=4".into()]).unwrap(),
         Parsed::Backup {
-            action: BackupAction::Create {
-                disk: Some(4),
-                deep: false
-            },
+            action: BackupAction::Create { disk: Some(4) },
             ..
         }
     ));
@@ -422,7 +419,6 @@ fn boolean_flags_reject_inline_values() {
         vec!["backup", "prune", "--yes=0"],
         vec!["backup", "delete", "1", "--yes=no"],
         vec!["backup", "restore", "backup.bin", "--yes=false"],
-        vec!["backup", "create", "--deep=false"],
     ] {
         let args: Vec<String> = argv.into_iter().map(str::to_string).collect();
         let err = parse_args(&args).err().expect("布尔旗标带值必须报错");

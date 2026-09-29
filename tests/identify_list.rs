@@ -237,13 +237,8 @@ fn scan_prefers_live_plain_filesystem_over_stale_edp_protocol_fields() {
     stale[entry + 12..entry + 16]
         .copy_from_slice(&u32::try_from(TOTAL - 2_048).unwrap().to_le_bytes());
     stale[510..512].copy_from_slice(&[0x55, 0xaa]);
-    let fs = edpcli::provision::build_empty_exfat(
-        2_048,
-        TOTAL - 2_048,
-        0x1234_5678,
-        "PLAIN",
-    )
-    .unwrap();
+    let fs =
+        edpcli::provision::build_empty_exfat(2_048, TOTAL - 2_048, 0x1234_5678, "PLAIN").unwrap();
     let boot = fs.sectors().get(&0).unwrap().to_vec();
 
     let mut m = std::collections::HashMap::new();
@@ -253,7 +248,7 @@ fn scan_prefers_live_plain_filesystem_over_stale_edp_protocol_fields() {
     );
     m.insert(
         "diskutil info -plist disk6".to_string(),
-        diskutil_info_plist(TOTAL * SECTOR as u64),
+        diskutil_info_plist(i64::try_from(TOTAL * SECTOR as u64).unwrap()),
     );
     m.insert(
         "ioreg -r -c IOSCSITargetDevice -l".to_string(),
@@ -278,13 +273,16 @@ fn scan_prefers_live_plain_filesystem_over_stale_edp_protocol_fields() {
     let rows = scan_disks(&runner, &bak.0, &read);
     let row = rows.iter().find(|row| row.disk == 6).unwrap();
 
-    assert_eq!(row.provision_kind, edpcli::provision::DiskProvisionKind::Plain);
+    assert_eq!(
+        row.provision_kind,
+        edpcli::provision::DiskProvisionKind::Plain
+    );
     assert_eq!(row.device_id, None);
     assert_eq!(row.onlyid, None);
     assert_eq!(row.dept, None);
     assert_eq!(row.user, None);
     assert_eq!(row.label, None);
-    assert_eq!(row.partitions, None);
+    assert!(row.partitions.is_none());
     assert_eq!(row.force_change_password, None);
     assert!(row.partition_table.is_some());
     assert_eq!(

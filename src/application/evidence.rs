@@ -216,7 +216,11 @@ fn plain_protocol_context(path: &Path, manifest: &Manifest) -> Result<Vec<u8>, E
             }
         })?;
         for extent_id in &artifact.source_extent_ids {
-            let Some(extent) = manifest.extents.iter().find(|extent| &extent.id == extent_id) else {
+            let Some(extent) = manifest
+                .extents
+                .iter()
+                .find(|extent| &extent.id == extent_id)
+            else {
                 continue;
             };
             if extent.start_lba >= METADATA_SECTOR_COUNT as u64 {
@@ -229,12 +233,12 @@ fn plain_protocol_context(path: &Path, manifest: &Manifest) -> Result<Vec<u8>, E
                 let src = usize::try_from(offset)
                     .ok()
                     .and_then(|sector| sector.checked_mul(SECTOR))
-                    .ok_or_else(|| EvidenceError::BackupProtocolLength { actual: data.len() })?;
+                    .ok_or(EvidenceError::BackupProtocolLength { actual: data.len() })?;
                 let dst_lba = extent.start_lba + offset;
                 let dst = usize::try_from(dst_lba)
                     .ok()
                     .and_then(|sector| sector.checked_mul(SECTOR))
-                    .ok_or_else(|| EvidenceError::BackupProtocolLength { actual: data.len() })?;
+                    .ok_or(EvidenceError::BackupProtocolLength { actual: data.len() })?;
                 let Some(source) = data.get(src..src + SECTOR) else {
                     return Err(EvidenceError::BackupProtocolLength { actual: data.len() });
                 };
@@ -252,16 +256,18 @@ impl EvidenceSource {
                 path: path.to_path_buf(),
                 message: error.to_string(),
             })?;
-        let canonical = crate::edpb::canonical_media_identity(&verified.manifest).map_err(|message| {
-            EvidenceError::BackupVerify {
-                path: path.to_path_buf(),
-                message,
-            }
-        })?;
+        let canonical =
+            crate::edpb::canonical_media_identity(&verified.manifest).map_err(|message| {
+                EvidenceError::BackupVerify {
+                    path: path.to_path_buf(),
+                    message,
+                }
+            })?;
         let current_plain_v3 = verified.manifest.schema == "edpb.manifest.v3"
             && verified.manifest.backup_purpose == Some(crate::edpb::BackupPurpose::MetadataOnly)
             && verified.manifest.snapshot.capture_level == crate::edpb::CaptureLevel::Metadata
-            && canonical.protocol.provision_kind == Some(crate::provision::DiskProvisionKind::Plain);
+            && canonical.protocol.provision_kind
+                == Some(crate::provision::DiskProvisionKind::Plain);
         let has_full_protocol = verified
             .manifest
             .artifacts
@@ -300,30 +306,36 @@ impl EvidenceSource {
             }
         })?;
         let legacy_nonplain = !manifest.snapshot.device_state.eq_ignore_ascii_case("plain");
-        let effective_device_id = canonical.protocol.device_id.clone().or_else(|| {
-            legacy_nonplain.then(|| manifest.device.device_id.clone())
-        });
-        let provision_kind = canonical.protocol.provision_kind.or_else(|| {
-            effective_device_id
-                .as_deref()
-                .and_then(|device_id| {
+        let effective_device_id = canonical
+            .protocol
+            .device_id
+            .clone()
+            .or_else(|| legacy_nonplain.then(|| manifest.device.device_id.clone()));
+        let provision_kind = canonical
+            .protocol
+            .provision_kind
+            .or_else(|| {
+                effective_device_id.as_deref().and_then(|device_id| {
                     crate::provision::DiskProvisionKind::from_metadata(&protocol, device_id)
                 })
-        }).or_else(|| {
-            (!legacy_nonplain
-                && crate::partition_table::confirmed_plain_protocol_prefix(
-                    &protocol,
-                    total_sectors,
-                ))
-            .then_some(crate::provision::DiskProvisionKind::Plain)
-        });
+            })
+            .or_else(|| {
+                (!legacy_nonplain
+                    && crate::partition_table::confirmed_plain_protocol_prefix(
+                        &protocol,
+                        total_sectors,
+                    ))
+                .then_some(crate::provision::DiskProvisionKind::Plain)
+            });
         let identity = EvidenceIdentity {
             device_id: effective_device_id,
             vid: canonical.hardware.vid.map(|value| format!("{value:04x}")),
             pid: canonical.hardware.pid.map(|value| format!("{value:04x}")),
             size_bytes: manifest.geometry.capacity_bytes,
             onlyid: canonical.protocol.onlyid.clone().or_else(|| {
-                legacy_nonplain.then(|| manifest.device.onlyid.clone()).flatten()
+                legacy_nonplain
+                    .then(|| manifest.device.onlyid.clone())
+                    .flatten()
             }),
             provision_kind,
         };

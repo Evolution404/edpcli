@@ -7,14 +7,14 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use edpcli::backup_deep::{
-    analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
-};
 use edpcli::backup_metadata::PartitionGeometry;
 use edpcli::common::{METADATA_SECTOR_COUNT, SECTOR};
 use edpcli::diskio::{
     atomic_write_sectors, execute_write_transaction, FileDev, SectorDev, SectorWriteStage,
     WriteTransactionPlan,
+};
+use edpcli::filesystem_analysis::{
+    analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
 };
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;

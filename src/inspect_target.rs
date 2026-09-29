@@ -3,7 +3,6 @@
 //! 这里不负责 CLI 展示。所有 decode 都必须来自已经验证的协议/数据区算法；
 //! 无法确认的区域返回明确错误，绝不把 RAW 静默冒充为 decoded。
 
-use crate::backup_deep::keys;
 use crate::backup_metadata::{
     parse_lba7_compatibility_geometry, parse_partition_geometry, Lba7CompatibilityGeometry,
     PartitionGeometry, TAIL_END4_MIRROR_OFFSET_SECTORS, TAIL_METADATA_MIRROR_OFFSET_SECTORS,
@@ -11,6 +10,9 @@ use crate::backup_metadata::{
 };
 use crate::common::{METADATA_LAST_LBA, SECTOR};
 use crate::crypto::a6b0_full_offset;
+use crate::provision::{
+    decrypt_mode2, default_file_key, default_file_key_checked, DefaultFileKeyError,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SectorRegion {
@@ -562,9 +564,9 @@ impl InspectDiskContext {
         let Some(did) = self.device_id.as_deref() else {
             return "未验证（缺少 device_id）".into();
         };
-        match keys::default_file_key_checked(&self.protocol_image, did, partition.index) {
+        match default_file_key_checked(&self.protocol_image, did, partition.index) {
             Ok(_) => "PASS".into(),
-            Err(error @ keys::DefaultFileKeyError::FileKeyCrcMismatch) => {
+            Err(error @ DefaultFileKeyError::FileKeyCrcMismatch) => {
                 format!("FAIL（{error}）")
             }
             Err(error) => format!("未验证（{error}）"),
@@ -600,7 +602,7 @@ impl InspectDiskContext {
                         .into(),
             };
         };
-        let key = match keys::default_file_key(&self.protocol_image, did, partition.index) {
+        let key = match default_file_key(&self.protocol_image, did, partition.index) {
             Ok(key) => key,
             Err(error) => {
                 return PhysicalDataState::Unknown {
@@ -608,7 +610,7 @@ impl InspectDiskContext {
                 };
             }
         };
-        let decoded = match keys::decrypt_mode2(raw_boot, &key) {
+        let decoded = match decrypt_mode2(raw_boot, &key) {
             Ok(decoded) => decoded,
             Err(error) => {
                 return PhysicalDataState::Unknown {
@@ -713,14 +715,14 @@ impl InspectDiskContext {
                         .device_id
                         .as_deref()
                         .ok_or_else(|| "缺少 device_id，无法解封数据区 FileKey".to_string())?;
-                    let key = keys::default_file_key(&self.protocol_image, did, partition.index)
+                    let key = default_file_key(&self.protocol_image, did, partition.index)
                         .map_err(|error| {
                             format!(
                                 "分区[{}] type{} 无法取得已验证 FileKey: {error}",
                                 partition.index, partition.partition_type
                             )
                         })?;
-                    let plain = keys::decrypt_mode2(raw, &key)?;
+                    let plain = decrypt_mode2(raw, &key)?;
                     Ok((
                         plain,
                         format!(

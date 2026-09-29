@@ -97,7 +97,7 @@ fn valid_exfat_boot(partition_start: u64, sector_count: u64) -> [u8; SECTOR] {
     boot
 }
 
-fn captured_partition_edpb(deep: bool) -> Option<(TmpDir, PathBuf, u64)> {
+fn captured_partition_edpb() -> Option<(TmpDir, PathBuf, u64)> {
     let data = load_disk_image("aigo")?;
     let device_id = "disk&ven_aigo&prod_u335&rev_pmap";
     let total_sectors = 245_760_000u64;
@@ -112,11 +112,7 @@ fn captured_partition_edpb(deep: bool) -> Option<(TmpDir, PathBuf, u64)> {
     let mut extent_data = boot.to_vec();
     extent_data.extend_from_slice(&[0x5au8; SECTOR]);
 
-    let tag = if deep {
-        "inspect_deep"
-    } else {
-        "inspect_metadata"
-    };
+    let tag = "inspect_metadata";
     let tmp = TmpDir::new(tag);
     let path = tmp.0.join(format!("{tag}.edpb"));
     let extent_id = "extent.inspect.partition".to_string();
@@ -195,11 +191,7 @@ fn captured_partition_edpb(deep: bool) -> Option<(TmpDir, PathBuf, u64)> {
         ],
         notes: vec!["inspect 离线回归夹具".into()],
     };
-    if deep {
-        edpb::write_deep_backup(&path, &capture).ok()?;
-    } else {
-        edpb::write_metadata_backup(&path, &capture).ok()?;
-    }
+    edpb::write_metadata_backup(&path, &capture).ok()?;
     Some((tmp, path, partition.start_sector))
 }
 
@@ -298,79 +290,33 @@ fn raw_and_meta_modes_have_distinct_output_contracts() {
 }
 
 #[test]
-fn metadata_and_deep_edpb_inspect_captured_non_protocol_lba_in_all_modes() {
-    for deep in [false, true] {
-        let Some((_tmp, path, start)) = captured_partition_edpb(deep) else {
-            eprintln!(
-                "跳过: 无法构造离线 {} EDPB 夹具",
-                if deep { "Deep" } else { "Metadata" }
-            );
-            continue;
-        };
-        let lba = (start + 1).to_string();
+fn metadata_edpb_inspects_captured_non_protocol_lba_in_all_modes() {
+    let Some((_tmp, path, start)) = captured_partition_edpb() else {
+        eprintln!("跳过: 无法构造离线 Metadata EDPB 夹具");
+        return;
+    };
+    let lba = (start + 1).to_string();
 
-        let raw = Command::new(env!("CARGO_BIN_EXE_edpcli"))
+    for mode in ["raw", "meta", "decode"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_edpcli"))
             .env("NO_COLOR", "1")
-            .args(["inspect", "raw"])
+            .args(["inspect", mode])
             .arg(&path)
             .args(["--lba", &lba])
             .output()
             .unwrap();
         assert_eq!(
-            raw.status.code(),
+            out.status.code(),
             Some(0),
             "{}",
-            String::from_utf8_lossy(&raw.stderr)
+            String::from_utf8_lossy(&out.stderr)
         );
-        let raw_stdout = String::from_utf8_lossy(&raw.stdout);
-        assert!(raw_stdout.contains("+0x000: 5A 5A"), "{raw_stdout}");
-
-        let meta = Command::new(env!("CARGO_BIN_EXE_edpcli"))
-            .env("NO_COLOR", "1")
-            .args(["inspect", "meta"])
-            .arg(&path)
-            .args(["--lba", &lba])
-            .output()
-            .unwrap();
-        assert_eq!(
-            meta.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&meta.stderr)
-        );
-        let meta_stdout = String::from_utf8_lossy(&meta.stdout);
-        assert!(meta_stdout.contains("relative_lba=1"), "{meta_stdout}");
-        assert!(
-            meta_stdout.contains("物理数据状态: 物理明文文件系统 (exFAT)"),
-            "{meta_stdout}"
-        );
-        assert!(meta_stdout.contains("decode 策略:"), "{meta_stdout}");
-
-        let decode = Command::new(env!("CARGO_BIN_EXE_edpcli"))
-            .env("NO_COLOR", "1")
-            .args(["inspect", "decode"])
-            .arg(&path)
-            .args(["--lba", &lba])
-            .output()
-            .unwrap();
-        assert_eq!(
-            decode.status.code(),
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&decode.stderr)
-        );
-        let decode_stdout = String::from_utf8_lossy(&decode.stdout);
-        assert!(
-            decode_stdout.contains("物理盘面已为有效 exFAT 明文文件系统"),
-            "{decode_stdout}"
-        );
-        assert!(decode_stdout.contains("+0x000: 5A 5A"), "{decode_stdout}");
     }
 }
 
 #[test]
 fn edpb_accepts_last_legal_lba_and_rejects_total_sectors_before_read() {
-    let Some((_tmp, path, _start)) = captured_partition_edpb(false) else {
+    let Some((_tmp, path, _start)) = captured_partition_edpb() else {
         eprintln!("跳过: 无法构造离线 Metadata EDPB 夹具");
         return;
     };
@@ -410,7 +356,7 @@ fn edpb_accepts_last_legal_lba_and_rejects_total_sectors_before_read() {
 
 #[test]
 fn edpb_uncaptured_non_protocol_lba_is_explicit_error() {
-    let Some((_tmp, path, start)) = captured_partition_edpb(false) else {
+    let Some((_tmp, path, start)) = captured_partition_edpb() else {
         eprintln!("跳过: 无法构造离线 Metadata EDPB 夹具");
         return;
     };

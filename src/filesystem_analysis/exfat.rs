@@ -174,7 +174,7 @@ fn stream_bytes(
     data_length: u64,
 ) -> Result<Vec<u8>, String> {
     if data_length > 32 * 1024 * 1024 {
-        return Err("exFAT metadata stream exceeds Deep budget".into());
+        return Err("exFAT metadata stream exceeds filesystem analysis budget".into());
     }
     let mut out = Vec::new();
     for &cluster in clusters {
@@ -423,7 +423,7 @@ pub(super) fn parse(
 
     while let Some((path, clusters)) = pending.pop_front() {
         if clusters.len() as u64 * geometry.sectors_per_cluster > 65_536 {
-            return Err("exFAT directory chain exceeds Deep budget".into());
+            return Err("exFAT directory chain exceeds filesystem analysis budget".into());
         }
         let mut bytes = Vec::new();
         for cluster in clusters {
@@ -432,7 +432,9 @@ pub(super) fn parse(
                 bytes.extend_from_slice(&read(r, start + sector, volume_length)?);
                 directory_bytes += 512;
                 if directory_bytes > 32 * 1024 * 1024 {
-                    return Err("exFAT directory metadata exceeds Deep budget".into());
+                    return Err(
+                        "exFAT directory metadata exceeds filesystem analysis budget".into(),
+                    );
                 }
             }
         }

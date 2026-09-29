@@ -257,9 +257,7 @@ pub fn run() -> i32 {
         } => {
             let bak = crate::application::resolve_backup_dir(backup_dir.as_deref());
             match action {
-                BackupAction::Create { disk, deep } => {
-                    backup_create_real_flow(&runner, disk, backup_dir, deep)
-                }
+                BackupAction::Create { disk } => backup_create_real_flow(&runner, disk, backup_dir),
                 BackupAction::List => backup_list(&bak),
                 BackupAction::Verify { target } => backup_verify(&bak, target.as_deref()),
                 BackupAction::Restore { target, disk } => {

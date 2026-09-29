@@ -2,9 +2,10 @@ use std::io;
 
 use edpcli::{
     application::provision::{plan_format_targets, FormatOptions},
-    backup_deep::{analyze_partition, keys::decrypt_mode2, AnalysisStatus, PartitionReader},
     backup_metadata::PartitionGeometry,
+    filesystem_analysis::{analyze_partition, AnalysisStatus, PartitionReader},
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
+    provision::decrypt_mode2,
     provision::{
         build_empty_exfat, build_empty_fat16, build_official_exfat_partitions,
         build_official_partition_filesystem, encrypt_sparse_mode2, wrap_file_key,
@@ -103,7 +104,7 @@ fn first_party_filesystem_config_defaults_and_normalizes_like_the_writer() {
 }
 
 #[test]
-fn portable_empty_exfat_round_trips_through_the_existing_deep_parser() {
+fn portable_empty_exfat_round_trips_through_filesystem_analysis() {
     let volume_sectors = 256 * 1024 * 1024 / 512;
     let image = build_empty_exfat(63, volume_sectors, 0x1234_5678, "EDPTEST").unwrap();
     assert_eq!(image.volume_sectors(), volume_sectors);

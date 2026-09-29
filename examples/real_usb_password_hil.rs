@@ -550,7 +550,7 @@ mod macos {
         let raw = dev
             .read_sector(lba)
             .map_err(|error| format!("读取 {} 首扇区失败: {error}", role.label()))?;
-        let plain = edpcli::backup_deep::keys::decrypt_mode2(&raw, &raw_file_key)
+        let plain = edpcli::provision::decrypt_mode2(&raw, &raw_file_key)
             .map_err(|error| format!("解密 {} 首扇区失败: {error}", role.label()))?;
         if !strict_exfat_boot(&plain, part.start_lba, part.sector_count) {
             return Err(format!(

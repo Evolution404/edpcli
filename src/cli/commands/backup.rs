@@ -4,14 +4,7 @@ pub(in crate::cli) fn backup_create_real_flow(
     runner: &SysRunner,
     disk_opt: Option<u32>,
     backup_dir_flag: Option<String>,
-    deep: bool,
 ) -> i32 {
-    if deep {
-        eprintln!(
-            "错误：--deep 已弃用且不再创建新的 Deep 备份；请使用不带该参数的元数据备份。历史 Deep EDPB 仍可读取/校验。"
-        );
-        return EXIT_USAGE;
-    }
     if let Some(disk) = disk_opt {
         if let Err(error) = guard_usb_disk(runner, disk) {
             eprintln!("{}", crate::ui::red(&error.msg));
@@ -50,16 +43,17 @@ pub(in crate::cli) fn backup_create_real_flow(
             &mut prompt,
             None,
             None,
-            deep,
         )
         .map(|report| {
-            if !deep {
-                println!(
-                    "元数据备份完成：{} 个分区；分区结构已保存；EDP 协议{}；文件系统与用户数据不包含",
-                    report.partition_count,
-                    if report.edp_protocol_saved { "已保存" } else { "不适用" }
-                );
-            }
+            println!(
+                "元数据备份完成：{} 个分区；分区结构已保存；EDP 协议{}；文件系统与用户数据不包含",
+                report.partition_count,
+                if report.edp_protocol_saved {
+                    "已保存"
+                } else {
+                    "不适用"
+                }
+            );
             EXIT_OK
         }),
     )

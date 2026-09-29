@@ -165,7 +165,6 @@ Plain 已有确定性的 `PlainProvisionWritePlan`，可新增统一 application
 | 能力 | CLI | TUI | 结论 |
 |---|---|---|---|
 | create `metadata` | 有 | 有 | 一致 |
-| create `deep` | `--deep` | 独立入口 | 语义一致 |
 | list | 有 | Backups workspace | 一致 |
 | `verify` | 有 | 有 | 一致 |
 | `restore` | 有 | 有 | 一致 |
@@ -264,7 +263,6 @@ cargo test --test <target> --quiet
 | atomic_write（首个） | ~27.7s |
 | backup | ~12.2s |
 | backup_catalog | ~12.2s |
-| backup_deep | ~12.2s |
 
 主要成本是 integration crate 数量、rustc/check/link 调度和 debug/link I/O，而不是断言本身。
 
@@ -658,7 +656,7 @@ protocol -> inspect presentation -> metainfo/provision validator
 2. 若历史迁移已经结束，删除迁移 example、`writer` 和 sidecar helpers；
 3. `LegacyMigrated` 是序列化 schema 值，若现存重要 EDPB 仍使用它，保留 read-only decode，但删除生成入口；若用户明确放弃这些文件，再删除 enum variant。
 
-不要把 LegacyMigrated 静默解释成 `Metadata`/`Deep`，因为缺失 `artifact` 是真实语义。
+不要把 LegacyMigrated 静默解释成 `Metadata`，因为缺失 `artifact` 是真实语义。
 
 ## 20. 不能删除的“`legacy`”
 

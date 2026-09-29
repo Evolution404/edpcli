@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::io;
 
 use edpcli::{
-    backup_deep::{analyze_partition, AnalysisStatus, PartitionReader},
     backup_metadata::PartitionGeometry,
     common::SECTOR,
     diskio::{execute_write_transaction, SectorDev, WriteTransactionPlan},
+    filesystem_analysis::{analyze_partition, AnalysisStatus, PartitionReader},
     provision::{
         build_plain_provision_write_plan, DiskProvisionKind, OfficialFilesystemFormat,
         PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,

@@ -29,11 +29,9 @@ pub(super) fn parse_backup(rest: &[String]) -> Result<Parsed, String> {
     let action = match action_name {
         "create" => {
             let mut disk = None;
-            let mut deep = false;
             let mut i = 0;
             while i < tail.len() {
                 match flag_name(&tail[i]) {
-                    "--deep" => set_switch(&mut deep, &tail[i], "--deep")?,
                     "--disk" => {
                         let v = take_value(tail, &mut i, "--disk")?;
                         set_once(&mut disk, parse_disk_spec(&v)?, "--disk")?;
@@ -46,7 +44,7 @@ pub(super) fn parse_backup(rest: &[String]) -> Result<Parsed, String> {
                 }
                 i += 1;
             }
-            BackupAction::Create { disk, deep }
+            BackupAction::Create { disk }
         }
         "list" => {
             let mut i = 0;

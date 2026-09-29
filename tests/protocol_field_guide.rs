@@ -117,7 +117,6 @@ fn chinese_translation_table_is_complete_unique_and_has_no_common_english_prose(
         "formatter",
         "serializer",
         "classifier",
-        "deep",
         "core",
         "restore",
         "transitional",
