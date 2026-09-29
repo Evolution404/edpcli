@@ -53,10 +53,10 @@ fn command_schema_is_the_public_surface_catalog() {
 
 #[test]
 fn help_and_completion_consume_command_schema() {
-    let cli_args = source("src/cli_args.rs");
+    let help = source("src/cli_args/help.rs");
     let completion = source("src/completion.rs");
-    assert!(cli_args.contains("command_spec::top_level_specs"));
-    assert!(cli_args.contains("command_spec::command"));
+    assert!(help.contains("command_spec::top_level_specs"));
+    assert!(help.contains("command_spec::command"));
     assert!(completion.contains("command_spec::top_level_specs"));
     assert!(completion.contains("command_spec::command"));
 

@@ -40,14 +40,15 @@ fn cli_and_tui_share_provision_prepare_commit_and_export_entrypoints() {
 
 #[test]
 fn plain_is_a_first_class_target_and_not_mode4() {
-    let args = source("src/cli_args.rs");
+    let help = source("src/cli_args/help.rs");
+    let parser = source("src/cli_args/provision.rs");
     let application = source("src/application/provision.rs");
     let tui_execution = source("src/tui/provision/execution_state.rs");
 
-    assert!(args.contains("mode0|mode1|mode2|mode3|plain"));
-    assert!(args.contains("--partition"));
-    assert!(args.contains("Plain 不是 mode4"));
-    assert!(!args.contains(r#""4" => Ok"#));
+    assert!(help.contains("mode0|mode1|mode2|mode3|plain"));
+    assert!(help.contains("--partition"));
+    assert!(help.contains("Plain 不是 mode4"));
+    assert!(!parser.contains(r#""4" => Ok"#));
 
     assert!(application.contains("enum ProvisionRequest"));
     assert!(application.contains("Official(Box<OfficialProvisionRequest>)"));
