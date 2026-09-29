@@ -75,7 +75,8 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
         ("src/tui/provision/execution_state.rs", 220),
         ("src/tui/provision/field_presentation.rs", 420),
         ("src/cli_args.rs", 550),
-        ("src/cli.rs", 350),
+        ("src/cli.rs", 250),
+        ("src/cli/prompter.rs", 180),
         ("src/cli_args/provision.rs", 700),
         ("src/application/inspect_tree/build.rs", 250),
         ("src/application/inspect_tree/topology.rs", 350),
@@ -499,11 +500,13 @@ fn cli_entry_is_split_by_command_domain() {
         "src/cli_args/backup.rs",
         "src/cli/commands/provision.rs",
         "src/cli/commands/backup.rs",
+        "src/cli/prompter.rs",
     ] {
         exists(path);
     }
     assert!(lines("src/cli_args.rs") < 550);
-    assert!(lines("src/cli.rs") < 350);
+    assert!(lines("src/cli.rs") < 250);
+    assert!(lines("src/cli/prompter.rs") < 180);
     let args = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli_args.rs"))
         .expect("read CLI parser root");
     assert!(!args.contains("fn parse_new_provision_opts("));

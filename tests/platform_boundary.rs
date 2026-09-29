@@ -5,6 +5,7 @@ const BUSINESS_SOURCES: &[&str] = &[
     "src/backup_catalog.rs",
     "src/backup_cli.rs",
     "src/cli.rs",
+    "src/cli/prompter.rs",
     "src/cli_args.rs",
     "src/completion.rs",
     "src/crypto.rs",
