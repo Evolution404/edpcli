@@ -89,7 +89,12 @@ fn authorize_restore(
     target_lba4_nonzero: bool,
     geometry: RestoreGeometryRequirements,
 ) -> EdpCliResult<()> {
+    let backup_is_plain = matches!(
+        backup.protocol.provision_kind,
+        Some(crate::provision::DiskProvisionKind::Plain)
+    );
     if target_lba4_nonzero
+        && !backup_is_plain
         && (target_tag16.iter().all(|byte| *byte == 0)
             || target.protocol.device_id.is_none()
             || target.protocol.provision_kind.is_none())
@@ -112,11 +117,7 @@ fn authorize_restore(
             ));
         }
     }
-    let backup_is_plain = matches!(
-        backup.protocol.provision_kind,
-        Some(crate::provision::DiskProvisionKind::Plain)
-    );
-    if target_tag16.iter().any(|byte| *byte != 0) {
+    if target_tag16.iter().any(|byte| *byte != 0) && !backup_is_plain {
         if target.protocol.device_id.is_none() || target.protocol.provision_kind.is_none() {
             return Err(err(
                 EXIT_BACKUP,
@@ -196,6 +197,8 @@ fn build_metadata_restore_plan(
     path: &Path,
     verified: &crate::edpb::VerifiedContainer,
     backup_protocol: Option<&[u8]>,
+    target_protocol: &[u8],
+    target_device_id: Option<&str>,
     target_total_sectors: u64,
 ) -> EdpCliResult<diskio::WriteTransactionPlan> {
     let mut transaction = diskio::WriteTransactionPlan::new(target_total_sectors);
@@ -362,6 +365,38 @@ fn build_metadata_restore_plan(
                     err(
                         EXIT_BACKUP,
                         format!("错误: Metadata Restore 计划无效: {message}"),
+                    )
+                })?;
+        }
+    }
+    let plain_v3 = verified.manifest.schema == "edpb.manifest.v3"
+        && verified
+            .manifest
+            .snapshot
+            .device_state
+            .eq_ignore_ascii_case("plain");
+    let target_has_valid_edp = target_protocol.len() == METADATA_IMAGE_LEN
+        && target_device_id
+            .and_then(|device_id| {
+                crate::provision::DiskProvisionKind::from_metadata(target_protocol, device_id)
+            })
+            .is_some();
+    if plain_v3 && target_has_valid_edp {
+        for lba in 1..=METADATA_LAST_LBA {
+            if lba == 3 || transaction.writes().contains_key(&lba) {
+                continue;
+            }
+            transaction
+                .insert(
+                    lba,
+                    vec![0u8; SECTOR],
+                    diskio::SectorWriteStage::Metadata,
+                    "plain restore stale EDP protocol cleanup",
+                )
+                .map_err(|message| {
+                    err(
+                        EXIT_BACKUP,
+                        format!("错误: Plain restore EDP 清理计划无效: {message}"),
                     )
                 })?;
         }
@@ -897,6 +932,8 @@ pub fn restore_flow_typed(
         &path,
         &verified,
         backup_protocol.as_deref(),
+        &img,
+        target_identity.protocol.device_id.as_deref(),
         current_total_sectors,
     )?;
     ctx.prompt
