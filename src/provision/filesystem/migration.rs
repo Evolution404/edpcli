@@ -1,10 +1,11 @@
 use std::collections::BTreeSet;
 
-use super::{build_empty_exfat, build_empty_fat16, SparseFilesystemImage, SECTOR_SIZE};
 use crate::filesystem::{
-    exfat_boot_checksum, exfat_geometry, exfat_upcase_table, fat_chain, put_stream, put_u16,
-    put_u32, put_u64, upcase_mapping,
+    build_empty_exfat, build_empty_fat16, exfat_boot_checksum, exfat_geometry, exfat_upcase_table,
+    fat_chain, put_stream, put_u16, put_u32, put_u64, upcase_mapping, SparseFilesystemImage,
 };
+
+const SECTOR_SIZE: usize = 512;
 use crate::provision::{FilesystemKind, MigrationStagedEntry};
 
 #[derive(Clone, Debug)]
@@ -226,7 +227,7 @@ fn write_cluster_bytes(
             let end = (start + SECTOR_SIZE).min(bytes.len());
             sector[..end - start].copy_from_slice(&bytes[start..end]);
         }
-        image.sectors.insert(first_lba + sector_index, sector);
+        image.sectors_mut().insert(first_lba + sector_index, sector);
     }
     Ok(())
 }
@@ -328,7 +329,7 @@ fn build_migrated_fat16(
             let start = sector_index as usize * SECTOR_SIZE;
             sector.copy_from_slice(&fat[start..start + SECTOR_SIZE]);
             image
-                .sectors
+                .sectors_mut()
                 .insert(reserved + copy * fat_sectors + sector_index, sector);
         }
     }
@@ -352,7 +353,9 @@ fn build_migrated_fat16(
         let start = sector_index as usize * SECTOR_SIZE;
         let mut sector = [0u8; SECTOR_SIZE];
         sector.copy_from_slice(&root[start..start + SECTOR_SIZE]);
-        image.sectors.insert(root_start + sector_index, sector);
+        image
+            .sectors_mut()
+            .insert(root_start + sector_index, sector);
     }
 
     for directory in tree.iter().filter(|entry| entry.staged.is_directory) {
@@ -599,7 +602,9 @@ fn build_migrated_exfat(
     for (index, chunk) in fat.as_chunks::<SECTOR_SIZE>().0.iter().enumerate() {
         let mut sector = [0u8; SECTOR_SIZE];
         sector.copy_from_slice(chunk);
-        image.sectors.insert(FAT_OFFSET + index as u64, sector);
+        image
+            .sectors_mut()
+            .insert(FAT_OFFSET + index as u64, sector);
     }
 
     let mut bitmap = vec![0u8; bitmap_len as usize];
@@ -610,7 +615,7 @@ fn build_migrated_exfat(
         }
     }
     put_stream(
-        &mut image.sectors,
+        image.sectors_mut(),
         heap_offset,
         sectors_per_cluster,
         bitmap_cluster,
@@ -711,8 +716,8 @@ fn build_migrated_exfat(
         chunk.copy_from_slice(&checksum.to_le_bytes());
     }
     for (index, sector) in main_boot.iter().enumerate() {
-        image.sectors.insert(index as u64, *sector);
-        image.sectors.insert(index as u64 + 12, *sector);
+        image.sectors_mut().insert(index as u64, *sector);
+        image.sectors_mut().insert(index as u64 + 12, *sector);
     }
     Ok(image)
 }

@@ -6,6 +6,7 @@ mod fat12;
 mod fat16;
 mod fat32;
 mod format;
+mod image;
 mod io;
 mod kind;
 mod metadata;
@@ -25,6 +26,10 @@ pub use fat16::{Fat16Driver, FAT16_DRIVER};
 pub use fat32::{Fat32Driver, FAT32_DRIVER};
 pub use format::{
     FilesystemGeometry, FilesystemWrite, FormatPlan, FormatRequest, FormatVerification,
+};
+pub use image::{
+    build_empty_exfat, build_empty_fat16, build_empty_filesystem, validate_volume_label,
+    SparseFilesystemImage,
 };
 pub use io::{BootSectorReader, FilesystemReader};
 pub use kind::FilesystemKind;

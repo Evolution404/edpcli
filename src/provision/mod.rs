@@ -22,10 +22,10 @@ mod write_plan;
 
 pub use crate::filesystem::FilesystemKind;
 
-pub use filesystem::{
-    build_empty_exfat, build_empty_fat16, build_migrated_filesystem, validate_volume_label,
-    SparseFilesystemImage,
+pub use crate::filesystem::{
+    build_empty_exfat, build_empty_fat16, validate_volume_label, SparseFilesystemImage,
 };
+pub use filesystem::build_migrated_filesystem;
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
 pub use key_domain::{
     KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, SecretBytes, SourcePasswordKnowledge,

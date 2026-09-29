@@ -5,11 +5,12 @@
 //! partition transform.
 
 use crate::crypto::crc32_bare;
-use crate::filesystem::FilesystemKind;
+use crate::filesystem::{
+    build_empty_exfat, build_empty_fat16, FilesystemKind, SparseFilesystemImage,
+};
 use crate::partition_transform::EdpSm4Transform;
 
 use super::{
-    filesystem::{build_empty_exfat, build_empty_fat16, SparseFilesystemImage},
     layout::{OfficialPartitionGeometry, OfficialProvisionPlan, PartitionFormatTarget},
     FileKeyWrapMode,
 };
