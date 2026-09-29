@@ -113,6 +113,7 @@ struct BackupSectorReader {
     path: PathBuf,
     manifest: Manifest,
     protocol: Vec<u8>,
+    has_full_protocol: bool,
     cache: BTreeMap<String, Vec<u8>>,
 }
 
@@ -137,7 +138,7 @@ impl BackupSectorReader {
 
 impl SectorReader for BackupSectorReader {
     fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
-        if lba < METADATA_SECTOR_COUNT as u64 {
+        if self.has_full_protocol && lba < METADATA_SECTOR_COUNT as u64 {
             let start = usize::try_from(lba)
                 .ok()
                 .and_then(|sector| sector.checked_mul(SECTOR))
@@ -191,6 +192,59 @@ pub struct EvidenceSource {
     reader: EvidenceReader,
 }
 
+fn plain_protocol_context(path: &Path, manifest: &Manifest) -> Result<Vec<u8>, EvidenceError> {
+    let mut protocol = vec![0u8; METADATA_IMAGE_LEN];
+    for artifact in manifest
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.kind == "raw_sectors")
+    {
+        let touches_prefix = artifact.source_extent_ids.iter().any(|extent_id| {
+            manifest
+                .extents
+                .iter()
+                .find(|extent| &extent.id == extent_id)
+                .is_some_and(|extent| extent.start_lba < METADATA_SECTOR_COUNT as u64)
+        });
+        if !touches_prefix {
+            continue;
+        }
+        let data = crate::edpb::read_artifact(path, &artifact.id).map_err(|message| {
+            EvidenceError::BackupProtocolRead {
+                path: path.to_path_buf(),
+                message,
+            }
+        })?;
+        for extent_id in &artifact.source_extent_ids {
+            let Some(extent) = manifest.extents.iter().find(|extent| &extent.id == extent_id) else {
+                continue;
+            };
+            if extent.start_lba >= METADATA_SECTOR_COUNT as u64 {
+                continue;
+            }
+            let copy_sectors = extent
+                .sector_count
+                .min(METADATA_SECTOR_COUNT as u64 - extent.start_lba);
+            for offset in 0..copy_sectors {
+                let src = usize::try_from(offset)
+                    .ok()
+                    .and_then(|sector| sector.checked_mul(SECTOR))
+                    .ok_or_else(|| EvidenceError::BackupProtocolLength { actual: data.len() })?;
+                let dst_lba = extent.start_lba + offset;
+                let dst = usize::try_from(dst_lba)
+                    .ok()
+                    .and_then(|sector| sector.checked_mul(SECTOR))
+                    .ok_or_else(|| EvidenceError::BackupProtocolLength { actual: data.len() })?;
+                let Some(source) = data.get(src..src + SECTOR) else {
+                    return Err(EvidenceError::BackupProtocolLength { actual: data.len() });
+                };
+                protocol[dst..dst + SECTOR].copy_from_slice(source);
+            }
+        }
+    }
+    Ok(protocol)
+}
+
 impl EvidenceSource {
     pub fn open_backup(path: &Path) -> Result<Self, EvidenceError> {
         let verified =
@@ -198,12 +252,32 @@ impl EvidenceSource {
                 path: path.to_path_buf(),
                 message: error.to_string(),
             })?;
-        let protocol = crate::edpb::read_raw_protocol(path).map_err(|error| {
-            EvidenceError::BackupProtocolRead {
+        let has_full_protocol = verified
+            .manifest
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.id == crate::edpb::RAW_PROTOCOL_ARTIFACT_ID);
+        let plain_v3 = verified.manifest.schema == "edpb.manifest.v3"
+            && verified
+                .manifest
+                .snapshot
+                .device_state
+                .eq_ignore_ascii_case("plain");
+        let protocol = if has_full_protocol {
+            crate::edpb::read_raw_protocol(path).map_err(|error| {
+                EvidenceError::BackupProtocolRead {
+                    path: path.to_path_buf(),
+                    message: error.to_string(),
+                }
+            })?
+        } else if plain_v3 {
+            plain_protocol_context(path, &verified.manifest)?
+        } else {
+            return Err(EvidenceError::BackupProtocolRead {
                 path: path.to_path_buf(),
-                message: error.to_string(),
-            }
-        })?;
+                message: "EDPB 缺少 LBA0-12 原始 Artifact".into(),
+            });
+        };
         if protocol.len() != METADATA_IMAGE_LEN {
             return Err(EvidenceError::BackupProtocolLength {
                 actual: protocol.len(),
@@ -251,6 +325,7 @@ impl EvidenceSource {
                 path: path.to_path_buf(),
                 manifest,
                 protocol,
+                has_full_protocol,
                 cache: BTreeMap::new(),
             })),
         })
