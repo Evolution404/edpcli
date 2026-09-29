@@ -74,6 +74,13 @@ pub trait FilesystemDriver: Send + Sync {
         Err(FilesystemError::format_unsupported(self.kind()))
     }
 
+    fn expected_format_metadata(
+        &self,
+        _request: &FormatRequest,
+    ) -> Result<FilesystemMetadata, FilesystemError> {
+        Err(FilesystemError::format_unsupported(self.kind()))
+    }
+
     fn build_format_plan(
         &self,
         _geometry: FilesystemGeometry,

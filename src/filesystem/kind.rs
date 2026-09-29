@@ -26,6 +26,17 @@ impl FilesystemKind {
         }
     }
 
+    pub fn from_config_token(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "fat12" => Some(Self::Fat12),
+            "fat16" => Some(Self::Fat16),
+            "fat32" => Some(Self::Fat32),
+            "exfat" => Some(Self::ExFat),
+            "ntfs" => Some(Self::Ntfs),
+            _ => None,
+        }
+    }
+
     pub const fn config_token(self) -> &'static str {
         match self {
             Self::Fat12 => "fat12",

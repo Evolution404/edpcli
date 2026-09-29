@@ -224,6 +224,26 @@ impl FilesystemDriver for Fat16Driver {
         encode_label(request.volume_label.as_deref()).map(|_| ())
     }
 
+    fn expected_format_metadata(
+        &self,
+        request: &FormatRequest,
+    ) -> Result<FilesystemMetadata, FilesystemError> {
+        self.validate_format_request(request)?;
+        let volume_serial = request.volume_serial.ok_or_else(|| {
+            FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidMetadata,
+                "FAT16 格式化需要卷序列号",
+            )
+        })?;
+        let label = encode_label(request.volume_label.as_deref())?;
+        Ok(FilesystemMetadata {
+            kind: self.kind(),
+            volume_label: decode_label(&label)?,
+            volume_serial: Some(volume_serial),
+        })
+    }
+
     fn build_format_plan(
         &self,
         geometry: FilesystemGeometry,

@@ -4,31 +4,16 @@ fn confirmed_filesystem(boot: &[u8], start_lba: u64, sectors: u64) -> Option<Fil
     if boot.len() != SECTOR {
         return None;
     }
-    let mut exfat_reader = crate::filesystem::BootSectorReader::new(boot, sectors);
-    let exfat_geometry =
-        crate::filesystem::FilesystemGeometry::new(start_lba, sectors, SECTOR as u32);
-    if crate::filesystem::FilesystemDriver::matches_geometry(
-        &crate::filesystem::EXFAT_DRIVER,
-        &mut exfat_reader,
-        exfat_geometry,
-    )
-    .ok()?
-    {
-        return Some(FilesystemKind::ExFat);
-    }
-    let mut fat16_reader = crate::filesystem::BootSectorReader::new(boot, sectors);
-    let fat16_geometry =
-        crate::filesystem::FilesystemGeometry::new(start_lba, sectors, SECTOR as u32);
-    if crate::filesystem::FilesystemDriver::matches_geometry(
-        &crate::filesystem::FAT16_DRIVER,
-        &mut fat16_reader,
-        fat16_geometry,
-    )
-    .ok()?
-    {
-        return Some(FilesystemKind::Fat16);
-    }
-    None
+    let registry = crate::filesystem::default_registry();
+    let mut detection_reader = crate::filesystem::BootSectorReader::new(boot, sectors);
+    let detected = registry.detect(&mut detection_reader).ok()??;
+    let geometry = crate::filesystem::FilesystemGeometry::new(start_lba, sectors, SECTOR as u32);
+    let mut geometry_reader = crate::filesystem::BootSectorReader::new(boot, sectors);
+    detected
+        .driver
+        .matches_geometry(&mut geometry_reader, geometry)
+        .ok()?
+        .then_some(detected.kind())
 }
 
 fn classify_live_source_identity(
