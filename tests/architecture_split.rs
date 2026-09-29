@@ -237,6 +237,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/form_render.rs",
         "src/tui/provision/review_render.rs",
         "src/tui/operation_progress_render.rs",
+        "src/tui/operation_progress_status.rs",
         "src/tui/progress_transport.rs",
         "src/tui/runtime_updates.rs",
         "src/tui/resume.rs",
@@ -480,6 +481,7 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/provision/form_render.rs") < 300);
     assert!(lines("src/tui/provision/review_render.rs") < 170);
     assert!(lines("src/tui/operation_progress_render.rs") < 260);
+    assert!(lines("src/tui/operation_progress_status.rs") < 120);
     assert!(lines("src/tui/progress_transport.rs") < 180);
     let field_source = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/fields.rs"),

@@ -151,7 +151,9 @@ fn ch16_provision_has_shared_stepper_and_card_surfaces() {
 
 #[test]
 fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
-    use edpcli::application::progress::{Phase, ProgressEvent, Step};
+    use edpcli::application::progress::{
+        OverallProgress, Phase, ProgressEvent, Step, TransactionActivityPhase, Unit, WorkProgress,
+    };
     use edpcli::tui::state::ProvisionStage;
     let mut state = provision_state();
     state.provision_mut().stage = ProvisionStage::Running;
@@ -164,17 +166,22 @@ fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
     run.started_at = now;
     run.last_activity_at = now;
     state.provision_mut().run = Some(run);
-    state.provision_push_progress(ProgressEvent::new(
-        Phase::Transaction,
-        Step::ProtocolReadback,
-        7,
-        10,
-    ));
-    let text = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
+    let event = ProgressEvent::new(Phase::Transaction, Step::ProtocolReadback, 2, 7)
+        .with_overall(OverallProgress::from_basis_points(7_000))
+        .with_work(WorkProgress {
+            current: 75,
+            total: 100,
+            unit: Unit::Sectors,
+            activity: Some(TransactionActivityPhase::FormatWrite),
+        });
+    state.provision_push_progress(event);
+    let lines = rendered_lines(&state, 160, 45);
+    let text = lines.join("\n").replace(' ', "");
     for value in [
         "总体进度",
         "70%",
         "当前阶段",
+        "2/7",
         "事务写入",
         "当前步骤",
         "协议读回校验",
@@ -183,6 +190,19 @@ fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
     ] {
         assert!(text.contains(value), "missing {value}");
     }
+    let phase_row = lines
+        .iter()
+        .position(|line| line.replace(' ', "").contains("当前阶段2/7"))
+        .expect("current-stage content row");
+    assert!(
+        lines[phase_row + 2].contains("75 / 100 sector · 75%"),
+        "work gauge label must occupy exactly the final content row: {:?}",
+        &lines[phase_row.saturating_sub(1)..=phase_row + 3]
+    );
+    assert!(
+        !lines[phase_row + 3].contains("75 / 100 sector · 75%"),
+        "work gauge must never overwrite the current-status bottom border"
+    );
     for (width, height) in [(40, 10), (80, 24), (120, 36), (240, 60)] {
         let compact = rendered_lines(&state, width, height)
             .join("\n")

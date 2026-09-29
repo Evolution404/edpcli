@@ -15,6 +15,7 @@ fn event(
         phase: Phase::Transaction,
         step: Step::ProtocolWrite,
         overall: OverallProgress::from_basis_points(overall_basis_points),
+        stage: None,
         work: Some(WorkProgress::new(current, total, Unit::Sectors)),
         detail: Some(format!("sector {current}/{total}")),
         severity,

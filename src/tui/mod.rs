@@ -14,6 +14,7 @@ pub mod event;
 pub mod execution;
 mod help_overlay;
 pub mod keymap;
+mod operation_progress_status;
 mod overview;
 pub mod pane;
 mod progress_transport;

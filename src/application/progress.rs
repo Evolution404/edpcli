@@ -223,6 +223,19 @@ impl ProgressSpan {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StageProgress {
+    pub current: u64,
+    pub total: u64,
+}
+
+impl StageProgress {
+    pub fn new(current: u64, total: u64) -> Self {
+        assert!(current <= total && total > 0);
+        Self { current, total }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LogPolicy {
     SnapshotOnly,
     Append,
@@ -235,6 +248,7 @@ pub struct ProgressEvent {
     pub phase: Phase,
     pub step: Step,
     pub overall: OverallProgress,
+    pub stage: Option<StageProgress>,
     pub work: Option<WorkProgress>,
     pub detail: Option<String>,
     pub severity: Severity,
@@ -250,6 +264,7 @@ impl ProgressEvent {
             phase,
             step,
             overall: ProgressSpan::new(0, OVERALL_BASIS_POINTS).interpolate(current, total),
+            stage: Some(StageProgress::new(current, total)),
             work: None,
             detail: None,
             severity: Severity::Info,
@@ -260,6 +275,11 @@ impl ProgressEvent {
 
     pub fn with_overall(mut self, overall: OverallProgress) -> Self {
         self.overall = overall;
+        self
+    }
+
+    pub fn with_stage(mut self, stage: StageProgress) -> Self {
+        self.stage = Some(stage);
         self
     }
 
@@ -282,6 +302,7 @@ impl ProgressEvent {
         let mut event = Self::new(phase, step, 0, 1);
         event.operation = operation;
         event.overall = OverallProgress::from_basis_points(0);
+        event.stage = None;
         event.detail = Some(detail.into());
         event.log_policy = LogPolicy::Append;
         event
@@ -294,11 +315,12 @@ pub fn project_write_event(
 ) -> ProgressEvent {
     use super::write::WriteEvent;
 
-    let (phase, step, basis_points, detail, severity, log_policy) = match event {
+    let (phase, step, basis_points, stage, detail, severity, log_policy) = match event {
         WriteEvent::BackupCreated { path } => (
             Phase::Complete,
             Step::Completed,
             OVERALL_BASIS_POINTS,
+            Some(StageProgress::new(1, 1)),
             format!("备份已创建：{}", path.display()),
             Severity::Info,
             LogPolicy::Append,
@@ -307,6 +329,7 @@ pub fn project_write_event(
             Phase::Backup,
             Step::RestoreVerification,
             500,
+            Some(StageProgress::new(1, 6)),
             format!("找到 {count} 个匹配备份"),
             Severity::Info,
             LogPolicy::AppendOnChange,
@@ -315,6 +338,7 @@ pub fn project_write_event(
             Phase::Backup,
             Step::RestoreVerification,
             500,
+            Some(StageProgress::new(1, 6)),
             format!("候选 {index} · {time}"),
             Severity::Info,
             LogPolicy::AppendOnChange,
@@ -323,6 +347,7 @@ pub fn project_write_event(
             Phase::Backup,
             Step::RestoreVerification,
             500,
+            Some(StageProgress::new(1, 6)),
             message.clone(),
             Severity::Warning,
             LogPolicy::Append,
@@ -331,6 +356,7 @@ pub fn project_write_event(
             Phase::Identity,
             Step::RestoreVerification,
             2_000,
+            Some(StageProgress::new(2, 6)),
             "备份 SHA-256 与恢复元数据校验通过".into(),
             Severity::Info,
             LogPolicy::Append,
@@ -339,6 +365,7 @@ pub fn project_write_event(
             Phase::Metadata,
             Step::RestoreVerification,
             3_500,
+            Some(StageProgress::new(3, 6)),
             format!("恢复预览完成：{}", path.display()),
             Severity::Info,
             LogPolicy::Append,
@@ -347,6 +374,7 @@ pub fn project_write_event(
             Phase::Identity,
             Step::LockAndReopen,
             4_000,
+            Some(StageProgress::new(4, 6)),
             format!("目标介质已固定：{}", path.display()),
             Severity::Info,
             LogPolicy::Append,
@@ -355,6 +383,7 @@ pub fn project_write_event(
             Phase::Readback,
             Step::RestoreWrite,
             9_000,
+            Some(StageProgress::new(5, 6)),
             "元数据恢复成功；文件系统未恢复，部分分区可能需要格式化".into(),
             Severity::Info,
             LogPolicy::Append,
@@ -363,6 +392,7 @@ pub fn project_write_event(
             Phase::Complete,
             Step::Completed,
             OVERALL_BASIS_POINTS,
+            Some(StageProgress::new(6, 6)),
             format!("恢复后只读检查完成：{} 个分区", assessment.partitions.len()),
             Severity::Info,
             LogPolicy::Append,
@@ -373,6 +403,7 @@ pub fn project_write_event(
         phase,
         step,
         overall: OverallProgress::from_basis_points(basis_points),
+        stage,
         work: None,
         detail: Some(detail),
         severity,

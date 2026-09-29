@@ -1,4 +1,7 @@
-use crate::application::progress::{OperationKind, OperationRunState, Severity, Unit};
+use crate::application::progress::{OperationKind, OperationRunState, Severity};
+use crate::tui::operation_progress_status::{
+    activity_label, draw_current_status, phase_label, unit_label,
+};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Modifier,
@@ -12,29 +15,6 @@ fn operation_title(kind: OperationKind) -> &'static str {
         OperationKind::Backup => "备份制作",
         OperationKind::Restore => "恢复备份",
         OperationKind::Provision => "制盘执行",
-    }
-}
-
-fn unit_label(unit: Unit) -> &'static str {
-    match unit {
-        Unit::Steps => "step",
-        Unit::Sectors => "sector",
-        Unit::Bytes => "byte",
-    }
-}
-
-fn activity_label(
-    activity: crate::application::progress::TransactionActivityPhase,
-) -> &'static str {
-    use crate::application::progress::TransactionActivityPhase as Activity;
-    match activity {
-        Activity::Mirror => "镜像准备",
-        Activity::Write => "写入",
-        Activity::Readback => "读回",
-        Activity::RollbackWrite => "回滚写入",
-        Activity::RollbackReadback => "回滚读回",
-        Activity::FormatWrite => "格式化写入",
-        Activity::FormatReadback => "格式化读回",
     }
 }
 
@@ -65,7 +45,7 @@ pub(crate) fn draw_operation_progress(frame: &mut Frame, area: Rect, run: &Opera
             lines.push(Line::from(format!(
                 "总体进度 {} · 当前阶段 {} · 当前步骤 {}",
                 overall_label(event.overall.basis_points()),
-                event.phase.label(),
+                phase_label(event),
                 event.step.label()
             )));
             if let Some(work) = event.work {
@@ -140,31 +120,7 @@ pub(crate) fn draw_operation_progress(frame: &mut Frame, area: Rect, run: &Opera
         chunks[1],
     );
 
-    let mut current_lines = Vec::new();
-    if let Some(event) = latest {
-        current_lines.push(Line::from(format!(
-            "当前阶段  {}    当前步骤  {}",
-            event.phase.label(),
-            event.step.label()
-        )));
-        if let Some(detail) = event.detail.as_deref() {
-            current_lines.push(Line::from(detail));
-        }
-        if let Some(activity) = event.work.and_then(|work| work.activity) {
-            current_lines.push(Line::from(format!(
-                "扇区活动  {}",
-                activity_label(activity)
-            )));
-        }
-    } else {
-        current_lines.push(Line::from("等待进度事件"));
-    }
-    frame.render_widget(
-        Paragraph::new(current_lines)
-            .block(crate::tui::ui::card("当前状态", true))
-            .wrap(Wrap { trim: false }),
-        chunks[2],
-    );
+    draw_current_status(frame, chunks[2], latest);
 
     let log_lines = if run.log.is_empty() {
         vec![Line::from(Span::styled("暂无语义活动日志", theme.muted()))]
@@ -207,29 +163,6 @@ pub(crate) fn draw_operation_progress(frame: &mut Frame, area: Rect, run: &Opera
             .wrap(Wrap { trim: false }),
         chunks[3],
     );
-
-    let work_area = Rect::new(
-        chunks[2].x,
-        chunks[2].bottom().saturating_sub(2),
-        chunks[2].width,
-        2,
-    );
-    if let Some(work) = latest.and_then(|event| event.work) {
-        let label = format!(
-            "{} / {} {} · {}%",
-            work.current,
-            work.total,
-            unit_label(work.unit),
-            work.percent()
-        );
-        frame.render_widget(
-            Gauge::default()
-                .gauge_style(theme.secondary_accent())
-                .ratio(work.ratio())
-                .label(label),
-            work_area,
-        );
-    }
 
     let safety = match run.operation {
         OperationKind::Backup => "安全提示  只读操作执行中；等待安全结束点。",
