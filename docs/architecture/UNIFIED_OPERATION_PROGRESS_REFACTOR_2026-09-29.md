@@ -868,3 +868,30 @@ git fetch origin
    - full；
    - 必要 HIL 全通过。
 
+---
+
+## 18. 2026-09-29 实施收口记录
+
+本计划 P0 → P8 已全部实施完成。
+
+- P0：先写失败测试，锁定备份确认覆盖层、统一运行进度页、总体进度插值、日志合并与固定底部布局行为。
+- P1：删除 `BackupCreateChoiceState` 与 `runtime_input/backup_choice.rs`，创建备份改为一次确认后直接进入执行状态，取消确认后保持原工作区、焦点和选择。
+- P2：建立共享 `OperationRunState`，制盘、备份和恢复不再维护各自的运行状态模型。
+- P3：统一 `ProgressEvent` 的总体进度、当前工作量和日志策略语义；总体进度使用 0..10000 基点。
+- P4：建立唯一 `draw_operation_progress()`，删除 `provision/running_render.rs`。
+- P5：备份和恢复接入共享运行状态与统一进度事件投影；恢复继续保留精确输入 `YES` 的介质写入确认。
+- P6：制盘按 `ProgressSpan` 将扇区工作量映射进总体进度；总体进度单调，成功完成严格达到 100%。
+- P7：新增 `progress_transport.rs` 合并同一高频快照流；警告、错误、回滚及阶段边界不合并；终端刷新上限约为 20 Hz。
+- P8：清理旧状态、旧输入处理器与旧运行页面；`src/application/provision.rs` 超过既有行数门禁后拆出 `provision/progress_projection.rs`，没有提高任何架构行数上限。
+
+最终验证：
+
+- `cargo fmt --all`：通过；
+- `git diff --check`：通过；
+- `cargo test --locked --test tui_suite`：321 / 321 通过；
+- `cargo test --locked --test repository_suite architecture_split -- --nocapture`：46 / 46 通过；
+- `scripts/test-fast.sh`：8 suites、10 artifacts、failures=0；
+- `python3 scripts/test-full.py --profile full`：8 suites、10 artifacts、doctest、failures=0。
+
+本轮没有修改真实介质事务、恢复或制盘写盘后端的安全语义，只调整应用层事件投影、运行状态、终端界面和高频进度运输；因此不新增 Virtual Disk HIL，既有写盘安全门槛保持不变。
+
