@@ -1,12 +1,12 @@
 //! Shared sparse-filesystem transaction executor.
 //!
-//! Filesystem construction remains in the pure provision domain. This
+//! Filesystem construction remains in the pure filesystem domain. This
 //! application helper owns the common physical mirror/write/readback/rollback path so
 //! provisioning and post-restore formatting cannot drift into separate writers.
 
 use crate::common::{EdpCliError, EdpCliResult, EXIT_TARGET};
 use crate::diskio::{self, SectorDev, SectorWriteStage, WriteTransactionPlan};
-use crate::provision::SparseFilesystemImage;
+use crate::filesystem::SparseFilesystemImage;
 
 pub(crate) fn write_sparse_filesystem_image(
     dev: &mut dyn SectorDev,

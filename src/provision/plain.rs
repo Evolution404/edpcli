@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
 use crate::common::{METADATA_LAST_LBA, SECTOR};
-
-use super::{
-    build_empty_exfat, build_empty_fat16, build_migrated_filesystem, FilesystemKind,
-    MigrationStagedEntry,
+use crate::filesystem::{
+    build_empty_exfat, build_empty_fat16, FilesystemKind, SparseFilesystemImage,
 };
+
+use super::{build_migrated_filesystem, MigrationStagedEntry};
 
 pub const DEFAULT_PLAIN_START_LBA: u64 = 2048;
 pub const MAX_PLAIN_PARTITIONS: usize = 4;
@@ -303,7 +303,7 @@ fn build_plain_mbr(plan: &PlainProvisionPlan) -> Result<[u8; SECTOR], String> {
 fn plain_filesystem_image(
     partition: &PlainPartitionSpec,
     volume_serial: u32,
-) -> Result<super::SparseFilesystemImage, String> {
+) -> Result<SparseFilesystemImage, String> {
     match partition.filesystem {
         FilesystemKind::Fat16 => build_empty_fat16(
             partition.start_lba,

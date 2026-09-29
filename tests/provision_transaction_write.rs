@@ -8,10 +8,10 @@ use edpcli::{
         execute_write_transaction_observed, SectorDev, SectorWriteStage, TransactionActivityPhase,
         WriteTransactionPlan,
     },
+    filesystem::FilesystemKind,
     provision::{
-        build_migrated_filesystem, build_plain_provision_write_plan, FilesystemKind,
-        MigrationStagedEntry, MigrationTransform, PlainCleanupExtent, PlainPartitionSpec,
-        PlainProvisionPlan,
+        build_migrated_filesystem, build_plain_provision_write_plan, MigrationStagedEntry,
+        MigrationTransform, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
     },
 };
 

@@ -30,9 +30,10 @@ fn finish_preserves_business_error_exit_code() {
 
 #[test]
 fn target_plan_summary_reports_exact_geometry_and_data_fate() {
+    use crate::filesystem::FilesystemKind;
     use crate::protocol::edpf::EdpPartitionType;
     use crate::provision::{
-        FilesystemKind, OfficialPartitionMode, PartitionAction, PartitionRole, RegionDisposition,
+        OfficialPartitionMode, PartitionAction, PartitionRole, RegionDisposition,
         SourcePasswordKnowledge, TargetPartitionGeometry, TargetPartitionPlan,
         TargetPasswordPolicy, TargetProvisionPlan,
     };

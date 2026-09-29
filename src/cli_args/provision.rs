@@ -25,10 +25,10 @@ fn parse_provision_target(s: &str) -> Result<crate::provision::ProvisionTarget, 
     }
 }
 
-fn parse_provision_filesystem(value: &str) -> Result<crate::provision::FilesystemKind, String> {
+fn parse_provision_filesystem(value: &str) -> Result<crate::filesystem::FilesystemKind, String> {
     match value.to_ascii_lowercase().as_str() {
-        "fat16" => Ok(crate::provision::FilesystemKind::Fat16),
-        "exfat" => Ok(crate::provision::FilesystemKind::ExFat),
+        "fat16" => Ok(crate::filesystem::FilesystemKind::Fat16),
+        "exfat" => Ok(crate::filesystem::FilesystemKind::ExFat),
         _ => Err(format!(
             "错误: 当前仅支持 fat16/exfat 文件系统，得到 {value}"
         )),
@@ -464,9 +464,9 @@ fn parse_new_provision_opts(
                 boot_label: String::new(),
                 share_label: String::new(),
                 encrypt_label: String::new(),
-                boot_fs: crate::provision::FilesystemKind::Fat16,
-                share_fs: crate::provision::FilesystemKind::ExFat,
-                encrypt_fs: crate::provision::FilesystemKind::ExFat,
+                boot_fs: crate::filesystem::FilesystemKind::Fat16,
+                share_fs: crate::filesystem::FilesystemKind::ExFat,
+                encrypt_fs: crate::filesystem::FilesystemKind::ExFat,
                 force_change_password: None,
                 cancel_password_complexity_check: None,
                 max_share_password_errors: None,
@@ -587,9 +587,9 @@ fn parse_new_provision_opts(
                 .unwrap_or_else(|| shared_label.clone().unwrap_or_else(|| "交换区".into())),
             encrypt_label: encrypt_label
                 .unwrap_or_else(|| shared_label.unwrap_or_else(|| "保密区".into())),
-            boot_fs: boot_fs.unwrap_or(crate::provision::FilesystemKind::Fat16),
-            share_fs: share_fs.unwrap_or(crate::provision::FilesystemKind::ExFat),
-            encrypt_fs: encrypt_fs.unwrap_or(crate::provision::FilesystemKind::ExFat),
+            boot_fs: boot_fs.unwrap_or(crate::filesystem::FilesystemKind::Fat16),
+            share_fs: share_fs.unwrap_or(crate::filesystem::FilesystemKind::ExFat),
+            encrypt_fs: encrypt_fs.unwrap_or(crate::filesystem::FilesystemKind::ExFat),
             force_change_password,
             cancel_password_complexity_check,
             max_share_password_errors,

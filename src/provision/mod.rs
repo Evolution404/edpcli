@@ -19,11 +19,6 @@ mod spec;
 mod validate;
 mod write_plan;
 
-pub use crate::filesystem::FilesystemKind;
-
-pub use crate::filesystem::{
-    build_empty_exfat, build_empty_fat16, validate_volume_label, SparseFilesystemImage,
-};
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
 pub use key_domain::{
     KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, SecretBytes, SourcePasswordKnowledge,

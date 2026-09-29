@@ -4,11 +4,12 @@
 //! the current first-party label-tool family; it does not create filesystems or
 //! touch a device.
 
+use crate::filesystem::FilesystemKind;
 use crate::protocol::{
     edpf::EdpPartitionType, lba7::Lba7PartitionMode, lba7_compat::Lba7CompatibilityExtentLayout,
 };
 
-use super::{FilesystemKind, LegacyLba7KeyMaterial, ProvisionKeyMaterial};
+use super::{LegacyLba7KeyMaterial, ProvisionKeyMaterial};
 
 pub type OfficialPartitionMode = Lba7PartitionMode;
 

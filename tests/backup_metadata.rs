@@ -17,7 +17,7 @@ use edpcli::diskio::SectorDev;
 use edpcli::edpb::{
     self, CaptureLevel, CoreCapture, MetadataCapture, RestorePolicy, SemanticStatus,
 };
-use edpcli::provision::{build_empty_exfat, build_empty_fat16};
+use edpcli::filesystem::{build_empty_exfat, build_empty_fat16};
 
 const NETAC_DEVICE_ID: &str = "disk&ven_netac&prod_onlydisk";
 const NETAC_TOTAL_SECTORS: u64 = 122_880_000;

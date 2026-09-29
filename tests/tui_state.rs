@@ -398,8 +398,8 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     assert!(edpcli::provision::OnlyId::parse(&form.label_id).is_ok());
     assert!(!form.force_change_password);
     assert!(!form.format_boot && !form.format_share && !form.format_encrypt);
-    assert_eq!(form.boot_fs, edpcli::provision::FilesystemKind::Fat16);
-    assert_eq!(form.share_fs, edpcli::provision::FilesystemKind::ExFat);
+    assert_eq!(form.boot_fs, edpcli::filesystem::FilesystemKind::Fat16);
+    assert_eq!(form.share_fs, edpcli::filesystem::FilesystemKind::ExFat);
     form.label = "自定义标签!SAFE6".into();
     form.label_id = "123456789".into();
     assert_eq!(form.label, "自定义标签!SAFE6");
@@ -601,7 +601,7 @@ fn provision_format_controls_follow_current_mode_targets() {
     assert!(state.provision_toggle_selected_option());
     assert_eq!(
         state.provision().form.share_fs,
-        edpcli::provision::FilesystemKind::Fat16
+        edpcli::filesystem::FilesystemKind::Fat16
     );
 
     state.provision_mut().kind = ProvisionKind::Mode2;

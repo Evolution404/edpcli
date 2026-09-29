@@ -1,6 +1,7 @@
 use edpcli::common::SECTOR;
-use edpcli::filesystem::{detect_boot_sector, FilesystemKind};
-use edpcli::provision::{build_empty_exfat, build_empty_fat16};
+use edpcli::filesystem::{
+    build_empty_exfat, build_empty_fat16, detect_boot_sector, FilesystemKind,
+};
 
 fn put16(bytes: &mut [u8], offset: usize, value: u16) {
     bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());

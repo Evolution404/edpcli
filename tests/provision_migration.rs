@@ -4,12 +4,13 @@ use edpcli::{
         analyze_partition, stream_file_payload, AnalysisStatus, FileEntry, FilePayloadExtent,
         FilePayloadLocator, PartitionReader,
     },
+    filesystem::FilesystemKind,
     protocol::edpf::EdpPartitionType,
     provision::{
-        build_migrated_filesystem, build_migration_manifest, Extent, FilesystemKind,
-        FilesystemProfile, MigrationBudgets, MigrationInventory, MigrationPreflightError,
-        MigrationSource, MigrationStagedEntry, MigrationTransform, PartitionRole,
-        PhysicalCryptoProfile, SourceRegion, TargetPartitionGeometry,
+        build_migrated_filesystem, build_migration_manifest, Extent, FilesystemProfile,
+        MigrationBudgets, MigrationInventory, MigrationPreflightError, MigrationSource,
+        MigrationStagedEntry, MigrationTransform, PartitionRole, PhysicalCryptoProfile,
+        SourceRegion, TargetPartitionGeometry,
     },
 };
 
@@ -202,7 +203,7 @@ fn migration_manifest_fails_closed_on_budget_path_and_locator_errors() {
 }
 
 struct ImageReader<'a> {
-    image: &'a edpcli::provision::SparseFilesystemImage,
+    image: &'a edpcli::filesystem::SparseFilesystemImage,
 }
 
 impl PartitionReader for ImageReader<'_> {

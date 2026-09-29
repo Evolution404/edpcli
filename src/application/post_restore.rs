@@ -9,11 +9,12 @@ use std::path::PathBuf;
 use crate::common::SECTOR;
 use crate::diskio::SectorDev;
 use crate::edpb::ManifestPartition;
-use crate::filesystem::FilesystemKind;
+use crate::filesystem::{
+    build_empty_exfat, build_empty_fat16, FilesystemKind, SparseFilesystemImage,
+};
 use crate::partition_transform::{decrypt_mode2, EdpSm4Transform};
 use crate::provision::{
-    build_empty_exfat, build_empty_fat16, parse_existing_provision, ExistingFileKeyError,
-    FileKeyWrapMode, ProvisionImage, SecretBytes,
+    parse_existing_provision, ExistingFileKeyError, FileKeyWrapMode, ProvisionImage, SecretBytes,
 };
 
 mod format_operation;
@@ -141,7 +142,7 @@ pub(crate) fn build_empty_partition_image(
     filesystem: FilesystemKind,
     volume_label: &str,
     volume_serial: u32,
-) -> Result<crate::provision::SparseFilesystemImage, String> {
+) -> Result<SparseFilesystemImage, String> {
     match filesystem {
         FilesystemKind::Fat16 => build_empty_fat16(
             partition.start_lba,

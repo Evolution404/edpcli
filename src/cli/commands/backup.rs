@@ -195,8 +195,8 @@ pub(in crate::cli) fn real_flow(
         }
         let filesystem = prompter.prompt_line("选择空文件系统 fat16 / exfat（回车跳过）: ");
         let filesystem = match filesystem.trim().to_ascii_lowercase().as_str() {
-            "fat16" => crate::provision::FilesystemKind::Fat16,
-            "exfat" => crate::provision::FilesystemKind::ExFat,
+            "fat16" => crate::filesystem::FilesystemKind::Fat16,
+            "exfat" => crate::filesystem::FilesystemKind::ExFat,
             "" => continue,
             other => {
                 eprintln!("当前 portable writer 不支持 {other}");

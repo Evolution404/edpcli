@@ -1,5 +1,6 @@
 use edpcli::{
     crypto::{a6b0_full, crc32_bare, xor_rolling},
+    filesystem::FilesystemKind,
     platform::{HardwareProbe, InquiryInfo, NativeTransport},
     protocol::edpf::EdpPartitionType,
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
@@ -8,12 +9,12 @@ use edpcli::{
         parse_existing_provision, prefill_for_target_mode, wrap_file_key,
         wrap_legacy_lba7_file_key, CapacityInput, CapacityInputMode, CapacitySource,
         DiskProvisionKind, ExistingFileKeyError, ExistingPartition, ExistingProvisionProfile,
-        FileKeyWrapMode, FilesystemKind, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
-        MigrationTransform, OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
-        OnlyId, PartitionAction, PartitionRole, PassInfoPolicy, ProvisionEntropy,
-        ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget, QuickCapacityUnit,
-        RegionDisposition, SourcePasswordKnowledge, TargetGeometryOverrides, TargetIdentity,
-        TargetProvisionPlan, OFFICIAL_PARTITION_START_SECTOR,
+        FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, MigrationTransform,
+        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId,
+        PartitionAction, PartitionRole, PassInfoPolicy, ProvisionEntropy, ProvisionMetadata,
+        ProvisionProfile, ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
+        SourcePasswordKnowledge, TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
+        OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
