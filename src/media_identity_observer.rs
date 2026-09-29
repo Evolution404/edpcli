@@ -94,6 +94,66 @@ fn lba4_digest(lba4: &[u8]) -> Option<String> {
         .then(|| format!("{:x}", Sha256::digest(lba4)))
 }
 
+pub(crate) fn apply_runtime_plain_override(
+    mut snapshot: MediaIdentitySnapshot,
+    protocol_image: &[u8],
+    total_sectors: u64,
+    mut read_sector: impl FnMut(u64) -> Result<Vec<u8>, String>,
+) -> MediaIdentitySnapshot {
+    if snapshot
+        .protocol
+        .provision_kind
+        .and_then(DiskProvisionKind::official_mode)
+        .is_none()
+        || protocol_image.len() != METADATA_IMAGE_LEN
+        || total_sectors == 0
+    {
+        return snapshot;
+    }
+
+    let Ok(raw0) = <&[u8; SECTOR]>::try_from(&protocol_image[..SECTOR]) else {
+        return snapshot;
+    };
+    let Ok(mbr) = crate::protocol::lba0::parse_lba0(raw0) else {
+        return snapshot;
+    };
+    let partitions = mbr
+        .partitions
+        .iter()
+        .filter(|partition| partition.partition_type != 0 && partition.sector_count != 0)
+        .collect::<Vec<_>>();
+    if partitions.is_empty()
+        || partitions.iter().any(|partition| {
+            matches!(partition.partition_type, 0x05 | 0x0f | 0x85 | 0xee)
+                || u64::from(partition.start_lba) < 2_048
+                || u64::from(partition.start_lba)
+                    .checked_add(u64::from(partition.sector_count))
+                    .is_none_or(|end| end > total_sectors)
+        })
+    {
+        return snapshot;
+    }
+
+    for partition in partitions {
+        let start = u64::from(partition.start_lba);
+        let count = u64::from(partition.sector_count);
+        let Ok(boot) = read_sector(start) else {
+            return snapshot;
+        };
+        if crate::inspect_target::detect_plain_filesystem(count, &boot).is_none() {
+            return snapshot;
+        }
+    }
+
+    snapshot.protocol = ProtocolIdentityEvidence {
+        device_id: None,
+        onlyid: None,
+        provision_kind: Some(DiskProvisionKind::Plain),
+        lba4_identity_digest: None,
+    };
+    snapshot
+}
+
 pub fn media_identity_from_protocol_image(
     runner: &dyn CmdRunner,
     disk: u32,
@@ -204,7 +264,20 @@ pub fn observe_media_identity_readonly(
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<ReadonlyMediaObservation> {
     let protocol_image = read_protocol_image_readonly(dev)?;
-    let snapshot = media_identity_from_protocol_image(runner, disk, &protocol_image)?;
+    let mut snapshot = media_identity_from_protocol_image(runner, disk, &protocol_image)?;
+    if let Some(total_sectors) = snapshot.hardware.total_sectors {
+        snapshot = apply_runtime_plain_override(
+            snapshot,
+            &protocol_image,
+            total_sectors,
+            |lba| {
+                let lba = u32::try_from(lba)
+                    .map_err(|_| format!("Plain runtime evidence LBA{lba} exceeds u32"))?;
+                dev.read_sector(lba)
+                    .map_err(|error| format!("read Plain runtime evidence LBA{lba}: {error}"))
+            },
+        );
+    }
     Ok(ReadonlyMediaObservation {
         snapshot,
         protocol_image,
