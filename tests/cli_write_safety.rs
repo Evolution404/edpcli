@@ -69,6 +69,14 @@ fn usage_errors_exit_two() {
 }
 
 #[test]
+fn deprecated_deep_backup_flag_never_creates_a_new_backup() {
+    let r = bin().args(["backup", "create", "--deep"]).output().unwrap();
+    assert_eq!(r.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    assert!(stderr.contains("--deep") && stderr.contains("不再创建"), "{stderr}");
+}
+
+#[test]
 fn provision_write_bridges_the_same_backup_dir_across_elevation_and_commit() {
     let source = include_str!("../src/cli/commands/provision.rs");
     assert!(source.contains("argv_with_backup_dir_for_elevation(backup_dir.as_deref())"));
@@ -1158,9 +1166,26 @@ fn chapter_18_b4_plain_v3_restore_writes_partition_metadata_without_protocol_cor
         "MBR must be restored"
     );
     assert_eq!(
-        &restored[SECTOR..13 * SECTOR],
-        &original_edp[SECTOR..13 * SECTOR],
-        "Plain metadata restore must not manufacture or overwrite filesystem/protocol sectors"
+        &restored[3 * SECTOR..4 * SECTOR],
+        &original_edp[3 * SECTOR..4 * SECTOR],
+        "Plain restore must preserve manufacturer LBA3 byte-for-byte"
+    );
+    for lba in [1usize, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
+        assert!(
+            restored[lba * SECTOR..(lba + 1) * SECTOR]
+                .iter()
+                .all(|byte| *byte == 0),
+            "Plain restore must clear stale EDP protocol LBA{lba}"
+        );
+    }
+    assert_eq!(
+        edpcli::provision::DiskProvisionKind::from_sectors(
+            &restored[7 * SECTOR..8 * SECTOR],
+            &restored[12 * SECTOR..13 * SECTOR],
+            "disk&ven_netac&prod_onlydisk"
+        ),
+        None,
+        "restored Plain metadata must not remain classifiable as an EDP mode"
     );
     assert_eq!(
         u32::from_le_bytes(restored[454..458].try_into().unwrap()),
