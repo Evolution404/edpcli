@@ -761,13 +761,18 @@ pub fn prepare_target_provision(
                 format!("错误: {} K6 迁移目标没有文件系统", migration.role.label()),
             )
         })?;
+        let filesystem_entries = migration
+            .entries
+            .iter()
+            .map(FilesystemMigrationEntry::from)
+            .collect::<Vec<_>>();
         let plain = build_migrated_filesystem(
             filesystem,
             part.geometry.start_lba,
             part.geometry.sector_count,
             serials[migration.target_index],
             &choice.volume_label,
-            &migration.entries,
+            &filesystem_entries,
         )
         .map_err(|message| {
             err(

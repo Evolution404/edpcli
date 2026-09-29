@@ -16,17 +16,16 @@ use edpcli::diskio::{
 use edpcli::filesystem::analysis::{
     analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
 };
-use edpcli::filesystem::FilesystemKind;
+use edpcli::filesystem::{build_migrated_filesystem, FilesystemKind, FilesystemMigrationEntry};
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use edpcli::provision::{
-    build_migrated_filesystem, generate_official_image, parse_existing_provision,
-    prefill_for_target_mode, unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key,
-    FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, MigrationStagedEntry,
-    MigrationTransform, OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
-    OnlyId, PartitionAction, PartitionRole, ProvisionEntropy, ProvisionImage, ProvisionMetadata,
-    ProvisionProfile, ProvisionSpec, RegionDisposition, SourcePasswordKnowledge, TargetIdentity,
-    TargetProvisionPlan,
+    generate_official_image, parse_existing_provision, prefill_for_target_mode,
+    unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
+    KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, MigrationStagedEntry, MigrationTransform,
+    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId, PartitionAction,
+    PartitionRole, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
+    ProvisionSpec, RegionDisposition, SourcePasswordKnowledge, TargetIdentity, TargetProvisionPlan,
 };
 
 static HIL_LOCK: Mutex<()> = Mutex::new(());
@@ -467,13 +466,17 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
         mtime: None,
         ctime: None,
     }];
+    let filesystem_entries = staged
+        .iter()
+        .map(FilesystemMigrationEntry::from)
+        .collect::<Vec<_>>();
     let migrated = build_migrated_filesystem(
         FilesystemKind::ExFat,
         share_target.start_lba,
         share_target.sector_count,
         0x4b36_4849,
         "K6VHIL",
-        &staged,
+        &filesystem_entries,
     )
     .expect("build populated K6 exFAT image");
     let mut k6_patch = BTreeMap::new();

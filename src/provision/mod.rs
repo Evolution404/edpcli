@@ -39,9 +39,9 @@ pub use layout::{
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
 pub use migration::{
-    build_migrated_filesystem, build_migration_manifest, finalize_staged_entry, MigrationBudgets,
-    MigrationInventory, MigrationManifest, MigrationManifestEntry, MigrationPreflightError,
-    MigrationStagedEntry, MAX_MIGRATION_ENTRIES,
+    build_migration_manifest, finalize_staged_entry, MigrationBudgets, MigrationInventory,
+    MigrationManifest, MigrationManifestEntry, MigrationPreflightError, MigrationStagedEntry,
+    MAX_MIGRATION_ENTRIES,
 };
 pub use partition_format::{
     build_official_exfat_partition, build_official_exfat_partitions,
