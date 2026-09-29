@@ -149,7 +149,16 @@ fn write_plain_metadata_v3(
             derivation: None,
             restore_policy: RestorePolicy::Restorable,
             completeness: ArtifactCompleteness::Complete,
-            data: vec![0u8; SECTOR],
+            data: {
+                let mut mbr = vec![0u8; SECTOR];
+                let entry = 0x1be;
+                mbr[entry + 4] = 0x07;
+                mbr[entry + 8..entry + 12].copy_from_slice(&2_048u32.to_le_bytes());
+                mbr[entry + 12..entry + 16]
+                    .copy_from_slice(&u32::try_from(total_sectors - 2_048).unwrap().to_le_bytes());
+                mbr[510..512].copy_from_slice(&[0x55, 0xaa]);
+                mbr
+            },
         }],
         notes: Vec::new(),
     };
@@ -431,6 +440,32 @@ fn backup_collision_never_overwrites_existing_file() {
     );
     assert_eq!(fs::read(&path).unwrap(), first, "同名备份绝不能被静默覆盖");
     assert!(edpb::verify_file(&path).is_ok());
+}
+
+#[test]
+fn plain_v3_metadata_opens_as_evidence_without_protocol_core() {
+    use edpcli::application::evidence::{EvidenceSource, SectorReader};
+
+    let tmp = TmpDir::new("plain_v3_evidence");
+    let total_sectors = 245_760_000u64;
+    let path = write_plain_metadata_v3(
+        &tmp.0,
+        "disk5_245760000_vid2bdf_pid0300_plain_20260929_073104.edpb",
+        total_sectors,
+    );
+
+    let mut evidence =
+        EvidenceSource::open_backup(&path).expect("Plain v3 evidence source must open");
+    assert_eq!(
+        evidence.identity().provision_kind,
+        Some(edpcli::provision::DiskProvisionKind::Plain)
+    );
+    let mbr = SectorReader::read_sector(&mut evidence, 0).expect("captured MBR");
+    assert_eq!(&mbr[510..512], &[0x55, 0xaa]);
+    assert!(
+        SectorReader::read_sector(&mut evidence, 4).is_err(),
+        "uncaptured Plain protocol sectors must stay explicitly unavailable"
+    );
 }
 
 #[test]
