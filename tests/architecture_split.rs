@@ -77,7 +77,8 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
         ("src/cli_args.rs", 550),
         ("src/cli.rs", 350),
         ("src/cli_args/provision.rs", 700),
-        ("src/application/inspect_tree/build.rs", 500),
+        ("src/application/inspect_tree/build.rs", 250),
+        ("src/application/inspect_tree/topology.rs", 350),
         ("src/provision/reprovision/plan.rs", 400),
         ("src/edpb/identity.rs", 400),
     ] {
@@ -524,6 +525,7 @@ fn application_inspect_is_split_by_read_responsibility() {
         "src/application/inspect/service.rs",
         "src/application/inspect_tree/model.rs",
         "src/application/inspect_tree/build.rs",
+        "src/application/inspect_tree/topology.rs",
         "src/application/inspect_tree/search.rs",
     ] {
         exists(path);
