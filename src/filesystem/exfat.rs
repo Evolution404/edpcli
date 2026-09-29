@@ -523,6 +523,25 @@ impl FilesystemDriver for ExFatDriver {
         }
         validate_label(request.volume_label.as_deref()).map(|_| ())
     }
+
+    fn expected_format_metadata(
+        &self,
+        request: &FormatRequest,
+    ) -> Result<FilesystemMetadata, FilesystemError> {
+        self.validate_format_request(request)?;
+        let volume_serial = request.volume_serial.ok_or_else(|| {
+            FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidMetadata,
+                "exFAT 格式化需要卷序列号",
+            )
+        })?;
+        Ok(FilesystemMetadata {
+            kind: self.kind(),
+            volume_label: request.volume_label.clone(),
+            volume_serial: Some(volume_serial),
+        })
+    }
     fn build_format_plan(
         &self,
         geometry: FilesystemGeometry,

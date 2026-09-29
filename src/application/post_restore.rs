@@ -240,12 +240,7 @@ pub(crate) fn format_partition_after_restore(
         let detected = crate::filesystem::detect_boot_sector(partition.sector_count, &plain_boot)
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "格式化后文件系统 boot sector 未通过严格校验".to_string())?;
-        let expected = match request.filesystem {
-            FilesystemKind::Fat16 => FilesystemKind::Fat16,
-            FilesystemKind::ExFat => FilesystemKind::ExFat,
-            FilesystemKind::Fat12 | FilesystemKind::Fat32 | FilesystemKind::Ntfs => unreachable!(),
-        };
-        if detected != expected {
+        if detected != request.filesystem {
             return Err(format!(
                 "格式化后文件系统类型不一致: expected {}, got {}",
                 request.filesystem.config_token(),

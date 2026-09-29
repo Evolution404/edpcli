@@ -822,30 +822,17 @@ fn execute_partition_format_observed(
         )
         .map_err(|error| err(EXIT_IO, format!("错误: 读取文件系统引导扇区失败: {error}")))?;
     let raw_plain_filesystem = if choice.target.physically_encrypted {
-        let mut fat16_reader = crate::filesystem::BootSectorReader::new(
+        let registry = crate::filesystem::default_registry();
+        let mut raw_reader = crate::filesystem::BootSectorReader::new(
             &raw_boot,
             choice.target.geometry.sector_count(),
         );
-        let fat16 = crate::filesystem::FilesystemDriver::detect(
-            &crate::filesystem::FAT16_DRIVER,
-            &mut fat16_reader,
-        )
-        .map_err(|error| err(EXIT_IO, format!("错误: FAT16 首扇区检测失败: {error}")))?
-        .confidence
-            == crate::filesystem::DetectionConfidence::Exact;
-
-        let mut exfat_reader = crate::filesystem::BootSectorReader::new(
-            &raw_boot,
-            choice.target.geometry.sector_count(),
-        );
-        let exfat = crate::filesystem::FilesystemDriver::detect(
-            &crate::filesystem::EXFAT_DRIVER,
-            &mut exfat_reader,
-        )
-        .map_err(|error| err(EXIT_IO, format!("错误: exFAT 首扇区检测失败: {error}")))?
-        .confidence
-            == crate::filesystem::DetectionConfidence::Exact;
-        fat16 || exfat
+        registry
+            .detect(&mut raw_reader)
+            .map_err(|error| err(EXIT_IO, format!("错误: 文件系统首扇区检测失败: {error}")))?
+            .is_some_and(|detected| {
+                detected.result.confidence == crate::filesystem::DetectionConfidence::Exact
+            })
     } else {
         false
     };
@@ -866,70 +853,67 @@ fn execute_partition_format_observed(
         file_key_crc: 0,
         encrypt_mode: 0,
     };
+    let registry = crate::filesystem::default_registry();
+    let driver = registry.driver(filesystem).ok_or_else(|| {
+        err(
+            EXIT_IO,
+            format!("错误: {} 文件系统没有已注册驱动", filesystem.config_token()),
+        )
+    })?;
+    if !driver.capabilities().verify_format {
+        return Err(err(
+            EXIT_IO,
+            format!(
+                "错误: 当前不支持 {} 格式化读回校验",
+                filesystem.config_token()
+            ),
+        ));
+    }
+    let mut request = crate::filesystem::FormatRequest::new(filesystem);
+    request.volume_label = (!choice.volume_label.is_empty()).then(|| choice.volume_label.clone());
+    request.volume_serial = Some(choice.volume_serial);
+    let expected = driver.expected_format_metadata(&request).map_err(|error| {
+        err(
+            EXIT_IO,
+            format!(
+                "错误: {} 格式化预期元数据无效: {error}",
+                filesystem.config_token()
+            ),
+        )
+    })?;
+    let fs_geometry = crate::filesystem::FilesystemGeometry::new(
+        choice.target.geometry.start_sector,
+        choice.target.geometry.sector_count(),
+        SECTOR as u32,
+    );
     let mut reader = PreparedImageReader {
         image: verification_image,
     };
-    if matches!(filesystem, FilesystemKind::Fat16 | FilesystemKind::ExFat) {
-        let (kind, expected_label, driver): (
-            crate::filesystem::FilesystemKind,
-            Option<String>,
-            &dyn crate::filesystem::FilesystemDriver,
-        ) = match filesystem {
-            FilesystemKind::Fat16 => (
-                crate::filesystem::FilesystemKind::Fat16,
-                (!choice.volume_label.is_empty()).then(|| choice.volume_label.to_uppercase()),
-                &crate::filesystem::FAT16_DRIVER,
-            ),
-            FilesystemKind::ExFat => (
-                crate::filesystem::FilesystemKind::ExFat,
-                (!choice.volume_label.is_empty()).then(|| choice.volume_label.clone()),
-                &crate::filesystem::EXFAT_DRIVER,
-            ),
-            FilesystemKind::Fat12 | FilesystemKind::Fat32 | FilesystemKind::Ntfs => unreachable!(),
-        };
-        let expected = crate::filesystem::FilesystemMetadata {
-            kind,
-            volume_label: expected_label,
-            volume_serial: Some(choice.volume_serial),
-        };
-        let fs_geometry = crate::filesystem::FilesystemGeometry::new(
-            choice.target.geometry.start_sector,
-            choice.target.geometry.sector_count(),
-            SECTOR as u32,
-        );
-        driver
-            .verify_format(&mut reader, fs_geometry, &expected)
-            .map_err(|error| {
-                err(
-                    EXIT_IO,
-                    format!(
-                        "错误: {} 格式化读回校验失败: {error}",
-                        filesystem.config_token()
-                    ),
-                )
-            })?;
-
-        let report = analyze_partition(&geometry, &mut reader);
-        if report.status != AnalysisStatus::Parsed
-            || report.filesystem.as_deref() != Some(filesystem.config_token())
-            || report.file_count != Some(0)
-        {
-            return Err(err(
+    driver
+        .verify_format(&mut reader, fs_geometry, &expected)
+        .map_err(|error| {
+            err(
                 EXIT_IO,
                 format!(
-                    "错误: {} 深度解析失败: {}",
-                    filesystem.config_token(),
-                    report.reason
+                    "错误: {} 格式化读回校验失败: {error}",
+                    filesystem.config_token()
                 ),
-            ));
-        }
-        return Ok(());
+            )
+        })?;
+
+    let report = analyze_partition(&geometry, &mut reader);
+    if report.status != AnalysisStatus::Parsed
+        || report.filesystem.as_deref() != Some(filesystem.config_token())
+        || report.file_count != Some(0)
+    {
+        return Err(err(
+            EXIT_IO,
+            format!(
+                "错误: {} 深度解析失败: {}",
+                filesystem.config_token(),
+                report.reason
+            ),
+        ));
     }
-    Err(err(
-        EXIT_IO,
-        format!(
-            "错误: 当前不支持 {} 格式化读回校验",
-            filesystem.config_token()
-        ),
-    ))
+    Ok(())
 }

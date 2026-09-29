@@ -381,13 +381,7 @@ fn analyze_plain_partition(
             filesystem: report
                 .filesystem
                 .as_deref()
-                .and_then(|name| match name {
-                    "fat16" => Some(FilesystemKind::Fat16),
-                    "fat32" => Some(FilesystemKind::Fat32),
-                    "exfat" => Some(FilesystemKind::ExFat),
-                    "ntfs" => Some(FilesystemKind::Ntfs),
-                    _ => None,
-                })
+                .and_then(FilesystemKind::from_config_token)
                 .map(FilesystemProfile::Known)
                 .unwrap_or(FilesystemProfile::Unknown),
             ..region
