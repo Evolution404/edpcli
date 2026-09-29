@@ -65,7 +65,8 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
     assert!(!near_hard_limit(79, 100));
     assert!(near_hard_limit(80, 100));
     for (path, hard_limit) in [
-        ("src/tui/mod.rs", 500),
+        ("src/tui/mod.rs", 400),
+        ("src/tui/resume.rs", 180),
         ("src/tui/inspect/state.rs", 600),
         ("src/tui/inspect/preview_state.rs", 200),
         ("src/tui/inspect/search_state.rs", 450),
@@ -213,6 +214,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/review_render.rs",
         "src/tui/provision/running_render.rs",
         "src/tui/runtime_updates.rs",
+        "src/tui/resume.rs",
         "src/tui/runtime_input.rs",
         "src/tui/runtime_input/inspect.rs",
         "src/tui/runtime_input/provision.rs",
@@ -260,8 +262,12 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
     assert!(
-        lines("src/tui/mod.rs") < 500,
+        lines("src/tui/mod.rs") < 400,
         "TUI module root must remain lifecycle-oriented; action dispatch belongs in dispatch.rs"
+    );
+    assert!(
+        lines("src/tui/resume.rs") < 180,
+        "TUI elevation-resume argv encoding must stay isolated from terminal lifecycle"
     );
     assert!(lines("src/tui/runtime_updates.rs") < 160);
     assert!(lines("src/tui/runtime_input.rs") < 180);
