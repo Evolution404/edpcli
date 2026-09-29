@@ -216,37 +216,15 @@ fn detect_filesystem_boot(
         return None;
     }
 
-    if boot.get(3..11) == Some(b"EXFAT   ") {
-        let volume_length = u64le(boot, 72);
-        let fat_offset = u32le(boot, 80) as u64;
-        let fat_length = u32le(boot, 84) as u64;
-        let heap_offset = u32le(boot, 88) as u64;
-        let cluster_count = u32le(boot, 92) as u64;
-        let root_cluster = u32le(boot, 96) as u64;
-        let bps_shift = boot[108];
-        let spc_shift = boot[109];
-        let fats = boot[110] as u64;
-        let percent_in_use = boot[112];
-        let spc = 1u64.checked_shl(spc_shift as u32)?;
-        let fat_end = fat_offset.checked_add(fat_length.checked_mul(fats)?)?;
-        let heap_end = heap_offset.checked_add(cluster_count.checked_mul(spc)?)?;
-        if boot[11..64].iter().all(|&byte| byte == 0)
-            && bps_shift == 9
-            && spc_shift < 26
-            && matches!(fats, 1 | 2)
-            && (percent_in_use <= 100 || percent_in_use == 0xff)
-            && total_fits_partition(volume_length, partition)
-            && fat_offset >= 24
-            && fat_length > 0
-            && heap_offset >= fat_end
-            && cluster_count > 0
-            && root_cluster >= 2
-            && root_cluster < cluster_count + 2
-            && heap_end <= volume_length
-        {
-            return Some(FilesystemBootKind::Exfat);
-        }
-        return None;
+    let mut exfat_reader = crate::filesystem::BootSectorReader::new(boot, partition.sector_count);
+    if crate::filesystem::FilesystemDriver::detect(
+        &crate::filesystem::EXFAT_DRIVER,
+        &mut exfat_reader,
+    )
+    .ok()
+    .is_some_and(|result| result.confidence == crate::filesystem::DetectionConfidence::Exact)
+    {
+        return Some(FilesystemBootKind::Exfat);
     }
 
     let mut fat16_reader = crate::filesystem::BootSectorReader::new(boot, partition.sector_count);

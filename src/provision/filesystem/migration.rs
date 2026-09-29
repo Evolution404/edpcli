@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 
-use super::{
-    build_empty_exfat, build_empty_fat16, exfat_boot_checksum, exfat_geometry, exfat_upcase_table,
-    fat_chain, put_stream, put_u16, put_u32, put_u64, SparseFilesystemImage, SECTOR_SIZE,
+use super::{build_empty_exfat, build_empty_fat16, SparseFilesystemImage, SECTOR_SIZE};
+use crate::filesystem::{
+    exfat_boot_checksum, exfat_geometry, exfat_upcase_table, fat_chain, put_stream, put_u16,
+    put_u32, put_u64, upcase_mapping,
 };
 use crate::provision::{MigrationStagedEntry, OfficialFilesystemFormat};
 
@@ -405,7 +406,7 @@ fn build_migrated_fat16(
 
 fn exfat_name_hash(name: &[u16]) -> u16 {
     name.iter().fold(0u16, |hash, unit| {
-        let upper = super::upcase_mapping(*unit);
+        let upper = upcase_mapping(*unit);
         upper.to_le_bytes().into_iter().fold(hash, |sum, byte| {
             sum.rotate_right(1).wrapping_add(byte as u16)
         })
@@ -586,13 +587,13 @@ fn build_migrated_exfat(
     let mut fat = vec![0u8; fat_bytes_len];
     put_u32(&mut fat, 0, 0xffff_fff8);
     put_u32(&mut fat, 4, 0xffff_ffff);
-    fat_chain(&mut fat, bitmap_cluster, bitmap_clusters)?;
-    fat_chain(&mut fat, upcase_cluster, upcase_clusters)?;
+    fat_chain(&mut fat, bitmap_cluster, bitmap_clusters).map_err(|error| error.to_string())?;
+    fat_chain(&mut fat, upcase_cluster, upcase_clusters).map_err(|error| error.to_string())?;
     if root_extra == 0 {
         put_u32(&mut fat, root_cluster as usize * 4, 0xffff_ffff);
     } else {
         put_u32(&mut fat, root_cluster as usize * 4, root_extra_first);
-        fat_chain(&mut fat, root_extra_first, root_extra)?;
+        fat_chain(&mut fat, root_extra_first, root_extra).map_err(|error| error.to_string())?;
     }
     const FAT_OFFSET: u64 = 24;
     for (index, chunk) in fat.as_chunks::<SECTOR_SIZE>().0.iter().enumerate() {
@@ -615,7 +616,8 @@ fn build_migrated_exfat(
         bitmap_cluster,
         bitmap_clusters,
         &bitmap,
-    )?;
+    )
+    .map_err(|error| error.to_string())?;
 
     let mut root = vec![0u8; root_clusters as usize * cluster_bytes as usize];
     let old_root_lba = heap_offset + (root_cluster as u64 - 2) * sectors_per_cluster;

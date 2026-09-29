@@ -8,9 +8,15 @@ fn confirmed_filesystem(
     if boot.len() != SECTOR {
         return None;
     }
-    if boot.get(3..11) == Some(b"EXFAT   ")
-        && u64::from_le_bytes(boot.get(64..72)?.try_into().ok()?) == start_lba
-        && u64::from_le_bytes(boot.get(72..80)?.try_into().ok()?) == sectors
+    let mut exfat_reader = crate::filesystem::BootSectorReader::new(boot, sectors);
+    let exfat_geometry =
+        crate::filesystem::FilesystemGeometry::new(start_lba, sectors, SECTOR as u32);
+    if crate::filesystem::FilesystemDriver::matches_geometry(
+        &crate::filesystem::EXFAT_DRIVER,
+        &mut exfat_reader,
+        exfat_geometry,
+    )
+    .ok()?
     {
         return Some(OfficialFilesystemFormat::ExFat);
     }

@@ -337,13 +337,13 @@ EDP 备份继续以协议为事实源：原始 LBA0-12、验证后的 LBA7 兼�
 
 ### F3 — 迁移 exFAT
 
-状态：`IN_PROGRESS`
+状态：`COMPLETE`
 
 把 exFAT 识别、几何解析、根目录/FAT 链上的有界 `0x83` 卷标读取、无卷标语义、空文件系统构建、格式化校验和读回校验迁入 `filesystem/exfat.rs`，删除外部重复逻辑。
 
 ### F4 — 统一只读检测驱动并切业务调用
 
-状态：`PENDING`
+状态：`IN_PROGRESS`
 
 建立 FAT12/FAT32/NTFS 最小驱动，按现有能力提供识别和元数据读取。把备份、检查、制盘、恢复、TUI 请求类型切到 `FilesystemKind` / `registry`，并修正 EDP 模式感知的清单角色。删除旧枚举或临时别名。
 
@@ -357,7 +357,7 @@ EDP 备份继续以协议为事实源：原始 LBA0-12、验证后的 LBA7 兼�
 
 状态：`PENDING`
 
-把 `filesystem_analysis` 迁到 `filesystem/analysis`，更新正式迁移消费者，删除旧模块、适配层、别名和重复辅助函数，并执行 grep 门禁证明具体文件系统知识不再泄漏到业务域。
+把 `filesystem_analysis` 迁到 `filesystem/analysis`；把仍位于 `provision/filesystem/migration.rs` 的 FAT/exFAT 专用迁移实现迁入文件系统领域，仅保留业务编排入口；更新正式迁移消费者，删除旧模块、适配层、别名和重复辅助函数，并执行 grep 门禁证明具体文件系统知识不再泄漏到业务域。
 
 ## 14. 最终 grep 门禁
 

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use edpcli::filesystem::{
     DetectionConfidence, DetectionResult, DriverRegistry, FilesystemCapabilities, FilesystemDriver,
     FilesystemError, FilesystemErrorKind, FilesystemGeometry, FilesystemKind, FilesystemReader,
-    FormatRequest, FAT16_DRIVER,
+    FormatRequest, EXFAT_DRIVER, FAT16_DRIVER,
 };
 
 struct MemoryReader {
@@ -248,6 +248,93 @@ fn fat16_driver_uses_none_as_the_only_no_user_label_semantic() {
     };
     assert_eq!(
         FAT16_DRIVER
+            .validate_format_request(&invalid)
+            .unwrap_err()
+            .kind,
+        FilesystemErrorKind::InvalidVolumeLabel
+    );
+}
+
+#[test]
+fn exfat_driver_owns_format_metadata_detection_and_verification() {
+    let geometry = FilesystemGeometry::new(2_048, 100_000, 512);
+    let request = FormatRequest {
+        filesystem: FilesystemKind::ExFat,
+        volume_label: Some("DATA".into()),
+        volume_serial: Some(0x8765_4321),
+    };
+    let plan = EXFAT_DRIVER
+        .build_format_plan(geometry, &request)
+        .expect("driver format plan");
+    let legacy = edpcli::provision::build_empty_exfat(2_048, 100_000, 0x8765_4321, "DATA").unwrap();
+    let writes = plan
+        .writes
+        .iter()
+        .map(|write| (write.relative_lba, write.data))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        &writes,
+        legacy.sectors(),
+        "迁移适配入口必须与 exFAT driver 字节一致"
+    );
+
+    let mut reader = PlanReader {
+        sector_count: geometry.sector_count,
+        sectors: writes.clone(),
+    };
+    let detected = EXFAT_DRIVER.detect(&mut reader).unwrap();
+    assert_eq!(detected.confidence, DetectionConfidence::Exact);
+    let metadata = EXFAT_DRIVER.read_metadata(&mut reader).unwrap();
+    assert_eq!(metadata.kind, FilesystemKind::ExFat);
+    assert_eq!(metadata.volume_label.as_deref(), Some("DATA"));
+    assert_eq!(metadata.volume_serial, Some(0x8765_4321));
+    let verified = EXFAT_DRIVER
+        .verify_format(&mut reader, geometry, &plan.expected_metadata)
+        .unwrap();
+    assert_eq!(verified.metadata, metadata);
+
+    let mut corrupted = PlanReader {
+        sector_count: geometry.sector_count,
+        sectors: writes,
+    };
+    corrupted.sectors.get_mut(&0).unwrap()[64..72].copy_from_slice(&2_049u64.to_le_bytes());
+    let error = EXFAT_DRIVER
+        .verify_format(&mut corrupted, geometry, &plan.expected_metadata)
+        .unwrap_err();
+    assert_eq!(error.kind, FilesystemErrorKind::InvalidGeometry);
+}
+
+#[test]
+fn exfat_driver_uses_none_as_the_only_no_user_label_semantic() {
+    let geometry = FilesystemGeometry::new(2_048, 100_000, 512);
+    let request = FormatRequest {
+        filesystem: FilesystemKind::ExFat,
+        volume_label: None,
+        volume_serial: Some(9),
+    };
+    let plan = EXFAT_DRIVER.build_format_plan(geometry, &request).unwrap();
+    assert_eq!(plan.expected_metadata.volume_label, None);
+    let mut reader = PlanReader {
+        sector_count: geometry.sector_count,
+        sectors: plan
+            .writes
+            .iter()
+            .map(|write| (write.relative_lba, write.data))
+            .collect(),
+    };
+    let metadata = EXFAT_DRIVER.read_metadata(&mut reader).unwrap();
+    assert_eq!(metadata.volume_label, None);
+    EXFAT_DRIVER
+        .verify_format(&mut reader, geometry, &plan.expected_metadata)
+        .unwrap();
+
+    let invalid = FormatRequest {
+        filesystem: FilesystemKind::ExFat,
+        volume_label: Some(String::new()),
+        volume_serial: Some(9),
+    };
+    assert_eq!(
+        EXFAT_DRIVER
             .validate_format_request(&invalid)
             .unwrap_err()
             .kind,

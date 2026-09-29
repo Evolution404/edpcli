@@ -5,7 +5,6 @@
 //! extents, and preserves identified historical tail backup structures.
 
 use serde::Serialize;
-use std::collections::BTreeSet;
 
 use crate::common::SECTOR;
 use crate::crypto::{a6b0_full, crc32_bare, xor_rolling};
@@ -431,41 +430,25 @@ pub(crate) fn probe_filesystem(partition: &PartitionGeometry, prefix: &[u8]) -> 
         return probe;
     }
 
-    if boot.get(3..11) == Some(b"EXFAT   ") {
-        let bps_shift = boot[108];
-        let spc_shift = boot[109];
-        if bps_shift < 32 && spc_shift < 32 {
-            let bps = 1u32.checked_shl(bps_shift as u32).unwrap_or(0);
-            let spc = 1u32.checked_shl(spc_shift as u32).unwrap_or(0);
-            if bps == SECTOR as u32 && spc != 0 {
-                probe.kind = FilesystemKind::Exfat;
-                probe.bytes_per_sector = Some(bps);
-                probe.sectors_per_cluster = Some(spc);
-                let fat_offset = u32le(boot, 80).unwrap_or(0) as u64;
-                let heap_offset = u32le(boot, 88).unwrap_or(0) as u64;
-                let root_cluster = u32le(boot, 96).unwrap_or(0) as u64;
-                if fat_offset != 0 {
-                    if let Some(lba) = partition.start_sector.checked_add(fat_offset) {
-                        probe.key_lbas.push(lba);
-                    }
-                    probe.notes.push(format!("exFAT FAT offset={fat_offset}"));
-                }
-                if root_cluster >= 2 {
-                    if let Some(lba) = (root_cluster - 2)
-                        .checked_mul(spc as u64)
-                        .and_then(|v| heap_offset.checked_add(v))
-                        .and_then(|rel| partition.start_sector.checked_add(rel))
-                    {
-                        probe.key_lbas.push(lba);
-                        probe
-                            .notes
-                            .push(format!("exFAT root cluster={root_cluster}"));
-                    }
-                }
-                if let Some(lba) = partition.start_sector.checked_add(12) {
-                    probe.key_lbas.push(lba);
-                }
-            }
+    if let Some(layout) = crate::filesystem::exfat_analysis_layout(boot, partition.sector_count) {
+        probe.kind = FilesystemKind::Exfat;
+        probe.bytes_per_sector = Some(layout.bytes_per_sector);
+        probe.sectors_per_cluster = Some(layout.sectors_per_cluster);
+        if let Some(lba) = partition.start_sector.checked_add(layout.fat_offset) {
+            probe.key_lbas.push(lba);
+        }
+        probe
+            .notes
+            .push(format!("exFAT FAT offset={}", layout.fat_offset));
+        if let Some(lba) = partition.start_sector.checked_add(layout.root_relative_lba) {
+            probe.key_lbas.push(lba);
+        }
+        probe.notes.push(format!(
+            "exFAT root relative LBA={}",
+            layout.root_relative_lba
+        ));
+        if let Some(lba) = partition.start_sector.checked_add(12) {
+            probe.key_lbas.push(lba);
         }
         return probe;
     }
@@ -675,143 +658,6 @@ impl crate::filesystem::FilesystemReader for PartitionFilesystemReader<'_> {
     }
 }
 
-fn read_exfat_volume_label(
-    dev: &mut dyn SectorDev,
-    partition_start: u64,
-    partition_sectors: u64,
-    boot: &[u8],
-) -> Result<Option<String>, String> {
-    if boot.len() != SECTOR || boot.get(3..11) != Some(b"EXFAT   ") {
-        return Ok(None);
-    }
-    let u16le = |offset: usize| -> u16 { u16::from_le_bytes([boot[offset], boot[offset + 1]]) };
-    let u32le =
-        |offset: usize| -> u32 { u32::from_le_bytes(boot[offset..offset + 4].try_into().unwrap()) };
-    let u64le =
-        |offset: usize| -> u64 { u64::from_le_bytes(boot[offset..offset + 8].try_into().unwrap()) };
-
-    let volume_length = u64le(72);
-    let fat_offset = u32le(80) as u64;
-    let fat_length = u32le(84) as u64;
-    let heap_offset = u32le(88) as u64;
-    let cluster_count = u32le(92);
-    let mut cluster = u32le(96);
-    let bps_shift = boot[108];
-    let spc_shift = boot[109];
-    let fats = boot[110] as u64;
-    let flags = u16le(106);
-
-    if bps_shift != 9
-        || spc_shift >= 26
-        || !matches!(fats, 1 | 2)
-        || volume_length == 0
-        || volume_length > partition_sectors
-        || fat_length == 0
-        || cluster_count == 0
-        || cluster < 2
-        || cluster >= cluster_count + 2
-    {
-        return Err("invalid exFAT geometry while reading volume label".into());
-    }
-
-    let sectors_per_cluster = 1u64 << spc_shift;
-    let active_fat = fat_offset
-        + if fats == 2 && flags & 1 != 0 {
-            fat_length
-        } else {
-            0
-        };
-    let mut visited = BTreeSet::new();
-    let mut directory_sectors_read = 0u64;
-    const MAX_LABEL_SCAN_SECTORS: u64 = 8192;
-
-    loop {
-        if cluster < 2 || cluster >= cluster_count + 2 || !visited.insert(cluster) {
-            return Err("invalid/cyclic exFAT root directory chain".into());
-        }
-        let relative_cluster = heap_offset
-            .checked_add(
-                (u64::from(cluster) - 2)
-                    .checked_mul(sectors_per_cluster)
-                    .ok_or("exFAT root cluster offset overflow")?,
-            )
-            .ok_or("exFAT root cluster LBA overflow")?;
-        let cluster_end = relative_cluster
-            .checked_add(sectors_per_cluster)
-            .ok_or("exFAT root cluster end overflow")?;
-        if cluster_end > volume_length {
-            return Err("exFAT root directory leaves volume".into());
-        }
-
-        for sector_offset in 0..sectors_per_cluster {
-            directory_sectors_read += 1;
-            if directory_sectors_read > MAX_LABEL_SCAN_SECTORS {
-                return Err("exFAT volume-label scan budget exceeded".into());
-            }
-            let absolute = partition_start
-                .checked_add(relative_cluster + sector_offset)
-                .ok_or("exFAT root directory absolute LBA overflow")?;
-            let sector = read_device_sector(dev, absolute)?;
-            if sector.len() != SECTOR {
-                return Err("truncated exFAT root directory sector".into());
-            }
-            for entry in sector.as_chunks::<32>().0 {
-                match entry[0] {
-                    0x00 => return Ok(None),
-                    0x83 => {
-                        let count = entry[1] as usize;
-                        if count > 11 {
-                            return Err("invalid exFAT volume-label length".into());
-                        }
-                        if count == 0 {
-                            return Ok(None);
-                        }
-                        let units = (0..count)
-                            .map(|index| {
-                                u16::from_le_bytes([entry[2 + index * 2], entry[3 + index * 2]])
-                            })
-                            .collect::<Vec<_>>();
-                        let label = String::from_utf16(&units)
-                            .map_err(|_| "invalid exFAT volume-label UTF-16")?;
-                        return Ok((!label.is_empty()).then_some(label));
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        let fat_byte_offset = u64::from(cluster)
-            .checked_mul(4)
-            .ok_or("exFAT FAT entry offset overflow")?;
-        let fat_sector_index = fat_byte_offset / SECTOR as u64;
-        if fat_sector_index >= fat_length {
-            return Err("exFAT root FAT entry leaves active FAT".into());
-        }
-        let fat_sector = read_device_sector(
-            dev,
-            partition_start
-                .checked_add(active_fat + fat_sector_index)
-                .ok_or("exFAT FAT absolute LBA overflow")?,
-        )?;
-        if fat_sector.len() != SECTOR {
-            return Err("truncated exFAT FAT sector".into());
-        }
-        let offset = (fat_byte_offset % SECTOR as u64) as usize;
-        let next = u32::from_le_bytes(
-            fat_sector[offset..offset + 4]
-                .try_into()
-                .map_err(|_| "truncated exFAT FAT entry")?,
-        );
-        if next >= 0xffff_fff8 {
-            return Ok(None);
-        }
-        if next < 2 || next >= cluster_count + 2 || next >= 0xffff_fff0 {
-            return Err("invalid exFAT root directory FAT link".into());
-        }
-        cluster = next;
-    }
-}
-
 fn probe_filesystem_hints(
     dev: &mut dyn SectorDev,
     start_lba: u64,
@@ -840,7 +686,17 @@ fn probe_filesystem_hints(
             .volume_label
         }
         crate::inspect_target::FilesystemBootKind::Exfat => {
-            read_exfat_volume_label(dev, start_lba, sector_count, &boot)?
+            let mut reader = PartitionFilesystemReader {
+                dev,
+                start_lba,
+                sector_count,
+            };
+            crate::filesystem::FilesystemDriver::read_metadata(
+                &crate::filesystem::EXFAT_DRIVER,
+                &mut reader,
+            )
+            .map_err(|error| error.to_string())?
+            .volume_label
         }
         crate::inspect_target::FilesystemBootKind::Fat12
         | crate::inspect_target::FilesystemBootKind::Fat32

@@ -20,8 +20,6 @@ use super::{
 };
 
 const SECTOR_SIZE: usize = 512;
-const BOOT_REGION_SECTORS: u64 = 24;
-const FAT_OFFSET: u64 = BOOT_REGION_SECTORS;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OfficialFilesystemFormat {
@@ -53,27 +51,6 @@ impl TryFrom<crate::filesystem::FilesystemKind> for OfficialFilesystemFormat {
             crate::filesystem::FilesystemKind::Fat32 => Ok(Self::Fat32),
             crate::filesystem::FilesystemKind::Fat12 => Err(
                 crate::filesystem::FilesystemError::format_unsupported(value),
-            ),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum FilesystemPlanError {
-    UnsupportedGeometry {
-        filesystem: OfficialFilesystemFormat,
-        volume_sectors: u64,
-        attempted_cluster_shifts: Vec<u8>,
-    },
-}
-
-impl std::fmt::Display for FilesystemPlanError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnsupportedGeometry { filesystem, volume_sectors, attempted_cluster_shifts } => write!(
-                formatter,
-                "无法为 {volume_sectors} 扇区的分区生成受支持的 {} 布局（已尝试簇大小 shift {:?}）；请调整分区大小或文件系统",
-                filesystem.windows_format_name(), attempted_cluster_shifts,
             ),
         }
     }
@@ -156,27 +133,6 @@ impl SparseFilesystemImage {
     }
 }
 
-fn put_u16(dst: &mut [u8], offset: usize, value: u16) {
-    dst[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
-}
-
-fn put_u32(dst: &mut [u8], offset: usize, value: u32) {
-    dst[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
-}
-
-fn put_u64(dst: &mut [u8], offset: usize, value: u64) {
-    dst[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
-}
-
-fn align_up(value: u64, alignment: u64) -> Option<u64> {
-    if alignment == 0 {
-        return None;
-    }
-    value
-        .checked_add(alignment - 1)
-        .map(|v| v / alignment * alignment)
-}
-
 pub fn validate_volume_label(
     filesystem: OfficialFilesystemFormat,
     label: &str,
@@ -195,11 +151,16 @@ pub fn validate_volume_label(
             .map_err(|error| error.to_string())
         }
         OfficialFilesystemFormat::ExFat => {
-            if label.encode_utf16().count() > 11 {
-                Err("exFAT volume label exceeds 11 UTF-16 code units".into())
-            } else {
-                Ok(())
-            }
+            let request = crate::filesystem::FormatRequest {
+                filesystem: crate::filesystem::FilesystemKind::ExFat,
+                volume_label: (!label.is_empty()).then(|| label.to_string()),
+                volume_serial: None,
+            };
+            crate::filesystem::FilesystemDriver::validate_format_request(
+                &crate::filesystem::EXFAT_DRIVER,
+                &request,
+            )
+            .map_err(|error| error.to_string())
         }
         OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => Err(format!(
             "portable filesystem writer does not yet implement {}",
@@ -241,319 +202,36 @@ pub fn build_empty_fat16(
     })
 }
 
-fn preferred_cluster_shift(volume_sectors: u64) -> u8 {
-    const GIB_SECTORS: u64 = 1024 * 1024 * 1024 / 512;
-    const MIB_SECTORS: u64 = 1024 * 1024 / 512;
-    if volume_sectors >= 64 * GIB_SECTORS {
-        7
-    } else if volume_sectors >= GIB_SECTORS {
-        6
-    } else if volume_sectors >= 64 * MIB_SECTORS {
-        4
-    } else {
-        3
-    }
-}
-
-fn choose_cluster_shift(volume_sectors: u64) -> Result<u8, FilesystemPlanError> {
-    let mut attempted_cluster_shifts = Vec::new();
-    for shift in preferred_cluster_shift(volume_sectors)
-        ..=crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTER_SHIFT
-    {
-        attempted_cluster_shifts.push(shift);
-        if let Ok((_, _, cluster_count)) = exfat_geometry(volume_sectors, shift) {
-            if cluster_count <= crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS {
-                return Ok(shift);
-            }
-        }
-    }
-    Err(FilesystemPlanError::UnsupportedGeometry {
-        filesystem: OfficialFilesystemFormat::ExFat,
-        volume_sectors,
-        attempted_cluster_shifts,
-    })
-}
-
-fn exfat_geometry(volume_sectors: u64, cluster_shift: u8) -> Result<(u64, u64, u32), String> {
-    if volume_sectors <= BOOT_REGION_SECTORS {
-        return Err("exFAT volume is too small for its boot region".into());
-    }
-    let sectors_per_cluster = 1u64
-        .checked_shl(cluster_shift.into())
-        .ok_or("invalid exFAT cluster shift")?;
-    let mut cluster_count = (volume_sectors - BOOT_REGION_SECTORS) / sectors_per_cluster;
-    for _ in 0..16 {
-        if cluster_count == 0 || cluster_count > u32::MAX as u64 - 2 {
-            return Err("exFAT cluster count is out of range".into());
-        }
-        let fat_bytes = (cluster_count + 2)
-            .checked_mul(4)
-            .ok_or("exFAT FAT size overflow")?;
-        let fat_length = fat_bytes.div_ceil(SECTOR_SIZE as u64);
-        let heap_offset = align_up(
-            FAT_OFFSET
-                .checked_add(fat_length)
-                .ok_or("exFAT heap offset overflow")?,
-            sectors_per_cluster,
-        )
-        .ok_or("exFAT heap alignment overflow")?;
-        if heap_offset >= volume_sectors {
-            return Err("exFAT volume is too small for FAT and cluster heap".into());
-        }
-        let next = (volume_sectors - heap_offset) / sectors_per_cluster;
-        if next == cluster_count {
-            return Ok((fat_length, heap_offset, cluster_count as u32));
-        }
-        cluster_count = next;
-    }
-    Err("exFAT geometry did not converge".into())
-}
-
-fn exfat_boot_checksum(sectors: &[[u8; SECTOR_SIZE]]) -> u32 {
-    let mut checksum = 0u32;
-    for (sector_index, sector) in sectors.iter().take(11).enumerate() {
-        for (offset, &byte) in sector.iter().enumerate() {
-            if sector_index == 0 && matches!(offset, 106 | 107 | 112) {
-                continue;
-            }
-            checksum = checksum.rotate_right(1).wrapping_add(byte as u32);
-        }
-    }
-    checksum
-}
-
-fn upcase_mapping(code: u16) -> u16 {
-    if (b'a' as u16..=b'z' as u16).contains(&code) {
-        code - 0x20
-    } else {
-        code
-    }
-}
-
-fn exfat_upcase_table() -> Vec<u8> {
-    let mut words = Vec::<u16>::new();
-    let mut code = 0u32;
-    while code <= u16::MAX as u32 {
-        let current = code as u16;
-        if upcase_mapping(current) == current {
-            let start = code;
-            while code <= u16::MAX as u32
-                && upcase_mapping(code as u16) == code as u16
-                && code - start < u16::MAX as u32
-            {
-                code += 1;
-            }
-            words.push(0xffff);
-            words.push((code - start) as u16);
-        } else {
-            words.push(upcase_mapping(current));
-            code += 1;
-        }
-    }
-    words
-        .into_iter()
-        .flat_map(u16::to_le_bytes)
-        .collect::<Vec<_>>()
-}
-
-fn checksum32(bytes: &[u8]) -> u32 {
-    bytes.iter().fold(0u32, |sum, &byte| {
-        sum.rotate_right(1).wrapping_add(byte as u32)
-    })
-}
-
-fn fat_chain(fat: &mut [u8], first_cluster: u32, count: u32) -> Result<(), String> {
-    if count == 0 {
-        return Err("exFAT metadata stream has zero clusters".into());
-    }
-    for offset in 0..count {
-        let cluster = first_cluster
-            .checked_add(offset)
-            .ok_or("exFAT metadata cluster overflow")?;
-        let next = if offset + 1 == count {
-            0xffff_ffff
-        } else {
-            cluster + 1
-        };
-        let at = cluster as usize * 4;
-        if at + 4 > fat.len() {
-            return Err("exFAT metadata chain exceeds FAT".into());
-        }
-        put_u32(fat, at, next);
-    }
-    Ok(())
-}
-
-fn put_stream(
-    sectors: &mut BTreeMap<u64, [u8; SECTOR_SIZE]>,
-    heap_offset: u64,
-    sectors_per_cluster: u64,
-    first_cluster: u32,
-    cluster_count: u32,
-    bytes: &[u8],
-) -> Result<(), String> {
-    let capacity = cluster_count as u64 * sectors_per_cluster * SECTOR_SIZE as u64;
-    if bytes.len() as u64 > capacity {
-        return Err("exFAT metadata stream exceeds allocated clusters".into());
-    }
-    let first_lba = heap_offset
-        .checked_add((first_cluster as u64 - 2) * sectors_per_cluster)
-        .ok_or("exFAT metadata LBA overflow")?;
-    for sector_index in 0..cluster_count as u64 * sectors_per_cluster {
-        let mut sector = [0u8; SECTOR_SIZE];
-        let start = sector_index as usize * SECTOR_SIZE;
-        if start < bytes.len() {
-            let end = (start + SECTOR_SIZE).min(bytes.len());
-            sector[..end - start].copy_from_slice(&bytes[start..end]);
-        }
-        sectors.insert(first_lba + sector_index, sector);
-    }
-    Ok(())
-}
-
+/// 迁移期兼容入口。exFAT 的具体磁盘结构由 ExFatDriver 单一实现。
 pub fn build_empty_exfat(
     partition_offset_lba: u64,
     volume_sectors: u64,
     volume_serial: u32,
     label: &str,
 ) -> Result<SparseFilesystemImage, String> {
-    let label_utf16 = label.encode_utf16().collect::<Vec<_>>();
-    if label_utf16.len() > 11 {
-        return Err("exFAT volume label exceeds 11 UTF-16 code units".into());
-    }
-    let cluster_shift = choose_cluster_shift(volume_sectors).map_err(|error| error.to_string())?;
-    let sectors_per_cluster = 1u64 << cluster_shift;
-    let (fat_length, heap_offset, cluster_count) = exfat_geometry(volume_sectors, cluster_shift)?;
-    debug_assert!(cluster_count <= crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS);
-
-    let cluster_bytes = sectors_per_cluster * SECTOR_SIZE as u64;
-    let bitmap_len = (cluster_count as u64).div_ceil(8);
-    let bitmap_clusters = bitmap_len.div_ceil(cluster_bytes) as u32;
-    let upcase = exfat_upcase_table();
-    let upcase_clusters = (upcase.len() as u64).div_ceil(cluster_bytes) as u32;
-    let root_cluster = 2u32;
-    let bitmap_cluster = 3u32;
-    let upcase_cluster = bitmap_cluster
-        .checked_add(bitmap_clusters)
-        .ok_or("exFAT metadata cluster overflow")?;
-    let allocated_clusters = 1u32
-        .checked_add(bitmap_clusters)
-        .and_then(|v| v.checked_add(upcase_clusters))
-        .ok_or("exFAT allocated-cluster count overflow")?;
-    if allocated_clusters > cluster_count {
-        return Err("exFAT volume is too small for system metadata".into());
-    }
-
-    let mut sectors = BTreeMap::<u64, [u8; SECTOR_SIZE]>::new();
-    let mut main_boot = [[0u8; SECTOR_SIZE]; 12];
-    let boot = &mut main_boot[0];
-    boot[0..3].copy_from_slice(&[0xeb, 0x76, 0x90]);
-    boot[3..11].copy_from_slice(b"EXFAT   ");
-    put_u64(boot, 64, partition_offset_lba);
-    put_u64(boot, 72, volume_sectors);
-    put_u32(boot, 80, FAT_OFFSET as u32);
-    put_u32(
-        boot,
-        84,
-        u32::try_from(fat_length).map_err(|_| "exFAT FAT length exceeds u32")?,
+    let request = crate::filesystem::FormatRequest {
+        filesystem: crate::filesystem::FilesystemKind::ExFat,
+        volume_label: (!label.is_empty()).then(|| label.to_string()),
+        volume_serial: Some(volume_serial),
+    };
+    let geometry = crate::filesystem::FilesystemGeometry::new(
+        partition_offset_lba,
+        volume_sectors,
+        SECTOR_SIZE as u32,
     );
-    put_u32(
-        boot,
-        88,
-        u32::try_from(heap_offset).map_err(|_| "exFAT heap offset exceeds u32")?,
-    );
-    put_u32(boot, 92, cluster_count);
-    put_u32(boot, 96, root_cluster);
-    put_u32(boot, 100, volume_serial);
-    put_u16(boot, 104, 0x0100);
-    put_u16(boot, 106, 0);
-    boot[108] = 9;
-    boot[109] = cluster_shift;
-    boot[110] = 1;
-    boot[111] = 0x80;
-    boot[112] = u8::try_from((allocated_clusters as u64 * 100).div_ceil(cluster_count as u64))
-        .unwrap_or(100)
-        .min(100);
-    boot[510..512].copy_from_slice(&[0x55, 0xaa]);
-    for sector in &mut main_boot[1..=8] {
-        sector[510..512].copy_from_slice(&[0x55, 0xaa]);
-    }
-    let boot_checksum = exfat_boot_checksum(&main_boot);
-    for chunk in main_boot[11].as_chunks_mut::<4>().0 {
-        chunk.copy_from_slice(&boot_checksum.to_le_bytes());
-    }
-    for (index, sector) in main_boot.iter().enumerate() {
-        sectors.insert(index as u64, *sector);
-        sectors.insert(index as u64 + 12, *sector);
-    }
-
-    let fat_bytes_len = usize::try_from(
-        fat_length
-            .checked_mul(SECTOR_SIZE as u64)
-            .ok_or("exFAT FAT byte length overflow")?,
+    let plan = crate::filesystem::FilesystemDriver::build_format_plan(
+        &crate::filesystem::EXFAT_DRIVER,
+        geometry,
+        &request,
     )
-    .map_err(|_| "exFAT FAT is too large for this process")?;
-    let mut fat = vec![0u8; fat_bytes_len];
-    put_u32(&mut fat, 0, 0xffff_fff8);
-    put_u32(&mut fat, 4, 0xffff_ffff);
-    fat_chain(&mut fat, root_cluster, 1)?;
-    fat_chain(&mut fat, bitmap_cluster, bitmap_clusters)?;
-    fat_chain(&mut fat, upcase_cluster, upcase_clusters)?;
-    for (index, chunk) in fat.as_chunks::<SECTOR_SIZE>().0.iter().enumerate() {
-        let mut sector = [0u8; SECTOR_SIZE];
-        sector.copy_from_slice(chunk);
-        sectors.insert(FAT_OFFSET + index as u64, sector);
-    }
-
-    let mut bitmap = vec![0u8; bitmap_len as usize];
-    for bit in 0..allocated_clusters as usize {
-        bitmap[bit / 8] |= 1 << (bit % 8);
-    }
-    put_stream(
-        &mut sectors,
-        heap_offset,
-        sectors_per_cluster,
-        bitmap_cluster,
-        bitmap_clusters,
-        &bitmap,
-    )?;
-    put_stream(
-        &mut sectors,
-        heap_offset,
-        sectors_per_cluster,
-        upcase_cluster,
-        upcase_clusters,
-        &upcase,
-    )?;
-
-    let mut root = vec![0u8; cluster_bytes as usize];
-    root[0] = 0x81;
-    root[1] = 0;
-    put_u32(&mut root, 20, bitmap_cluster);
-    put_u64(&mut root, 24, bitmap_len);
-    root[32] = 0x82;
-    put_u32(&mut root, 36, checksum32(&upcase));
-    put_u32(&mut root, 52, upcase_cluster);
-    put_u64(&mut root, 56, upcase.len() as u64);
-    if !label_utf16.is_empty() {
-        root[64] = 0x83;
-        root[65] = label_utf16.len() as u8;
-        for (index, value) in label_utf16.iter().enumerate() {
-            put_u16(&mut root, 66 + index * 2, *value);
-        }
-    }
-    put_stream(
-        &mut sectors,
-        heap_offset,
-        sectors_per_cluster,
-        root_cluster,
-        1,
-        &root,
-    )?;
-
+    .map_err(|error| error.to_string())?;
     Ok(SparseFilesystemImage {
         volume_sectors,
-        sectors,
+        sectors: plan
+            .writes
+            .into_iter()
+            .map(|write| (write.relative_lba, write.data))
+            .collect(),
     })
 }
 
@@ -727,63 +405,4 @@ pub fn build_official_exfat_partitions(
         )?);
     }
     Ok(out)
-}
-
-#[cfg(test)]
-mod ch14_q0_geometry_contracts {
-    use super::{choose_cluster_shift, exfat_geometry};
-
-    fn first_volume_with_cluster_count(target: u32, shift: u8) -> u64 {
-        let mut low = target as u64 * (1u64 << shift);
-        let mut high = (target as u64 + 100_000) * (1u64 << shift);
-        while low < high {
-            let mid = low + (high - low) / 2;
-            if exfat_geometry(mid, shift).unwrap().2 < target {
-                low = mid + 1;
-            } else {
-                high = mid;
-            }
-        }
-        low
-    }
-
-    #[test]
-    fn validated_cluster_budget_accepts_limit_and_upgrades_limit_plus_one() {
-        const LIMIT: u32 = crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS;
-        let at_limit = first_volume_with_cluster_count(LIMIT, 7);
-        let over_limit = first_volume_with_cluster_count(LIMIT + 1, 7);
-        assert_eq!(exfat_geometry(at_limit, 7).unwrap().2, LIMIT);
-        assert_eq!(exfat_geometry(over_limit, 7).unwrap().2, LIMIT + 1);
-        assert_eq!(choose_cluster_shift(at_limit).unwrap(), 7);
-        assert_eq!(choose_cluster_shift(over_limit).unwrap(), 8);
-    }
-
-    #[test]
-    fn deterministic_geometry_sweep_stays_within_parser_capability() {
-        const GIB: u64 = 2_097_152;
-        let mut volumes = (1..=1024)
-            .step_by(7)
-            .map(|gib| gib * GIB)
-            .collect::<Vec<_>>();
-        for threshold in [64 * GIB, 256 * GIB, 512 * GIB] {
-            volumes.extend([threshold - 1, threshold, threshold + 1]);
-        }
-        for volume in volumes {
-            let shift = choose_cluster_shift(volume).unwrap();
-            let (_, heap_offset, count) = exfat_geometry(volume, shift).unwrap();
-            assert!(count <= crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS);
-            assert!(heap_offset + count as u64 * (1u64 << shift) <= volume);
-            assert!(shift <= crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTER_SHIFT);
-        }
-    }
-
-    #[test]
-    fn unsupported_geometry_is_typed_and_user_actionable() {
-        let error = choose_cluster_shift(u64::MAX).unwrap_err();
-        assert!(matches!(
-            error,
-            super::FilesystemPlanError::UnsupportedGeometry { .. }
-        ));
-        assert!(error.to_string().contains("请调整分区大小或文件系统"));
-    }
 }
