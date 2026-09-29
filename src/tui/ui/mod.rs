@@ -5,6 +5,7 @@ pub mod banner;
 pub mod card;
 pub mod confirmation;
 pub mod modal;
+pub mod operation_result;
 pub mod panel;
 pub mod responsive;
 pub mod table;
@@ -18,6 +19,10 @@ pub use confirmation::{
     ConfirmationTone, MediaWriteConfirmationKind, WriteConfirmationSpec,
 };
 pub use modal::{centered_modal_rect, render_modal};
+pub use operation_result::{
+    render_operation_result, OperationResultSpec, ResultCard, ResultField, ResultTable, ResultTone,
+    ResultValue,
+};
 pub use panel::panel;
 pub use responsive::ViewportClass;
 pub use table::data_table;

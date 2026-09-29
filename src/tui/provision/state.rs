@@ -27,6 +27,10 @@ pub(crate) use field_model::{
     ProvisionFieldId, ProvisionFieldSection,
 };
 
+#[path = "result_model.rs"]
+mod result_model;
+pub use result_model::{ProvisionResultPartition, ProvisionResultSnapshot};
+
 impl ProvisionKind {
     pub const ALL: [Self; 5] = [
         Self::Mode0,
@@ -146,6 +150,8 @@ pub struct ProvisionState {
     pub export_path: String,
     pub message: Option<String>,
     pub result_status: Option<crate::application::provision::ProvisionExecutionStatus>,
+    pub result_outcome: Option<crate::application::provision::ProvisionWriteOutcome>,
+    pub result_plan: Option<ProvisionResultSnapshot>,
     pub run: Option<crate::application::progress::OperationRunState>,
     pub pane_focus: crate::tui::pane::PaneFocus,
     pub(super) target_disk: Option<u32>,
@@ -168,6 +174,8 @@ impl Default for ProvisionState {
             export_path: String::new(),
             message: None,
             result_status: None,
+            result_outcome: None,
+            result_plan: None,
             run: None,
             pane_focus: crate::tui::pane::PaneFocus::provision_form(),
             target_disk: None,
@@ -245,6 +253,9 @@ impl AppState {
         self.provision.confirmation.clear();
         self.provision.message = None;
         self.provision.prepared = None;
+        self.provision.result_status = None;
+        self.provision.result_outcome = None;
+        self.provision.result_plan = None;
         self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_form();
         let current_target = self
             .selected_device()

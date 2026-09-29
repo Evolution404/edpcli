@@ -102,6 +102,60 @@ fn backup_restore_provision_share_operation_progress_renderer() {
 }
 
 #[test]
+fn overall_and_work_gauges_share_high_contrast_progress_labels() {
+    let theme = include_str!("../src/tui/theme.rs");
+    let overall = include_str!("../src/tui/operation_progress_render.rs");
+    let work = include_str!("../src/tui/operation_progress_status.rs");
+    assert!(theme.contains("fn progress_label"));
+    assert!(theme.contains("self.palette.text_primary"));
+    assert!(overall.contains("theme.progress_label()"));
+    assert!(work.contains("theme.progress_label()"));
+}
+
+#[test]
+fn result_report_pages_share_one_component_and_provision_is_result_oriented() {
+    let shared = include_str!("../src/tui/ui/operation_result.rs");
+    let provision = include_str!("../src/tui/provision/result_render.rs");
+    let provision_root = include_str!("../src/tui/provision/render.rs");
+    let wizard = include_str!("../src/tui/wizard_result_render.rs");
+    let backup = include_str!("../src/tui/backups/result_render.rs");
+
+    assert!(shared.contains("pub fn render_operation_result"));
+    for adapter in [provision, wizard, backup] {
+        assert!(adapter.contains("render_operation_result"));
+    }
+    for required in ["盘型", "分区结果", "大小", "验收结果", "备份文件", "总耗时"]
+    {
+        assert!(provision.contains(required), "missing {required}");
+    }
+    let execution = include_str!("../src/tui/provision/execution_state.rs");
+    let result_model = include_str!("../src/tui/provision/result_model.rs");
+    let write_section = execution
+        .split("pub fn provision_take_for_write")
+        .nth(1)
+        .expect("write lifecycle section")
+        .split("pub fn provision_finish_write")
+        .next()
+        .expect("write lifecycle boundary");
+    assert!(write_section.contains("self.provision.prepared.take()?"));
+    assert!(write_section.contains("ProvisionResultSnapshot::from_prepared"));
+    assert!(!write_section.contains(".clone()"));
+    for secret_marker in [
+        "SecretBytes",
+        "source_password",
+        "file_key",
+        "lba12_material",
+    ] {
+        assert!(
+            !result_model.contains(secret_marker),
+            "result snapshot must not retain {secret_marker}"
+        );
+    }
+    assert!(!provision_root.contains("最近进度事件"));
+    assert!(!provision.contains("最近进度事件"));
+}
+
+#[test]
 fn progress_transport_coalesces_snapshots_and_limits_render_rate() {
     let task = include_str!("../src/tui/task.rs");
     let transport = include_str!("../src/tui/progress_transport.rs");

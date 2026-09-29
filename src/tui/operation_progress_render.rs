@@ -116,7 +116,7 @@ pub(crate) fn draw_operation_progress(frame: &mut Frame, area: Rect, run: &Opera
             .block(crate::tui::ui::card("总体进度", true))
             .gauge_style(theme.accent())
             .ratio(overall)
-            .label(overall_label),
+            .label(Span::styled(overall_label, theme.progress_label())),
         chunks[1],
     );
 

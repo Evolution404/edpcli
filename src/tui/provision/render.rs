@@ -18,6 +18,10 @@ use form_render::draw_provision_form;
 mod review_render;
 use review_render::draw_provision_review;
 
+#[path = "result_render.rs"]
+mod result_render;
+use result_render::draw_provision_result;
+
 fn provision_content_layout(
     area: ratatui::layout::Rect,
     stage: ProvisionStage,
@@ -268,80 +272,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             }
         }
         ProvisionStage::Result => {
-            use crate::application::provision::ProvisionExecutionStatus as Status;
-            let result_style = match provision.result_status {
-                Some(Status::Success) => success(),
-                Some(Status::CompletedWithWarnings | Status::PartialFormatFailure) => warning(),
-                Some(Status::FatalFailure) | None => danger(),
-            };
-            let result_title = match provision.result_status {
-                Some(Status::Success) => "制盘成功",
-                Some(Status::CompletedWithWarnings) => "制盘完成，存在警告",
-                Some(Status::PartialFormatFailure) => "部分完成：格式化失败",
-                Some(Status::FatalFailure) | None => "制盘失败",
-            };
-            let badge_tone = match provision.result_status {
-                Some(Status::Success) => crate::tui::ui::BadgeTone::Success,
-                Some(Status::CompletedWithWarnings | Status::PartialFormatFailure) => {
-                    crate::tui::ui::BadgeTone::Warning
-                }
-                Some(Status::FatalFailure) | None => crate::tui::ui::BadgeTone::Danger,
-            };
-            let mut lines = vec![
-                crate::tui::ui::status_badge(result_title, badge_tone),
-                Line::from(""),
-            ];
-            lines.extend(
-                provision
-                    .message
-                    .as_deref()
-                    .unwrap_or("操作结束")
-                    .lines()
-                    .map(|line| Line::from(safe(line))),
-            );
-            if let Some(run) = &provision.run {
-                let elapsed = run
-                    .last_activity_at
-                    .duration_since(run.started_at)
-                    .as_secs();
-                lines.push(Line::from(format!("总耗时  {elapsed} 秒")));
-                let mut phases = std::collections::BTreeMap::new();
-                for event in &run.log {
-                    phases
-                        .entry(event.phase)
-                        .and_modify(|last: &mut (std::time::Instant, std::time::Instant)| {
-                            last.1 = event.emitted_at
-                        })
-                        .or_insert((event.emitted_at, event.emitted_at));
-                }
-                for (phase, (first, last)) in phases {
-                    lines.push(Line::from(format!(
-                        "{}  {} 秒",
-                        phase.label(),
-                        last.duration_since(first).as_secs()
-                    )));
-                }
-                lines.push(Line::from(Span::styled("最近进度事件", accent())));
-                for event in run.log.iter().rev().take(6).rev() {
-                    lines.push(Line::from(safe(&format!(
-                        "[{:.2}%] {}  {}",
-                        f64::from(event.overall.basis_points()) / 100.0,
-                        event.phase.label(),
-                        event.step.label()
-                    ))));
-                }
-            }
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "Enter / Esc 返回制盘中心",
-                accent(),
-            )));
-            frame.render_widget(
-                Paragraph::new(lines)
-                    .alignment(Alignment::Center)
-                    .block(crate::tui::ui::card("制盘结果", true).border_style(result_style)),
-                main_area,
-            );
+            draw_provision_result(frame, main_area, state);
         }
     }
 }

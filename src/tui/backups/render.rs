@@ -1,5 +1,11 @@
 use super::*;
 
+#[path = "result_render.rs"]
+mod result_render;
+use result_render::{
+    draw_backup_batch_delete_result, draw_backup_delete_result, draw_backup_prune_result,
+};
+
 fn backup_table_values(
     backup: &crate::application::BackupWorkspaceItem,
     checked: bool,
@@ -509,6 +515,10 @@ pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect,
         );
         return;
     }
+    if delete.stage == WizardStage::Result {
+        draw_backup_delete_result(frame, area, delete);
+        return;
+    }
     let mut lines = vec![
         Line::from(Span::styled("删除备份", danger())),
         Line::from(vec![
@@ -523,9 +533,7 @@ pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect,
                 "正在复核并删除；q / Esc / Ctrl-C 将延迟到安全结束点。",
             ));
         }
-        WizardStage::Result => {
-            lines.push(Line::from("操作已结束；Esc 返回备份列表。"));
-        }
+        WizardStage::Result => unreachable!("result uses shared result renderer"),
         _ => {}
     }
     if let Some(message) = &delete.message {
@@ -560,6 +568,10 @@ pub(super) fn draw_backup_batch_delete(
         .as_ref()
         .map(|plan| plan.targets.len())
         .unwrap_or_else(|| state.backup_selection_count());
+    if batch.stage == BackupBatchDeleteStage::Result {
+        draw_backup_batch_delete_result(frame, area, batch);
+        return;
+    }
     let mut lines = vec![
         Line::from(Span::styled("批量删除备份", danger())),
         Line::from(format!("当前勾选: {} 份", state.backup_selection_count())),
@@ -609,11 +621,7 @@ pub(super) fn draw_backup_batch_delete(
             )));
         }
         BackupBatchDeleteStage::Result => {
-            lines.push(Line::from(Span::styled(
-                safe(batch.message.as_deref().unwrap_or("批量删除流程结束")),
-                success(),
-            )));
-            lines.push(Line::from("Enter / Esc 返回备份列表。"));
+            unreachable!("result uses shared result renderer")
         }
     }
     if batch.stage != BackupBatchDeleteStage::Result {
@@ -641,6 +649,11 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
         return;
     };
     use super::super::state::BackupPruneStage;
+
+    if prune.stage == BackupPruneStage::Result {
+        draw_backup_prune_result(frame, area, prune);
+        return;
+    }
 
     let mut lines = vec![
         Line::from(Span::styled("备份保留策略清理", warning())),
@@ -713,11 +726,7 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
             )));
         }
         BackupPruneStage::Result => {
-            lines.push(Line::from(Span::styled(
-                safe(prune.message.as_deref().unwrap_or("清理流程结束")),
-                success(),
-            )));
-            lines.push(Line::from("Enter / Esc 返回备份列表。"));
+            unreachable!("result uses shared result renderer")
         }
     }
     if prune.stage != BackupPruneStage::Result {

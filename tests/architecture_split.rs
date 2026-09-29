@@ -236,6 +236,10 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/scheme_picker_render.rs",
         "src/tui/provision/form_render.rs",
         "src/tui/provision/review_render.rs",
+        "src/tui/provision/result_render.rs",
+        "src/tui/provision/result_model.rs",
+        "src/tui/ui/operation_result.rs",
+        "src/tui/wizard_result_render.rs",
         "src/tui/operation_progress_render.rs",
         "src/tui/operation_progress_status.rs",
         "src/tui/progress_transport.rs",
@@ -265,6 +269,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/inspect/sector_render.rs",
         "src/tui/backups/state.rs",
         "src/tui/backups/render.rs",
+        "src/tui/backups/result_render.rs",
         "src/tui/devices/render.rs",
         "src/tui/devices/state.rs",
         "src/tui/dispatch.rs",
@@ -480,6 +485,11 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/provision/selection_render.rs") < 260);
     assert!(lines("src/tui/provision/form_render.rs") < 300);
     assert!(lines("src/tui/provision/review_render.rs") < 170);
+    assert!(lines("src/tui/provision/result_render.rs") < 340);
+    assert!(lines("src/tui/provision/result_model.rs") < 120);
+    assert!(lines("src/tui/ui/operation_result.rs") < 340);
+    assert!(lines("src/tui/wizard_result_render.rs") < 120);
+    assert!(lines("src/tui/backups/result_render.rs") < 180);
     assert!(lines("src/tui/operation_progress_render.rs") < 260);
     assert!(lines("src/tui/operation_progress_status.rs") < 120);
     assert!(lines("src/tui/progress_transport.rs") < 180);

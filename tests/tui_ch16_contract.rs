@@ -229,6 +229,10 @@ fn ch16_provision_result_uses_typed_outcome_badges() {
         state.provision_mut().result_status = Some(status);
         let text = rendered_lines(&state, 120, 36).join("\n").replace(' ', "");
         assert!(text.contains(label), "missing {label}");
+        for required in ["盘型", "总容量", "验收结果"] {
+            assert!(text.contains(required), "missing {required}");
+        }
+        assert!(!text.contains("最近进度事件"));
     }
 }
 

@@ -25,6 +25,8 @@ mod operation_progress_render;
 mod provision_render;
 #[path = "restore_confirmation_render.rs"]
 mod restore_confirmation_render;
+#[path = "wizard_result_render.rs"]
+mod wizard_result_render;
 
 use backups_render::{
     draw_backup_batch_delete, draw_backup_delete, draw_backup_prune, draw_backups,
@@ -34,6 +36,7 @@ use inspect_render::draw_advanced_inspect;
 use operation_progress_render::draw_operation_progress;
 use provision_render::{draw_provision, draw_scheme_picker};
 use restore_confirmation_render::draw_restore_write_confirmation;
+use wizard_result_render::draw_wizard_result;
 
 fn backup_health(backup: &crate::application::BackupWorkspaceItem) -> (&'static str, Style) {
     if !backup.size_ok {
@@ -321,6 +324,11 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         if let Some(run) = wizard.run.as_ref() {
             draw_operation_progress(frame, area, run);
         }
+        return;
+    }
+
+    if wizard.stage == WizardStage::Result {
+        draw_wizard_result(frame, area, wizard);
         return;
     }
 
@@ -763,21 +771,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 muted(),
             )));
         }
-        WizardStage::Result => {
-            let ok = wizard
-                .message
-                .as_deref()
-                .is_some_and(|message| !message.starts_with("错误"));
-            lines.push(Line::from(Span::styled(
-                if ok { "操作完成" } else { "操作结束" },
-                if ok { success() } else { danger() }.add_modifier(Modifier::BOLD),
-            )));
-            if let Some(message) = &wizard.message {
-                lines.push(Line::from(safe(message)));
-            }
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled("Enter / Esc 返回", muted())));
-        }
+        WizardStage::Result => unreachable!("result wizard uses shared result renderer"),
     }
 
     let block = Block::default()

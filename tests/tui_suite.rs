@@ -34,6 +34,8 @@ mod tui_lifecycle;
 mod tui_nonblocking;
 #[path = "tui_operation_progress.rs"]
 mod tui_operation_progress;
+#[path = "tui_operation_result.rs"]
+mod tui_operation_result;
 #[path = "tui_pane_contract.rs"]
 mod tui_pane_contract;
 #[path = "tui_search_command.rs"]

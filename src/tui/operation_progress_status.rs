@@ -1,7 +1,7 @@
 use crate::application::progress::{ProgressEvent, TransactionActivityPhase, Unit};
 use ratatui::{
     layout::Rect,
-    text::Line,
+    text::{Line, Span},
     widgets::{Gauge, Paragraph, Wrap},
     Frame,
 };
@@ -83,7 +83,7 @@ pub(super) fn draw_current_status(frame: &mut Frame, area: Rect, event: Option<&
             Gauge::default()
                 .gauge_style(theme.secondary_accent())
                 .ratio(work.ratio())
-                .label(label),
+                .label(Span::styled(label, theme.progress_label())),
             work_area,
         );
     }

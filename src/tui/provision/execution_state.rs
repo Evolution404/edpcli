@@ -101,11 +101,20 @@ impl AppState {
             self.provision.message = Some("必须精确输入 YES 才会开始向目标设备写入".into());
             return None;
         }
+        let total_bytes = self
+            .selected_device()
+            .map(|row| row.size)
+            .unwrap_or_default();
         let prepared = self.provision.prepared.take()?;
+        self.provision.result_plan = Some(ProvisionResultSnapshot::from_prepared(
+            &prepared,
+            total_bytes,
+        ));
         self.provision.stage = ProvisionStage::Running;
         self.shell.input_mode = InputMode::Normal;
         self.provision.message = Some("事务写盘进行中；退出请求会延迟到安全检查点".into());
         self.provision.result_status = None;
+        self.provision.result_outcome = None;
         self.provision.run = Some(crate::application::progress::OperationRunState::new(
             crate::application::progress::OperationKind::Provision,
             format!("disk{}", prepared.disk()),
@@ -125,11 +134,13 @@ impl AppState {
         match result {
             Ok(outcome) => {
                 self.provision.result_status = Some(outcome.execution_status());
-                self.provision.message = Some(outcome.summary_lines().join("\n"));
+                self.provision.message = None;
+                self.provision.result_outcome = Some(outcome);
             }
             Err(message) => {
                 self.provision.result_status =
                     Some(crate::application::provision::ProvisionExecutionStatus::FatalFailure);
+                self.provision.result_outcome = None;
                 self.provision.message = Some(message);
             }
         }

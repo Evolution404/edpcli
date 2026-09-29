@@ -310,6 +310,12 @@ impl Theme {
             .add_modifier(Modifier::BOLD)
     }
 
+    pub fn progress_label(self) -> Style {
+        Style::default()
+            .fg(self.palette.text_primary)
+            .add_modifier(Modifier::BOLD)
+    }
+
     pub fn secondary_text(self) -> Style {
         Style::default().fg(self.palette.text_secondary)
     }
