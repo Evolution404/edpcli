@@ -222,6 +222,79 @@ fn scan_and_print_all_row_kinds() {
     assert!(out3.contains("读取异常"), "{}", out3);
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn scan_prefers_live_plain_filesystem_over_stale_edp_protocol_fields() {
+    let Some(mut stale) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    const TOTAL: u64 = 122_880_000;
+    stale[..SECTOR].fill(0);
+    let entry = 0x1be;
+    stale[entry + 4] = 0x07;
+    stale[entry + 8..entry + 12].copy_from_slice(&2_048u32.to_le_bytes());
+    stale[entry + 12..entry + 16]
+        .copy_from_slice(&u32::try_from(TOTAL - 2_048).unwrap().to_le_bytes());
+    stale[510..512].copy_from_slice(&[0x55, 0xaa]);
+    let fs = edpcli::provision::build_empty_exfat(
+        2_048,
+        TOTAL - 2_048,
+        0x1234_5678,
+        "PLAIN",
+    )
+    .unwrap();
+    let boot = fs.sectors().get(&0).unwrap().to_vec();
+
+    let mut m = std::collections::HashMap::new();
+    m.insert(
+        "diskutil list -plist".to_string(),
+        diskutil_list_plist(&["disk6"]),
+    );
+    m.insert(
+        "diskutil info -plist disk6".to_string(),
+        diskutil_info_plist(TOTAL * SECTOR as u64),
+    );
+    m.insert(
+        "ioreg -r -c IOSCSITargetDevice -l".to_string(),
+        ioreg_scsi(6, "Netac  ", "OnlyDisk", "1.00"),
+    );
+    m.insert(
+        "ioreg -r -c IOUSBHostDevice -l".to_string(),
+        ioreg_usb(6, 0x0DD8, 0x2005),
+    );
+    let runner = FakeRunner { canned: m };
+    let read = |_disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
+        if lba == 2_048 {
+            return Ok(boot.clone());
+        }
+        if lba < 13 {
+            let start = lba as usize * SECTOR;
+            return Ok(stale[start..start + SECTOR].to_vec());
+        }
+        Ok(vec![0u8; SECTOR])
+    };
+    let bak = TmpDir::new("stale_edp_plain_scan");
+    let rows = scan_disks(&runner, &bak.0, &read);
+    let row = rows.iter().find(|row| row.disk == 6).unwrap();
+
+    assert_eq!(row.provision_kind, edpcli::provision::DiskProvisionKind::Plain);
+    assert_eq!(row.device_id, None);
+    assert_eq!(row.onlyid, None);
+    assert_eq!(row.dept, None);
+    assert_eq!(row.user, None);
+    assert_eq!(row.label, None);
+    assert_eq!(row.partitions, None);
+    assert_eq!(row.force_change_password, None);
+    assert!(row.partition_table.is_some());
+    assert_eq!(
+        row.identity_pin
+            .as_ref()
+            .and_then(|pin| pin.snapshot.protocol.provision_kind),
+        Some(edpcli::provision::DiskProvisionKind::Plain)
+    );
+}
+
 #[test]
 fn list_cli_smoke_exit_zero() {
     // 本机平台探测真跑：无论有没有插盘，都应正常退出并给出可辨认输出。
