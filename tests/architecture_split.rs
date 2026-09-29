@@ -142,6 +142,11 @@ fn complete_dependency_direction_is_guarded() {
 }
 
 #[test]
+fn tui_does_not_import_protocol_implementation_modules() {
+    assert_sources_exclude(rust_sources_under("src/tui"), &["crate::protocol::"]);
+}
+
+#[test]
 fn library_root_exposes_stable_interfaces_only() {
     let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
         .expect("read library root");

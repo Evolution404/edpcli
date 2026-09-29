@@ -305,17 +305,7 @@ impl AppState {
                 self.provision.form.max_encrypt_password_errors = value.to_string();
             }
         }
-        let target_mode = kind
-            .target()
-            .official_mode()
-            .expect("TUI official mode menu cannot select Plain");
-        let prefill = self.selected_device().and_then(|row| {
-                let source = row.existing_profile_for_prefill();
-                let total = row.size / crate::common::SECTOR as u64;
-                let lce = crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity(total, crate::common::SECTOR as u32)?;
-                crate::provision::prefill_for_target_mode(source.as_ref(), target_mode, lce.start_lba, crate::common::SECTOR as u64).ok()
-            });
-        if let Some(prefill) = prefill {
+        if let Some(prefill) = self.provision_initial_prefill(kind) {
             self.provision.form.apply_prefill(&prefill);
         }
         self.provision.form_initialized_for = current_target;

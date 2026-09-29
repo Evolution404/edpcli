@@ -310,12 +310,9 @@ impl AppState {
         if total_sectors == 0 {
             return DiskLayoutModel::new(0, Vec::new());
         }
-        let Some(lce) =
-            crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity(
-                total_sectors,
-                crate::common::SECTOR as u32,
-            )
-        else {
+        let Some(lce) = crate::application::provision_geometry::verified_usb_compatibility_extent(
+            total_sectors,
+        ) else {
             return DiskLayoutModel::new(0, Vec::new());
         };
         let Ok((resolved, _)) = self.provision_resolved_prefill() else {
@@ -334,7 +331,7 @@ impl AppState {
             })
             .collect();
 
-        DiskLayoutModel::canonical_edp(total_sectors, partitions, lce.start_lba, lce.size_sectors)
+        DiskLayoutModel::canonical_edp(total_sectors, partitions, lce.start_lba, lce.sector_count)
             .unwrap_or_else(|_| DiskLayoutModel::new(0, Vec::new()))
     }
 

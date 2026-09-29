@@ -21,6 +21,7 @@ pub mod partition_table;
 pub mod post_restore;
 pub mod progress;
 pub mod provision;
+pub mod provision_geometry;
 pub mod target_session;
 pub mod write;
 pub use crate::diskio::BackupIntegrityStatus;
