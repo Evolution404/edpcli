@@ -824,6 +824,8 @@ pub fn restore_flow_typed(
     let observed = observe_media_identity_readonly(ctx.runner, disk, dev)?;
     let img = observed.protocol_image;
     let target_identity = observed.snapshot;
+    let raw_target_device_id =
+        identify(ctx.runner, disk, &img[7 * SECTOR..8 * SECTOR]).device_id;
     let lba4 = &img[4 * SECTOR..5 * SECTOR];
     let label_id = target_identity.protocol.onlyid.clone();
     let tag16 = diskio::lba4_tag16_from(lba4)
@@ -926,7 +928,7 @@ pub fn restore_flow_typed(
         &verified,
         backup_protocol.as_deref(),
         &img,
-        target_identity.protocol.device_id.as_deref(),
+        raw_target_device_id.as_deref(),
         current_total_sectors,
     )?;
     ctx.prompt
