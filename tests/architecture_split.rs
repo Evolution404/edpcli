@@ -67,6 +67,7 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
     for (path, hard_limit) in [
         ("src/tui/mod.rs", 400),
         ("src/tui/devices/state.rs", 400),
+        ("src/tui/disk_layout_state.rs", 120),
         ("src/tui/table_state.rs", 650),
         ("src/tui/resume.rs", 180),
         ("src/tui/inspect/state.rs", 350),
@@ -252,6 +253,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/dispatch.rs",
         "src/tui/controller.rs",
         "src/tui/controller/provision.rs",
+        "src/tui/disk_layout_state.rs",
         "src/tui/task_gate.rs",
         "src/tui/table_state.rs",
         "src/inspect/model.rs",
@@ -270,7 +272,11 @@ fn large_modules_are_split_by_domain_boundary() {
 
     assert!(lines("src/application/provision.rs") < 1_000);
     assert!(lines("src/diskio.rs") < 500);
-    assert!(lines("src/tui/state.rs") < 2_700);
+    assert!(lines("src/tui/state.rs") < 2_500);
+    assert!(
+        lines("src/tui/disk_layout_state.rs") < 120,
+        "shared DiskLayout interaction state must stay isolated from AppState orchestration"
+    );
     assert!(
         lines("src/tui/devices/state.rs") < 400,
         "Devices workspace state must stay isolated from AppState orchestration"
