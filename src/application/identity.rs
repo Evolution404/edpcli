@@ -2,7 +2,7 @@
 
 use super::media_identity::{
     match_media_identity, IdentityConfidence, IdentityEvidenceKind, IdentityEvidenceOutcome,
-    IdentityEvidenceResult, IdentityMatch, MediaIdentitySnapshot, MediaRelationship,
+    IdentityEvidenceResult, IdentityMatch, MediaIdentitySnapshot, MediaRelationship, SerialQuality,
 };
 use crate::provision::DiskProvisionKind;
 
@@ -10,6 +10,69 @@ use super::BackupWorkspaceItem;
 
 pub const IDENTITY_HEADINGS: [&str; 7] =
     ["容量", "VID:PID", "型号", "onlyid", "姓名", "部门", "盘型"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityReliability {
+    Strong,
+    Medium,
+    Weak,
+    Pending,
+    Unknown,
+}
+
+impl IdentityReliability {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Strong => "强",
+            Self::Medium => "中",
+            Self::Weak => "弱",
+            Self::Pending => "待确认",
+            Self::Unknown => "未知",
+        }
+    }
+}
+
+pub fn device_identity_reliability(
+    row: &crate::disk_scan::Row,
+) -> (IdentityReliability, &'static str) {
+    match row
+        .identity_pin
+        .as_ref()
+        .map(|pin| pin.snapshot.hardware.serial_quality)
+    {
+        Some(SerialQuality::Usable) => (IdentityReliability::Strong, "硬件序列号 + VID:PID + 容量"),
+        Some(SerialQuality::Suspicious) => (
+            IdentityReliability::Medium,
+            "序列号可疑，结合 VID:PID + 容量",
+        ),
+        Some(SerialQuality::Missing) if row.device_id.is_some() && row.onlyid.is_some() => (
+            IdentityReliability::Medium,
+            "EDP device_id + onlyid + 硬件特征",
+        ),
+        Some(SerialQuality::Missing) => (IdentityReliability::Weak, "仅硬件型号/容量等非唯一特征"),
+        None if row.serial.is_some() => {
+            (IdentityReliability::Pending, "已读取序列号，身份快照未建立")
+        }
+        None if row.device_id.is_some() || row.onlyid.is_some() => {
+            (IdentityReliability::Pending, "仅协议身份可用")
+        }
+        None => (IdentityReliability::Unknown, "未建立可靠身份依据"),
+    }
+}
+
+pub fn device_hardware_serial(row: &crate::disk_scan::Row) -> String {
+    row.serial
+        .as_deref()
+        .or_else(|| {
+            row.identity_pin
+                .as_ref()
+                .and_then(|pin| pin.snapshot.hardware.serial.as_deref())
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("—")
+        .to_string()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalIdentityProjection {

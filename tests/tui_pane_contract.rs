@@ -113,6 +113,15 @@ fn backup(
     }
 }
 
+fn related_backup(
+    index: usize,
+    row: &edpcli::disk_scan::Row,
+) -> edpcli::application::BackupWorkspaceItem {
+    let mut item = backup(index, Some(row.provision_kind));
+    item.identity = row.identity_pin.as_ref().map(|pin| pin.snapshot.clone());
+    item
+}
+
 fn edp_device_with_layout() -> edpcli::disk_scan::Row {
     use edpcli::sectors::EdpfPartition;
 
@@ -702,7 +711,19 @@ fn d0_device_table_uses_user_approved_column_order() {
         .collect::<Vec<_>>();
     assert_eq!(
         headings,
-        vec!["设备", "容量", "部门", "姓名", "盘型", "状态", "备份", "型号"]
+        vec![
+            "设备",
+            "容量",
+            "部门",
+            "姓名",
+            "盘型",
+            "状态",
+            "备份",
+            "身份可靠性",
+            "型号",
+            "VID:PID",
+            "序列号",
+        ]
     );
 }
 
@@ -987,6 +1008,51 @@ fn device_tree_gg_and_g_jump_to_first_and_last_visible_nodes() {
     state.navigate(NavCommand::Bottom, 12);
     assert_eq!(state.device_info_selected_key(), last);
     assert_eq!(last, DeviceInfoNodeKey::Status);
+}
+
+#[test]
+fn device_status_backup_table_omits_zero_counts_and_selects_restore_source() {
+    use edpcli::tui::state::DeviceInfoNodeKey;
+
+    let mut row = edp_device_with_layout();
+    row.n_baks = 2;
+    row.n_possible_baks = 0;
+    let backups = vec![related_backup(1, &row), related_backup(2, &row)];
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    state.replace_backups(backups);
+    state.focus_devices_pane(PaneId::DevicesTree);
+    state.navigate(NavCommand::Bottom, 20);
+    assert_eq!(state.device_info_selected_key(), DeviceInfoNodeKey::Status);
+    state.device_info_focus_detail();
+
+    assert_eq!(
+        state.selected_restore_backup_path(),
+        Some("backup-1.edpb".into())
+    );
+    let text = render_text(&state, 180, 46);
+    assert!(text.contains("●2份确认"), "{text}");
+    assert!(!text.contains("▲0份疑似"), "{text}");
+    assert!(text.contains("backup-1.edpb"), "{text}");
+    assert!(text.contains("backup-2.edpb"), "{text}");
+    assert!(text.contains("R恢复当前备份"), "{text}");
+
+    state.navigate(NavCommand::Down, 20);
+    assert_eq!(
+        state.selected_restore_backup_path(),
+        Some("backup-2.edpb".into())
+    );
+    state.navigate(NavCommand::Top, 20);
+    assert_eq!(
+        state.selected_restore_backup_path(),
+        Some("backup-1.edpb".into())
+    );
+    state.navigate(NavCommand::Bottom, 20);
+    assert_eq!(
+        state.selected_restore_backup_path(),
+        Some("backup-2.edpb".into())
+    );
 }
 
 #[test]

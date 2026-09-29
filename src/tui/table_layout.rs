@@ -25,8 +25,10 @@ pub enum ColumnId {
     Name,
     Time,
     Capacity,
+    Reliability,
     VidPid,
     Model,
+    Serial,
     Onlyid,
     User,
     Dept,
@@ -96,7 +98,10 @@ pub fn table_column_schema(kind: TableKind) -> Option<Vec<TableColumnSpec>> {
             table_column(ProvisionKind, "盘型", column(12, 22, 30, 98, 2, true)),
             table_column(State, "状态", column(8, 12, 18, 97, 1, true)),
             table_column(Backups, "备份", column(4, 6, 8, 70, 1, false)),
-            table_column(Model, "型号", column(10, 18, 32, 45, 2, false)),
+            table_column(Reliability, "身份可靠性", column(8, 10, 12, 69, 1, false)),
+            table_column(Model, "型号", column(10, 18, 32, 68, 2, false)),
+            table_column(VidPid, "VID:PID", column(9, 9, 12, 67, 1, false)),
+            table_column(Serial, "序列号", column(10, 18, 32, 66, 2, false)),
         ]),
         TableKind::Backups => {
             let identity_column = |id| {
@@ -505,8 +510,17 @@ pub fn device_table_view(rows: &[crate::disk_scan::Row], generation: u64) -> Tab
                     safe(&match column.id {
                         ColumnId::Device => format!("disk{}", row.disk),
                         ColumnId::Capacity => cells[0].clone(),
+                        ColumnId::Reliability => {
+                            crate::application::identity::device_identity_reliability(row)
+                                .0
+                                .label()
+                                .into()
+                        }
                         ColumnId::VidPid => cells[1].clone(),
                         ColumnId::Model => cells[2].clone(),
+                        ColumnId::Serial => {
+                            crate::application::identity::device_hardware_serial(row)
+                        }
                         ColumnId::Onlyid => cells[3].clone(),
                         ColumnId::User => cells[4].clone(),
                         ColumnId::Dept => cells[5].clone(),

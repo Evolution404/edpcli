@@ -398,6 +398,6 @@ mod tests {
         assert_eq!(clipboard.0.len(), 2);
         assert_eq!(clipboard.0[0], "disk6");
         assert!(clipboard.0[1].contains("DEMO"));
-        assert_eq!(clipboard.0[1].split('\t').count(), 8);
+        assert_eq!(clipboard.0[1].split('\t').count(), 11);
     }
 }

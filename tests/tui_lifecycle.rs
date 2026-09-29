@@ -171,7 +171,7 @@ fn table_column_reorder_moves_whole_column_without_changing_h_l_or_sort_identity
     state.replace_devices(vec![row]);
 
     let original = state.table_column_order(TableKind::Devices);
-    assert_eq!(original, (0..8).collect::<Vec<_>>());
+    assert_eq!(original, (0..11).collect::<Vec<_>>());
 
     // h/l keeps its existing meaning: change active column only.
     assert!(state.move_table_column(TableKind::Devices, false)); // 容量
@@ -188,7 +188,7 @@ fn table_column_reorder_moves_whole_column_without_changing_h_l_or_sort_identity
     assert_eq!(state.table_active_column(TableKind::Devices), 1);
     assert_eq!(
         state.table_column_order(TableKind::Devices),
-        vec![0, 2, 1, 3, 4, 5, 6, 7]
+        vec![0, 2, 1, 3, 4, 5, 6, 7, 8, 9, 10]
     );
     assert_eq!(
         state.table_sort(TableKind::Devices).unwrap().column,

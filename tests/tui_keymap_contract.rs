@@ -391,7 +391,20 @@ fn normal_mode_keeps_inspect_and_backup_as_single_key_actions() {
         &[
             "TuiAction::Restore",
             "state.workspace() == Workspace::Backups",
+            "state.workspace() == Workspace::Devices",
+            "state.devices_focused_pane() == PaneId::DevicesDetail",
+            "state.selected_device_related_backup().is_some()",
             "ActionRequest::Navigate(NavCommand::BeginRestore)",
+        ],
+    ));
+    let production = include_str!("../src/tui/dispatch.rs");
+    assert!(contains_tokens_in_order(
+        production,
+        &[
+            "NavCommand::BeginRestore",
+            "state.selected_restore_backup_path()",
+            "state.begin_write_wizard_for_identity(",
+            "state::WriteKind::Restore",
         ],
     ));
 }

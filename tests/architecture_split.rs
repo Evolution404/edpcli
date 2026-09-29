@@ -1208,6 +1208,7 @@ fn tui_renderers_do_not_assume_parent_surface_palette_colors() {
             "palette().surface",
             "palette().surface_raised",
             "palette().surface_active",
+            "palette().surface_focus",
             "Color::",
             ".fg(",
             ".bg(",
@@ -1225,6 +1226,10 @@ fn tui_renderers_do_not_assume_parent_surface_palette_colors() {
     let layout =
         fs::read_to_string(root.join("src/tui/disk_layout.rs")).expect("read disk layout renderer");
     assert!(layout.contains("disk_region_half_block"));
+    let table = fs::read_to_string(root.join("src/tui/ui/table.rs")).expect("read shared table");
+    let card = fs::read_to_string(root.join("src/tui/ui/card.rs")).expect("read shared card");
+    assert!(table.contains("pane_surface(focused)"));
+    assert!(card.contains("pane_surface(focused)"));
 }
 
 #[test]

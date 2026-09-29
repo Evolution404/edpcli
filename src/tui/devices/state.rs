@@ -32,6 +32,7 @@ pub struct DevicesState {
     pub(super) pane_focus: crate::tui::pane::PaneFocus,
     pub(super) info_selected: DeviceInfoNodeKey,
     pub(super) info_expanded: BTreeSet<DeviceInfoNodeKey>,
+    pub(super) related_backup_selected: usize,
 }
 
 impl Default for DevicesState {
@@ -45,6 +46,7 @@ impl Default for DevicesState {
             pane_focus: crate::tui::pane::PaneFocus::devices(),
             info_selected: DeviceInfoNodeKey::Capacity,
             info_expanded,
+            related_backup_selected: 0,
         }
     }
 }
@@ -83,6 +85,7 @@ impl AppState {
 
     pub(super) fn reconcile_device_info_selection(&mut self) {
         self.devices.info_selected = self.device_info_selected_key();
+        self.devices.related_backup_selected = 0;
         self.devices
             .pane_focus
             .viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
@@ -96,23 +99,9 @@ impl AppState {
         }
 
         fn reliability_label(row: &crate::disk_scan::Row) -> &'static str {
-            use crate::application::media_identity::SerialQuality;
-            match row
-                .identity_pin
-                .as_ref()
-                .map(|pin| pin.snapshot.hardware.serial_quality)
-            {
-                Some(SerialQuality::Usable) => "强",
-                Some(SerialQuality::Suspicious) => "中",
-                Some(SerialQuality::Missing) if row.device_id.is_some() && row.onlyid.is_some() => {
-                    "中"
-                }
-                Some(SerialQuality::Missing) => "弱",
-                None if row.serial.is_some() || row.device_id.is_some() || row.onlyid.is_some() => {
-                    "待确认"
-                }
-                None => "未知",
-            }
+            crate::application::identity::device_identity_reliability(row)
+                .0
+                .label()
         }
 
         fn backup_summary(row: &crate::disk_scan::Row) -> String {
@@ -121,10 +110,17 @@ impl AppState {
             } else {
                 "正常"
             };
-            match row.n_possible_baks {
-                0 => format!("{status} · {}", row.n_baks),
-                possible => format!("{status} · {}+{possible}", row.n_baks),
+            let mut parts = vec![status.to_string()];
+            if row.n_baks > 0 {
+                parts.push(format!("● {} 份确认", row.n_baks));
             }
+            if row.n_possible_baks > 0 {
+                parts.push(format!("▲ {} 份疑似", row.n_possible_baks));
+            }
+            if row.n_baks == 0 && row.n_possible_baks == 0 {
+                parts.push("暂无备份".into());
+            }
+            parts.join(" · ")
         }
 
         let expanded = |key| self.devices.info_expanded.contains(&key);
@@ -271,6 +267,81 @@ impl AppState {
             .top();
     }
 
+    pub fn device_related_backups(
+        &self,
+    ) -> Vec<(usize, crate::application::media_identity::BackupAffinity)> {
+        use crate::application::media_identity::{
+            match_media_identity, BackupAffinity, BackupAffinityPolicy,
+        };
+
+        let Some(pin) = self
+            .selected_device()
+            .and_then(|row| row.identity_pin.as_ref())
+        else {
+            return Vec::new();
+        };
+        self.backups()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, backup)| {
+                let identity = backup.identity.as_ref()?;
+                let matched = match_media_identity(&pin.snapshot, identity, None);
+                let affinity = BackupAffinityPolicy::classify(&matched);
+                (affinity != BackupAffinity::Unrelated).then_some((index, affinity))
+            })
+            .collect()
+    }
+
+    pub fn device_related_backup_selected_index(&self) -> Option<usize> {
+        let len = self.device_related_backups().len();
+        (len > 0).then(|| self.devices.related_backup_selected.min(len - 1))
+    }
+
+    pub fn selected_device_related_backup(
+        &self,
+    ) -> Option<&crate::application::BackupWorkspaceItem> {
+        let related = self.device_related_backups();
+        let selected = self.device_related_backup_selected_index()?;
+        let (source, _) = related.get(selected).copied()?;
+        self.backups().get(source)
+    }
+
+    pub fn device_related_backup_move(&mut self, delta: isize) {
+        let len = self.device_related_backups().len();
+        if len == 0 {
+            self.devices.related_backup_selected = 0;
+            return;
+        }
+        let current = self.devices.related_backup_selected.min(len - 1);
+        self.devices.related_backup_selected = if delta < 0 {
+            current.saturating_sub(delta.unsigned_abs())
+        } else {
+            current.saturating_add(delta as usize).min(len - 1)
+        };
+    }
+
+    pub fn device_related_backup_jump(&mut self, to_end: bool) {
+        let len = self.device_related_backups().len();
+        self.devices.related_backup_selected = if to_end { len.saturating_sub(1) } else { 0 };
+    }
+
+    pub fn selected_restore_backup_path(&self) -> Option<std::path::PathBuf> {
+        match self.workspace() {
+            Workspace::Backups => self.selected_backup_path(),
+            Workspace::Devices
+                if self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesDetail
+                    && matches!(
+                        self.device_info_selected_key(),
+                        DeviceInfoNodeKey::Status | DeviceInfoNodeKey::Backups
+                    ) =>
+            {
+                self.selected_device_related_backup()
+                    .map(|backup| backup.path.clone())
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn device_info_detail_line_count(&self) -> usize {
         match self.device_info_selected_key() {
             DeviceInfoNodeKey::Identity => 20,
@@ -285,11 +356,9 @@ impl AppState {
                 .and_then(|model| model.tail_group().map(|tail| tail.children.len() + 13))
                 .unwrap_or(3),
             DeviceInfoNodeKey::LayoutSegment { .. } => 18,
-            DeviceInfoNodeKey::Status => self
-                .selected_device()
-                .map(|row| 12 + row.n_baks + row.n_possible_baks)
-                .unwrap_or(12),
-            DeviceInfoNodeKey::Backups => 12,
+            DeviceInfoNodeKey::Status | DeviceInfoNodeKey::Backups => {
+                10 + self.device_related_backups().len()
+            }
             DeviceInfoNodeKey::Protocol => 20,
         }
     }

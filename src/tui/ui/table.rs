@@ -15,6 +15,7 @@ pub fn data_table<'a>(
     focused: bool,
 ) -> Table<'a> {
     Table::new(rows, widths)
+        .style(theme::current().pane_surface(focused))
         .header(header.style(theme::current().accent()))
         .block(panel(title, focused))
         .row_highlight_style(theme::current().selection_overlay(focused))

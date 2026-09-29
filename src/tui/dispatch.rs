@@ -58,9 +58,10 @@ pub(super) fn dispatch_nav_command(
             StateEffect::None
         }
         NavCommand::BeginRestore => {
-            if let (Some(row), Some(backup)) =
-                (state.selected_device(), state.selected_backup_path())
-            {
+            if let (Some(row), Some(backup)) = (
+                state.selected_device(),
+                state.selected_restore_backup_path(),
+            ) {
                 let disk = row.disk;
                 let identity = row
                     .identity_pin
@@ -77,7 +78,7 @@ pub(super) fn dispatch_nav_command(
                     state.set_notice("目标介质身份尚未完成只读采集，请刷新设备后重试。");
                 }
             } else {
-                state.set_notice("恢复需要先在设备页选定目标 U 盘，再进入备份页选择备份。");
+                state.set_notice("恢复需要先选定目标 U 盘和一条可操作备份。");
             }
             StateEffect::None
         }

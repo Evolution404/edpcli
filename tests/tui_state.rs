@@ -1881,7 +1881,7 @@ fn table_copy_follows_logical_column_after_runtime_reorder() {
         .expect("copy whole device row");
     let cells = row.split('\t').collect::<Vec<_>>();
     assert_eq!(cells[1], "输电运检中心");
-    assert_eq!(cells.len(), 8);
+    assert_eq!(cells.len(), 11);
 
     assert!(state.move_table_column_edge_for_viewport(TableKind::Devices, true, 160, 30));
     let last = state.table_copy_payload(TableKind::Devices, false).unwrap();

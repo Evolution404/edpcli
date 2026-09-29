@@ -116,7 +116,13 @@ pub(super) fn draw_device_list(frame: &mut Frame, area: ratatui::layout::Rect, s
                                 .unwrap_or_else(warning),
                             ColumnId::State => device_status_style(row),
                             ColumnId::Backups => secondary(),
-                            ColumnId::Model => muted(),
+                            ColumnId::Reliability => {
+                                let reliability =
+                                    crate::application::identity::device_identity_reliability(row)
+                                        .0;
+                                crate::tui::theme::current().identity_reliability(reliability)
+                            }
+                            ColumnId::Model | ColumnId::Serial => muted(),
                             _ => Style::default(),
                         };
                         let style = crate::tui::theme::current().table_cell(

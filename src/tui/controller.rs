@@ -4,8 +4,8 @@ use super::clipboard::ClipboardBackend;
 use super::keymap::{TuiAction, WidgetRole};
 use super::pane::PaneId;
 use super::state::{
-    AdvancedInspectSource, AdvancedInspectStage, AppState, NavCommand, ProvisionStage, StateEffect,
-    Workspace,
+    AdvancedInspectSource, AdvancedInspectStage, AppState, DeviceInfoNodeKey, NavCommand,
+    ProvisionStage, StateEffect, Workspace,
 };
 
 #[derive(Debug, Clone)]
@@ -439,7 +439,16 @@ pub(super) fn dispatch_action(
             state.begin_backup_create_choice();
             ActionOutcome::handled()
         }
-        TuiAction::Restore if state.workspace() == Workspace::Backups => {
+        TuiAction::Restore
+            if state.workspace() == Workspace::Backups
+                || (state.workspace() == Workspace::Devices
+                    && state.devices_focused_pane() == PaneId::DevicesDetail
+                    && matches!(
+                        state.device_info_selected_key(),
+                        DeviceInfoNodeKey::Status | DeviceInfoNodeKey::Backups
+                    )
+                    && state.selected_device_related_backup().is_some()) =>
+        {
             ActionOutcome::request(ActionRequest::Navigate(NavCommand::BeginRestore))
         }
         TuiAction::PanelNext | TuiAction::PanelPrevious

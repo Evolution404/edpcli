@@ -101,6 +101,11 @@ pub const DEVICES_HELP: &[HelpBinding] = &[
         label: "备份当前设备元数据",
         action: TuiAction::BackupCreate,
     },
+    HelpBinding {
+        keys: "R",
+        label: "恢复详情中选中的备份",
+        action: TuiAction::Restore,
+    },
 ];
 
 pub const BACKUPS_HELP: &[HelpBinding] = &[

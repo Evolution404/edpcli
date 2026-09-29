@@ -7,6 +7,7 @@ use ratatui::{
     widgets::BorderType,
 };
 
+use crate::application::identity::IdentityReliability;
 use crate::provision::DiskProvisionKind;
 
 use super::disk_layout::DiskRegionKind;
@@ -25,6 +26,7 @@ pub struct Palette {
     pub background: Color,
     pub surface: Color,
     pub surface_raised: Color,
+    pub surface_focus: Color,
     pub surface_active: Color,
     pub selection: Color,
     pub border_subtle: Color,
@@ -75,6 +77,7 @@ impl Theme {
                 background: Color::Rgb(0x11, 0x16, 0x1C),
                 surface: Color::Rgb(0x17, 0x1D, 0x24),
                 surface_raised: Color::Rgb(0x0E, 0x1C, 0x27),
+                surface_focus: Color::Rgb(0x10, 0x23, 0x30),
                 surface_active: Color::Rgb(0x1D, 0x25, 0x30),
                 selection: Color::Rgb(0x26, 0x34, 0x42),
                 border_subtle: Color::Rgb(0x29, 0x3A, 0x47),
@@ -112,6 +115,7 @@ impl Theme {
                 background: Color::Indexed(234),
                 surface: Color::Indexed(235),
                 surface_raised: Color::Indexed(236),
+                surface_focus: Color::Indexed(235),
                 surface_active: Color::Indexed(237),
                 selection: Color::Indexed(238),
                 border_subtle: Color::Indexed(238),
@@ -149,6 +153,7 @@ impl Theme {
                 background: Color::Black,
                 surface: Color::Black,
                 surface_raised: Color::Black,
+                surface_focus: Color::Black,
                 surface_active: Color::DarkGray,
                 selection: Color::DarkGray,
                 border_subtle: Color::DarkGray,
@@ -353,14 +358,24 @@ impl Theme {
         }
     }
 
-    pub fn card_surface(self, focused: bool) -> Style {
-        let background = match (self.mode, focused) {
-            (ThemeMode::Ansi16, _) | (_, false) => self.palette.surface_raised,
-            (_, true) => self.palette.surface_active,
-        };
+    pub fn pane_surface(self, focused: bool) -> Style {
         Style::default()
             .fg(self.palette.text_primary)
-            .bg(background)
+            .bg(if focused {
+                self.palette.surface_focus
+            } else {
+                self.palette.surface_raised
+            })
+    }
+
+    pub fn identity_reliability(self, reliability: IdentityReliability) -> Style {
+        match reliability {
+            IdentityReliability::Strong => self.success().add_modifier(Modifier::BOLD),
+            IdentityReliability::Medium => self.secondary_accent().add_modifier(Modifier::BOLD),
+            IdentityReliability::Weak => self.danger(),
+            IdentityReliability::Pending => self.warning().add_modifier(Modifier::BOLD),
+            IdentityReliability::Unknown => self.muted(),
+        }
     }
 
     pub fn input(self) -> Style {
@@ -846,7 +861,7 @@ mod tests {
         assert_ne!(theme.pane_border_type(false), theme.pane_border_type(true));
         assert_eq!(theme.pane_title_prefix(false), "");
         assert_eq!(theme.pane_title_prefix(true), "▌ ");
-        assert_ne!(theme.card_surface(false).bg, theme.card_surface(true).bg);
+        assert_ne!(theme.pane_surface(false).bg, theme.pane_surface(true).bg);
         assert_ne!(theme.input().bg, theme.input_focused().bg);
     }
 

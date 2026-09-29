@@ -16,7 +16,19 @@ fn d0_device_schema_is_task_specific_and_backup_default_order_is_exact() {
             .iter()
             .map(|column| column.heading)
             .collect::<Vec<_>>(),
-        vec!["设备", "容量", "部门", "姓名", "盘型", "状态", "备份", "型号"]
+        vec![
+            "设备",
+            "容量",
+            "部门",
+            "姓名",
+            "盘型",
+            "状态",
+            "备份",
+            "身份可靠性",
+            "型号",
+            "VID:PID",
+            "序列号",
+        ]
     );
 
     assert_eq!(

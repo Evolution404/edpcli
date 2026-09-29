@@ -1856,6 +1856,15 @@ impl AppState {
             NavCommand::WorkspaceProvision => self.switch_workspace(Workspace::Provision),
             NavCommand::Up => {
                 if self.shell.workspace == Workspace::Devices
+                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesDetail
+                    && matches!(
+                        self.device_info_selected_key(),
+                        DeviceInfoNodeKey::Status | DeviceInfoNodeKey::Backups
+                    )
+                    && !self.device_related_backups().is_empty()
+                {
+                    self.device_related_backup_move(-1);
+                } else if self.shell.workspace == Workspace::Devices
                     && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesTree
                 {
                     self.device_info_move_tree(-1);
@@ -1887,6 +1896,15 @@ impl AppState {
             }
             NavCommand::Down => {
                 if self.shell.workspace == Workspace::Devices
+                    && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesDetail
+                    && matches!(
+                        self.device_info_selected_key(),
+                        DeviceInfoNodeKey::Status | DeviceInfoNodeKey::Backups
+                    )
+                    && !self.device_related_backups().is_empty()
+                {
+                    self.device_related_backup_move(1);
+                } else if self.shell.workspace == Workspace::Devices
                     && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesTree
                 {
                     self.device_info_move_tree(1);
@@ -1946,18 +1964,34 @@ impl AppState {
                 if self.shell.workspace == Workspace::Devices
                     && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesDetail =>
             {
-                self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
-                    .scroll_y
-                    .top();
+                if matches!(
+                    self.device_info_selected_key(),
+                    DeviceInfoNodeKey::Status | DeviceInfoNodeKey::Backups
+                ) && !self.device_related_backups().is_empty()
+                {
+                    self.device_related_backup_jump(false);
+                } else {
+                    self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
+                        .scroll_y
+                        .top();
+                }
             }
             NavCommand::Bottom
                 if self.shell.workspace == Workspace::Devices
                     && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesDetail =>
             {
-                let content_len = self.device_info_detail_line_count();
-                self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
-                    .scroll_y
-                    .bottom(content_len, viewport_height);
+                if matches!(
+                    self.device_info_selected_key(),
+                    DeviceInfoNodeKey::Status | DeviceInfoNodeKey::Backups
+                ) && !self.device_related_backups().is_empty()
+                {
+                    self.device_related_backup_jump(true);
+                } else {
+                    let content_len = self.device_info_detail_line_count();
+                    self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
+                        .scroll_y
+                        .bottom(content_len, viewport_height);
+                }
             }
             NavCommand::HalfPageDown
                 if self.shell.workspace == Workspace::Devices

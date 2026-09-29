@@ -8,7 +8,7 @@ use edpcli::tui::{
     state::AppState,
     theme::{Theme, ThemeMode},
 };
-use ratatui::{backend::TestBackend, style::Color, Terminal};
+use ratatui::{backend::TestBackend, layout::Constraint, style::Color, widgets::Row, Terminal};
 
 fn rust_files(root: &Path, out: &mut Vec<PathBuf>) {
     for entry in
@@ -29,6 +29,7 @@ fn chapter_ten_truecolor_palette_is_exact() {
     let palette = Theme::truecolor_dark().palette();
     assert_eq!(palette.background, Color::Rgb(0x11, 0x16, 0x1C));
     assert_eq!(palette.surface, Color::Rgb(0x17, 0x1D, 0x24));
+    assert_eq!(palette.surface_focus, Color::Rgb(0x10, 0x23, 0x30));
     assert_eq!(palette.surface_active, Color::Rgb(0x1D, 0x25, 0x30));
     assert_eq!(palette.selection, Color::Rgb(0x26, 0x34, 0x42));
     assert_eq!(palette.border, Color::Rgb(0x30, 0x39, 0x45));
@@ -281,21 +282,58 @@ fn pane_focus_has_color_shape_title_and_surface_signals() {
     assert_ne!(theme.pane_border_type(false), theme.pane_border_type(true));
     assert_eq!(theme.pane_title_prefix(false), "");
     assert_eq!(theme.pane_title_prefix(true), "▌ ");
-    assert_ne!(theme.card_surface(false).bg, theme.card_surface(true).bg);
+    assert_ne!(theme.pane_surface(false).bg, theme.pane_surface(true).bg);
+    assert_eq!(
+        theme.pane_surface(true).bg,
+        Some(theme.palette().surface_focus)
+    );
+    assert_ne!(
+        theme.pane_surface(true).bg,
+        Some(theme.palette().surface_active)
+    );
+    assert_ne!(theme.pane_surface(true).bg, theme.selection().bg);
 }
 
 #[test]
 fn fallback_card_focus_never_collides_with_selection_surface() {
     let ansi256 = Theme::ansi256_dark();
     assert_ne!(
-        ansi256.card_surface(false).bg,
-        ansi256.card_surface(true).bg
+        ansi256.pane_surface(false).bg,
+        ansi256.pane_surface(true).bg
     );
-    assert_ne!(ansi256.card_surface(true).bg, ansi256.selection().bg);
+    assert_ne!(ansi256.pane_surface(true).bg, ansi256.selection().bg);
 
     let ansi16 = Theme::ansi16();
-    assert_eq!(ansi16.card_surface(false).bg, ansi16.card_surface(true).bg);
-    assert_ne!(ansi16.card_surface(true).bg, ansi16.selection().bg);
+    assert_eq!(ansi16.pane_surface(false).bg, ansi16.pane_surface(true).bg);
+    assert_ne!(ansi16.pane_surface(true).bg, ansi16.selection().bg);
+}
+
+#[test]
+fn shared_data_table_applies_the_same_focused_pane_surface_as_cards() {
+    fn rendered_body_background(focused: bool) -> Color {
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        terminal
+            .draw(|frame| {
+                let table = edpcli::tui::ui::data_table(
+                    "测试表格",
+                    Row::new(["标题"]),
+                    [Row::new(["值"])],
+                    [Constraint::Min(1)],
+                    focused,
+                );
+                frame.render_widget(table, frame.area());
+            })
+            .unwrap();
+        terminal.backend().buffer()[(20, 6)]
+            .style()
+            .bg
+            .expect("table pane surface background")
+    }
+
+    let palette = edpcli::tui::theme::current().palette();
+    assert_eq!(rendered_body_background(false), palette.surface_raised);
+    assert_eq!(rendered_body_background(true), palette.surface_focus);
+    assert_ne!(palette.surface_focus, palette.selection);
 }
 
 #[test]

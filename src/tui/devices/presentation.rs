@@ -25,7 +25,8 @@ pub(super) fn device_detail_lines(
 fn identity_protocol_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'static>> {
     let identity = crate::application::identity::WorkspaceIdentity::from_device(row);
     let cells = identity.display_cells();
-    let (reliability, reliability_style, basis) = device_identity_reliability(row);
+    let (reliability, basis) = crate::application::identity::device_identity_reliability(row);
+    let reliability_style = crate::tui::theme::current().identity_reliability(reliability);
     vec![
         section_line("硬件"),
         field_line("设备", format!("disk{}", row.disk)),
@@ -33,7 +34,10 @@ fn identity_protocol_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'stat
         field_line("容量", format_bytes(row.size)),
         field_line("接口", safe(&row.proto)),
         field_line("VID:PID", safe(&cells[1])),
-        field_line("序列号", safe(row.serial.as_deref().unwrap_or("—"))),
+        field_line(
+            "序列号",
+            safe(&crate::application::identity::device_hardware_serial(row)),
+        ),
         Line::from(""),
         section_line("EDP 协议"),
         styled_field_line(
@@ -68,7 +72,11 @@ fn identity_protocol_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'stat
         ),
         Line::from(""),
         section_line("身份可靠性"),
-        styled_field_line("可靠性", format!("● {reliability}"), reliability_style),
+        styled_field_line(
+            "可靠性",
+            format!("● {}", reliability.label()),
+            reliability_style,
+        ),
         field_line("依据", basis),
     ]
 }
@@ -361,14 +369,10 @@ fn active_capacity_extent(
 }
 
 fn status_backup_detail_lines(
-    state: &AppState,
+    _state: &AppState,
     row: &crate::disk_scan::Row,
-    width: usize,
+    _width: usize,
 ) -> Vec<Line<'static>> {
-    use crate::application::media_identity::{
-        match_media_identity, BackupAffinity, BackupAffinityPolicy,
-    };
-
     let status_style = if row.probe_error.is_some() {
         danger()
     } else if row.denied {
@@ -418,75 +422,23 @@ fn status_backup_detail_lines(
 
     lines.push(Line::from(""));
     lines.push(section_line("关联备份"));
-    lines.push(Line::from(vec![
-        Span::styled(format!("● {} 份确认", row.n_baks), success()),
-        Span::styled("  ·  ", muted()),
-        Span::styled(format!("▲ {} 份疑似", row.n_possible_baks), warning()),
-    ]));
-
-    let mut related = Vec::new();
-    if let Some(pin) = &row.identity_pin {
-        for backup in state.backups() {
-            let Some(identity) = backup.identity.as_ref() else {
-                continue;
-            };
-            let identity_match = match_media_identity(&pin.snapshot, identity, None);
-            let affinity = BackupAffinityPolicy::classify(&identity_match);
-            if affinity != BackupAffinity::Unrelated {
-                related.push((backup, affinity));
-            }
+    let mut counts = Vec::new();
+    if row.n_baks > 0 {
+        counts.push(Span::styled(format!("● {} 份确认", row.n_baks), success()));
+    }
+    if row.n_possible_baks > 0 {
+        if !counts.is_empty() {
+            counts.push(Span::styled("  ·  ", muted()));
         }
+        counts.push(Span::styled(
+            format!("▲ {} 份疑似", row.n_possible_baks),
+            warning(),
+        ));
     }
-
-    if related.is_empty() {
-        lines.push(Line::from(Span::styled(
-            if row.n_baks + row.n_possible_baks == 0 {
-                "没有识别到与当前设备相关的备份。"
-            } else {
-                "关联备份已计数，备份工作区尚未加载完整列表。"
-            },
-            muted(),
-        )));
-        return lines;
+    if counts.is_empty() {
+        counts.push(Span::styled("暂无备份", muted()));
     }
-
-    lines.push(Line::from(Span::styled(
-        format!(
-            "{}  {}  {}  {}",
-            crate::ui::pad_to("关系", 8),
-            crate::ui::pad_to("时间", 19),
-            crate::ui::pad_to("容量", 11),
-            "备份文件"
-        ),
-        secondary(),
-    )));
-    let fixed = 8 + 2 + 19 + 2 + 11 + 2;
-    let file_width = width.saturating_sub(fixed).max(12);
-    for (backup, affinity) in related {
-        let (relation, style) = match affinity {
-            BackupAffinity::Confirmed => ("● 确认", success()),
-            BackupAffinity::Possible => ("▲ 疑似", warning()),
-            BackupAffinity::Unrelated => continue,
-        };
-        let capacity = backup
-            .size_bytes
-            .map(format_bytes)
-            .unwrap_or_else(|| "—".into());
-        let file_name = crate::tui::table_layout::truncate_cell(
-            &safe(&backup.file_name),
-            file_width,
-            crate::tui::table_layout::TruncatePolicy::Ellipsis,
-        );
-        lines.push(Line::from(vec![
-            Span::styled(crate::ui::pad_to(relation, 8), style),
-            Span::raw("  "),
-            Span::raw(crate::ui::pad_to(&safe(&backup.display_time), 19)),
-            Span::raw("  "),
-            Span::raw(crate::ui::pad_to(&capacity, 11)),
-            Span::raw("  "),
-            Span::raw(file_name),
-        ]));
-    }
+    lines.push(Line::from(counts));
     lines
 }
 
@@ -528,27 +480,5 @@ fn percentage(sectors: u64, total: u64) -> String {
         "<0.01%".into()
     } else {
         format!("{ratio:.2}%")
-    }
-}
-
-fn device_identity_reliability(row: &crate::disk_scan::Row) -> (&'static str, Style, &'static str) {
-    use crate::application::media_identity::SerialQuality;
-
-    match row
-        .identity_pin
-        .as_ref()
-        .map(|pin| pin.snapshot.hardware.serial_quality)
-    {
-        Some(SerialQuality::Usable) => ("强", success(), "硬件序列号 + VID:PID + 容量"),
-        Some(SerialQuality::Suspicious) => ("中", warning(), "序列号可疑，结合 VID:PID + 容量"),
-        Some(SerialQuality::Missing) if row.device_id.is_some() && row.onlyid.is_some() => {
-            ("中", warning(), "EDP device_id + onlyid + 硬件特征")
-        }
-        Some(SerialQuality::Missing) => ("弱", danger(), "仅硬件型号/容量等非唯一特征"),
-        None if row.serial.is_some() => ("待确认", warning(), "已读取序列号，身份快照未建立"),
-        None if row.device_id.is_some() || row.onlyid.is_some() => {
-            ("待确认", warning(), "仅协议身份可用")
-        }
-        None => ("未知", muted(), "未建立可靠身份依据"),
     }
 }
