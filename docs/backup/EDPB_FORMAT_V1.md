@@ -174,7 +174,7 @@ LCE 是 LBA7 后续条目指向的固定 6 扇区兼容物理块。LBA7 指针�
 
 ## 13. 恢复与后续操作安全
 
-恢复按 `restore_policy=restorable` 的原始扇区 `Artifact` 生成事务计划。Plain 写回分区表元数据；EDP 写回 LBA0～12、确认的 LCE 和盘尾协议对象。LBA0 最后提交，事务同步、逐扇区读回，失败时回滚。显式备份路径不能绕过强物理身份和精确几何；卸载锁盘后重新打开并再次观察身份与盘面。
+恢复按 `restore_policy=restorable` 的原始扇区 `Artifact` 生成事务计划。Plain 写回分区表元数据；EDP 写回 LBA0～12、确认的 LCE 和盘尾协议对象。Plain v3 恢复到当前仍存在可验证旧 EDP 协议残留的同一物理介质时，事务还会执行**目标侧归一化清理**：保留制造商 LBA3，保留备份分区表工件已经声明的扇区，并清除其余会继续构成旧 EDP 身份的 LBA1～12 残留；这些清理字节不是备份内容，也不代表备份新增了文件系统数据。LBA0 最后提交，事务同步、逐扇区读回，失败时回滚。显式备份路径不能绕过强物理身份和精确几何；卸载锁盘后重新打开并再次观察身份与盘面。
 
 元数据恢复成功仅表示元数据事务及读回成功。恢复后的只读评估单独区分 `Usable`、`NeedsFormat`、`PasswordRequired`、`CryptoMetadataInvalid` 与 `Unsupported`。评估或后续格式化失败不能反转已验证的元数据恢复结果；元数据备份不保证原文件系统或用户数据可挂载。
 
@@ -270,7 +270,7 @@ edpcli backup verify
 新产品默认入口只创建元数据备份；历史分析兼容策略：
 
 1. TUI 移除 `Deep` 入口；
-2. CLI `--deep` 已标为弃用，但暂保留旧的只读深度采集路径；
+2. CLI 仍识别历史 `--deep` 参数以给出明确弃用错误，但**不再创建新的 Deep 备份**；
 3. 不允许把 `--deep` 静默映射为另一种语义后仍显示为 `Deep`；
 4. 历史 `capture_level=deep` EDPB 继续支持 `list / verify / info / inspect`；
 5. 历史 `Deep` 容器中的目录/统计派生数据只作为兼容只读信息，新的 `restore` 不依赖这些派生数据。
@@ -725,7 +725,7 @@ B0～B10 按阶段实施并小步提交；以下保留每阶段的验收证据�
 
 **B4 — `Metadata` `restore`**
 
-**实施状态（2026-09-28）：COMPLETE。** `Restore` planner 已改为从已验证 EDPB 中枚举 `RestorePolicy::Restorable` 的 raw-sector `Artifact`，逐 `Extent` 生成 typed `WriteTransactionPlan`；LBA0 仍为最后提交的 `Commit`，其余元数据经同一 atomic write/sync/readback/rollback 事务执行。v3 Plain 不再要求不存在的固定 LBA0～12 protocol `Artifact`，可恢复 MBR/GPT 分区元数据；EDP/historical v1/v2 继续恢复 LBA0～12，并对 LCE 与备份 LBA7 指针复核，同时恢复已确认的两类盘尾结构。强物理身份、精确 `geometry`、prepare/unmount/lock、reopen fresh identity recheck 均未降低；Plain backup 缺 onlyid 时恢复到同一块已制成 EDP 的物理盘继续允许。Focused：v3 Plain 1/1；EDP protocol+LCE+tail 1/1；CLI 写安全 32/32 PASS。
+**实施状态（2026-09-29）：COMPLETE。** `Restore` planner 从已验证 EDPB 中枚举 `RestorePolicy::Restorable` 的 raw-sector `Artifact`，逐 `Extent` 生成 typed `WriteTransactionPlan`；LBA0 仍为最后提交的 `Commit`，其余元数据经同一 atomic write/sync/readback/rollback 事务执行。v3 Plain 不要求固定 LBA0～12 protocol `Artifact`，恢复 MBR/GPT 分区元数据；若同一目标当前仍留有可验证旧 EDP LBA4/LBA7/LBA12，则在同一事务中保留 LBA3、尊重 GPT/MBR 工件覆盖范围并清除其余 stale EDP protocol 扇区，防止恢复成 Plain 后继续被识别为 mode0/mode1。该 cleanup 是目标归一化，不进入备份文件。EDP/historical v1/v2 继续恢复其真实 LBA0～12，并对 LCE 与备份 LBA7 指针复核，同时恢复已确认的两类盘尾结构。授权使用 live layout-aware identity；stale protocol 只作为 cleanup 证据，不能获得写授权。强物理身份、精确 `geometry`、prepare/unmount/lock、reopen fresh identity recheck 均未降低。
 
 - 按盘型生成 `metadata`-only `WriteTransactionPlan`；
 - Plain MBR/GPT；
@@ -781,7 +781,7 @@ B0～B10 按阶段实施并小步提交；以下保留每阶段的验收证据�
 
 **B9 — CLI/TUI 清理**
 
-**实施状态（2026-09-29）：COMPLETE。** TUI 新建备份只提供元数据备份及固定覆盖范围说明，移除了深度备份命令、向导和运行分支；恢复结果按分区显示只读评估状态，并明确提示后续分区处理需独立确认。制盘演示进度统一称“制盘前元数据备份”。CLI 默认备份完成时列明分区结构、协议与未包含的文件系统/用户数据；`--deep` 仍可调用历史分析路径，但帮助与运行时均标为弃用。历史 EDPB 的读取兼容保持。
+**实施状态（2026-09-29）：COMPLETE。** TUI 新建备份只提供元数据备份及固定覆盖范围说明，移除了深度备份命令、向导和运行分支；恢复结果按分区显示只读评估状态，并明确提示后续分区处理需独立确认。制盘演示进度统一称“制盘前元数据备份”。CLI 默认备份完成时列明分区结构、协议与未包含的文件系统/用户数据；`--deep` 只保留为可识别的弃用参数并返回用法错误，不再创建 Deep。历史 v1/v2/Core/Deep EDPB 继续支持校验及只读 `info / inspect / read`，但不能因此重新开放新建 Deep。
 
 - 移除 TUI `Deep`；
 - CLI `--deep` 弃用；
