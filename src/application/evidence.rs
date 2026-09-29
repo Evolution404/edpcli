@@ -252,41 +252,56 @@ impl EvidenceSource {
                 path: path.to_path_buf(),
                 message: error.to_string(),
             })?;
+        if verified.manifest.schema != "edpb.manifest.v3"
+            || verified.manifest.backup_purpose != Some(crate::edpb::BackupPurpose::MetadataOnly)
+            || verified.manifest.snapshot.capture_level != crate::edpb::CaptureLevel::Metadata
+        {
+            return Err(EvidenceError::BackupVerify {
+                path: path.to_path_buf(),
+                message: "只支持最新版 EDPB v3 metadata-only 备份".into(),
+            });
+        }
         let canonical = crate::edpb::canonical_media_identity(&verified.manifest).map_err(|message| {
             EvidenceError::BackupVerify {
                 path: path.to_path_buf(),
                 message,
             }
         })?;
-        let current_plain_v3 = verified.manifest.schema == "edpb.manifest.v3"
-            && verified.manifest.backup_purpose == Some(crate::edpb::BackupPurpose::MetadataOnly)
-            && verified.manifest.snapshot.capture_level == crate::edpb::CaptureLevel::Metadata
-            && canonical.protocol.provision_kind == Some(crate::provision::DiskProvisionKind::Plain);
+        let provision_kind = canonical.protocol.provision_kind.ok_or_else(|| {
+            EvidenceError::BackupVerify {
+                path: path.to_path_buf(),
+                message: "EDPB v3 manifest 缺少确定盘型".into(),
+            }
+        })?;
         let has_full_protocol = verified
             .manifest
             .artifacts
             .iter()
             .any(|artifact| artifact.id == crate::edpb::RAW_PROTOCOL_ARTIFACT_ID);
-        if current_plain_v3 && has_full_protocol {
-            return Err(EvidenceError::BackupVerify {
-                path: path.to_path_buf(),
-                message: "Plain v3 metadata-only 不应包含固定 LBA0-12 protocol core".into(),
-            });
-        }
-        let protocol = if has_full_protocol {
-            crate::edpb::read_raw_protocol(path).map_err(|error| {
-                EvidenceError::BackupProtocolRead {
-                    path: path.to_path_buf(),
-                    message: error.to_string(),
+        let protocol = match provision_kind {
+            crate::provision::DiskProvisionKind::Plain => {
+                if has_full_protocol {
+                    return Err(EvidenceError::BackupVerify {
+                        path: path.to_path_buf(),
+                        message: "Plain v3 不应包含固定 LBA0-12 protocol core".into(),
+                    });
                 }
-            })?
-        } else if current_plain_v3 {
-            plain_protocol_context(path, &verified.manifest)?
-        } else {
-            return Err(EvidenceError::BackupProtocolRead {
-                path: path.to_path_buf(),
-                message: "EDPB 缺少可读的 LBA0-12 原始 Artifact".into(),
-            });
+                plain_protocol_context(path, &verified.manifest)?
+            }
+            _ => {
+                if !has_full_protocol {
+                    return Err(EvidenceError::BackupProtocolRead {
+                        path: path.to_path_buf(),
+                        message: "EDP v3 缺少 LBA0-12 原始 Artifact".into(),
+                    });
+                }
+                crate::edpb::read_raw_protocol(path).map_err(|error| {
+                    EvidenceError::BackupProtocolRead {
+                        path: path.to_path_buf(),
+                        message: error.to_string(),
+                    }
+                })?
+            }
         };
         if protocol.len() != METADATA_IMAGE_LEN {
             return Err(EvidenceError::BackupProtocolLength {
@@ -299,33 +314,13 @@ impl EvidenceSource {
                 path: path.to_path_buf(),
             }
         })?;
-        let legacy_nonplain = !manifest.snapshot.device_state.eq_ignore_ascii_case("plain");
-        let effective_device_id = canonical.protocol.device_id.clone().or_else(|| {
-            legacy_nonplain.then(|| manifest.device.device_id.clone())
-        });
-        let provision_kind = canonical.protocol.provision_kind.or_else(|| {
-            effective_device_id
-                .as_deref()
-                .and_then(|device_id| {
-                    crate::provision::DiskProvisionKind::from_metadata(&protocol, device_id)
-                })
-        }).or_else(|| {
-            (!legacy_nonplain
-                && crate::partition_table::confirmed_plain_protocol_prefix(
-                    &protocol,
-                    total_sectors,
-                ))
-            .then_some(crate::provision::DiskProvisionKind::Plain)
-        });
         let identity = EvidenceIdentity {
-            device_id: effective_device_id,
+            device_id: canonical.protocol.device_id.clone(),
             vid: canonical.hardware.vid.map(|value| format!("{value:04x}")),
             pid: canonical.hardware.pid.map(|value| format!("{value:04x}")),
             size_bytes: manifest.geometry.capacity_bytes,
-            onlyid: canonical.protocol.onlyid.clone().or_else(|| {
-                legacy_nonplain.then(|| manifest.device.onlyid.clone()).flatten()
-            }),
-            provision_kind,
+            onlyid: canonical.protocol.onlyid.clone(),
+            provision_kind: Some(provision_kind),
         };
         Ok(Self {
             source_label: path.display().to_string(),
