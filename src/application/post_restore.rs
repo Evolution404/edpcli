@@ -9,9 +9,7 @@ use std::path::PathBuf;
 use crate::common::SECTOR;
 use crate::diskio::SectorDev;
 use crate::edpb::ManifestPartition;
-use crate::filesystem::{
-    build_empty_exfat, build_empty_fat16, FilesystemKind, SparseFilesystemImage,
-};
+use crate::filesystem::{build_empty_filesystem, FilesystemKind, SparseFilesystemImage};
 use crate::partition_transform::{decrypt_mode2, EdpSm4Transform};
 use crate::provision::{
     parse_existing_provision, ExistingFileKeyError, FileKeyWrapMode, ProvisionImage, SecretBytes,
@@ -143,24 +141,13 @@ pub(crate) fn build_empty_partition_image(
     volume_label: &str,
     volume_serial: u32,
 ) -> Result<SparseFilesystemImage, String> {
-    match filesystem {
-        FilesystemKind::Fat16 => build_empty_fat16(
-            partition.start_lba,
-            partition.sector_count,
-            volume_serial,
-            volume_label,
-        ),
-        FilesystemKind::ExFat => build_empty_exfat(
-            partition.start_lba,
-            partition.sector_count,
-            volume_serial,
-            volume_label,
-        ),
-        FilesystemKind::Fat12 | FilesystemKind::Fat32 | FilesystemKind::Ntfs => Err(format!(
-            "portable filesystem writer does not yet implement {}",
-            filesystem.config_token()
-        )),
-    }
+    build_empty_filesystem(
+        filesystem,
+        partition.start_lba,
+        partition.sector_count,
+        volume_serial,
+        Some(volume_label),
+    )
 }
 
 impl EncryptedPartitionReinitializeRequest {
