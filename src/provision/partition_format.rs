@@ -20,29 +20,6 @@ pub struct PartitionFilesystemImage {
     pub image: SparseFilesystemImage,
 }
 
-pub fn build_official_exfat_partition(
-    plan: &OfficialProvisionPlan,
-    target: &PartitionFormatTarget,
-    file_key: &[u8; 16],
-    volume_label: &str,
-    volume_serial: u32,
-) -> Result<PartitionFilesystemImage, String> {
-    if plan.filesystem_format != FilesystemKind::ExFat {
-        return Err(format!(
-            "portable filesystem writer does not yet implement {}",
-            plan.filesystem_format.config_token()
-        ));
-    }
-    build_official_partition_filesystem_with_format(
-        plan,
-        target,
-        file_key,
-        volume_label,
-        volume_serial,
-        FilesystemKind::ExFat,
-    )
-}
-
 pub fn build_official_partition_filesystem(
     plan: &OfficialProvisionPlan,
     target: &PartitionFormatTarget,
@@ -110,40 +87,4 @@ fn build_official_partition_filesystem_with_format(
         physically_encrypted: target.physically_encrypted,
         image,
     })
-}
-
-pub fn build_official_exfat_partitions(
-    plan: &OfficialProvisionPlan,
-    file_key: &[u8; 16],
-    volume_label: &str,
-    volume_serials: &[u32],
-) -> Result<Vec<PartitionFilesystemImage>, String> {
-    if plan.filesystem_format != FilesystemKind::ExFat {
-        return Err(format!(
-            "portable filesystem writer does not yet implement {}",
-            plan.filesystem_format.config_token()
-        ));
-    }
-    let targets = plan.format_targets()?;
-    if volume_serials.len() != targets.len() {
-        return Err(format!(
-            "filesystem volume serial count mismatch: got {}, need {}",
-            volume_serials.len(),
-            targets.len()
-        ));
-    }
-    let mut out = Vec::with_capacity(targets.len());
-    for (index, target) in targets.iter().enumerate() {
-        if !target.format_capable {
-            continue;
-        }
-        out.push(build_official_exfat_partition(
-            plan,
-            target,
-            file_key,
-            volume_label,
-            volume_serials[index],
-        )?);
-    }
-    Ok(out)
 }
