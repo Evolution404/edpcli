@@ -79,7 +79,8 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
         ("src/tui/provision/execution_state.rs", 220),
         ("src/tui/provision/field_presentation.rs", 340),
         ("src/tui/provision/field_layout.rs", 180),
-        ("src/cli_args.rs", 450),
+        ("src/cli_args.rs", 400),
+        ("src/cli_args/parse_support.rs", 100),
         ("src/cli_args/help.rs", 160),
         ("src/cli.rs", 250),
         ("src/cli/prompter.rs", 180),
@@ -527,13 +528,15 @@ fn cli_entry_is_split_by_command_domain() {
         "src/cli_args/inspect.rs",
         "src/cli_args/backup.rs",
         "src/cli_args/help.rs",
+        "src/cli_args/parse_support.rs",
         "src/cli/commands/provision.rs",
         "src/cli/commands/backup.rs",
         "src/cli/prompter.rs",
     ] {
         exists(path);
     }
-    assert!(lines("src/cli_args.rs") < 450);
+    assert!(lines("src/cli_args.rs") < 400);
+    assert!(lines("src/cli_args/parse_support.rs") < 100);
     assert!(lines("src/cli_args/help.rs") < 160);
     assert!(lines("src/cli.rs") < 250);
     assert!(lines("src/cli/prompter.rs") < 180);

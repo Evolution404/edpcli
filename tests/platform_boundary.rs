@@ -8,6 +8,7 @@ const BUSINESS_SOURCES: &[&str] = &[
     "src/cli/prompter.rs",
     "src/cli_args.rs",
     "src/cli_args/help.rs",
+    "src/cli_args/parse_support.rs",
     "src/completion.rs",
     "src/crypto.rs",
     "src/disk_scan.rs",
