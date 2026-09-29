@@ -14,10 +14,12 @@
 - `src/media_identity.rs`、`src/partition_table.rs`、`src/disk_layout.rs`、`src/backup_coverage.rs`：UI-neutral 领域/读模型与纯算法；`application` 仅保留兼容 re-export 和 use-case 编排，`diskio`/`edpb`/`disk_scan` 不得反向依赖 application。
 - `src/media_identity_observer.rs`：只读身份观察服务，可读取协议镜像和硬件探测但没有任何写盘状态转换入口。
 - `src/provision/`：纯内存制盘领域模型与验证器；Plain 与官方 mode0～3 都通过统一 `ProvisionRequest` 进入应用层。
+- `src/filesystem/`：统一文件系统驱动领域；FAT12/FAT16/FAT32/exFAT/NTFS 共享识别和元信息接口，当前第一方格式化、读回和文件级分析只开放 FAT16/exFAT。
 - `src/protocol/`：LBA0～12、IIR、LCE 的类型化协议模型；`protocol::semantic` 提供跨业务语义，不包含 UI 字段名、颜色或渲染结构。
 - `src/diskio/`：块设备、写事务、备份配置、备份目录和备份创建按职责拆分。
 - `src/backup_*` / `src/edpb/`：元数据备份与自包含 EDPB 容器；容器模型、编解码、身份、写入、读取和校验按职责分离。
 - `src/platform/`：macOS/Linux/Windows 的设备、锁定、卸载和平台探测边界。
+- `src/tui/operation_progress_render.rs` 与 `operation_progress_status.rs`：备份、恢复、制盘共用的长操作进度页面；业务百分比和阶段计数来自应用事件，前端只渲染。
 - `src/disk_scan.rs` 只负责设备只读扫描；CLI 列表排版位于 `src/disk_scan_render.rs`。`src/text_width.rs` 提供无终端依赖的显示宽度与填充原语。
 
 ## 读写边界
@@ -26,7 +28,7 @@
 
 CLI 与 TUI 的制盘能力共用同一 `ProvisionRequest::{Official, Plain}` 和 prepare/commit 服务。Plain 是普通 MBR 磁盘目标，不属于官方 mode 编号，也不得映射为 mode4。
 
-应用层通过 `WriteEvent`、`MetadataBackupReport`、`MetadataRestoreOutcome`、`PostRestoreAssessment`、制盘报告和检查工作区返回结构化结果；ANSI/CLI 文本渲染位于前端层。元数据恢复报告只记录写入和读回，分区可用性与后续操作结果分别表达。TUI 后台任务只传递结构化结果，不直接向终端写输出；进入关键写入阶段后，退出请求延迟到安全收尾完成。
+应用层通过 `WriteEvent`、`MetadataBackupReport`、`MetadataRestoreOutcome`、`PostRestoreAssessment`、制盘报告和检查工作区返回结构化结果；ANSI/CLI 文本渲染位于前端层。备份、恢复、制盘的长操作统一投影为 `OperationRunState`：`OverallProgress` 表示总体基点，`StageProgress` 表示逻辑步骤 `N/M`，`WorkProgress` 表示当前 sector/byte 工作量。高频快照在运输层合并，终端正常刷新上限约 20 Hz；警告、错误、回滚和阶段边界保持可见。TUI 后台任务只传递结构化结果，不直接向终端写输出；进入关键写入阶段后，退出请求延迟到安全收尾完成。
 
 ## 协议与语义事实源
 
@@ -42,7 +44,7 @@ LBA0～12 的类型化解析器、配置类型轴和跨 LBA 语义位于 `src/pr
 
 ## 制盘架构
 
-官方 mode0～3 与 Plain 都是正式产品能力。CLI/TUI 均支持 plan/write；可确定性导出的目标共用 image/export 路径。应用层先 prepare 出不可变计划，再由 commit 执行安全写入，领域层不直接打开设备、执行平台命令或提权。
+官方 mode0～3 与 Plain 都是正式产品能力。CLI/TUI 共用只读准备和真实提交服务，可确定性导出的目标共用镜像导出路径。应用层先生成不可变计划，再由提交阶段执行安全写入，领域层不直接打开设备、执行平台命令或提权。已有盘通过区域处理策略选择原样保留、验证保留、密钥重新包装、K6 文件级迁移、重建或丢弃；加密来源需要已验证来源密码才能进入解密迁移。
 
 ## 验证
 
