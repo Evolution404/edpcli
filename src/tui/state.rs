@@ -149,7 +149,6 @@ pub enum InputMode {
     Search,
     Command,
     Confirm,
-    Help,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1644,6 +1643,10 @@ impl AppState {
         self.shell.input_mode
     }
 
+    pub const fn help_open(&self) -> bool {
+        self.shell.help_open
+    }
+
     pub const fn is_critical_operation(&self) -> bool {
         self.shell.critical_operation
     }
@@ -1712,6 +1715,10 @@ impl AppState {
         }
 
         if command == NavCommand::Escape {
+            if self.shell.help_open {
+                self.shell.help_open = false;
+                return StateEffect::None;
+            }
             if self.provision.scheme_picker_open {
                 self.provision_close_scheme_picker();
                 return StateEffect::None;
@@ -2009,7 +2016,7 @@ impl AppState {
                 self.shell.input_buffer.clear();
                 self.shell.input_mode = InputMode::Command;
             }
-            NavCommand::Help => self.shell.input_mode = InputMode::Help,
+            NavCommand::Help => self.shell.help_open = !self.shell.help_open,
             NavCommand::Refresh
             | NavCommand::BeginRestore
             | NavCommand::BeginBackupCreate

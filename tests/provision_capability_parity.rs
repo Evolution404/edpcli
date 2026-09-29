@@ -75,12 +75,15 @@ fn optional_format_choices_are_not_forced_on_by_rebuild_actions() {
 #[test]
 fn plain_export_is_available_in_tui_review_flow() {
     let execution = source("src/tui/provision/execution_state.rs");
-    let render = source("src/tui/render.rs");
+    let keymap = source("src/tui/keymap.rs");
+    let controller = source("src/tui/controller/provision.rs");
 
     assert!(
         !execution.contains("ProvisionPrepared::Plain(_) => return None"),
         "Plain export must not be blocked by TUI state"
     );
-    assert!(render.contains("e 导出镜像"));
-    assert!(!render.contains("e 导出镜像（新盘计划）"));
+    assert!(keymap.contains("KeyCode::Char('e') => Some(TuiAction::Export)"));
+    assert!(controller.contains("ProvisionStage::Review => match action"));
+    assert!(controller.contains("TuiAction::Export =>"));
+    assert!(controller.contains("state.provision_begin_export();"));
 }

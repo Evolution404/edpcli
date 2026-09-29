@@ -177,20 +177,30 @@ fn inspect_tab_cycle_is_tree_overview_detail_only() {
 }
 
 #[test]
-fn table_footer_advertises_cell_and_row_copy_across_workspaces() {
+fn contextual_help_advertises_shared_table_copy_without_a_permanent_footer() {
     let mut devices = AppState::new();
     devices.replace_devices(vec![device()]);
     let device_text = render_text(&devices, 240, 60);
     assert!(!device_text.contains("y单元格·Y整行"));
     assert!(device_text.contains("?帮助"));
 
-    devices.navigate(NavCommand::WorkspaceBackups, 20);
-    assert!(render_text(&devices, 240, 60).contains("y单元格·Y整行"));
+    devices.navigate(NavCommand::Help, 20);
+    let help = render_text(&devices, 240, 60);
+    assert!(help.contains("快捷键·设备"), "{help}");
+    assert!(help.contains("复制单元格/整行"), "{help}");
+}
 
-    devices.navigate(NavCommand::WorkspaceProvision, 20);
-    assert!(render_text(&devices, 240, 60).contains("y单元格·Y整行"));
-    assert_eq!(devices.provision_select_disk(), Some(6));
-    assert!(render_text(&devices, 240, 60).contains("y单元格·Y整行"));
+#[test]
+fn top_navigation_is_the_only_persistent_help_prompt() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+    let normal = render_text(&state, 120, 32);
+    assert_eq!(normal.matches("?帮助").count(), 1, "{normal}");
+
+    state.begin_provision_for_selected_device().unwrap();
+    let picker = render_text(&state, 120, 32);
+    assert_eq!(picker.matches("?帮助").count(), 1, "{picker}");
+    assert!(!picker.contains("制盘方案："), "{picker}");
 }
 
 #[test]
@@ -216,6 +226,31 @@ fn provision_scheme_picker_is_centered_over_devices_before_entering_form() {
     assert_eq!(state.workspace(), Workspace::Provision);
     assert_eq!(state.provision().stage, ProvisionStage::Form);
     assert_eq!(state.provision().kind, ProvisionKind::Mode1);
+}
+
+#[test]
+fn provision_scheme_picker_uses_shared_modal_surface_instead_of_terminal_black() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+    state.begin_provision_for_selected_device().unwrap();
+
+    let width = 120;
+    let height = 32;
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let content_area = ratatui::layout::Rect::new(0, 2, width, height - 2);
+    let popup = edpcli::tui::ui::centered_modal_rect(content_area, 78, 17);
+    let expected = edpcli::tui::theme::current()
+        .modal_surface()
+        .bg
+        .expect("modal surface background");
+    // Sample an interior blank cell, not the continuation cell of a full-width CJK glyph.
+    let sample = (popup.right().saturating_sub(3), popup.y + 2);
+    assert_eq!(
+        terminal.backend().buffer()[sample].style().bg,
+        Some(expected),
+        "modal interior must be painted by the shared modal surface"
+    );
 }
 
 #[test]

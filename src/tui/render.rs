@@ -984,16 +984,20 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else {
         CoreMode::Stable
     };
-    let has_notice = state.notice().is_some();
+
+    let notice = state.notice();
+    let status = super::status::dynamic_status(state);
     let mut constraints = vec![
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(1),
     ];
-    if has_notice {
+    if notice.is_some() {
         constraints.push(Constraint::Length(1));
     }
-    constraints.push(Constraint::Length(1));
+    if status.is_some() {
+        constraints.push(Constraint::Length(1));
+    }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
@@ -1001,7 +1005,6 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
     super::shell::header(frame, chunks[0], state, core_mode);
     super::shell::navigation(frame, chunks[1], state);
-
     let content_area = chunks[2];
 
     if state.workspace() == Workspace::Inspect && state.advanced_inspect().is_some() {
@@ -1016,253 +1019,38 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         draw_backup_prune(frame, content_area, state);
     } else if state.wizard().is_some() {
         draw_wizard(frame, content_area, state);
+    } else if state.input_mode() == InputMode::Command {
+        draw_command_palette(frame, content_area, state);
     } else {
-        match state.input_mode() {
-            InputMode::Command => {
-                draw_command_palette(frame, content_area, state);
-            }
-            InputMode::Help => {
-                let mut help_lines = vec![Line::from(Span::styled("Vim 键位", accent()))];
-                help_lines.extend(
-                    super::keymap::NORMAL_HELP
-                        .iter()
-                        .map(|binding| Line::from(format!("{}  {}", binding.keys, binding.label))),
-                );
-                help_lines.push(Line::from(
-                    "顶层标签：设备 ↔ 备份 · 一级 Tab/Shift-Tab 或 gt/gT 切换 · 二级 Tab/Shift-Tab 切当前页焦点 · Esc 返回上一层",
-                ));
-                help_lines.push(Line::from(
-                    "设备: Enter 从列表进入信息树/从树进入详情 · Ctrl-w 切 Pane · 树内 j/k 选择、gg/G 首尾、o 展开 · 详情内 j/k 滚动、gg/G 顶底 · p 制盘 · i 检查 · b 备份 · 备份页: Enter/i 检查 · v 校验 · R 恢复 · d 删除",
-                ));
-                help_lines.push(Line::from(
-                    "检查: / 搜索 · n/N 匹配 · gl 跳转 · Sector 0/$、gg/G、v",
-                ));
-                help_lines.push(Line::from(
-                    "制盘: Normal 下 i 编辑、Enter 生成计划；Insert 下 Tab/Shift-Tab 完成编辑并移焦点，Enter/Esc 完成编辑；物理写盘保持精确输入 YES 的安全确认",
-                ));
-                let help = Paragraph::new(help_lines)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .title("帮助")
-                            .title_style(secondary()),
-                    )
-                    .wrap(Wrap { trim: true });
-                frame.render_widget(help, content_area);
-            }
-            _ => match state.workspace() {
-                Workspace::Devices => draw_devices(frame, content_area, state),
-                Workspace::Inspect => frame.render_widget(
-                    Paragraph::new("检查：请在设备或备份页选定对象后按 i 进入。")
-                        .block(super::ui::panel("检查", true)),
-                    content_area,
-                ),
-                Workspace::Backups => draw_backups(frame, content_area, state),
-                Workspace::Provision => draw_provision(frame, content_area, state),
-            },
+        match state.workspace() {
+            Workspace::Devices => draw_devices(frame, content_area, state),
+            Workspace::Inspect => frame.render_widget(
+                Paragraph::new("检查：请在设备或备份页选定对象后按 i 进入。")
+                    .block(super::ui::panel("检查", true)),
+                content_area,
+            ),
+            Workspace::Backups => draw_backups(frame, content_area, state),
+            Workspace::Provision => draw_provision(frame, content_area, state),
         }
     }
 
     if state.provision_scheme_picker_open() {
         draw_scheme_picker(frame, content_area, state);
     }
+    if state.help_open() {
+        super::help_overlay::draw_help_overlay(frame, content_area, state);
+    }
 
-    let status = if state.is_critical_operation() && state.backup_delete().is_some() {
-        "备份删除正在执行：Esc 不退出；q / Ctrl-C 将延迟到安全检查点".to_string()
-    } else if state.is_critical_operation() && state.backup_batch_delete().is_some() {
-        "批量备份删除正在执行：Esc 不退出；q / Ctrl-C 将延迟到安全检查点".to_string()
-    } else if state.is_critical_operation() && state.backup_prune().is_some() {
-        "备份清理正在执行：Esc 不退出；q / Ctrl-C 将延迟到安全检查点".to_string()
-    } else if state.is_critical_operation() {
-        "关键写盘阶段：Esc 不退出；q / Ctrl-C 将延迟到安全检查点".to_string()
-    } else if state.provision_scheme_picker_open() {
-        "制盘方案：j/k 或 ↑/↓ 选择 · Enter 确认进入制盘表单 · Esc 取消".to_string()
-    } else if let Some(advanced) = state.advanced_inspect() {
-        use super::state::AdvancedInspectStage;
-        match advanced.stage {
-            AdvancedInspectStage::Running => "全盘检查后台只读建立结构树…".to_string(),
-            AdvancedInspectStage::Browser => {
-                let escape = state
-                    .advanced_inspect_breadcrumb()
-                    .map(|model| model.escape_hint())
-                    .unwrap_or_else(|| "Esc 返回".into());
-                if let Some((query, index, total)) = state.advanced_inspect_search_status() {
-                    format!(
-                        "检查：1/2/3/4 业务/原始/Hex/布局 · Tab/Shift-Tab 切 Pane · Ctrl-w h/j/k/l Pane · j/k 当前 Pane · o 展开/折叠 · Enter 查看 · {escape} · q 退出 · 当前 {index}/{total}: {}",
-                        safe(query)
-                    )
-                } else {
-                    format!("检查：1/2/3/4 业务/原始/Hex/布局 · Tab/Shift-Tab 切 Pane · Ctrl-w h/j/k/l Pane · j/k 当前 Pane · o 展开/折叠 · Enter 查看 · {escape} · q 退出")
-                }
-            }
-        }
-    } else if state.input_mode() == InputMode::Search {
-        format!(
-            "/{}  ·  输入即过滤  ·  Enter 确认  ·  Esc 取消编辑",
-            safe(state.input_buffer())
-        )
-    } else if state.input_mode() == InputMode::Command {
-        format!(
-            ":{}  ·  Enter 执行  ·  Backspace 删除  ·  Esc 取消",
-            safe(state.input_buffer())
-        )
-    } else if state.input_mode() == InputMode::Help {
-        "Esc 返回  ·  q 退出".to_string()
-    } else if state.wizard().is_some() {
-        match state.wizard().unwrap().stage {
-            WizardStage::Review => "Enter 继续 · o 详情 · Esc 返回".to_string(),
-            WizardStage::Confirm => "输入 YES · Backspace 删除 · Enter 执行 · Esc 返回".to_string(),
-            WizardStage::Running => "q / Ctrl-C 延迟退出".to_string(),
-            WizardStage::PostRestore => "j/k 选择 · Enter 处理 · o 详情 · Esc 完成".to_string(),
-            WizardStage::VolumeLabelInput => {
-                "输入卷标 · Backspace 删除 · Enter 继续 · Esc 返回".to_string()
-            }
-            WizardStage::PasswordInput => "输入原密码 · Enter 继续 · Esc 返回".to_string(),
-            WizardStage::EncryptedFormatConfirm => {
-                "输入 YES · Enter 加密格式化 · Esc 返回".to_string()
-            }
-            WizardStage::FormatConfirm => {
-                "输入 YES · Backspace 删除 · Enter 格式化 · Esc 返回".to_string()
-            }
-            WizardStage::Formatting => "q / Ctrl-C 延迟退出".to_string(),
-            WizardStage::ReinitializePassword => "输入新密码 · Enter 下一步 · Esc 返回".to_string(),
-            WizardStage::ReinitializePasswordConfirm => {
-                "再次输入新密码 · Enter 校验 · Esc 返回".to_string()
-            }
-            WizardStage::ReinitializeConfirm => {
-                "输入 YES · Enter 重建密钥域 · Esc 返回".to_string()
-            }
-            WizardStage::Reinitializing => "q / Ctrl-C 延迟退出".to_string(),
-            WizardStage::Result => "Enter / Esc 关闭".to_string(),
-        }
-    } else if let Some(delete) = state.backup_delete() {
-        match delete.stage {
-            WizardStage::Confirm => "输入 YES · Backspace 删除 · Enter 删除 · Esc 取消".to_string(),
-            WizardStage::Running => "q / Ctrl-C 延迟退出".to_string(),
-            WizardStage::Result => "Enter / Esc 关闭".to_string(),
-            _ => "Esc 返回".to_string(),
-        }
-    } else if let Some(batch) = state.backup_batch_delete() {
-        use super::state::BackupBatchDeleteStage;
-        match batch.stage {
-            BackupBatchDeleteStage::Planning => "正在生成删除计划…".to_string(),
-            BackupBatchDeleteStage::Review => "Enter 确认 · Esc 取消".to_string(),
-            BackupBatchDeleteStage::Confirm => {
-                "输入 YES · Backspace 删除 · Enter 执行 · Esc 返回".to_string()
-            }
-            BackupBatchDeleteStage::Running => "q / Ctrl-C 延迟退出".to_string(),
-            BackupBatchDeleteStage::Result => "Enter / Esc 关闭".to_string(),
-        }
-    } else if let Some(prune) = state.backup_prune() {
-        use super::state::BackupPruneStage;
-        match prune.stage {
-            BackupPruneStage::Input => {
-                "输入保留份数 · Backspace 删除 · Enter 预览 · Esc 取消".to_string()
-            }
-            BackupPruneStage::Planning => "正在生成清理计划…".to_string(),
-            BackupPruneStage::Review => "Enter 确认 · Esc 取消".to_string(),
-            BackupPruneStage::Confirm => {
-                "输入 YES · Backspace 删除 · Enter 执行 · Esc 返回".to_string()
-            }
-            BackupPruneStage::Running => "q / Ctrl-C 延迟退出".to_string(),
-            BackupPruneStage::Result => "Enter / Esc 关闭".to_string(),
-        }
-    } else {
-        match state.workspace() {
-            Workspace::Devices => "? 帮助".to_string(),
-            Workspace::Inspect => {
-                if state.active_table_kind()
-                    == Some(crate::tui::table_layout::TableKind::InspectFields)
-                {
-                    let kind = crate::tui::table_layout::TableKind::InspectFields;
-                    let total = crate::tui::table_layout::layout_for(kind).specs().len();
-                    format!(
-                        "检查字段表：Tab/Shift-Tab 切 Pane · j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出",
-                        state.table_active_column(kind) + 1,
-                        total
-                    )
-                } else {
-                    "检查：Tab/Shift-Tab 切 Pane · j/k 当前 Pane · Ctrl-w 切 Pane · o 展开/折叠 · Enter 查看 · Esc 返回 · q 退出"
-                        .to_string()
-                }
-            }
-            Workspace::Backups => {
-                if state.selected_backup().is_some() {
-                    let kind = crate::tui::table_layout::TableKind::Backups;
-                    let total = crate::tui::table_layout::layout_for(kind).specs().len();
-                    format!(
-                        "Tab/Shift-Tab 或 gt/gT 标签 · j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Space 勾选 · Enter/i 检查 · b 新建 · v 校验 · R 恢复 · d 删除 · Esc 当前标签 · q 退出",
-                        state.table_active_column(kind) + 1,
-                        total
-                    )
-                } else {
-                    "Tab/Shift-Tab 或 gt/gT 标签 · b 新建 · r 刷新 · Esc 当前标签 · q 退出"
-                        .to_string()
-                }
-            }
-            Workspace::Provision => {
-                let provision_status = match state.provision().stage {
-                ProvisionStage::SelectDisk => {
-                    let kind = crate::tui::table_layout::TableKind::ProvisionDevices;
-                    let total = crate::tui::table_layout::layout_for(kind).specs().len();
-                    format!(
-                        "制盘选盘：j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 固定目标 · Esc 返回设备页",
-                        state.table_active_column(kind) + 1,
-                        total
-                    )
-                }
-                ProvisionStage::Form if state.input_mode() == InputMode::Insert => {
-                    "INSERT · ←/→ 光标 · Home/End 首尾 · 输入/Backspace 编辑 · Tab/Shift-Tab 完成并移焦点 · Enter/Esc 完成编辑"
-                        .to_string()
-                }
-                ProvisionStage::Form if state.provision_selected_field_is_editable() => {
-                    let unit_key = if state
-                        .provision_field_hint(state.provision().field_selected)
-                        .is_some_and(|hint| hint.starts_with("Space 切换 MiB / GiB / sector"))
-                    {
-                        " · Space 单位 · f 填满"
-                    } else {
-                        ""
-                    };
-                    format!("NORMAL · Tab/Shift-Tab 字段/布局焦点 · j/k 字段 · i 编辑{unit_key} · Enter 生成计划 · Esc 返回")
-                }
-                ProvisionStage::Form => {
-                    "NORMAL · Tab/Shift-Tab 字段/布局焦点 · j/k 字段 · i 编辑 · h/l 或 Space 切换 · Enter 生成计划 · Esc 返回"
-                        .to_string()
-                }
-                ProvisionStage::Planning => "正在生成只读计划…".to_string(),
-                ProvisionStage::Review => {
-                    "Tab/Shift-Tab 切 Pane  ·  Enter 最终确认  ·  e 导出镜像  ·  Esc 返回修改".to_string()
-                }
-                ProvisionStage::ExportPath => {
-                    "输入导出路径  ·  Enter 导出  ·  Esc 返回计划".to_string()
-                }
-                ProvisionStage::Exporting => "镜像正在后台导出…".to_string(),
-                ProvisionStage::Confirm => "输入 YES + Enter 执行  ·  Esc 返回计划".to_string(),
-                ProvisionStage::Running => {
-                    "安全事务执行中；Esc 不退出，q / Ctrl-C 的退出请求延迟到安全检查点".to_string()
-                }
-                ProvisionStage::Result => "Enter / Esc 返回制盘中心".to_string(),
-                };
-                provision_status
-            }
-        }
-    };
-    let status = if state.input_mode() == InputMode::Normal
-        && state.active_table_kind().is_some()
-        && state.workspace() != Workspace::Devices
-        && !state.is_critical_operation()
-    {
-        format!("y 单元格 · Y 整行 · {status}")
-    } else {
-        status
-    };
-    super::shell::footer(frame, chunks[usize::from(has_notice) + 3], &status);
-    if let Some(message) = state.notice() {
+    let mut tail = 3;
+    if let Some(message) = notice {
         frame.render_widget(
             super::ui::notice_banner(safe(message), super::ui::BannerTone::Warning),
-            chunks[3],
+            chunks[tail],
         );
+        tail += 1;
+    }
+    if let Some(status) = status {
+        super::shell::status_bar(frame, chunks[tail], &status);
     }
 }
 

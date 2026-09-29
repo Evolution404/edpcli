@@ -2,7 +2,9 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use edpcli::tui::{
-    keymap::{KeyMapper, TuiAction, WidgetRole, INSPECT_HELP, NORMAL_HELP},
+    keymap::{
+        KeyMapper, TuiAction, WidgetRole, DEVICES_HELP, GLOBAL_HELP, INSPECT_HELP, TABLE_HELP,
+    },
     state::InputMode,
 };
 
@@ -526,25 +528,26 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
         "Provision Form plan request must execute through the production task adapter"
     );
 
-    let render = include_str!("../src/tui/render.rs");
+    let keymap = include_str!("../src/tui/keymap/help.rs");
     assert!(
-        !render.contains("i/Enter 进入 Insert"),
+        !keymap.contains("i/Enter 进入 Insert"),
         "help/footer must not advertise the regressed Enter-to-edit behavior"
     );
     assert!(
-        render.contains("Enter 生成计划"),
-        "Provision Form footer must advertise Enter as generate-plan"
+        keymap.contains("进入下一阶段"),
+        "Provision help registry must advertise Enter as the forward action"
     );
 }
 
 #[test]
 fn user_visible_inspect_hints_point_to_full_disk_tree_entry() {
-    let shell = include_str!("../src/tui/render.rs");
-    assert!(shell.contains("i 检查"));
+    let keymap = include_str!("../src/tui/keymap/help.rs");
+    let shell = include_str!("../src/tui/shell/mod.rs");
+    assert!(keymap.contains("检查当前设备"));
     assert!(shell.contains("? 帮助"));
-    assert!(shell.contains("Enter 从列表进入信息树"));
-    assert!(!shell.contains("i Inspect"));
-    assert!(!shell.contains("gi Inspect"));
+    assert!(keymap.contains("打开设备信息 / 进入详情"));
+    assert!(!keymap.contains("i Inspect"));
+    assert!(!keymap.contains("gi Inspect"));
 
     let dispatch = include_str!("../src/tui/dispatch.rs");
     assert!(dispatch.contains("NavCommand::OpenInspect =>"));
@@ -668,22 +671,22 @@ fn release_events_never_reach_keymap() {
 
 #[test]
 fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
-    assert!(NORMAL_HELP
+    assert!(DEVICES_HELP
         .iter()
-        .any(|binding| binding.keys == "j/k" && binding.label == "Move"));
-    assert!(NORMAL_HELP
-        .iter()
-        .any(|binding| binding.keys == "r" && binding.action == TuiAction::Refresh));
-    assert!(NORMAL_HELP.iter().any(|binding| {
-        binding.keys == "Tab/Shift-Tab"
-            && binding.label == "当前层级焦点 / 顶层标签"
+        .any(|binding| binding.keys.contains("j/k") && binding.action == TuiAction::MoveDown));
+    assert!(GLOBAL_HELP.iter().any(|binding| {
+        binding.keys == "Tab / Shift-Tab"
+            && binding.label == "切换当前层级焦点 / 顶层标签"
             && binding.action == TuiAction::FocusNext
     }));
-    assert!(NORMAL_HELP.iter().any(|binding| {
-        binding.keys == "gt/gT"
-            && binding.label == "切换顶层标签"
+    assert!(GLOBAL_HELP.iter().any(|binding| {
+        binding.keys == "gt / gT"
+            && binding.label == "下一个 / 上一个顶层标签"
             && binding.action == TuiAction::WorkspaceNext
     }));
+    assert!(TABLE_HELP
+        .iter()
+        .any(|binding| binding.keys == "y / Y" && binding.action == TuiAction::TableCopyCell));
     assert!(INSPECT_HELP.iter().any(|binding| {
         binding.keys == "Tab/Shift-Tab"
             && binding.label == "切换当前页 Pane"

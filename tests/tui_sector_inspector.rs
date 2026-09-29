@@ -5,7 +5,7 @@ use edpcli::application::inspect::{
 use edpcli::inspect::{FieldChild, FieldStyle, InspectMeta};
 use edpcli::tui::{
     render,
-    state::{AdvancedInspectSource, AppState, SectorInspectMode},
+    state::{AdvancedInspectSource, AppState, NavCommand, SectorInspectMode},
 };
 use ratatui::{backend::TestBackend, Terminal};
 
@@ -119,6 +119,7 @@ fn inspect_fields_table_footer_shows_copy_shortcuts() {
     let kind = edpcli::tui::table_layout::TableKind::InspectFields;
     assert!(state.table_copy_payload(kind, false).is_some());
     assert!(state.table_copy_payload(kind, true).unwrap().contains('\t'));
+    state.navigate(NavCommand::Help, 20);
     let mut terminal = Terminal::new(TestBackend::new(240, 60)).unwrap();
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
     let text = terminal
@@ -129,7 +130,7 @@ fn inspect_fields_table_footer_shows_copy_shortcuts() {
         .map(|cell| cell.symbol())
         .collect::<String>()
         .replace(' ', "");
-    assert!(text.contains("y单元格·Y整行"));
+    assert!(text.contains("复制单元格/整行"), "{text}");
 }
 
 #[test]

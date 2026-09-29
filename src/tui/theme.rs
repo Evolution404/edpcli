@@ -234,6 +234,22 @@ impl Theme {
             .bg(self.palette.surface_raised)
     }
 
+    pub fn modal_surface(self) -> Style {
+        self.raised_surface()
+    }
+
+    pub fn modal_background(self) -> Style {
+        Style::default().bg(self.palette.surface_raised)
+    }
+
+    pub fn modal_border(self) -> Style {
+        self.strong_border()
+    }
+
+    pub fn modal_title(self) -> Style {
+        self.accent()
+    }
+
     pub fn subtle_border(self) -> Style {
         Style::default().fg(self.palette.border_subtle)
     }

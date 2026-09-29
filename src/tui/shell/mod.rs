@@ -22,7 +22,6 @@ pub fn header(frame: &mut Frame, area: Rect, state: &AppState, core_mode: CoreMo
         InputMode::Search => ("SEARCH", theme.secondary_accent()),
         InputMode::Command => ("COMMAND", theme.secondary_accent()),
         InputMode::Confirm => ("CONFIRM", theme.warning()),
-        InputMode::Help => ("HELP", theme.muted()),
     };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -75,7 +74,7 @@ pub fn navigation(frame: &mut Frame, area: Rect, state: &AppState) {
     }
 }
 
-pub fn footer(frame: &mut Frame, area: Rect, text: &str) {
+pub fn status_bar(frame: &mut Frame, area: Rect, text: &str) {
     frame.render_widget(
         Paragraph::new(crate::ui::sanitize_terminal_text(text))
             .style(theme::current().secondary_text()),

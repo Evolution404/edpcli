@@ -100,13 +100,6 @@ struct Pending {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HelpBinding {
-    pub keys: &'static str,
-    pub label: &'static str,
-    pub action: TuiAction,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WidgetRole {
     Tree,
     Table,
@@ -116,141 +109,12 @@ pub enum WidgetRole {
     Other,
 }
 
-pub const NORMAL_HELP: &[HelpBinding] = &[
-    HelpBinding {
-        keys: "j/k",
-        label: "Move",
-        action: TuiAction::MoveDown,
-    },
-    HelpBinding {
-        keys: "h/l",
-        label: "表格：上一列 / 下一列",
-        action: TuiAction::TableColumnRight,
-    },
-    HelpBinding {
-        keys: "</>",
-        label: "表格：左移 / 右移当前整列",
-        action: TuiAction::TableMoveColumnRight,
-    },
-    HelpBinding {
-        keys: "H/L",
-        label: "表格：横向视口",
-        action: TuiAction::TableScrollRight,
-    },
-    HelpBinding {
-        keys: "0/$",
-        label: "表格：第一列 / 最后一列",
-        action: TuiAction::TableColumnFirst,
-    },
-    HelpBinding {
-        keys: "s/S",
-        label: "表格：排序 / 默认顺序",
-        action: TuiAction::TableSortToggle,
-    },
-    HelpBinding {
-        keys: "y/Y",
-        label: "表格：复制单元格 / 整行",
-        action: TuiAction::TableCopyCell,
-    },
-    HelpBinding {
-        keys: "Enter",
-        label: "Open",
-        action: TuiAction::Activate,
-    },
-    HelpBinding {
-        keys: "/",
-        label: "Search",
-        action: TuiAction::Search,
-    },
-    HelpBinding {
-        keys: "r",
-        label: "Refresh",
-        action: TuiAction::Refresh,
-    },
-    HelpBinding {
-        keys: "p",
-        label: "Provision",
-        action: TuiAction::Provision,
-    },
-    HelpBinding {
-        keys: "Tab/Shift-Tab",
-        label: "当前层级焦点 / 顶层标签",
-        action: TuiAction::FocusNext,
-    },
-    HelpBinding {
-        keys: "gt/gT",
-        label: "切换顶层标签",
-        action: TuiAction::WorkspaceNext,
-    },
-    HelpBinding {
-        keys: "?",
-        label: "Help",
-        action: TuiAction::Help,
-    },
-];
-
-pub const INSPECT_HELP: &[HelpBinding] = &[
-    HelpBinding {
-        keys: "1/2/3/4",
-        label: "业务字段/原始字段/Hex/全盘布局",
-        action: TuiAction::InspectBusiness,
-    },
-    HelpBinding {
-        keys: "Tab/Shift-Tab",
-        label: "切换当前页 Pane",
-        action: TuiAction::FocusNext,
-    },
-    HelpBinding {
-        keys: "j/k",
-        label: "Move",
-        action: TuiAction::MoveDown,
-    },
-    HelpBinding {
-        keys: "h/l",
-        label: "Fold",
-        action: TuiAction::MoveLeft,
-    },
-    HelpBinding {
-        keys: "字段表 h/l · </> · H/L · 0/$ · s/S · y/Y",
-        label: "列 · 视口 · 排序 · 复制",
-        action: TuiAction::TableColumnRight,
-    },
-    HelpBinding {
-        keys: "Enter",
-        label: "Open",
-        action: TuiAction::Activate,
-    },
-    HelpBinding {
-        keys: "o",
-        label: "Toggle",
-        action: TuiAction::Open,
-    },
-    HelpBinding {
-        keys: "/",
-        label: "Search",
-        action: TuiAction::Search,
-    },
-    HelpBinding {
-        keys: "n/N",
-        label: "Match",
-        action: TuiAction::NextMatch,
-    },
-    HelpBinding {
-        keys: "gl",
-        label: "Goto",
-        action: TuiAction::InspectJump,
-    },
-    HelpBinding {
-        keys: "[/]",
-        label: "Sector",
-        action: TuiAction::SectorPrevious,
-    },
-    HelpBinding {
-        keys: "?",
-        label: "Help",
-        action: TuiAction::Help,
-    },
-];
+#[path = "keymap/help.rs"]
+mod help;
+pub use help::{
+    HelpBinding, BACKUPS_HELP, DEVICES_HELP, GLOBAL_HELP, INSPECT_HELP, PICKER_HELP,
+    PROVISION_HELP, TABLE_HELP,
+};
 
 pub fn is_actionable_key(event: &KeyEvent) -> bool {
     !matches!(event.kind, KeyEventKind::Release)
@@ -327,12 +191,6 @@ impl KeyMapper {
             InputMode::Insert => return self.map_insert(event),
             InputMode::Search | InputMode::Command => return self.map_text_entry(event),
             InputMode::Confirm => return self.map_confirm(event),
-            InputMode::Help => {
-                return match event.code {
-                    KeyCode::Esc => Some(TuiAction::Back),
-                    _ => None,
-                };
-            }
             InputMode::Normal => {}
         }
 

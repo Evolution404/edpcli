@@ -1520,9 +1520,11 @@ fn search_command_and_help_modes_return_to_normal_with_escape() {
     assert_eq!(state.input_mode(), InputMode::Normal);
 
     state.navigate(NavCommand::Help, 10);
-    assert_eq!(state.input_mode(), InputMode::Help);
+    assert_eq!(state.input_mode(), InputMode::Normal);
+    assert!(state.help_open());
     state.navigate(NavCommand::Escape, 10);
     assert_eq!(state.input_mode(), InputMode::Normal);
+    assert!(!state.help_open());
 }
 
 #[test]

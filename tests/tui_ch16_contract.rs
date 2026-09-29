@@ -462,7 +462,7 @@ fn ch16_inspect_lba8_renders_at_all_required_sizes() {
             .join("\n")
             .replace(' ', "");
         assert!(
-            text.contains("检查"),
+            text.contains("结构树") || text.contains("LBA8"),
             "missing workspace at {width}x{height}"
         );
     }
@@ -578,7 +578,7 @@ fn ch16_business_layouts_do_not_use_legacy_animation_or_workspace_sidebars() {
 #[test]
 fn ch16_design_primitives_share_theme_and_render_at_compact_size() {
     use edpcli::tui::ui::{
-        card, data_table, key_hints, notice_banner, panel, status_badge, BadgeTone, BannerTone,
+        card, data_table, notice_banner, panel, status_badge, BadgeTone, BannerTone,
     };
     use ratatui::{
         layout::Constraint,
@@ -608,8 +608,7 @@ fn ch16_design_primitives_share_theme_and_render_at_compact_size() {
                 ratatui::layout::Rect::new(0, 4, 40, 1),
             );
             frame.render_widget(
-                Paragraph::new(key_hints(&[("r", "刷新"), ("?", "帮助")]))
-                    .block(panel("操作", false)),
+                Paragraph::new("动态状态").block(panel("状态", false)),
                 ratatui::layout::Rect::new(0, 5, 40, 4),
             );
         })
@@ -619,7 +618,7 @@ fn ch16_design_primitives_share_theme_and_render_at_compact_size() {
         .map(|position| terminal.backend().buffer()[position].symbol().to_owned())
         .collect::<String>()
         .replace(' ', "");
-    for value in ["设备", "正常", "disk4", "扫描完成", "刷新"] {
+    for value in ["设备", "正常", "disk4", "扫描完成", "动态状态"] {
         assert!(text.contains(value), "missing {value}");
     }
 }

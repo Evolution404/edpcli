@@ -298,6 +298,21 @@ pub(super) fn dispatch_action(
     viewport_width: u16,
     clipboard: &mut dyn ClipboardBackend,
 ) -> ActionOutcome {
+    if state.help_open() {
+        return match action {
+            TuiAction::Back => ActionOutcome::effect(state.navigate(NavCommand::Escape, 1)),
+            TuiAction::Help => ActionOutcome::effect(state.navigate(NavCommand::Help, 1)),
+            TuiAction::Quit => {
+                ActionOutcome::effect(state.navigate(NavCommand::Quit, viewport_height))
+            }
+            _ => ActionOutcome::handled(),
+        };
+    }
+
+    if action == TuiAction::Help {
+        return ActionOutcome::effect(state.navigate(NavCommand::Help, viewport_height));
+    }
+
     if state.provision_scheme_picker_open() {
         if let Some(outcome) = provision::dispatch_provision(state, action, viewport_height) {
             return outcome;

@@ -66,6 +66,12 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
     assert!(near_hard_limit(80, 100));
     for (path, hard_limit) in [
         ("src/tui/mod.rs", 400),
+        ("src/tui/render.rs", 1_200),
+        ("src/tui/keymap.rs", 420),
+        ("src/tui/keymap/help.rs", 320),
+        ("src/tui/help_overlay.rs", 150),
+        ("src/tui/status.rs", 140),
+        ("src/tui/ui/modal.rs", 100),
         ("src/tui/devices/state.rs", 400),
         ("src/tui/disk_layout_state.rs", 120),
         ("src/tui/navigation_state.rs", 300),
@@ -1211,6 +1217,69 @@ fn tui_renderers_do_not_assume_parent_surface_palette_colors() {
     let layout =
         fs::read_to_string(root.join("src/tui/disk_layout.rs")).expect("read disk layout renderer");
     assert!(layout.contains("disk_region_fill_color"));
+}
+
+#[test]
+fn help_and_status_information_architecture_has_single_owners() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let render = fs::read_to_string(root.join("src/tui/render.rs")).expect("read root renderer");
+    let keymap = fs::read_to_string(root.join("src/tui/keymap.rs")).expect("read keymap");
+    let help_registry =
+        fs::read_to_string(root.join("src/tui/keymap/help.rs")).expect("read help registry");
+    let help = fs::read_to_string(root.join("src/tui/help_overlay.rs")).expect("read help overlay");
+    let status = fs::read_to_string(root.join("src/tui/status.rs")).expect("read status model");
+    let shell = fs::read_to_string(root.join("src/tui/shell/mod.rs")).expect("read shell");
+    let controller =
+        fs::read_to_string(root.join("src/tui/controller.rs")).expect("read controller");
+
+    assert!(render.contains("status::dynamic_status"));
+    assert!(render.contains("help_overlay::draw_help_overlay"));
+    assert!(!render.contains("制盘方案：j/k"));
+    assert!(!render.contains("检查字段表："));
+    assert!(!render.contains("y 单元格 · Y 整行"));
+    assert!(!render.contains("Tab/Shift-Tab 或 gt/gT"));
+    assert!(keymap.contains("pub use help::"));
+    assert!(help_registry.contains("pub const DEVICES_HELP"));
+    assert!(help_registry.contains("pub const BACKUPS_HELP"));
+    assert!(help_registry.contains("pub const PROVISION_HELP"));
+    assert!(help_registry.contains("pub const GLOBAL_HELP"));
+    assert!(!help_registry.contains("pub const NORMAL_HELP"));
+    assert!(help.contains("PICKER_HELP"));
+    assert!(help.contains("TABLE_HELP"));
+    assert!(status.contains("pub(super) fn dynamic_status"));
+    assert!(shell.contains("\"? 帮助\""));
+    assert!(shell.contains("pub fn status_bar"));
+    assert!(!shell.contains("pub fn footer"));
+    let dispatch = controller
+        .split_once("pub(super) fn dispatch_action")
+        .map(|(_, dispatch)| dispatch)
+        .expect("dispatch_action");
+    let global_help = dispatch
+        .find("if action == TuiAction::Help")
+        .expect("global help dispatch");
+    let picker = dispatch
+        .find("if state.provision_scheme_picker_open()")
+        .expect("picker dispatch");
+    assert!(
+        global_help < picker,
+        "global ? help must be dispatched before business overlays can swallow it"
+    );
+}
+
+#[test]
+fn modal_surface_is_a_shared_theme_primitive_not_a_business_local_clear_block() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let modal = fs::read_to_string(root.join("src/tui/ui/modal.rs")).expect("read modal primitive");
+    let picker = fs::read_to_string(root.join("src/tui/provision/scheme_picker_render.rs"))
+        .expect("read scheme picker");
+
+    assert!(modal.contains("theme.modal_background()"));
+    assert!(modal.contains("theme.modal_border()"));
+    assert!(modal.contains("buffer.set_style"));
+    assert!(modal.contains("Clear"));
+    assert!(picker.contains("ui::render_modal"));
+    assert!(!picker.contains("Clear"));
+    assert!(!picker.contains("Block::default"));
 }
 
 #[test]
