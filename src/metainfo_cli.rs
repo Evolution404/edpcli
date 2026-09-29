@@ -219,7 +219,7 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
             }
         }
     }
-    let identity =
+    let mut identity =
         match crate::application::media_identity_observer::media_identity_from_protocol_image(
             runner,
             n,
@@ -231,6 +231,20 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
                 return error.code;
             }
         };
+    if let Some(total_sectors) = total_sectors {
+        identity = crate::application::media_identity_observer::apply_runtime_plain_override(
+            identity,
+            &protocol_image,
+            total_sectors,
+            |lba| {
+                let lba = u32::try_from(lba)
+                    .map_err(|_| format!("Plain runtime evidence LBA{lba} exceeds u32"))?;
+                reader
+                    .read_sector(lba)
+                    .map_err(|error| format!("read Plain runtime evidence LBA{lba}: {error}"))
+            },
+        );
+    }
     let summary =
         if identity.protocol.provision_kind == Some(crate::provision::DiskProvisionKind::Plain) {
             metainfo::MetaInfoSummary::plain(
