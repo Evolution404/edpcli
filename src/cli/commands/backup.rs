@@ -8,8 +8,9 @@ pub(in crate::cli) fn backup_create_real_flow(
 ) -> i32 {
     if deep {
         eprintln!(
-            "警告：--deep 已弃用；新备份请使用不带该参数的元数据备份。此入口仅保留历史分析兼容。"
+            "错误：--deep 已弃用且不再创建新的 Deep 备份；请使用不带该参数的元数据备份。历史 Deep EDPB 仍可读取/校验。"
         );
+        return EXIT_USAGE;
     }
     if let Some(disk) = disk_opt {
         if let Err(error) = guard_usb_disk(runner, disk) {
