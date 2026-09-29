@@ -87,6 +87,8 @@ mod editor;
 mod execution_state;
 #[path = "field_input.rs"]
 mod field_input;
+#[path = "field_layout.rs"]
+mod field_layout;
 #[path = "field_presentation.rs"]
 mod field_presentation;
 #[path = "fields.rs"]

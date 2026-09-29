@@ -73,7 +73,8 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
         ("src/tui/inspect/detail_render.rs", 500),
         ("src/tui/provision/state.rs", 400),
         ("src/tui/provision/execution_state.rs", 220),
-        ("src/tui/provision/field_presentation.rs", 420),
+        ("src/tui/provision/field_presentation.rs", 340),
+        ("src/tui/provision/field_layout.rs", 180),
         ("src/cli_args.rs", 550),
         ("src/cli.rs", 250),
         ("src/cli/prompter.rs", 180),
@@ -200,6 +201,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/fields.rs",
         "src/tui/provision/field_model.rs",
         "src/tui/provision/field_presentation.rs",
+        "src/tui/provision/field_layout.rs",
         "src/tui/provision/field_input.rs",
         "src/tui/provision/password_verification.rs",
         "src/tui/provision/validation.rs",
@@ -394,7 +396,8 @@ fn large_modules_are_split_by_domain_boundary() {
         "Provision field navigation and input editing must stay responsibility-bounded"
     );
     assert!(lines("src/tui/provision/field_model.rs") < 120);
-    assert!(lines("src/tui/provision/field_presentation.rs") < 420);
+    assert!(lines("src/tui/provision/field_presentation.rs") < 340);
+    assert!(lines("src/tui/provision/field_layout.rs") < 180);
     assert!(lines("src/tui/provision/field_input.rs") < 250);
     assert!(lines("src/tui/provision/password_verification.rs") < 200);
     assert!(lines("src/tui/provision/key_domains.rs") < 80);
