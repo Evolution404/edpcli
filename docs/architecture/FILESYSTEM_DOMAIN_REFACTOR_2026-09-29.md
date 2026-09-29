@@ -193,6 +193,7 @@ pub enum FilesystemErrorKind {
     FormatUnsupported,
     CorruptFilesystem,
     ScanBudgetExceeded,
+    AmbiguousDetection,
 }
 ```
 
@@ -208,14 +209,16 @@ pub trait FilesystemDriver: Send + Sync {
     fn capabilities(&self) -> FilesystemCapabilities;
     fn detect(&self, source: &mut dyn FilesystemReader)
         -> Result<DetectionResult, FilesystemError>;
+    fn matches_geometry(&self, source: &mut dyn FilesystemReader, geometry: FilesystemGeometry)
+        -> Result<bool, FilesystemError>;
     fn read_metadata(&self, source: &mut dyn FilesystemReader)
         -> Result<FilesystemMetadata, FilesystemError>;
     fn validate_format_request(&self, request: &FormatRequest)
         -> Result<(), FilesystemError>;
     fn build_format_plan(&self, geometry: FilesystemGeometry, request: &FormatRequest)
         -> Result<FormatPlan, FilesystemError>;
-    fn verify_format(&self, source: &mut dyn FilesystemReader, expected: &FilesystemMetadata)
-        -> Result<FormatVerification, FilesystemError>;
+    fn verify_format(&self, source: &mut dyn FilesystemReader, geometry: FilesystemGeometry,
+        expected: &FilesystemMetadata) -> Result<FormatVerification, FilesystemError>;
 }
 ```
 
@@ -328,13 +331,13 @@ EDP 备份继续以协议为事实源：原始 LBA0-12、验证后的 LBA7 兼�
 
 ### F2 — 迁移 FAT16
 
-状态：`IN_PROGRESS`
+状态：`COMPLETE`
 
-把 FAT16 识别、BPB 校验、卷标编解码、无卷标语义、空文件系统构建、格式化请求校验和读回校验迁入 `filesystem/fat16.rs`。备份/检查/制盘/恢复改走驱动，再删除其他位置的 FAT16 重复知识。
+把 FAT16 识别、BPB 校验、卷标编解码、无卷标语义、空文件系统构建、格式化请求校验和读回校验迁入 `filesystem/fat16.rs`。备份/检查/制盘/恢复改走驱动，再删除其他位置的 FAT16 重复知识。实施中补充了通用 `matches_geometry`，用于把 FAT16 hidden sectors、后续 exFAT partition offset 等几何确认也收敛到驱动内。
 
 ### F3 — 迁移 exFAT
 
-状态：`PENDING`
+状态：`IN_PROGRESS`
 
 把 exFAT 识别、几何解析、根目录/FAT 链上的有界 `0x83` 卷标读取、无卷标语义、空文件系统构建、格式化校验和读回校验迁入 `filesystem/exfat.rs`，删除外部重复逻辑。
 

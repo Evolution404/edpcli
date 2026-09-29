@@ -13,7 +13,6 @@ pub use migration::build_migrated_filesystem;
 
 use super::sm4_encrypt_block;
 use crate::crypto::crc32_bare;
-use encoding_rs::GBK;
 
 use super::{
     layout::{OfficialPartitionGeometry, OfficialProvisionPlan, PartitionFormatTarget},
@@ -178,32 +177,23 @@ fn align_up(value: u64, alignment: u64) -> Option<u64> {
         .map(|v| v / alignment * alignment)
 }
 
-fn fat16_label(label: &str) -> Result<[u8; 11], String> {
-    if label.is_empty() {
-        return Ok(*b"NO NAME    ");
-    }
-    if label
-        .chars()
-        .any(|ch| ch.is_control() || "\"*/:<>?\\|".contains(ch))
-    {
-        return Err("FAT16 volume label contains forbidden characters".into());
-    }
-    let uppercase = label.to_uppercase();
-    let (encoded, _, had_errors) = GBK.encode(&uppercase);
-    if had_errors || encoded.len() > 11 {
-        return Err("FAT16 volume label cannot be encoded in 11 GBK bytes".into());
-    }
-    let mut out = [b' '; 11];
-    out[..encoded.len()].copy_from_slice(&encoded);
-    Ok(out)
-}
-
 pub fn validate_volume_label(
     filesystem: OfficialFilesystemFormat,
     label: &str,
 ) -> Result<(), String> {
     match filesystem {
-        OfficialFilesystemFormat::Fat16 => fat16_label(label).map(|_| ()),
+        OfficialFilesystemFormat::Fat16 => {
+            let request = crate::filesystem::FormatRequest {
+                filesystem: crate::filesystem::FilesystemKind::Fat16,
+                volume_label: (!label.is_empty()).then(|| label.to_string()),
+                volume_serial: None,
+            };
+            crate::filesystem::FilesystemDriver::validate_format_request(
+                &crate::filesystem::FAT16_DRIVER,
+                &request,
+            )
+            .map_err(|error| error.to_string())
+        }
         OfficialFilesystemFormat::ExFat => {
             if label.encode_utf16().count() > 11 {
                 Err("exFAT volume label exceeds 11 UTF-16 code units".into())
@@ -218,93 +208,36 @@ pub fn validate_volume_label(
     }
 }
 
-/// Construct a complete empty FAT16 boot sector, mirrored FATs and fixed root
-/// directory. The exact 20,417-sector official boot geometry is supported.
+/// 迁移期兼容入口。FAT16 的具体磁盘结构由 Fat16Driver 单一实现。
 pub fn build_empty_fat16(
     partition_offset: u64,
     volume_sectors: u64,
     volume_serial: u32,
     volume_label: &str,
 ) -> Result<SparseFilesystemImage, String> {
-    let total = u32::try_from(volume_sectors).map_err(|_| "FAT16 volume exceeds u32 sectors")?;
-    let hidden = u32::try_from(partition_offset).map_err(|_| "FAT16 hidden sectors exceeds u32")?;
-    let label = fat16_label(volume_label)?;
-    const ROOT_ENTRIES: u16 = 512;
-    const ROOT_SECTORS: u64 = 32;
-    const RESERVED: u64 = 1;
-    const COPIES: u64 = 2;
-    let mut chosen = None;
-    for spc in [1u64, 2, 4, 8, 16, 32, 64, 128] {
-        let mut fat_sectors = 1u64;
-        for _ in 0..16 {
-            let overhead = RESERVED + COPIES * fat_sectors + ROOT_SECTORS;
-            if volume_sectors <= overhead {
-                break;
-            }
-            let clusters = (volume_sectors - overhead) / spc;
-            let next = ((clusters + 2) * 2).div_ceil(SECTOR_SIZE as u64);
-            if next == fat_sectors {
-                if (4_085..65_525).contains(&clusters) && fat_sectors <= u16::MAX as u64 {
-                    chosen = Some((spc as u8, fat_sectors as u16, clusters));
-                }
-                break;
-            }
-            fat_sectors = next;
-        }
-        if chosen.is_some() {
-            break;
-        }
-    }
-    let (spc, fat_sectors, _) = chosen.ok_or("volume size cannot be represented as FAT16")?;
-    let root_start = RESERVED + COPIES * fat_sectors as u64;
-    let mut boot = [0u8; SECTOR_SIZE];
-    boot[0..3].copy_from_slice(&[0xeb, 0x3c, 0x90]);
-    boot[3..11].copy_from_slice(b"EDPCLI  ");
-    put_u16(&mut boot, 11, 512);
-    boot[13] = spc;
-    put_u16(&mut boot, 14, RESERVED as u16);
-    boot[16] = COPIES as u8;
-    put_u16(&mut boot, 17, ROOT_ENTRIES);
-    if total <= u16::MAX as u32 {
-        put_u16(&mut boot, 19, total as u16);
-    }
-    boot[21] = 0xf8;
-    put_u16(&mut boot, 22, fat_sectors);
-    put_u16(&mut boot, 24, 63);
-    put_u16(&mut boot, 26, 255);
-    put_u32(&mut boot, 28, hidden);
-    if total > u16::MAX as u32 {
-        put_u32(&mut boot, 32, total);
-    }
-    boot[36] = 0x80;
-    boot[38] = 0x29;
-    put_u32(&mut boot, 39, volume_serial);
-    boot[43..54].copy_from_slice(&label);
-    boot[54..62].copy_from_slice(b"FAT16   ");
-    boot[510..512].copy_from_slice(&[0x55, 0xaa]);
-    let mut sectors = BTreeMap::new();
-    sectors.insert(0, boot);
-    for copy in 0..COPIES {
-        for offset in 0..fat_sectors as u64 {
-            let mut fat = [0u8; SECTOR_SIZE];
-            if offset == 0 {
-                fat[..4].copy_from_slice(&[0xf8, 0xff, 0xff, 0xff]);
-            }
-            sectors.insert(RESERVED + copy * fat_sectors as u64 + offset, fat);
-        }
-    }
-    let mut root = [0u8; SECTOR_SIZE];
-    if !volume_label.is_empty() {
-        root[..11].copy_from_slice(&label);
-        root[11] = 0x08;
-    }
-    sectors.insert(root_start, root);
-    for offset in 1..ROOT_SECTORS {
-        sectors.insert(root_start + offset, [0u8; SECTOR_SIZE]);
-    }
+    let request = crate::filesystem::FormatRequest {
+        filesystem: crate::filesystem::FilesystemKind::Fat16,
+        volume_label: (!volume_label.is_empty()).then(|| volume_label.to_string()),
+        volume_serial: Some(volume_serial),
+    };
+    let geometry = crate::filesystem::FilesystemGeometry::new(
+        partition_offset,
+        volume_sectors,
+        SECTOR_SIZE as u32,
+    );
+    let plan = crate::filesystem::FilesystemDriver::build_format_plan(
+        &crate::filesystem::FAT16_DRIVER,
+        geometry,
+        &request,
+    )
+    .map_err(|error| error.to_string())?;
     Ok(SparseFilesystemImage {
         volume_sectors,
-        sectors,
+        sectors: plan
+            .writes
+            .into_iter()
+            .map(|write| (write.relative_lba, write.data))
+            .collect(),
     })
 }
 

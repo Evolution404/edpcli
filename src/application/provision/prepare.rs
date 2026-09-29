@@ -14,18 +14,17 @@ fn confirmed_filesystem(
     {
         return Some(OfficialFilesystemFormat::ExFat);
     }
-    if boot.get(54..62) == Some(b"FAT16   ")
-        && u32::from_le_bytes(boot.get(28..32)?.try_into().ok()?) as u64 == start_lba
+    let mut fat16_reader = crate::filesystem::BootSectorReader::new(boot, sectors);
+    let fat16_geometry =
+        crate::filesystem::FilesystemGeometry::new(start_lba, sectors, SECTOR as u32);
+    if crate::filesystem::FilesystemDriver::matches_geometry(
+        &crate::filesystem::FAT16_DRIVER,
+        &mut fat16_reader,
+        fat16_geometry,
+    )
+    .ok()?
     {
-        let short = u16::from_le_bytes(boot.get(19..21)?.try_into().ok()?) as u64;
-        let total = if short != 0 {
-            short
-        } else {
-            u32::from_le_bytes(boot.get(32..36)?.try_into().ok()?) as u64
-        };
-        if total == sectors {
-            return Some(OfficialFilesystemFormat::Fat16);
-        }
+        return Some(OfficialFilesystemFormat::Fat16);
     }
     None
 }

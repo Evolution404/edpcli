@@ -4,7 +4,6 @@
 //! from the current LBA12 EDPF table, captures bounded filesystem metadata
 //! extents, and preserves identified historical tail backup structures.
 
-use encoding_rs::GBK;
 use serde::Serialize;
 use std::collections::BTreeSet;
 
@@ -626,23 +625,54 @@ fn read_device_sector(dev: &mut dyn SectorDev, lba: u64) -> Result<Vec<u8>, Stri
         .map_err(|error| format!("read LBA{lba} failed: {error}"))
 }
 
-fn decode_fat16_boot_label(boot: &[u8]) -> Option<String> {
-    if boot.len() != SECTOR || boot.get(54..62) != Some(b"FAT16   ") {
-        return None;
+struct PartitionFilesystemReader<'a> {
+    dev: &'a mut dyn SectorDev,
+    start_lba: u64,
+    sector_count: u64,
+}
+
+impl crate::filesystem::FilesystemReader for PartitionFilesystemReader<'_> {
+    fn sector_size(&self) -> u32 {
+        SECTOR as u32
     }
-    let raw = boot.get(43..54)?;
-    if raw.iter().all(|byte| *byte == 0 || *byte == b' ') || raw == b"NO NAME    " {
-        return None;
+
+    fn sector_count(&self) -> u64 {
+        self.sector_count
     }
-    let (decoded, _, had_errors) = GBK.decode(raw);
-    if had_errors {
-        return None;
+
+    fn read_sector(
+        &mut self,
+        relative_lba: u64,
+    ) -> Result<[u8; SECTOR], crate::filesystem::FilesystemError> {
+        if relative_lba >= self.sector_count {
+            return Err(crate::filesystem::FilesystemError::for_filesystem(
+                crate::filesystem::FilesystemKind::Fat16,
+                crate::filesystem::FilesystemErrorKind::InvalidGeometry,
+                "文件系统读取超出分区范围",
+            ));
+        }
+        let absolute = self.start_lba.checked_add(relative_lba).ok_or_else(|| {
+            crate::filesystem::FilesystemError::for_filesystem(
+                crate::filesystem::FilesystemKind::Fat16,
+                crate::filesystem::FilesystemErrorKind::InvalidGeometry,
+                "文件系统绝对 LBA 溢出",
+            )
+        })?;
+        let bytes = read_device_sector(self.dev, absolute).map_err(|message| {
+            crate::filesystem::FilesystemError::for_filesystem(
+                crate::filesystem::FilesystemKind::Fat16,
+                crate::filesystem::FilesystemErrorKind::ReadFailure,
+                message,
+            )
+        })?;
+        bytes.try_into().map_err(|_| {
+            crate::filesystem::FilesystemError::for_filesystem(
+                crate::filesystem::FilesystemKind::Fat16,
+                crate::filesystem::FilesystemErrorKind::ReadFailure,
+                "文件系统扇区长度不是 512B",
+            )
+        })
     }
-    let value = decoded
-        .trim_end_matches(' ')
-        .trim_end_matches(char::from(0))
-        .to_string();
-    (!value.is_empty()).then_some(value)
 }
 
 fn read_exfat_volume_label(
@@ -796,7 +826,19 @@ fn probe_filesystem_hints(
     };
     let filesystem = Some(kind.label().to_ascii_lowercase());
     let label = match kind {
-        crate::inspect_target::FilesystemBootKind::Fat16 => decode_fat16_boot_label(&boot),
+        crate::inspect_target::FilesystemBootKind::Fat16 => {
+            let mut reader = PartitionFilesystemReader {
+                dev,
+                start_lba,
+                sector_count,
+            };
+            crate::filesystem::FilesystemDriver::read_metadata(
+                &crate::filesystem::FAT16_DRIVER,
+                &mut reader,
+            )
+            .map_err(|error| error.to_string())?
+            .volume_label
+        }
         crate::inspect_target::FilesystemBootKind::Exfat => {
             read_exfat_volume_label(dev, start_lba, sector_count, &boot)?
         }

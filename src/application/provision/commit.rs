@@ -741,6 +741,28 @@ impl PartitionReader for PreparedImageReader<'_> {
     }
 }
 
+impl crate::filesystem::FilesystemReader for PreparedImageReader<'_> {
+    fn sector_size(&self) -> u32 {
+        SECTOR as u32
+    }
+
+    fn sector_count(&self) -> u64 {
+        self.image.volume_sectors()
+    }
+
+    fn read_sector(
+        &mut self,
+        relative_lba: u64,
+    ) -> Result<[u8; SECTOR], crate::filesystem::FilesystemError> {
+        self.image.sector_or_zero(relative_lba).ok_or_else(|| {
+            crate::filesystem::FilesystemError::new(
+                crate::filesystem::FilesystemErrorKind::ReadFailure,
+                "格式化验证读取超出分区范围",
+            )
+        })
+    }
+}
+
 fn format_partition_with_progress(
     runner: &dyn CmdRunner,
     dev: &mut dyn SectorDev,
@@ -799,8 +821,23 @@ fn execute_partition_format_observed(
                 .map_err(|_| err(EXIT_TARGET, "错误: 分区起点 LBA 溢出"))?,
         )
         .map_err(|error| err(EXIT_IO, format!("错误: 读取文件系统引导扇区失败: {error}")))?;
+    let raw_fat16_plain = if choice.target.physically_encrypted {
+        let mut raw_reader = crate::filesystem::BootSectorReader::new(
+            &raw_boot,
+            choice.target.geometry.sector_count(),
+        );
+        crate::filesystem::FilesystemDriver::detect(
+            &crate::filesystem::FAT16_DRIVER,
+            &mut raw_reader,
+        )
+        .map_err(|error| err(EXIT_IO, format!("错误: FAT16 首扇区检测失败: {error}")))?
+        .confidence
+            == crate::filesystem::DetectionConfidence::Exact
+    } else {
+        false
+    };
     if choice.target.physically_encrypted
-        && (raw_boot.get(3..11) == Some(b"EXFAT   ") || raw_boot.get(54..62) == Some(b"FAT16   "))
+        && (raw_boot.get(3..11) == Some(b"EXFAT   ") || raw_fat16_plain)
     {
         return Err(err(EXIT_IO, "错误: 加密分区物理首扇区出现明文文件系统签名"));
     }
@@ -824,6 +861,42 @@ fn execute_partition_format_observed(
     let boot = reader
         .read_sector(0)
         .map_err(|error| err(EXIT_IO, error.to_string()))?;
+    if filesystem == OfficialFilesystemFormat::Fat16 {
+        let expected = crate::filesystem::FilesystemMetadata {
+            kind: crate::filesystem::FilesystemKind::Fat16,
+            volume_label: (!choice.volume_label.is_empty())
+                .then(|| choice.volume_label.to_uppercase()),
+            volume_serial: Some(choice.volume_serial),
+        };
+        let fs_geometry = crate::filesystem::FilesystemGeometry::new(
+            choice.target.geometry.start_sector,
+            choice.target.geometry.sector_count(),
+            SECTOR as u32,
+        );
+        crate::filesystem::FilesystemDriver::verify_format(
+            &crate::filesystem::FAT16_DRIVER,
+            &mut reader,
+            fs_geometry,
+            &expected,
+        )
+        .map_err(|error| err(EXIT_IO, format!("错误: FAT16 格式化读回校验失败: {error}")))?;
+
+        let report = analyze_partition(&geometry, &mut reader);
+        if report.status != AnalysisStatus::Parsed
+            || report.filesystem.as_deref() != Some(filesystem.config_token())
+            || report.file_count != Some(0)
+        {
+            return Err(err(
+                EXIT_IO,
+                format!(
+                    "错误: {} 深度解析失败: {}",
+                    filesystem.config_token(),
+                    report.reason
+                ),
+            ));
+        }
+        return Ok(());
+    }
     let geometry_ok = match filesystem {
         OfficialFilesystemFormat::ExFat => {
             boot.get(3..11) == Some(b"EXFAT   ")
@@ -833,19 +906,7 @@ fn execute_partition_format_observed(
                     == choice.target.geometry.sector_count()
                 && u32::from_le_bytes(boot[100..104].try_into().unwrap()) == choice.volume_serial
         }
-        OfficialFilesystemFormat::Fat16 => {
-            let total16 = u16::from_le_bytes(boot[19..21].try_into().unwrap()) as u64;
-            let total = if total16 != 0 {
-                total16
-            } else {
-                u32::from_le_bytes(boot[32..36].try_into().unwrap()) as u64
-            };
-            boot.get(54..62) == Some(b"FAT16   ")
-                && u32::from_le_bytes(boot[28..32].try_into().unwrap()) as u64
-                    == choice.target.geometry.start_sector
-                && total == choice.target.geometry.sector_count()
-                && u32::from_le_bytes(boot[39..43].try_into().unwrap()) == choice.volume_serial
-        }
+        OfficialFilesystemFormat::Fat16 => unreachable!("FAT16 已由文件系统驱动校验"),
         OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => false,
     };
     if !geometry_ok {
@@ -872,10 +933,7 @@ fn execute_partition_format_observed(
             let cluster_sectors = 1u64 << boot[109];
             heap_offset + (root_cluster as u64 - 2) * cluster_sectors
         }
-        OfficialFilesystemFormat::Fat16 => {
-            u16::from_le_bytes(boot[14..16].try_into().unwrap()) as u64
-                + boot[16] as u64 * u16::from_le_bytes(boot[22..24].try_into().unwrap()) as u64
-        }
+        OfficialFilesystemFormat::Fat16 => unreachable!("FAT16 已由文件系统驱动校验"),
         OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => unreachable!(),
     };
     let root = reader
@@ -899,33 +957,10 @@ fn execute_partition_format_observed(
             })
             .and_then(|units| String::from_utf16(&units).ok())
             .unwrap_or_default(),
-        OfficialFilesystemFormat::Fat16 => {
-            if choice.volume_label.is_empty() {
-                if boot[43..54] != *b"NO NAME    " {
-                    return Err(err(EXIT_IO, "错误: FAT16 空卷标 BPB 读回不一致"));
-                }
-                if root[11] == 0x08 {
-                    return Err(err(EXIT_IO, "错误: FAT16 空卷标不应写入卷标目录项"));
-                }
-                String::new()
-            } else {
-                if root[11] != 0x08 || boot[43..54] != root[..11] {
-                    return Err(err(EXIT_IO, "错误: FAT16 卷标目录项读回不一致"));
-                }
-                let (decoded, _, had_errors) = GBK.decode(&root[..11]);
-                if had_errors {
-                    return Err(err(EXIT_IO, "错误: FAT16 卷标无法按 GBK 解码"));
-                }
-                decoded.trim_end_matches(' ').to_string()
-            }
-        }
+        OfficialFilesystemFormat::Fat16 => unreachable!("FAT16 已由文件系统驱动校验"),
         OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => unreachable!(),
     };
-    let expected_label = if filesystem == OfficialFilesystemFormat::Fat16 {
-        choice.volume_label.to_uppercase()
-    } else {
-        choice.volume_label.clone()
-    };
+    let expected_label = choice.volume_label.clone();
     if actual_label != expected_label {
         return Err(err(EXIT_IO, "错误: 文件系统卷标读回不一致"));
     }

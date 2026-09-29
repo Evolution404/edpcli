@@ -249,6 +249,17 @@ fn detect_filesystem_boot(
         return None;
     }
 
+    let mut fat16_reader = crate::filesystem::BootSectorReader::new(boot, partition.sector_count);
+    if crate::filesystem::FilesystemDriver::detect(
+        &crate::filesystem::FAT16_DRIVER,
+        &mut fat16_reader,
+    )
+    .ok()
+    .is_some_and(|result| result.confidence == crate::filesystem::DetectionConfidence::Exact)
+    {
+        return Some(FilesystemBootKind::Fat16);
+    }
+
     let bps = u16le(boot, 11) as u32;
     let spc = boot[13] as u32;
     let reserved = u16le(boot, 14) as u64;
@@ -291,10 +302,7 @@ fn detect_filesystem_boot(
         }
         return None;
     }
-    if fat16 != 0 && root_entries != 0 {
-        if cluster_count >= 4_085 {
-            return Some(FilesystemBootKind::Fat16);
-        }
+    if fat16 != 0 && root_entries != 0 && cluster_count < 4_085 {
         return Some(FilesystemBootKind::Fat12);
     }
     None

@@ -55,6 +55,14 @@ pub trait FilesystemDriver: Send + Sync {
     fn detect(&self, source: &mut dyn FilesystemReader)
         -> Result<DetectionResult, FilesystemError>;
 
+    fn matches_geometry(
+        &self,
+        _source: &mut dyn FilesystemReader,
+        _geometry: FilesystemGeometry,
+    ) -> Result<bool, FilesystemError> {
+        Err(FilesystemError::unsupported(self.kind(), "分区几何确认"))
+    }
+
     fn read_metadata(
         &self,
         _source: &mut dyn FilesystemReader,
@@ -77,6 +85,7 @@ pub trait FilesystemDriver: Send + Sync {
     fn verify_format(
         &self,
         _source: &mut dyn FilesystemReader,
+        _geometry: FilesystemGeometry,
         _expected: &FilesystemMetadata,
     ) -> Result<FormatVerification, FilesystemError> {
         Err(FilesystemError::format_unsupported(self.kind()))

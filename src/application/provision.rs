@@ -34,7 +34,6 @@ use crate::provision::{
     TargetProvisionPlan, DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
-use encoding_rs::GBK;
 
 use super::device::open_readonly_usb_disk;
 use super::media_identity::MediaIdentityPin;
