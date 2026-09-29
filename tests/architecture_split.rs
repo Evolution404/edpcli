@@ -67,7 +67,8 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
     for (path, hard_limit) in [
         ("src/tui/mod.rs", 400),
         ("src/tui/resume.rs", 180),
-        ("src/tui/inspect/state.rs", 600),
+        ("src/tui/inspect/state.rs", 500),
+        ("src/tui/inspect/lifecycle_state.rs", 180),
         ("src/tui/inspect/preview_state.rs", 200),
         ("src/tui/inspect/search_state.rs", 450),
         ("src/tui/inspect/jump_state.rs", 200),
@@ -225,6 +226,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/runtime_input/shell.rs",
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
+        "src/tui/inspect/lifecycle_state.rs",
         "src/tui/inspect/search_state.rs",
         "src/tui/inspect/jump_state.rs",
         "src/tui/inspect/detail_state.rs",
@@ -298,8 +300,12 @@ fn large_modules_are_split_by_domain_boundary() {
         "Provision action routing must stay isolated from the shared controller"
     );
     assert!(
-        lines("src/tui/inspect/state.rs") < 600,
+        lines("src/tui/inspect/state.rs") < 500,
         "Inspect workspace state must stay orchestration-oriented"
+    );
+    assert!(
+        lines("src/tui/inspect/lifecycle_state.rs") < 180,
+        "Inspect begin/request/finish lifecycle must stay isolated from navigation state"
     );
     assert!(
         lines("src/tui/inspect/preview_state.rs") < 200,
