@@ -11,7 +11,7 @@ use super::media_identity::{
     MediaIdentitySnapshot, RestoreAuthorizationDecision, RestoreAuthorizationPolicy,
     RestoreGeometryRequirements,
 };
-use super::media_identity_observer::media_identity_from_protocol_image;
+use super::media_identity_observer::observe_media_identity_readonly;
 use super::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use crate::common::*;
 use crate::diskio::{self, raw_path, Clock, DiskFacts, SectorDev, SystemClock};
@@ -821,12 +821,13 @@ pub fn restore_flow_typed(
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<super::post_restore::MetadataRestoreOutcome> {
     let target_session = TargetSession::<ReadOnly>::open_usb(ctx.runner, disk)?;
-    let img = read_image(dev)?;
+    let observed = observe_media_identity_readonly(ctx.runner, disk, dev)?;
+    let img = observed.protocol_image;
+    let target_identity = observed.snapshot;
     let lba4 = &img[4 * SECTOR..5 * SECTOR];
-    let label_id = diskio::lba4_label_id_from(lba4);
+    let label_id = target_identity.protocol.onlyid.clone();
     let tag16 = diskio::lba4_tag16_from(lba4)
         .ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少 16B 身份标签"))?;
-    let target_identity = media_identity_from_protocol_image(ctx.runner, disk, &img)?;
     let target_lba4_nonzero = lba4.iter().any(|byte| *byte != 0);
     let selector = BackupSelector::load(&ctx.backup_dir);
     let path: PathBuf = match bin {
