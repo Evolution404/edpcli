@@ -1,6 +1,5 @@
 use edpcli::common::SECTOR;
-use edpcli::filesystem::FilesystemKind;
-use edpcli::inspect_target::detect_plain_filesystem;
+use edpcli::filesystem::{detect_boot_sector, FilesystemKind};
 use edpcli::provision::{build_empty_exfat, build_empty_fat16};
 
 fn put16(bytes: &mut [u8], offset: usize, value: u16) {
@@ -73,37 +72,37 @@ fn ntfs_boot(total: u64) -> [u8; SECTOR] {
 fn filesystem_detection_matrix_is_frozen_before_domain_refactor() {
     let fat12_total = 16_000u64;
     assert_eq!(
-        detect_plain_filesystem(fat12_total, &fat12_boot(fat12_total as u16)),
+        detect_boot_sector(fat12_total, &fat12_boot(fat12_total as u16)).unwrap(),
         Some(FilesystemKind::Fat12)
     );
 
     let fat16_total = 20_417u64;
     let fat16 = build_empty_fat16(63, fat16_total, 0x1234_5678, "BOOT").unwrap();
     assert_eq!(
-        detect_plain_filesystem(fat16_total, &fat16.sector_or_zero(0).unwrap()),
+        detect_boot_sector(fat16_total, &fat16.sector_or_zero(0).unwrap()).unwrap(),
         Some(FilesystemKind::Fat16)
     );
 
     let fat32_total = 1_000_000u64;
     assert_eq!(
-        detect_plain_filesystem(fat32_total, &fat32_boot(fat32_total as u32)),
+        detect_boot_sector(fat32_total, &fat32_boot(fat32_total as u32)).unwrap(),
         Some(FilesystemKind::Fat32)
     );
 
     let exfat_total = 100_000u64;
     let exfat = build_empty_exfat(2_048, exfat_total, 0x8765_4321, "DATA").unwrap();
     assert_eq!(
-        detect_plain_filesystem(exfat_total, &exfat.sector_or_zero(0).unwrap()),
+        detect_boot_sector(exfat_total, &exfat.sector_or_zero(0).unwrap()).unwrap(),
         Some(FilesystemKind::ExFat)
     );
 
     let ntfs_total = 100_000u64;
     assert_eq!(
-        detect_plain_filesystem(ntfs_total, &ntfs_boot(ntfs_total)),
+        detect_boot_sector(ntfs_total, &ntfs_boot(ntfs_total)).unwrap(),
         Some(FilesystemKind::Ntfs)
     );
 
-    assert_eq!(detect_plain_filesystem(100_000, &[0u8; SECTOR]), None);
+    assert_eq!(detect_boot_sector(100_000, &[0u8; SECTOR]).unwrap(), None);
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use super::{
-    DetectionConfidence, DetectionResult, FilesystemDriver, FilesystemError, FilesystemErrorKind,
-    FilesystemKind, FilesystemReader,
+    BootSectorReader, DetectionConfidence, DetectionResult, FilesystemDriver, FilesystemError,
+    FilesystemErrorKind, FilesystemKind, FilesystemReader,
 };
 
 static DEFAULT_DRIVERS: [&'static dyn FilesystemDriver; 5] = [
@@ -13,6 +13,22 @@ static DEFAULT_DRIVERS: [&'static dyn FilesystemDriver; 5] = [
 
 pub fn default_registry() -> DriverRegistry<'static> {
     DriverRegistry::new(&DEFAULT_DRIVERS)
+}
+
+pub fn detect_boot_sector(
+    sector_count: u64,
+    boot: &[u8],
+) -> Result<Option<FilesystemKind>, FilesystemError> {
+    if boot.len() != 512 {
+        return Err(FilesystemError::new(
+            FilesystemErrorKind::ReadFailure,
+            "文件系统首扇区长度不是 512B",
+        ));
+    }
+    let mut reader = BootSectorReader::new(boot, sector_count);
+    default_registry()
+        .detect(&mut reader)
+        .map(|detected| detected.map(|value| value.kind()))
 }
 
 pub struct DetectedFilesystem<'a> {

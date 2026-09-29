@@ -282,7 +282,11 @@ fn parse_plain_source(
     if sector.len() != SECTOR {
         return Err(err(EXIT_TARGET, "错误: K6 Plain 来源 LBA0 长度异常"));
     }
-    if crate::inspect_target::detect_plain_filesystem(total_sectors, &sector).is_some() {
+    if crate::filesystem::detect_boot_sector(total_sectors, &sector)
+        .ok()
+        .flatten()
+        .is_some()
+    {
         return Ok(vec![PlainSourcePartition {
             index: 0,
             partition_type: 0,

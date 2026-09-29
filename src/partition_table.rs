@@ -468,7 +468,11 @@ pub fn confirmed_plain_protocol_prefix(protocol_image: &[u8], total: u64) -> boo
     // filesystem ("superfloppy") with no MBR/GPT partition table. Accept
     // those only when the existing strict FAT/exFAT/NTFS boot-sector
     // validator confirms LBA0 against the physical whole-disk geometry.
-    if crate::inspect_target::detect_plain_filesystem(total, raw0).is_some() {
+    if crate::filesystem::detect_boot_sector(total, raw0)
+        .ok()
+        .flatten()
+        .is_some()
+    {
         return true;
     }
     let Ok(mbr) = lba0::parse_lba0(raw0) else {

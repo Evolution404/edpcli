@@ -171,7 +171,9 @@ pub fn sector_meta_text(
         ));
         let filesystem = partition_boot_raw
             .and_then(|boot| {
-                crate::inspect_target::detect_plain_filesystem(partition.sector_count, boot)
+                crate::filesystem::detect_boot_sector(partition.sector_count, boot)
+                    .ok()
+                    .flatten()
             })
             .map(|filesystem| filesystem.label().to_string())
             .or_else(|| partition.filesystem.clone());

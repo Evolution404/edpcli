@@ -667,7 +667,9 @@ fn probe_filesystem_hints(
     if boot.len() != SECTOR {
         return Err("filesystem boot sector is truncated".into());
     }
-    let Some(kind) = crate::inspect_target::detect_plain_filesystem(sector_count, &boot) else {
+    let Some(kind) = crate::filesystem::detect_boot_sector(sector_count, &boot)
+        .map_err(|error| error.to_string())?
+    else {
         return Ok((None, None));
     };
     let filesystem = Some(kind.label().to_ascii_lowercase());

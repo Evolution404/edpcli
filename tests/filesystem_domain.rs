@@ -65,33 +65,6 @@ fn canonical_filesystem_kind_tokens_are_stable() {
 }
 
 #[test]
-fn migration_adapters_preserve_legacy_filesystem_kinds() {
-    use edpcli::provision::FilesystemKind;
-
-    for (legacy, canonical) in [
-        (FilesystemKind::Fat12, FilesystemKind::Fat12),
-        (FilesystemKind::Fat16, FilesystemKind::Fat16),
-        (FilesystemKind::Fat32, FilesystemKind::Fat32),
-        (FilesystemKind::ExFat, FilesystemKind::ExFat),
-        (FilesystemKind::Ntfs, FilesystemKind::Ntfs),
-    ] {
-        assert_eq!(FilesystemKind::from(legacy), canonical);
-        assert_eq!(FilesystemKind::from(canonical), legacy);
-    }
-
-    for canonical in [
-        FilesystemKind::Fat12,
-        FilesystemKind::Fat16,
-        FilesystemKind::Fat32,
-        FilesystemKind::ExFat,
-        FilesystemKind::Ntfs,
-    ] {
-        let legacy: FilesystemKind = canonical;
-        assert_eq!(legacy, canonical);
-    }
-}
-
-#[test]
 fn registry_selects_strongest_detection_and_fails_closed_on_ties() {
     let fat16 = FakeDriver {
         kind: FilesystemKind::Fat16,

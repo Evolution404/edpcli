@@ -196,29 +196,30 @@ pub(super) fn run_evidence_source(
         meta.device_id = Some(device_id.clone());
     }
     let provision_kind = identity.provision_kind;
-    let (partition_table, partition_table_issue) =
-        if provision_kind == Some(crate::provision::DiskProvisionKind::Plain) {
-            match crate::application::partition_table::read_partition_table(
-                evidence.total_sectors(),
-                |lba| evidence.read_sector(lba).map_err(|error| error.to_string()),
-            ) {
-                Ok(mut table) => {
-                    for partition in &mut table.partitions {
-                        if let Ok(boot) = evidence.read_sector(partition.start_lba) {
-                            partition.filesystem = crate::inspect_target::detect_plain_filesystem(
-                                partition.sector_count,
-                                &boot,
-                            )
-                            .map(|filesystem| filesystem.label().to_string());
-                        }
+    let (partition_table, partition_table_issue) = if provision_kind
+        == Some(crate::provision::DiskProvisionKind::Plain)
+    {
+        match crate::application::partition_table::read_partition_table(
+            evidence.total_sectors(),
+            |lba| evidence.read_sector(lba).map_err(|error| error.to_string()),
+        ) {
+            Ok(mut table) => {
+                for partition in &mut table.partitions {
+                    if let Ok(boot) = evidence.read_sector(partition.start_lba) {
+                        partition.filesystem =
+                            crate::filesystem::detect_boot_sector(partition.sector_count, &boot)
+                                .ok()
+                                .flatten()
+                                .map(|filesystem| filesystem.label().to_string());
                     }
-                    (Some(table), None)
                 }
-                Err(error) => (None, Some(error)),
+                (Some(table), None)
             }
-        } else {
-            (None, None)
-        };
+            Err(error) => (None, Some(error)),
+        }
+    } else {
+        (None, None)
+    };
     let context = crate::inspect_target::InspectDiskContext::new_with_partition_table(
         evidence.protocol().to_vec(),
         meta.device_id.clone(),

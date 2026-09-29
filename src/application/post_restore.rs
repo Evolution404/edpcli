@@ -10,7 +10,6 @@ use crate::common::SECTOR;
 use crate::diskio::SectorDev;
 use crate::edpb::ManifestPartition;
 use crate::filesystem::FilesystemKind;
-use crate::inspect_target::detect_plain_filesystem;
 use crate::provision::decrypt_mode2;
 use crate::provision::{
     build_empty_exfat, build_empty_fat16, encrypt_sparse_mode2, parse_existing_provision,
@@ -250,7 +249,8 @@ pub(crate) fn format_partition_after_restore(
         } else {
             boot
         };
-        let detected = detect_plain_filesystem(partition.sector_count, &plain_boot)
+        let detected = crate::filesystem::detect_boot_sector(partition.sector_count, &plain_boot)
+            .map_err(|error| error.to_string())?
             .ok_or_else(|| "格式化后文件系统 boot sector 未通过严格校验".to_string())?;
         let expected = match request.filesystem {
             FilesystemKind::Fat16 => FilesystemKind::Fat16,
@@ -321,7 +321,9 @@ fn plain_partition(
 
     match read_sector(dev, partition.start_lba) {
         Ok(boot) => {
-            let detected = detect_plain_filesystem(partition.sector_count, &boot);
+            let detected = crate::filesystem::detect_boot_sector(partition.sector_count, &boot)
+                .ok()
+                .flatten();
             PostRestorePartition {
                 index: partition.index,
                 role: partition.role.clone(),
@@ -368,7 +370,9 @@ fn edp_crypto_state(
         "默认密码"
     };
     if record.lba12.need_encrypt == 0 {
-        let detected = detect_plain_filesystem(sector_count, boot);
+        let detected = crate::filesystem::detect_boot_sector(sector_count, boot)
+            .ok()
+            .flatten();
         return if let Some(filesystem) = detected {
             (
                 PostRestorePartitionState::Usable,
@@ -388,7 +392,9 @@ fn edp_crypto_state(
         Ok(file_key) if record.lba12.encrypt_mode == FileKeyWrapMode::Sm4.raw() => {
             match decrypt_mode2(boot, &file_key) {
                 Ok(plain_boot) => {
-                    let detected = detect_plain_filesystem(sector_count, &plain_boot);
+                    let detected = crate::filesystem::detect_boot_sector(sector_count, &plain_boot)
+                        .ok()
+                        .flatten();
                     if let Some(filesystem) = detected {
                         (
                             PostRestorePartitionState::Usable,

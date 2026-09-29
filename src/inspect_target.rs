@@ -123,33 +123,9 @@ fn u32le(raw: &[u8], offset: usize) -> u32 {
 }
 
 fn detect_filesystem_boot(partition: &PartitionGeometry, boot: &[u8]) -> Option<FilesystemKind> {
-    if boot.len() != SECTOR {
-        return None;
-    }
-    let mut reader = crate::filesystem::BootSectorReader::new(boot, partition.sector_count);
-    crate::filesystem::default_registry()
-        .detect(&mut reader)
+    crate::filesystem::detect_boot_sector(partition.sector_count, boot)
         .ok()
         .flatten()
-        .map(|detected| detected.kind())
-}
-
-pub fn detect_plain_filesystem(sector_count: u64, boot: &[u8]) -> Option<FilesystemKind> {
-    let partition = PartitionGeometry {
-        index: 0,
-        partition_type: 0,
-        partition_count: 1,
-        need_disturb: 0,
-        need_encrypt: 0,
-        start_sector: 0,
-        sector_size: SECTOR as u64,
-        partition_size: sector_count.saturating_mul(SECTOR as u64),
-        sector_count,
-        user_key_crc: 0,
-        file_key_crc: 0,
-        encrypt_mode: 0,
-    };
-    detect_filesystem_boot(&partition, boot)
 }
 
 #[derive(Clone, Debug)]
@@ -509,13 +485,15 @@ impl InspectDiskContext {
                         )
                     })?
                 };
-                let filesystem = detect_plain_filesystem(partition.sector_count, boot)
-                    .ok_or_else(|| {
-                        format!(
-                            "普通分区 P{} 起始扇区未通过 FAT/exFAT/NTFS 严格校验；decode fail-closed",
-                            partition.index
-                        )
-                    })?;
+                let filesystem =
+                    crate::filesystem::detect_boot_sector(partition.sector_count, boot)
+                        .map_err(|error| error.to_string())?
+                        .ok_or_else(|| {
+                            format!(
+                        "普通分区 P{} 起始扇区未通过 FAT/exFAT/NTFS 严格校验；decode fail-closed",
+                        partition.index
+                    )
+                        })?;
                 return Ok((
                     raw.to_vec(),
                     format!(

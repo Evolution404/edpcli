@@ -140,7 +140,11 @@ pub(crate) fn apply_runtime_plain_override(
         let Ok(boot) = read_sector(start) else {
             return snapshot;
         };
-        if crate::inspect_target::detect_plain_filesystem(count, &boot).is_none() {
+        if crate::filesystem::detect_boot_sector(count, &boot)
+            .ok()
+            .flatten()
+            .is_none()
+        {
             return snapshot;
         }
     }
