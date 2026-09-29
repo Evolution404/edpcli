@@ -21,6 +21,8 @@ mod write_plan;
 
 pub use crate::filesystem::FilesystemKind;
 
+pub use crate::crypto::{sm4_decrypt_block, sm4_encrypt_block};
+pub use crate::partition_transform::decrypt_mode2;
 pub use filesystem::{
     build_empty_exfat, build_empty_fat16, build_migrated_filesystem,
     build_official_exfat_partition, build_official_exfat_partitions,
@@ -33,10 +35,9 @@ pub use key_domain::{
     TargetPasswordPolicy, DEFAULT_KEY_DOMAIN_PASSWORD,
 };
 pub use keys::{
-    decrypt_mode2, default_file_key, default_file_key_checked, sm4_decrypt_block,
-    sm4_encrypt_block, unwrap_file_key, unwrap_legacy_lba7_file_key, wrap_file_key,
-    wrap_legacy_lba7_file_key, DefaultFileKeyError, ExistingFileKeyError, FileKeyWrapMode,
-    LegacyLba7KeyMaterial, ProvisionKeyMaterial,
+    default_file_key, default_file_key_checked, unwrap_file_key, unwrap_legacy_lba7_file_key,
+    wrap_file_key, wrap_legacy_lba7_file_key, DefaultFileKeyError, ExistingFileKeyError,
+    FileKeyWrapMode, LegacyLba7KeyMaterial, ProvisionKeyMaterial,
 };
 pub use layout::{
     build_official_partition_layout, official_format_targets,
