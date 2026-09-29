@@ -73,7 +73,8 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
         ("src/tui/inspect/preview_state.rs", 200),
         ("src/tui/inspect/search_state.rs", 450),
         ("src/tui/inspect/jump_state.rs", 200),
-        ("src/tui/inspect/detail_render.rs", 500),
+        ("src/tui/inspect/detail_render.rs", 420),
+        ("src/tui/inspect/field_table_render.rs", 180),
         ("src/tui/provision/state.rs", 400),
         ("src/tui/provision/execution_state.rs", 220),
         ("src/tui/provision/field_presentation.rs", 340),
@@ -239,6 +240,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/inspect/render.rs",
         "src/tui/inspect/tree_render.rs",
         "src/tui/inspect/detail_render.rs",
+        "src/tui/inspect/field_table_render.rs",
         "src/tui/inspect/sector_render.rs",
         "src/tui/backups/state.rs",
         "src/tui/backups/render.rs",
@@ -347,8 +349,12 @@ fn large_modules_are_split_by_domain_boundary() {
         "Inspect tree renderer must stay responsibility-bounded"
     );
     assert!(
-        lines("src/tui/inspect/detail_render.rs") < 500,
+        lines("src/tui/inspect/detail_render.rs") < 420,
         "Inspect detail renderer must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/inspect/field_table_render.rs") < 180,
+        "Inspect field table rendering must stay isolated from object evidence rendering"
     );
     assert!(
         lines("src/tui/inspect/sector_render.rs") < 350,

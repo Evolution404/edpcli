@@ -304,7 +304,7 @@ fn every_interactive_table_renderer_uses_unified_active_column_layout() {
         ),
         (
             "inspect",
-            include_str!("../src/tui/inspect/detail_render.rs"),
+            include_str!("../src/tui/inspect/field_table_render.rs"),
             1usize,
         ),
     ] {

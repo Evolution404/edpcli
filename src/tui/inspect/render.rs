@@ -8,6 +8,9 @@ use render_helpers::{draw_inspect_breadcrumb, inspect_field_status_style};
 mod tree_render;
 use tree_render::draw_inspect_tree_pane;
 
+#[path = "field_table_render.rs"]
+mod field_table_render;
+
 #[path = "detail_render.rs"]
 mod detail_render;
 use detail_render::draw_inspect_object_panes;
