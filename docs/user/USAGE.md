@@ -57,14 +57,22 @@ edpcli --version
 edpcli version
 ```
 
-在本机开发/试用未发布版本时，统一使用：
+在本机开发/试用未发布版本时，在仓库根目录直接执行：
 
 ```bash
-scripts/install-local.sh target/release/edpcli
+make install
 ```
 
-该脚本固定写入 `~/.local/bin/edpcli`，不会写 `/usr/local/bin`；安装后还会通过
+如果环境没有 `make`，等价入口是：
+
+```bash
+./scripts/install.sh
+```
+
+安装入口先执行 `cargo build --release --locked`，再调用 `scripts/install-local.sh`
+固定写入 `~/.local/bin/edpcli`，不会写 `/usr/local/bin`；安装后通过
 `zsh -lic 'command -v edpcli'` 和 SHA-256 对比确认用户终端实际运行的就是刚安装的二进制。
+它不会自动拉取远程提交、切换分支或修改 Git 工作区；有未提交修改时会提示并安装当前工作区。
 
 Windows 将 `edpcli.exe` 放入固定目录并加入 `PATH`：
 

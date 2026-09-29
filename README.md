@@ -45,14 +45,22 @@ install -m 0755 edpcli "$HOME/.local/bin/edpcli"
 edpcli version
 ```
 
-本机开发/测试构建不要直接写 `/usr/local/bin`。仓库提供统一安装入口：
+本机开发/测试构建不要直接写 `/usr/local/bin`。在仓库根目录一条命令安装当前工作区：
 
 ```bash
-scripts/install-local.sh target/release/edpcli
+make install
 ```
 
-脚本会固定安装到 `~/.local/bin/edpcli`，并用交互式 zsh 的实际命令解析结果和
-SHA-256 做双重校验，避免自动化环境 PATH 与用户终端 PATH 不一致时装错位置。
+不想依赖 `make` 时可直接执行：
+
+```bash
+./scripts/install.sh
+```
+
+这两个入口使用同一条安装链：`cargo build --release --locked` 构建当前工作区，
+随后复用 `scripts/install-local.sh` 安装到 `~/.local/bin/edpcli`，并校验交互式
+zsh 的实际命令解析结果与 SHA-256。安装命令不会自动执行 `git pull`、切换分支或
+修改工作区；存在未提交修改时会明确提示并安装当前工作区实际代码。
 
 其他平台/架构的安装命令见 [`docs/user/USAGE.md`](docs/user/USAGE.md)。
 
