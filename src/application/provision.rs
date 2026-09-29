@@ -16,23 +16,23 @@ use crate::diskio::{self, SectorDev};
 use crate::filesystem::analysis::{
     analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
 };
+use crate::filesystem::{build_empty_filesystem, FilesystemKind, SparseFilesystemImage};
 use crate::partition_transform::EdpSm4Transform;
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
-    apply_target_geometry_overrides, build_empty_exfat, build_empty_fat16,
-    build_migrated_filesystem, build_official_partition_filesystem,
-    build_official_provision_protocol_image, build_plain_migrated_provision_write_plan,
-    build_plain_provision_write_plan, parse_existing_provision, prefill_for_target_mode,
-    unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
-    CapacitySource, FileKeyWrapMode, FilesystemKind, KeyDomainRole, KeyDomainSecrets,
-    OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    apply_target_geometry_overrides, build_migrated_filesystem,
+    build_official_partition_filesystem, build_official_provision_protocol_image,
+    build_plain_migrated_provision_write_plan, build_plain_provision_write_plan,
+    parse_existing_provision, prefill_for_target_mode, unwrap_legacy_lba7_file_key, wrap_file_key,
+    wrap_legacy_lba7_file_key, CapacityInput, CapacitySource, FileKeyWrapMode, KeyDomainRole,
+    KeyDomainSecrets, OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
     OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision,
     PartitionAction, PartitionFilesystemImage, PartitionFormatTarget, PartitionRole,
     PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
     PlainProvisionWritePlan, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
     ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge,
-    SparseFilesystemImage, TargetGeometryOverrides, TargetIdentity, TargetPasswordPolicy,
-    TargetProvisionPlan, DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_MODE0_BOOT_SECTORS,
+    TargetGeometryOverrides, TargetIdentity, TargetPasswordPolicy, TargetProvisionPlan,
+    DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
 
@@ -233,24 +233,13 @@ fn build_plain_format_image(
     volume_label: &str,
     volume_serial: u32,
 ) -> Result<SparseFilesystemImage, String> {
-    match filesystem {
-        FilesystemKind::Fat16 => build_empty_fat16(
-            target.geometry.start_sector,
-            target.geometry.sector_count(),
-            volume_serial,
-            volume_label,
-        ),
-        FilesystemKind::ExFat => build_empty_exfat(
-            target.geometry.start_sector,
-            target.geometry.sector_count(),
-            volume_serial,
-            volume_label,
-        ),
-        FilesystemKind::Fat12 | FilesystemKind::Fat32 | FilesystemKind::Ntfs => Err(format!(
-            "portable filesystem writer does not yet implement {}",
-            filesystem.config_token()
-        )),
-    }
+    build_empty_filesystem(
+        filesystem,
+        target.geometry.start_sector,
+        target.geometry.sector_count(),
+        volume_serial,
+        Some(volume_label),
+    )
 }
 
 pub fn plan_format_targets(

@@ -146,7 +146,7 @@ fn fat16_driver_owns_format_metadata_detection_and_verification() {
     let plan = FAT16_DRIVER
         .build_format_plan(geometry, &request)
         .expect("driver format plan");
-    let legacy = edpcli::provision::build_empty_fat16(63, 20_417, 0x1234_5678, "BOOT").unwrap();
+    let legacy = edpcli::filesystem::build_empty_fat16(63, 20_417, 0x1234_5678, "BOOT").unwrap();
     let writes = plan
         .writes
         .iter()
@@ -233,7 +233,8 @@ fn exfat_driver_owns_format_metadata_detection_and_verification() {
     let plan = EXFAT_DRIVER
         .build_format_plan(geometry, &request)
         .expect("driver format plan");
-    let legacy = edpcli::provision::build_empty_exfat(2_048, 100_000, 0x8765_4321, "DATA").unwrap();
+    let legacy =
+        edpcli::filesystem::build_empty_exfat(2_048, 100_000, 0x8765_4321, "DATA").unwrap();
     let writes = plan
         .writes
         .iter()

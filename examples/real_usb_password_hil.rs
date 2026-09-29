@@ -19,11 +19,12 @@ mod macos {
     use edpcli::application::Prompter;
     use edpcli::common::SECTOR;
     use edpcli::diskio::{raw_path, FileDev, SectorDev};
+    use edpcli::filesystem::FilesystemKind;
     use edpcli::provision::{
-        parse_existing_provision, FilesystemKind, KeyDomainRole, KeyDomainSecretPair,
-        KeyDomainSecrets, OfficialPartitionMode, PartitionAction, PartitionRole, ProvisionImage,
-        ProvisionTarget, RegionDisposition, SourcePasswordKnowledge, TargetIdentity,
-        DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_SAFE6_LABEL,
+        parse_existing_provision, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
+        OfficialPartitionMode, PartitionAction, PartitionRole, ProvisionImage, ProvisionTarget,
+        RegionDisposition, SourcePasswordKnowledge, TargetIdentity, DEFAULT_KEY_DOMAIN_PASSWORD,
+        DEFAULT_SAFE6_LABEL,
     };
     use edpcli::sysinfo::{disk_total_sectors, CmdRunner, SysRunner};
     use sha2::{Digest, Sha256};

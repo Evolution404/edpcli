@@ -5,9 +5,7 @@
 //! partition transform.
 
 use crate::crypto::crc32_bare;
-use crate::filesystem::{
-    build_empty_exfat, build_empty_fat16, FilesystemKind, SparseFilesystemImage,
-};
+use crate::filesystem::{build_empty_filesystem, FilesystemKind, SparseFilesystemImage};
 use crate::partition_transform::EdpSm4Transform;
 
 use super::{
@@ -93,26 +91,13 @@ fn build_official_partition_filesystem_with_format(
         }
     }
 
-    let plain = match format {
-        FilesystemKind::Fat16 => build_empty_fat16(
-            target.geometry.start_sector,
-            target.geometry.sector_count(),
-            volume_serial,
-            volume_label,
-        )?,
-        FilesystemKind::ExFat => build_empty_exfat(
-            target.geometry.start_sector,
-            target.geometry.sector_count(),
-            volume_serial,
-            volume_label,
-        )?,
-        FilesystemKind::Fat12 | FilesystemKind::Fat32 | FilesystemKind::Ntfs => {
-            return Err(format!(
-                "portable filesystem writer does not yet implement {}",
-                format.config_token()
-            ))
-        }
-    };
+    let plain = build_empty_filesystem(
+        format,
+        target.geometry.start_sector,
+        target.geometry.sector_count(),
+        volume_serial,
+        Some(volume_label),
+    )?;
 
     let image = if target.physically_encrypted {
         plain.transformed(&EdpSm4Transform::new(*file_key))

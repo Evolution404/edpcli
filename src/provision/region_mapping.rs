@@ -1,8 +1,10 @@
 //! Canonical source/target region compatibility for reprovision planning.
 
+use crate::filesystem::FilesystemKind;
+
 use super::{
-    ExistingPartition, ExistingPartitionRecord, FileKeyWrapMode, FilesystemKind, KeyDomainRole,
-    PartitionRole, TargetPartitionGeometry,
+    ExistingPartition, ExistingPartitionRecord, FileKeyWrapMode, KeyDomainRole, PartitionRole,
+    TargetPartitionGeometry,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

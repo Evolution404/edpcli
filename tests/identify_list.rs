@@ -238,7 +238,7 @@ fn scan_prefers_live_plain_filesystem_over_stale_edp_protocol_fields() {
         .copy_from_slice(&u32::try_from(TOTAL - 2_048).unwrap().to_le_bytes());
     stale[510..512].copy_from_slice(&[0x55, 0xaa]);
     let fs =
-        edpcli::provision::build_empty_exfat(2_048, TOTAL - 2_048, 0x1234_5678, "PLAIN").unwrap();
+        edpcli::filesystem::build_empty_exfat(2_048, TOTAL - 2_048, 0x1234_5678, "PLAIN").unwrap();
     let boot = fs.sectors().get(&0).unwrap().to_vec();
 
     let mut m = std::collections::HashMap::new();

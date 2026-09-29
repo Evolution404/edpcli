@@ -86,7 +86,7 @@ pub struct PostRestoreReinitializeIntent {
     pub disk: u32,
     pub outcome: crate::application::post_restore::MetadataRestoreOutcome,
     pub request: crate::application::post_restore::EncryptedPartitionReinitializeRequest,
-    pub filesystem: crate::provision::FilesystemKind,
+    pub filesystem: crate::filesystem::FilesystemKind,
     pub volume_label: String,
 }
 
@@ -527,7 +527,7 @@ impl AppState {
     fn selected_post_restore_format(
         wizard: &WizardState,
     ) -> Option<crate::application::post_restore::PartitionFormatRequest> {
-        use crate::provision::FilesystemKind;
+        use crate::filesystem::FilesystemKind;
 
         let outcome = wizard.restore_outcome.as_ref()?;
         let partition = outcome
@@ -811,7 +811,7 @@ impl AppState {
             return;
         };
         if let Err(message) =
-            crate::provision::validate_volume_label(request.filesystem, &wizard.volume_label_input)
+            crate::filesystem::validate_volume_label(request.filesystem, &wizard.volume_label_input)
         {
             wizard.message = Some(message);
             return;

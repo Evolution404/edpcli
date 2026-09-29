@@ -2,8 +2,10 @@ use std::io;
 
 use edpcli::{
     backup_metadata::PartitionGeometry,
-    filesystem::analysis::{analyze_partition, AnalysisStatus, PartitionReader},
-    provision::{build_empty_exfat, build_empty_fat16, SparseFilesystemImage},
+    filesystem::{
+        analysis::{analyze_partition, AnalysisStatus, PartitionReader},
+        build_empty_exfat, build_empty_fat16, SparseFilesystemImage,
+    },
 };
 
 struct ImageReader<'a>(&'a SparseFilesystemImage);

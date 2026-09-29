@@ -578,7 +578,7 @@ fn formatted_plain_layout_overrides_stale_valid_edp_protocol_for_readonly_identi
         .copy_from_slice(&u32::try_from(TOTAL - 2_048).unwrap().to_le_bytes());
     protocol[510..512].copy_from_slice(&[0x55, 0xaa]);
 
-    let fs = edpcli::provision::build_empty_exfat(2_048, TOTAL - 2_048, 0x1234_5678, "PLAIN")
+    let fs = edpcli::filesystem::build_empty_exfat(2_048, TOTAL - 2_048, 0x1234_5678, "PLAIN")
         .expect("build strict exFAT boot");
     let boot = fs.sectors().get(&0).expect("exFAT boot sector").to_vec();
     let mut dev = StaleEdpPlainDev {

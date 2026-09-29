@@ -1,11 +1,9 @@
 use std::collections::BTreeMap;
 
 use crate::common::{METADATA_LAST_LBA, SECTOR};
+use crate::filesystem::{build_empty_filesystem, FilesystemKind, SparseFilesystemImage};
 
-use super::{
-    build_empty_exfat, build_empty_fat16, build_migrated_filesystem, FilesystemKind,
-    MigrationStagedEntry,
-};
+use super::{build_migrated_filesystem, MigrationStagedEntry};
 
 pub const DEFAULT_PLAIN_START_LBA: u64 = 2048;
 pub const MAX_PLAIN_PARTITIONS: usize = 4;
@@ -303,25 +301,14 @@ fn build_plain_mbr(plan: &PlainProvisionPlan) -> Result<[u8; SECTOR], String> {
 fn plain_filesystem_image(
     partition: &PlainPartitionSpec,
     volume_serial: u32,
-) -> Result<super::SparseFilesystemImage, String> {
-    match partition.filesystem {
-        FilesystemKind::Fat16 => build_empty_fat16(
-            partition.start_lba,
-            partition.sector_count,
-            volume_serial,
-            &partition.volume_label,
-        ),
-        FilesystemKind::ExFat => build_empty_exfat(
-            partition.start_lba,
-            partition.sector_count,
-            volume_serial,
-            &partition.volume_label,
-        ),
-        FilesystemKind::Fat12 | FilesystemKind::Fat32 | FilesystemKind::Ntfs => Err(format!(
-            "Plain portable writer 尚未实现 {} 文件系统",
-            partition.filesystem.config_token()
-        )),
-    }
+) -> Result<SparseFilesystemImage, String> {
+    build_empty_filesystem(
+        partition.filesystem,
+        partition.start_lba,
+        partition.sector_count,
+        volume_serial,
+        Some(&partition.volume_label),
+    )
 }
 
 fn insert_plain_write(

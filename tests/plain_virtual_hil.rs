@@ -6,8 +6,9 @@ use edpcli::{
     common::SECTOR,
     diskio::{execute_write_transaction, SectorDev, WriteTransactionPlan},
     filesystem::analysis::{analyze_partition, AnalysisStatus, PartitionReader},
+    filesystem::FilesystemKind,
     provision::{
-        build_plain_provision_write_plan, DiskProvisionKind, FilesystemKind, PlainCleanupExtent,
+        build_plain_provision_write_plan, DiskProvisionKind, PlainCleanupExtent,
         PlainPartitionSpec, PlainProvisionPlan,
     },
 };

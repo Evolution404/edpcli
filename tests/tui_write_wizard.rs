@@ -7,7 +7,8 @@ use edpcli::application::post_restore::{
     PostRestorePartitionState,
 };
 use edpcli::edpb::ManifestPartition;
-use edpcli::provision::{ExistingFileKeyError, FilesystemKind};
+use edpcli::filesystem::FilesystemKind;
+use edpcli::provision::ExistingFileKeyError;
 use edpcli::tui::state::{AppState, NavCommand, StateEffect, WizardStage, WriteIntent, WriteKind};
 
 #[test]

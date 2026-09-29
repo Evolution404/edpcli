@@ -11,7 +11,7 @@ use edpcli::application::Prompter;
 use edpcli::common::SECTOR;
 use edpcli::diskio::SectorDev;
 use edpcli::edpb::ManifestPartition;
-use edpcli::provision::FilesystemKind;
+use edpcli::filesystem::FilesystemKind;
 use std::collections::BTreeMap;
 use std::io;
 use std::time::Duration;

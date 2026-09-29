@@ -5,10 +5,10 @@ use std::time::Duration;
 use edpcli::{
     common::SECTOR,
     diskio::{execute_write_transaction, FileDev, SectorDev, WriteTransactionPlan},
+    filesystem::FilesystemKind,
     platform,
     provision::{
-        build_plain_provision_write_plan, DiskProvisionKind, FilesystemKind, PlainPartitionSpec,
-        PlainProvisionPlan,
+        build_plain_provision_write_plan, DiskProvisionKind, PlainPartitionSpec, PlainProvisionPlan,
     },
     sysinfo::SysRunner,
 };

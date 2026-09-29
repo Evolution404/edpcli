@@ -1,5 +1,6 @@
 //! Sector-based, device-independent defaults for a target provisioning mode.
 
+use crate::filesystem::FilesystemKind;
 use crate::protocol::edpf::EdpPartitionType;
 use crate::{
     common::SECTOR,
@@ -8,10 +9,9 @@ use crate::{
 };
 
 use super::{
-    FilesystemKind, MigrationTransform, OfficialPartitionMode, PartitionRole, PassInfoPolicy,
-    RegionMappingKind, RegionMappingPlanner, SourceRegion, TargetRegion,
-    DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
-    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    MigrationTransform, OfficialPartitionMode, PartitionRole, PassInfoPolicy, RegionMappingKind,
+    RegionMappingPlanner, SourceRegion, TargetRegion, DEFAULT_MODE0_BOOT_SECTORS,
+    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 
 mod disposition;

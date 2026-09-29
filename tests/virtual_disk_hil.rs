@@ -16,16 +16,17 @@ use edpcli::diskio::{
 use edpcli::filesystem::analysis::{
     analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
 };
+use edpcli::filesystem::FilesystemKind;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use edpcli::provision::{
     build_migrated_filesystem, generate_official_image, parse_existing_provision,
     prefill_for_target_mode, unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key,
-    FileKeyWrapMode, FilesystemKind, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
-    MigrationStagedEntry, MigrationTransform, OfficialPartitionMode, OfficialPartitionSizes,
-    OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, ProvisionEntropy,
-    ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec, RegionDisposition,
-    SourcePasswordKnowledge, TargetIdentity, TargetProvisionPlan,
+    FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, MigrationStagedEntry,
+    MigrationTransform, OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
+    OnlyId, PartitionAction, PartitionRole, ProvisionEntropy, ProvisionImage, ProvisionMetadata,
+    ProvisionProfile, ProvisionSpec, RegionDisposition, SourcePasswordKnowledge, TargetIdentity,
+    TargetProvisionPlan,
 };
 
 static HIL_LOCK: Mutex<()> = Mutex::new(());
