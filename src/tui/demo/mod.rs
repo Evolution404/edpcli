@@ -149,7 +149,7 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
 }
 
 fn select_lba8(state: &mut AppState) -> bool {
-    for suffix in ["/region.protocol", "/region.protocol.extent", "/sector.8"] {
+    for suffix in ["/region.protocol", "/sector.8"] {
         let rows = state.advanced_inspect_tree_rows();
         let Some(index) = rows.iter().position(|row| row.id.ends_with(suffix)) else {
             return false;

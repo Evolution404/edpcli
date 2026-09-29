@@ -1595,15 +1595,6 @@ fn advanced_inspect_lazy_sector_window_is_bounded_and_pageable() {
     state.advanced_inspect_move_tree(partition_index as isize);
     state.advanced_inspect_toggle_selected();
 
-    let rows = state.advanced_inspect_tree_rows();
-    let extent_index = rows
-        .iter()
-        .position(|row| row.id.ends_with("/region.partition.1.extent"))
-        .expect("partition extent");
-    let current = state.advanced_inspect().unwrap().tree_selected;
-    state.advanced_inspect_move_tree(extent_index as isize - current as isize);
-    state.advanced_inspect_toggle_selected();
-
     let first_page = state.advanced_inspect_tree_rows();
     let first_page_sectors = first_page
         .iter()
@@ -1711,15 +1702,6 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
         .position(|row| row.id.ends_with("/region.protocol"))
         .unwrap();
     state.advanced_inspect_move_tree(protocol as isize);
-    state.advanced_inspect_toggle_selected();
-
-    let rows = state.advanced_inspect_tree_rows();
-    let extent = rows
-        .iter()
-        .position(|row| row.id.ends_with("/region.protocol.extent"))
-        .unwrap();
-    let current = state.advanced_inspect().unwrap().tree_selected;
-    state.advanced_inspect_move_tree(extent as isize - current as isize);
     state.advanced_inspect_toggle_selected();
 
     let rows = state.advanced_inspect_tree_rows();

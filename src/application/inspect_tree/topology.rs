@@ -1,4 +1,4 @@
-use super::build::{lazy_extent, region_with_extent};
+use super::build::{lazy_extent, region_with_lazy_sectors};
 use super::*;
 
 fn clip_range(start: u64, count: u64, total: u64) -> Option<(u64, u64)> {
@@ -64,7 +64,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
 
     if context.is_plain() {
         let Some(table) = &context.partition_table else {
-            return root(vec![region_with_extent(
+            return root(vec![region_with_lazy_sectors(
                 "region.unknown.0",
                 "分区布局不可用",
                 0,
@@ -79,7 +79,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
         let mut claimed = Vec::new();
         for (index, extent) in table.table_extents.iter().enumerate() {
             if let Some((start, count)) = clip_range(extent.start_lba, extent.sector_count, total) {
-                regions.push(region_with_extent(
+                regions.push(region_with_lazy_sectors(
                     format!("region.partition_table.{index}"),
                     extent.label.clone(),
                     start,
@@ -95,7 +95,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
             if let Some((start, count)) =
                 clip_range(partition.start_lba, partition.sector_count, total)
             {
-                regions.push(region_with_extent(
+                regions.push(region_with_lazy_sectors(
                     format!("region.plain_partition.{}", partition.index),
                     partition.display_label(),
                     start,
@@ -109,7 +109,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
         }
         let claimed = merged_claimed_ranges(claimed, total);
         for (index, (start, count)) in unknown_gaps(&claimed, total).into_iter().enumerate() {
-            regions.push(region_with_extent(
+            regions.push(region_with_lazy_sectors(
                 format!("region.unallocated.{index}"),
                 "空闲区域",
                 start,
@@ -126,7 +126,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
     let Ok(model) =
         crate::application::disk_layout::DiskLayoutModel::canonical_inspect_context(context)
     else {
-        return root(vec![region_with_extent(
+        return root(vec![region_with_lazy_sectors(
             "region.unknown.0",
             "布局证据不足",
             0,
@@ -205,7 +205,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
             }
             _ => format!("region.extent.{}", segment.start_lba),
         };
-        regions.push(region_with_extent(
+        regions.push(region_with_lazy_sectors(
             id,
             segment.label.clone(),
             segment.start_lba,

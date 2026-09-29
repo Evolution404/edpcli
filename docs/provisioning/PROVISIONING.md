@@ -1410,7 +1410,7 @@ o 展开  Enter查看  gl 跳转  / 搜索  Tab面板  ? 帮助
 
 #### Phase I3：全盘 InspectNode / Region 模型
 
-- Device → Region → Extent → Sector → Field；
+- 普通区域采用 Device → Region → lazy Sector → Field；只有像尾部区域这样包含多个独立语义范围的 group 才保留 Region → Extent → lazy Sector；
 - LBA0～12、LCE、partition table、partitions、data、tail、unknown range 全部可表达；
 - 大区域 lazy children；
 - 任意 LBA 能映射到所属 region。
@@ -1543,12 +1543,12 @@ o 展开  Enter查看  gl 跳转  / 搜索  Tab面板  ? 帮助
 - Phase I1 审计已完成：CLI 已支持任意 `u64` LBA/range/count，TUI 全盘 Inspect backend 也具备任意合法 LBA 读取能力；确认历史主要双轨来自旧 `InspectWorkspace` 固定 LBA0～12 路径，以及 CLI/TUI 各自维护的 protocol/non-protocol decode 与 meta 决策。
 - Phase I2 已完成：application 层统一 `SectorReader` / checked range reader、`Protocol / LCE / Partition` decoder registry、`decode_sector()` / `sector_meta_text()`；CLI `raw/decode/meta` 已删除自己的 EDPB/物理盘 reader、partition boot 读取、decode/meta/export 循环，只负责来源选择、参数转换和渲染统一 `AdvancedInspectWorkspace`。旧 `InspectWorkspace` 已删除；TUI 现行产品只暴露一个 Inspect，全盘树直接复用该 backend。
 - 统一 Field 模型已落地：协议 parser 原有字段语义不改，由 application materialize 为绝对 `[start,end_exclusive)` byte range、Field type、raw bytes、decoded bytes、status、label/value/group/children；range 模型从第一版即可无损表达跨 sector 字段，unknown/reserved/preserved 状态枚举已预留，当前已验证协议字段标记为 Known。
-- Phase I3 已完成模型层：新增 UI-neutral 的 `InspectTopology / InspectNode / InspectNodeRange / InspectChildren`，形成 Device → Region → Extent → lazy Sector → Field 结构；LBA0～12、LCE、各 partition/data、盘尾 9-sector mirror、end-4 历史恢复节点与物理空闲补集均可表达。LBA0 sector stub 显式包含 MBR partition-table Structure；任意合法 LBA 可定位到唯一 primary 物理分段。
+- Phase I3 已完成模型层：新增 UI-neutral 的 `InspectTopology / InspectNode / InspectNodeRange / InspectChildren`。现行结构中普通物理区域直接采用 Device → Region → lazy Sector → Field，避免把 1:1 技术 Extent 暴露成“扇区范围”UI 层；只有尾部区域这类包含 LCE/mirror/end-4/空闲补集等多个独立语义范围的 group 才保留 Region → Extent → lazy Sector。LBA0～12、LCE、各 partition/data、盘尾 9-sector mirror、end-4 历史恢复节点与物理空闲补集均可表达。LBA0 sector stub 显式包含 MBR partition-table Structure；任意合法 LBA 可定位到唯一 primary 物理分段。
 - 大 Region/Partition/空闲 range 不生成全量 Sector vector，只保存 `LazySectors { start_lba, sector_count }`，按 offset+limit materialize sector page；EDP 尾部从 LCE 起点形成父 group，mirror/end-4 与空闲补集作为连续互斥 children，避免顶层重复区域。拓扑复用 EDPB 的 `SemanticStatus`，但不把 TUI 展开/焦点状态塞入备份领域模型。
 - `AdvancedInspectWorkspace` 已直接携带同源 topology，因此 CLI/TUI 后续不需要重新推导磁盘区域。I3 定向门禁：tree 5/5、application inspect 11/11、CLI 6/6、TUI workspace 5/5、TUI lifecycle 13/13，`cargo check --all-targets` 与 `git diff --check` 通过。
 - Phase I4 已完成：旧“高级检查参数表单 → 平铺 LBA 结果”双轨已删除，选择物理盘/EDPB 后直接后台建立 topology 并进入统一 Browser。宽屏采用 Tree / Overview / Detail 三栏，中等宽度为左树 + 右侧上下两栏，窄屏复用同一 Browser 状态纵向排列，不维护第二套窄屏状态机。
 - 树交互已落地：`j/k` 与上下键移动，`h/l` 收起/展开，`o` 切换折叠，Enter 查看/进入，`gl` 跳转，`/` 搜索、`n/N` 循环匹配，Tab 正向 Tree→Overview→Detail、Shift+Tab 反向切换，Esc 返回；selection 通过 `visible_window()` 始终保持在可视窗口内。旧 `AdvancedInspectStage::Form/Result`、`AdvancedInspectForm`、旧 result navigation 与参数表单文案均已清零。
-- viewport virtualization 已落地：每个 lazy extent 独立维护 sector window offset，每页最多 materialize 64 个 Sector，并通过“上一页/下一页”控制行翻窗；200-sector 回归样本验证第一页仅 LBA2048..2111、第二页仅 LBA2112..2175，旧页节点立即退出树，树规模不随分区总容量线性增长。I4 定向门禁：TUI lifecycle 13/13、TUI state 38/38、Inspect workspace 5/5、Inspect scroll 3/3，`cargo check --all-targets` 与 `git diff --check` 通过。
+- viewport virtualization 已落地：每个持有 `LazySectors` 的 Region/Extent 独立维护 sector window offset，每页最多 materialize 64 个 Sector，并通过“上一页/下一页”控制行翻窗；200-sector 回归样本验证第一页仅 LBA2048..2111、第二页仅 LBA2112..2175，旧页节点立即退出树，树规模不随分区总容量线性增长。I4 定向门禁：TUI lifecycle 13/13、TUI state 38/38、Inspect workspace 5/5、Inspect scroll 3/3，`cargo check --all-targets` 与 `git diff --check` 通过。
 - Phase I5 已完成：Sector 行 Enter 后通过独立 generation + single-flight worker 按需读取，不把 I/O 放进 TUI state；同一 application backend 新增 Sector Inspector 专用 fail-soft decode，decoder 不适用时仍返回 512B raw 并携带 `decode_error`，CLI `decode` 仍保持严格 fail-closed。
 - Sector Inspector 固定逻辑视图为 32×16B Hex + ASCII，显示 sector-relative offset 与 disk-absolute byte offset，支持 byte cursor（←/→ ±1B、j/k 或 ↑/↓ ±16B）、`0/$` 当前 16B 行首尾、`gg/G` 当前 Sector 首尾、`Ctrl-u/Ctrl-d` 半页、PageUp/PageDown 跨 Sector且保留 cursor、`v` 循环 Raw/Decode/Mixed；小终端仅滚动可视行，不改变 32×16 数据模型。
 - 当前 byte 会映射同源 `InspectField`，详情显示 typed value、field type/status、绝对 byte range；无已知 field 时明确显示 Unknown，不推测语义。按 `o` 展开当前 byte bit 与已验证 Field child。metadata LBA0～12 常驻，非 metadata 按需缓存最多 5 个 Sector，避免全盘浏览退化为无界内存增长。
@@ -1556,9 +1556,9 @@ o 展开  Enter查看  gl 跳转  / 搜索  Tab面板  ? 帮助
 - Phase I6 已完成：Hex byte → Field 继续直接使用 canonical `InspectField` 绝对 byte range 反查；树中 Field → Hex 新增反向入口，Enter Field 后直接打开 Sector Inspector、跳到字段起始 byte，并 pin 当前 Field。完整 Field range 使用绝对 byte range 高亮，可跨 16B 行；跨 sector Field 通过 PageUp/PageDown 保留 pin 并在相邻 sector 定位到 range 交集起点，手动移动 byte 后自动退出 pinned Field，恢复 cursor-driven 反查。
 - `Known / Unknown / Reserved / Preserved` 保持独立状态并使用现有 Theme semantic style 渲染，不引入 Inspect 私有硬编码颜色；Unknown byte 继续明确显示未分类，不自动降级为 padding/Reserved。`y` 使用 TUI 内部 yank register 复制当前 Field 语义值或当前 byte，`Y` 复制当前 Field raw range；该 register 跨平台、可测试，不在 TUI state 中引入 `pbcopy`/`xclip` 等平台命令依赖。
 - I6 专项门禁：Sector Inspector 4/4 通过，覆盖 Field→Hex、Hex→Field、跨行/跨 sector range、Unknown/Reserved/Preserved、yank register；完整 `cargo test --all-targets` 通过（最终长时 Runner Job `exit_code=0`），`cargo fmt --all -- --check`、`cargo check --all-targets` 与 `git diff --check` 通过。
-- Phase I7 已完成：Browser 中 `gl` 打开统一 Jump 输入，支持十进制/0x 十六进制 LBA 与绝对 byte offset，并使用 checked arithmetic 将 offset 无损映射为 LBA + sector-relative byte；越界、非法和 u64 overflow 均 fail closed，不做 silent clamp。Jump 命中 lazy extent 时仅切换该 extent 的 64-sector window、展开必要祖先并选中目标 Sector；byte offset 继续复用现有 Sector worker，Inspector cursor 精确落到目标 byte，event loop/state 不直接执行磁盘 I/O。
-- `/` 结构化搜索已完成：搜索 canonical topology 的 Region / Extent / Structure / Group / Field label，以及当前已知/cached `InspectField.value`；纯 topology 路径查找和 cached sector 结构匹配位于 `application::inspect_tree`，TUI 不复制 decoder/parser。命中会自动展开 Tree 路径并定位目标；`n/N` 在当前匹配集合中循环下一个/上一个，Field 命中可直接继续既有 Field→Hex。搜索不会为大分区 materialize 全量 Sector，也不会执行同步 full-disk raw scan；raw pattern search 仍明确留在第二阶段。
-- I7 已完成全部门禁：Sector Inspector 9/9（含 LBA jump、hex LBA、absolute byte offset 精确 cursor、lazy extent 自动翻页、invalid/overflow/out-of-range、Field label/typed value 搜索、40×10/80×24/120×36 prompt 渲染与 cache/virtualization 不退化）、TUI state 39/39、TUI lifecycle 13/13、Inspect tree 5/5、documentation layout 5/5 均通过；`cargo fmt --all -- --check`、`cargo check --all-targets` 通过，长时 `cargo test --all-targets` 最终 `exit_code=0`、680/680 tests passed、0 failed。下一步进入 Phase I8：视觉统一与窄屏收口。
+- Phase I7 已完成：Browser 中 `gl` 打开统一 Jump 输入，支持十进制/0x 十六进制 LBA 与绝对 byte offset，并使用 checked arithmetic 将 offset 无损映射为 LBA + sector-relative byte；越界、非法和 u64 overflow 均 fail closed，不做 silent clamp。Jump 命中持有 `LazySectors` 的 Region/Extent 时仅切换该节点的 64-sector window、展开必要祖先并选中目标 Sector；byte offset 继续复用现有 Sector worker，Inspector cursor 精确落到目标 byte，event loop/state 不直接执行磁盘 I/O。
+- `/` 结构化搜索已完成：搜索 canonical topology 的 Region / 尾部 Extent / Structure / Group / Field label，以及当前已知/cached `InspectField.value`；纯 topology 路径查找和 cached sector 结构匹配位于 `application::inspect_tree`，TUI 不复制 decoder/parser。命中会自动展开 Tree 路径并定位目标；`n/N` 在当前匹配集合中循环下一个/上一个，Field 命中可直接继续既有 Field→Hex。搜索不会为大分区 materialize 全量 Sector，也不会执行同步 full-disk raw scan；raw pattern search 仍明确留在第二阶段。
+- I7 已完成全部门禁：Sector Inspector 9/9（含 LBA jump、hex LBA、absolute byte offset 精确 cursor、lazy Region/Extent 自动翻页、invalid/overflow/out-of-range、Field label/typed value 搜索、40×10/80×24/120×36 prompt 渲染与 cache/virtualization 不退化）、TUI state 39/39、TUI lifecycle 13/13、Inspect tree 5/5、documentation layout 5/5 均通过；`cargo fmt --all -- --check`、`cargo check --all-targets` 通过，长时 `cargo test --all-targets` 最终 `exit_code=0`、680/680 tests passed、0 failed。下一步进入 Phase I8：视觉统一与窄屏收口。
 - Phase I8 已完成实现：全局渲染入口新增 `ThemeToken` 语义层，原有 accent/secondary/success/warning/error/muted/selection 全部经统一 token 映射；Advanced Inspect 区域不再直接引用 `Color::*`。Unknown/Reserved 使用 muted 语义，Preserved 使用 success，当前 byte/field/panel selection 继续使用统一 selection token。
 - Advanced Inspect 新增与其它页面一致的 `结构树 / 节点概览 / 节点详情` Panel；I8 当时的键位后续多次收口，**现行（2026-09-28）规则**为：一级 Devices/Backups 中 `Tab/Shift+Tab` 切顶层标签，进入 Inspect 后 `Tab/Shift+Tab` 切当前 Inspect Pane，`Ctrl-w*` 仍提供方向/前后 Pane 导航。Tree 的 `▶` 仅表示当前键盘焦点且全屏唯一，展开/折叠改用 `−/+`，避免与 focus marker 混淆；selected 背景只覆盖箭头和实际 row 内容，不涂满到 panel padding/border。
 - I8 窄屏采用同状态单面板降级：宽屏仍为三栏，中屏仍为左树 + 右侧上下两栏；当宽度 <92 或有效高度 <14 时只渲染当前 active panel，Tree selection、detail scroll、Sector byte cursor 都不被响应式布局改写。Sector Inspector 在 60×18 下仍会自动滚到 cursor 所在 16B 行，并保留精确 byte selection。
@@ -9433,7 +9433,7 @@ Backup detail / coverage
 
 #### U4 — Inspect Workspace
 
-状态：COMPLETE（2026-09-27）。Inspect 以当前对象快照和 typed 字段树为首屏，LBA8 摘要直接投影部门、用户、E_LABEL 17 项及版本/宿主信息；`o` 展开 E_LABEL，Enter 查看详情且不改变展开状态。字段详情展示完整 evidence，默认磁盘布局为紧凑条并可切换全盘视图；raw/decode/meta、任意 sector、lazy extent、search/jump 保持可用。Inspect 不再占用大动画侧栏；TUI suite 216/216、Inspect suite 60/60 通过。
+状态：COMPLETE（2026-09-27）。Inspect 以当前对象快照和 typed 字段树为首屏，LBA8 摘要直接投影部门、用户、E_LABEL 17 项及版本/宿主信息；`o` 展开 E_LABEL，Enter 查看详情且不改变展开状态。字段详情展示完整 evidence，默认磁盘布局为紧凑条并可切换全盘视图；raw/decode/meta、任意 sector、lazy Region/Extent、search/jump 保持可用。Inspect 不再占用大动画侧栏；TUI suite 216/216、Inspect suite 60/60 通过。
 
 - 对象优先布局；
 - LBA8 首屏直接展示部门/用户/E_LABEL；
@@ -9444,7 +9444,7 @@ Backup detail / coverage
 - 对象快照 / 字段详情职责分离；
 - Compact / Detailed DiskLayout；
 - 业务字段 / 原始字段 / Hex / 全盘布局切换；
-- 保留 raw/decode/meta、任意 sector、lazy extent、search/jump；
+- 保留 raw/decode/meta、任意 sector、lazy Region/Extent、search/jump；
 - Inspect 尺寸门禁 + typed evidence tests 全绿。
 
 #### U5 — Provision Workspace

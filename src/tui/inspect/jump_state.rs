@@ -27,19 +27,19 @@ impl AppState {
 
         let relative = lba
             .checked_sub(location.start_lba)
-            .ok_or_else(|| format!("LBA{lba} 位于 extent 起点之前"))?;
+            .ok_or_else(|| format!("LBA{lba} 位于 lazy 区域起点之前"))?;
         if relative >= location.sector_count {
-            return Err(format!("LBA{lba} 超出目标 extent"));
+            return Err(format!("LBA{lba} 超出目标 lazy 区域"));
         }
         let row_path = tree_state::inspect_row_path(&location.node_path);
-        let extent_id = row_path
+        let lazy_node_id = row_path
             .last()
             .cloned()
-            .ok_or_else(|| format!("LBA{lba} 的 extent 路径为空"))?;
+            .ok_or_else(|| format!("LBA{lba} 的 lazy 区域路径为空"))?;
         let page_offset = relative / SECTOR_PAGE * SECTOR_PAGE;
         if let Some(state) = self.inspect.advanced.as_mut() {
             state.expanded.extend(row_path);
-            state.lazy_offsets.insert(extent_id.clone(), page_offset);
+            state.lazy_offsets.insert(lazy_node_id.clone(), page_offset);
             state.tree_revision = state.tree_revision.wrapping_add(1);
             state.sector = None;
             state.panel = AdvancedInspectPanel::Tree;
@@ -49,7 +49,7 @@ impl AppState {
             state.message = None;
         }
 
-        let target_id = format!("{extent_id}/sector.{lba}");
+        let target_id = format!("{lazy_node_id}/sector.{lba}");
         let target = self
             .advanced_inspect_tree_index(&target_id)
             .ok_or_else(|| format!("LBA{lba} 已翻页但目标 Sector 未 materialize"))?;

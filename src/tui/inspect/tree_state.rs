@@ -4,7 +4,7 @@ use super::*;
 pub enum AdvancedInspectTreeAction {
     None,
     SetLazyOffset {
-        extent_id: String,
+        lazy_node_id: String,
         offset: u64,
         target_id: String,
     },
@@ -76,7 +76,7 @@ impl AppState {
             range: crate::application::inspect_tree::InspectNodeRange,
             decoder: Option<crate::application::inspect::InspectDecoderKind>,
             status: crate::edpb::SemanticStatus,
-            extent_id: String,
+            lazy_node_id: String,
             offset: u64,
             target_id: String,
         }
@@ -94,7 +94,7 @@ impl AppState {
                 expandable: false,
                 expanded: false,
                 action: AdvancedInspectTreeAction::SetLazyOffset {
-                    extent_id: spec.extent_id,
+                    lazy_node_id: spec.lazy_node_id,
                     offset: spec.offset,
                     target_id: spec.target_id,
                 },
@@ -175,7 +175,7 @@ impl AppState {
                             ),
                             decoder: node.decoder,
                             status: node.status,
-                            extent_id: row_id.clone(),
+                            lazy_node_id: row_id.clone(),
                             offset: previous_offset,
                             target_id: format!("{row_id}/sector.{previous_lba}"),
                         }));
@@ -225,7 +225,7 @@ impl AppState {
                             ),
                             decoder: node.decoder,
                             status: node.status,
-                            extent_id: row_id.clone(),
+                            lazy_node_id: row_id.clone(),
                             offset: next_offset,
                             target_id: format!("{row_id}/sector.{next_lba}"),
                         }));
@@ -413,12 +413,12 @@ impl AppState {
 
         match row.action {
             AdvancedInspectTreeAction::SetLazyOffset {
-                extent_id,
+                lazy_node_id,
                 offset,
                 target_id,
             } => {
                 if let Some(state) = self.inspect.advanced.as_mut() {
-                    state.lazy_offsets.insert(extent_id, offset);
+                    state.lazy_offsets.insert(lazy_node_id, offset);
                     state.tree_revision = state.tree_revision.wrapping_add(1);
                 }
                 if let Some(target_index) = self.advanced_inspect_tree_index(&target_id) {

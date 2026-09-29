@@ -98,15 +98,6 @@ fn select_protocol_lba0(state: &mut AppState) {
     state.advanced_inspect_toggle_selected();
 
     let rows = state.advanced_inspect_tree_rows();
-    let extent = rows
-        .iter()
-        .position(|row| row.id.ends_with("/region.protocol.extent"))
-        .expect("protocol extent");
-    let current = state.advanced_inspect().unwrap().tree_selected;
-    state.advanced_inspect_move_tree(extent as isize - current as isize);
-    state.advanced_inspect_toggle_selected();
-
-    let rows = state.advanced_inspect_tree_rows();
     let sector = rows
         .iter()
         .position(|row| row.id.ends_with("/sector.0"))
@@ -336,6 +327,12 @@ fn ch14_single_sector_tree_rows_omit_redundant_closed_range() {
         text.replace(' ', "").contains("EDP主协议区[0..12]"),
         "{text}"
     );
+    assert!(!text.contains("扇区范围"), "{text}");
+    let rows = state.advanced_inspect_tree_rows();
+    assert!(rows
+        .iter()
+        .any(|row| row.id.ends_with("/region.protocol/sector.0")));
+    assert!(!rows.iter().any(|row| row.id.contains(".extent/sector.")));
 }
 
 #[test]
@@ -390,14 +387,6 @@ fn selecting_known_partition_sector_requests_read_only_preview() {
     state.advanced_inspect_move_tree(region as isize);
     state.advanced_inspect_toggle_selected();
     let rows = state.advanced_inspect_tree_rows();
-    let extent = rows
-        .iter()
-        .position(|row| row.id.ends_with("/region.partition.1.extent"))
-        .unwrap();
-    let current = state.advanced_inspect().unwrap().tree_selected;
-    state.advanced_inspect_move_tree(extent as isize - current as isize);
-    state.advanced_inspect_toggle_selected();
-    let rows = state.advanced_inspect_tree_rows();
     let sector = rows
         .iter()
         .position(|row| row.id.ends_with("/sector.2048"))
@@ -423,14 +412,6 @@ fn ch14_failed_passive_preview_requires_explicit_retry_then_recovers() {
         .position(|row| row.id.ends_with("/region.partition.1"))
         .unwrap();
     state.advanced_inspect_move_tree(partition as isize);
-    state.advanced_inspect_toggle_selected();
-    let rows = state.advanced_inspect_tree_rows();
-    let extent = rows
-        .iter()
-        .position(|row| row.id.ends_with("/region.partition.1.extent"))
-        .unwrap();
-    let current = state.advanced_inspect().unwrap().tree_selected;
-    state.advanced_inspect_move_tree(extent as isize - current as isize);
     state.advanced_inspect_toggle_selected();
     let rows = state.advanced_inspect_tree_rows();
     let sector = rows

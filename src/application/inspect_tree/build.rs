@@ -30,7 +30,7 @@ pub(super) fn lazy_extent(
     }
 }
 
-pub(super) fn region_with_extent(
+pub(super) fn region_with_lazy_sectors(
     id: impl Into<String>,
     label: impl Into<String>,
     start_lba: u64,
@@ -39,18 +39,8 @@ pub(super) fn region_with_extent(
     status: SemanticStatus,
     region_semantic: DiskRegionSemantic,
 ) -> InspectNode {
-    let id = id.into();
-    let extent = lazy_extent(
-        format!("{id}.extent"),
-        "扇区范围",
-        start_lba,
-        sector_count,
-        decoder,
-        status,
-        Some(region_semantic),
-    );
     InspectNode {
-        id,
+        id: id.into(),
         label: label.into(),
         kind: if region_semantic == DiskRegionSemantic::Unknown {
             InspectNodeKind::UnknownRange
@@ -58,7 +48,10 @@ pub(super) fn region_with_extent(
             InspectNodeKind::Region
         },
         range: InspectNodeRange::sectors(start_lba, sector_count),
-        children: InspectChildren::Materialized(vec![extent]),
+        children: InspectChildren::LazySectors {
+            start_lba,
+            sector_count,
+        },
         decoder,
         status,
         region_semantic: Some(region_semantic),

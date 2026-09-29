@@ -130,10 +130,11 @@ fn topology_partition_is_lazy_and_free_gaps_are_explicit() {
             )
         })
         .unwrap();
-    let InspectChildren::Materialized(extents) = &partition_region.children else {
-        panic!("partition region must own one extent");
-    };
-    let page = extents[0].materialize_sector_page(10, 3);
+    assert!(matches!(
+        partition_region.children,
+        InspectChildren::LazySectors { .. }
+    ));
+    let page = partition_region.materialize_sector_page(10, 3);
     assert_eq!(
         page.iter()
             .map(|node| node.range.start_lba)
@@ -146,6 +147,26 @@ fn topology_partition_is_lazy_and_free_gaps_are_explicit() {
             .and_then(|node| node.region_semantic),
         Some(DiskRegionSemantic::Unallocated)
     );
+}
+
+#[test]
+fn ordinary_regions_own_lazy_sectors_directly_without_singleton_extent_wrappers() {
+    let topology = build_inspect_topology(&context(10_000));
+    let InspectChildren::Materialized(regions) = &topology.root.children else {
+        panic!("root regions must be materialized");
+    };
+    for region in regions {
+        if region.region_semantic == Some(DiskRegionSemantic::Tail) {
+            continue;
+        }
+        assert!(
+            matches!(region.children, InspectChildren::LazySectors { .. }),
+            "{} must expose sectors directly",
+            region.id
+        );
+        assert!(!region.id.ends_with(".extent"));
+        assert_ne!(region.label, "扇区范围");
+    }
 }
 
 #[test]
@@ -280,10 +301,11 @@ fn tail_mirror_and_end4_are_nested_under_lce_anchored_tail_region() {
 fn protocol_lba0_sector_stub_exposes_partition_table_structure() {
     let topology = build_inspect_topology(&context(5_000));
     let protocol = topology.primary_region_for_lba(0).unwrap();
-    let InspectChildren::Materialized(extents) = &protocol.children else {
-        panic!("protocol region must own extent");
-    };
-    let sector = extents[0].materialize_sector_page(0, 1).remove(0);
+    assert!(matches!(
+        protocol.children,
+        InspectChildren::LazySectors { .. }
+    ));
+    let sector = protocol.materialize_sector_page(0, 1).remove(0);
     let InspectChildren::Materialized(children) = sector.children else {
         panic!("LBA0 must expose structure");
     };
