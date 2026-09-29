@@ -2,10 +2,15 @@
 
 use std::sync::OnceLock;
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::{
+    style::{Color, Modifier, Style},
+    widgets::BorderType,
+};
+
+use crate::provision::DiskProvisionKind;
 
 use super::disk_layout::DiskRegionKind;
-use super::state::{ProvisionBarKind, ProvisionKind};
+use super::state::ProvisionBarKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemeMode {
@@ -107,7 +112,7 @@ impl Theme {
                 background: Color::Indexed(234),
                 surface: Color::Indexed(235),
                 surface_raised: Color::Indexed(236),
-                surface_active: Color::Indexed(236),
+                surface_active: Color::Indexed(237),
                 selection: Color::Indexed(238),
                 border_subtle: Color::Indexed(238),
                 border_strong: Color::Indexed(67),
@@ -287,9 +292,15 @@ impl Theme {
     }
 
     pub fn selection(self) -> Style {
-        Style::default()
-            .fg(self.palette.text_primary)
-            .bg(self.palette.selection)
+        self.selection_overlay(true)
+    }
+
+    pub fn selection_overlay(self, focused: bool) -> Style {
+        Style::default().bg(if focused {
+            self.palette.selection
+        } else {
+            self.palette.surface_active
+        })
     }
 
     pub fn selection_marker(self) -> Style {
@@ -298,12 +309,58 @@ impl Theme {
             .bg(self.palette.selection)
     }
 
+    pub fn cursor(self) -> Style {
+        self.selection_overlay(true).add_modifier(Modifier::BOLD)
+    }
+
     pub fn panel(self) -> Style {
         Style::default().fg(self.palette.border)
     }
 
     pub fn focused_panel(self) -> Style {
         Style::default().fg(self.palette.border_focus)
+    }
+
+    pub fn pane_border(self, focused: bool) -> Style {
+        if focused {
+            self.focused_panel()
+        } else {
+            self.subtle_border()
+        }
+    }
+
+    pub const fn pane_border_type(self, focused: bool) -> BorderType {
+        if focused {
+            BorderType::Thick
+        } else {
+            BorderType::Plain
+        }
+    }
+
+    pub fn pane_title(self, focused: bool) -> Style {
+        if focused {
+            self.accent().add_modifier(Modifier::BOLD)
+        } else {
+            self.secondary_text()
+        }
+    }
+
+    pub const fn pane_title_prefix(self, focused: bool) -> &'static str {
+        if focused {
+            "▌ "
+        } else {
+            ""
+        }
+    }
+
+    pub fn card_surface(self, focused: bool) -> Style {
+        let background = match (self.mode, focused) {
+            (ThemeMode::Ansi16, _) | (_, false) => self.palette.surface_raised,
+            (_, true) => self.palette.surface_active,
+        };
+        Style::default()
+            .fg(self.palette.text_primary)
+            .bg(background)
     }
 
     pub fn input(self) -> Style {
@@ -340,6 +397,45 @@ impl Theme {
         Style::default()
             .fg(self.palette.accent)
             .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    }
+
+    pub fn table_header(self, active: bool, pane_focused: bool) -> Style {
+        if active && pane_focused {
+            self.accent()
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        } else {
+            self.secondary_text().add_modifier(Modifier::BOLD)
+        }
+    }
+
+    pub fn active_semantic(self, base: Style) -> Style {
+        let foreground = base
+            .fg
+            .map(|color| self.brighter_semantic_color(color))
+            .unwrap_or(self.palette.accent);
+        base.fg(foreground).add_modifier(Modifier::BOLD)
+    }
+
+    pub fn table_cell(self, base: Style, column_active: bool, pane_focused: bool) -> Style {
+        if column_active && pane_focused {
+            self.active_semantic(base)
+        } else if column_active {
+            base.add_modifier(Modifier::BOLD)
+        } else {
+            base
+        }
+    }
+
+    pub fn apply_selection(self, base: Style, selected: bool, pane_focused: bool) -> Style {
+        if selected {
+            base.bg(if pane_focused {
+                self.palette.selection
+            } else {
+                self.palette.surface_active
+            })
+        } else {
+            base
+        }
     }
 
     pub fn partition(self, kind: ProvisionBarKind) -> Style {
@@ -614,15 +710,43 @@ impl Theme {
         }
     }
 
-    pub fn provision_kind(self, kind: ProvisionKind) -> Style {
-        let color = match kind {
-            ProvisionKind::Mode0 => self.palette.accent,
-            ProvisionKind::Mode1 => self.palette.violet,
-            ProvisionKind::Mode2 => self.palette.warning,
-            ProvisionKind::Mode3 => self.palette.success,
-            ProvisionKind::Plain => self.palette.partition_plain,
-        };
-        Style::default().fg(color).add_modifier(Modifier::BOLD)
+    pub fn disk_region_half_block(self, kind: DiskRegionKind, active: bool) -> Style {
+        Style::default().fg(self.disk_region_fill_color(kind, active))
+    }
+
+    pub fn provision_kind_color(self, kind: DiskProvisionKind) -> Color {
+        match kind {
+            DiskProvisionKind::Mode0 => self.palette.accent,
+            DiskProvisionKind::Mode1 => self.palette.violet,
+            DiskProvisionKind::Mode2 => self.palette.warning,
+            DiskProvisionKind::Mode3 => self.palette.success,
+            DiskProvisionKind::Plain => self.palette.partition_plain,
+        }
+    }
+
+    fn brighter_semantic_color(self, color: Color) -> Color {
+        match (self.mode, color) {
+            (ThemeMode::TrueColorDark, Color::Rgb(r, g, b)) => {
+                let lift =
+                    |value: u8| value.saturating_add(((u16::from(255 - value) * 18) / 100) as u8);
+                Color::Rgb(lift(r), lift(g), lift(b))
+            }
+            _ => color,
+        }
+    }
+
+    pub fn provision_kind(self, kind: DiskProvisionKind) -> Style {
+        Style::default().fg(self.provision_kind_color(kind))
+    }
+
+    pub fn provision_kind_emphasis(self, kind: DiskProvisionKind) -> Style {
+        self.provision_kind(kind).add_modifier(Modifier::BOLD)
+    }
+
+    pub fn provision_kind_active(self, kind: DiskProvisionKind) -> Style {
+        Style::default()
+            .fg(self.brighter_semantic_color(self.provision_kind_color(kind)))
+            .add_modifier(Modifier::BOLD)
     }
 
     pub fn animation(self, tone: AnimationTone) -> Style {
@@ -713,13 +837,40 @@ mod tests {
     }
 
     #[test]
-    fn selection_and_focus_use_distinct_low_contrast_semantics() {
+    fn selection_and_focus_preserve_semantics_and_add_structural_focus() {
         let theme = Theme::truecolor_dark();
-        assert_eq!(theme.selection().fg, Some(theme.palette.text_primary));
+        assert_eq!(theme.selection().fg, None);
         assert_eq!(theme.selection().bg, Some(theme.palette.selection));
         assert_ne!(theme.selection().bg, Some(theme.palette.accent));
-        assert_ne!(theme.panel().fg, theme.focused_panel().fg);
+        assert_ne!(theme.pane_border(false).fg, theme.pane_border(true).fg);
+        assert_ne!(theme.pane_border_type(false), theme.pane_border_type(true));
+        assert_eq!(theme.pane_title_prefix(false), "");
+        assert_eq!(theme.pane_title_prefix(true), "▌ ");
+        assert_ne!(theme.card_surface(false).bg, theme.card_surface(true).bg);
         assert_ne!(theme.input().bg, theme.input_focused().bg);
+    }
+
+    #[test]
+    fn provision_kind_active_keeps_each_semantic_hue_instead_of_turning_white() {
+        let theme = Theme::truecolor_dark();
+        for kind in [
+            DiskProvisionKind::Plain,
+            DiskProvisionKind::Mode0,
+            DiskProvisionKind::Mode1,
+            DiskProvisionKind::Mode2,
+            DiskProvisionKind::Mode3,
+        ] {
+            let normal = theme.provision_kind(kind);
+            let active = theme.provision_kind_active(kind);
+            assert_eq!(normal.fg, Some(theme.provision_kind_color(kind)));
+            assert_ne!(active.fg, normal.fg, "{kind:?} active color must brighten");
+            assert_ne!(
+                active.fg,
+                Some(theme.palette.text_primary),
+                "{kind:?} active color must keep its semantic hue"
+            );
+            assert!(active.add_modifier.contains(Modifier::BOLD));
+        }
     }
 
     #[test]

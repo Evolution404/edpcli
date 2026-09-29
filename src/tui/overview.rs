@@ -1,6 +1,6 @@
 use crate::provision::DiskProvisionKind;
 use crate::tui::{
-    state::{AppState, InputMode, ProvisionKind},
+    state::{AppState, InputMode},
     theme,
     ui::{OverviewMetric, OverviewSearch},
 };
@@ -51,16 +51,6 @@ impl ProvisionKindCounts {
     }
 }
 
-fn tui_kind(kind: DiskProvisionKind) -> ProvisionKind {
-    match kind {
-        DiskProvisionKind::Plain => ProvisionKind::Plain,
-        DiskProvisionKind::Mode0 => ProvisionKind::Mode0,
-        DiskProvisionKind::Mode1 => ProvisionKind::Mode1,
-        DiskProvisionKind::Mode2 => ProvisionKind::Mode2,
-        DiskProvisionKind::Mode3 => ProvisionKind::Mode3,
-    }
-}
-
 pub fn overview_metrics(counts: ProvisionKindCounts) -> Vec<OverviewMetric> {
     let mut metrics = vec![OverviewMetric::new(
         "总计",
@@ -73,8 +63,7 @@ pub fn overview_metrics(counts: ProvisionKindCounts) -> Vec<OverviewMetric> {
             .into_iter()
             .map(|(kind, label, count)| {
                 let style = kind
-                    .map(tui_kind)
-                    .map(|kind| theme::current().provision_kind(kind))
+                    .map(|kind| theme::current().provision_kind_emphasis(kind))
                     .unwrap_or_else(|| theme::current().warning());
                 OverviewMetric::new(label, count, style)
             }),

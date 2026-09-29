@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use edpcli::provision::DiskProvisionKind;
 use edpcli::tui::disk_layout::DiskRegionKind;
 use edpcli::tui::{
     render,
@@ -218,23 +219,83 @@ fn tui_workspace_renderers_do_not_define_private_colors() {
             continue;
         }
         let source = fs::read_to_string(&path).unwrap();
-        assert!(
-            !source.contains("Color::"),
-            "{} bypasses centralized TUI Theme with a direct Color::*",
-            path.strip_prefix(env!("CARGO_MANIFEST_DIR"))
-                .unwrap_or(&path)
-                .display()
-        );
+        for forbidden in ["Color::", ".fg(", ".bg(", "Modifier::REVERSED"] {
+            assert!(
+                !source.contains(forbidden),
+                "{} bypasses centralized TUI Theme with {forbidden}",
+                path.strip_prefix(env!("CARGO_MANIFEST_DIR"))
+                    .unwrap_or(&path)
+                    .display()
+            );
+        }
     }
 }
 
 #[test]
-fn selection_is_not_the_old_black_on_cyan_highlight() {
+fn selection_overlay_never_overwrites_semantic_foreground() {
     let style = Theme::truecolor_dark().selection();
-    assert_eq!(style.fg, Some(Color::Rgb(0xD7, 0xDC, 0xE2)));
+    assert_eq!(style.fg, None);
     assert_eq!(style.bg, Some(Color::Rgb(0x26, 0x34, 0x42)));
-    assert_ne!(style.fg, Some(Color::Black));
     assert_ne!(style.bg, Some(Color::Cyan));
+}
+
+#[test]
+fn provision_kind_palette_has_one_base_and_active_style_per_mode() {
+    let theme = Theme::truecolor_dark();
+    let mut base_colors = Vec::new();
+    for kind in [
+        DiskProvisionKind::Plain,
+        DiskProvisionKind::Mode0,
+        DiskProvisionKind::Mode1,
+        DiskProvisionKind::Mode2,
+        DiskProvisionKind::Mode3,
+    ] {
+        let base = theme.provision_kind(kind);
+        let active = theme.provision_kind_active(kind);
+        assert_eq!(base.fg, Some(theme.provision_kind_color(kind)));
+        assert_ne!(
+            active.fg, base.fg,
+            "{kind:?} must visibly brighten when active"
+        );
+        assert_ne!(
+            active.fg,
+            Some(theme.palette().text_primary),
+            "{kind:?} active state must not turn white"
+        );
+        assert!(active.add_modifier.contains(ratatui::style::Modifier::BOLD));
+        base_colors.push(base.fg);
+    }
+    base_colors.sort_by_key(|color| format!("{color:?}"));
+    base_colors.dedup();
+    assert_eq!(
+        base_colors.len(),
+        5,
+        "all five disk kinds need distinct semantic colors"
+    );
+}
+
+#[test]
+fn pane_focus_has_color_shape_title_and_surface_signals() {
+    let theme = Theme::truecolor_dark();
+    assert_ne!(theme.pane_border(false).fg, theme.pane_border(true).fg);
+    assert_ne!(theme.pane_border_type(false), theme.pane_border_type(true));
+    assert_eq!(theme.pane_title_prefix(false), "");
+    assert_eq!(theme.pane_title_prefix(true), "▌ ");
+    assert_ne!(theme.card_surface(false).bg, theme.card_surface(true).bg);
+}
+
+#[test]
+fn fallback_card_focus_never_collides_with_selection_surface() {
+    let ansi256 = Theme::ansi256_dark();
+    assert_ne!(
+        ansi256.card_surface(false).bg,
+        ansi256.card_surface(true).bg
+    );
+    assert_ne!(ansi256.card_surface(true).bg, ansi256.selection().bg);
+
+    let ansi16 = Theme::ansi16();
+    assert_eq!(ansi16.card_surface(false).bg, ansi16.card_surface(true).bg);
+    assert_ne!(ansi16.card_surface(true).bg, ansi16.selection().bg);
 }
 
 #[test]

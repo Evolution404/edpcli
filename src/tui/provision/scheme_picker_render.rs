@@ -46,33 +46,38 @@ pub(super) fn draw_scheme_picker(frame: &mut Frame, area: ratatui::layout::Rect,
             rows[0],
         );
 
+        let selected_index = state.provision_scheme_selected();
         let items = ProvisionKind::ALL
             .into_iter()
-            .map(|kind| {
+            .enumerate()
+            .map(|(index, kind)| {
+                let active = index == selected_index;
+                let mode_style = if active {
+                    crate::tui::theme::current().provision_kind_active(kind.disk_kind())
+                } else {
+                    crate::tui::theme::current().provision_kind(kind.disk_kind())
+                };
                 ListItem::new(vec![
                     Line::from(vec![
-                        Span::styled(
-                            format!("{}  ", shortcut(kind)),
-                            provision_kind_style(kind).add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(
-                            safe(kind.title()),
-                            provision_kind_style(kind).add_modifier(Modifier::BOLD),
-                        ),
+                        if active {
+                            Span::styled("▌ ", mode_style)
+                        } else {
+                            Span::raw("  ")
+                        },
+                        Span::styled(format!("{}  ", shortcut(kind)), mode_style),
+                        Span::styled(safe(kind.title()), mode_style),
                     ]),
                     Line::from(vec![
-                        Span::raw("   "),
+                        Span::raw("     "),
                         Span::styled(safe(kind.description()), muted()),
                     ]),
                 ])
             })
             .collect::<Vec<_>>();
 
-        let list = List::new(items)
-            .highlight_style(selected().add_modifier(Modifier::BOLD))
-            .highlight_symbol("▌ ");
+        let list = List::new(items);
         let mut list_state = ListState::default();
-        list_state.select(Some(state.provision_scheme_selected()));
+        list_state.select(Some(selected_index));
         frame.render_stateful_widget(list, rows[1], &mut list_state);
 
         frame.render_widget(

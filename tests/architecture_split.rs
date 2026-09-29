@@ -1208,6 +1208,12 @@ fn tui_renderers_do_not_assume_parent_surface_palette_colors() {
             "palette().surface",
             "palette().surface_raised",
             "palette().surface_active",
+            "Color::",
+            ".fg(",
+            ".bg(",
+            "Modifier::REVERSED",
+            "focused_panel()",
+            ".border_style(panel())",
         ] {
             assert!(
                 !source.contains(forbidden),
@@ -1218,7 +1224,7 @@ fn tui_renderers_do_not_assume_parent_surface_palette_colors() {
     }
     let layout =
         fs::read_to_string(root.join("src/tui/disk_layout.rs")).expect("read disk layout renderer");
-    assert!(layout.contains("disk_region_fill_color"));
+    assert!(layout.contains("disk_region_half_block"));
 }
 
 #[test]

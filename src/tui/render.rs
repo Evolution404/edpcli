@@ -203,20 +203,8 @@ fn muted() -> Style {
     super::theme::current().muted()
 }
 
-fn selected() -> Style {
-    super::theme::current().selection()
-}
-
 fn selection_marker() -> Style {
     super::theme::current().selection_marker()
-}
-
-fn panel() -> Style {
-    super::theme::current().panel()
-}
-
-fn focused_panel() -> Style {
-    super::theme::current().focused_panel()
 }
 
 fn tab() -> Style {
@@ -235,21 +223,13 @@ fn input_focused() -> Style {
     super::theme::current().input_focused()
 }
 
-fn provision_kind_style(kind: ProvisionKind) -> Style {
-    super::theme::current().provision_kind(kind)
-}
-
 fn device_status_style(row: &crate::disk_scan::Row) -> Style {
     if row.proto != "USB" || row.denied {
         warning()
     } else if row.probe_error.is_some() {
         danger()
     } else {
-        match row.confirmed_provision_kind() {
-            Some(crate::provision::DiskProvisionKind::Plain) => muted(),
-            Some(_) => accent(),
-            None => warning(),
-        }
+        success()
     }
 }
 
@@ -557,11 +537,11 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                             .sector_count
                             .saturating_mul(crate::common::SECTOR as u64),
                     );
-                    let line_style = if index == wizard.post_restore_selected {
-                        selected()
-                    } else {
-                        Style::default()
-                    };
+                    let line_style = super::theme::current().apply_selection(
+                        Style::default(),
+                        index == wizard.post_restore_selected,
+                        true,
+                    );
                     lines.push(
                         Line::from(vec![
                             Span::styled(format!("{marker} "), selection_marker()),
@@ -956,7 +936,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
             ) {
                 warning()
             } else {
-                super::theme::current().focused_panel()
+                super::theme::current().modal_border()
             },
         )
         .title(title);

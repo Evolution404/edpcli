@@ -63,6 +63,16 @@ impl ProvisionKind {
     pub const fn description(self) -> &'static str {
         self.target().description()
     }
+
+    pub const fn disk_kind(self) -> crate::provision::DiskProvisionKind {
+        match self {
+            Self::Mode0 => crate::provision::DiskProvisionKind::Mode0,
+            Self::Mode1 => crate::provision::DiskProvisionKind::Mode1,
+            Self::Mode2 => crate::provision::DiskProvisionKind::Mode2,
+            Self::Mode3 => crate::provision::DiskProvisionKind::Mode3,
+            Self::Plain => crate::provision::DiskProvisionKind::Plain,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

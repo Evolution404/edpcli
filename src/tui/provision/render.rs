@@ -127,7 +127,9 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     row.confirmed_provision_kind()
                         .map(|kind| kind.full_name())
                         .unwrap_or("未知 / 未确认"),
-                    device_status_style(row),
+                    row.confirmed_provision_kind()
+                        .map(|kind| crate::tui::theme::current().provision_kind_emphasis(kind))
+                        .unwrap_or_else(warning),
                 ),
             ]),
             Line::from(vec![
@@ -192,12 +194,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     Line::from("此阶段不写盘；正在计算 LCE、分区边界与协议元数据。"),
                 ])
                 .alignment(Alignment::Center)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(focused_panel())
-                        .title("只读规划"),
-                ),
+                .block(crate::tui::ui::card("只读规划", true)),
                 main_area,
             );
         }
@@ -217,12 +214,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     Line::from(""),
                     Line::from("直接输入编辑路径 · Backspace 删除 · Enter 开始导出 · Esc 返回"),
                 ])
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(focused_panel())
-                        .title("镜像导出"),
-                )
+                .block(crate::tui::ui::card("镜像导出", true))
                 .wrap(Wrap { trim: true }),
                 main_area,
             );
@@ -241,12 +233,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     Line::from("导出完成前保持当前计划不变。"),
                 ])
                 .alignment(Alignment::Center)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(focused_panel())
-                        .title("镜像导出"),
-                ),
+                .block(crate::tui::ui::card("镜像导出", true)),
                 main_area,
             );
         }

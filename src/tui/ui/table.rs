@@ -17,6 +17,6 @@ pub fn data_table<'a>(
     Table::new(rows, widths)
         .header(header.style(theme::current().accent()))
         .block(panel(title, focused))
-        .row_highlight_style(theme::current().selection())
+        .row_highlight_style(theme::current().selection_overlay(focused))
         .highlight_symbol("▌ ")
 }

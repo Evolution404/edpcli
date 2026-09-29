@@ -25,7 +25,13 @@ fn backup_table_values(
             ColumnId::Onlyid => (safe(&cells[3]), Style::default()),
             ColumnId::User => (safe(&cells[4]), Style::default()),
             ColumnId::Dept => (safe(&cells[5]), Style::default()),
-            ColumnId::ProvisionKind => (safe(&cells[6]), accent()),
+            ColumnId::ProvisionKind => (
+                safe(&cells[6]),
+                backup
+                    .provision_kind
+                    .map(|kind| crate::tui::theme::current().provision_kind(kind))
+                    .unwrap_or_else(warning),
+            ),
             ColumnId::Health => (health.into(), health_style),
             _ => unreachable!("backup schema only contains backup and identity columns"),
         })
@@ -62,12 +68,7 @@ pub(super) fn draw_backup_create_choice(
     ]);
     frame.render_widget(
         Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(focused_panel())
-                    .title("元数据备份"),
-            )
+            .block(crate::tui::ui::card("元数据备份", true))
             .wrap(Wrap { trim: true }),
         area,
     );
@@ -163,10 +164,8 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
         };
 
         if visible_count == 0 {
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(title)
-                .title_style(secondary());
+            let pane_focused = focused == PaneId::BackupsList;
+            let block = crate::tui::ui::card(title, pane_focused);
             let inner = block.inner(backup_parts[1]);
             frame.render_widget(block, backup_parts[1]);
             let (heading, message, hint) = if state.workspace_filter_active() {
@@ -228,6 +227,8 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                 interaction.viewport_offset(),
                 Some(interaction.active_column()),
             );
+            let pane_focused =
+                state.backups_focused_pane() == crate::tui::pane::PaneId::BackupsList;
             let window = visible_window(state.selected(), visible_count, backup_parts[1].height);
             let window_start = window.start;
             let window_len = window.len();
@@ -247,11 +248,11 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                                 let logical = order[column.index];
                                 let (value, style) = &values[logical];
                                 Cell::from(visible_cell(value, column)).style(
-                                    if column.index == interaction.active_column() {
-                                        style.add_modifier(Modifier::BOLD)
-                                    } else {
-                                        *style
-                                    },
+                                    crate::tui::theme::current().table_cell(
+                                        *style,
+                                        column.index == interaction.active_column(),
+                                        pane_focused,
+                                    ),
                                 )
                             })
                             .collect::<Vec<_>>(),
@@ -264,11 +265,10 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                     .map(|column| {
                         let logical = order[column.index];
                         let label = table_heading(headings[logical], logical, interaction);
-                        let style = if column.index == interaction.active_column() {
-                            accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
-                        } else {
-                            secondary().add_modifier(Modifier::BOLD)
-                        };
+                        let style = crate::tui::theme::current().table_header(
+                            column.index == interaction.active_column(),
+                            pane_focused,
+                        );
                         Cell::from(visible_cell(&label, column)).style(style)
                     })
                     .collect::<Vec<_>>(),
@@ -282,7 +282,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                 header,
                 rows,
                 viewport.widths(),
-                state.backups_focused_pane() == crate::tui::pane::PaneId::BackupsList,
+                pane_focused,
             );
             let mut table_state = TableState::default();
             table_state.select(Some(state.selected().saturating_sub(window_start)));
@@ -342,7 +342,13 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("盘型  ", muted()),
-                    Span::styled(safe(&cells[6]), accent()),
+                    Span::styled(
+                        safe(&cells[6]),
+                        backup
+                            .provision_kind
+                            .map(|kind| crate::tui::theme::current().provision_kind_emphasis(kind))
+                            .unwrap_or_else(warning),
+                    ),
                 ]),
                 Line::from(format!("容量  {}", safe(&cells[0]))),
                 Line::from(format!("VID:PID  {}", safe(&cells[1]))),

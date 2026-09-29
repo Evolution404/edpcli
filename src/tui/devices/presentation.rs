@@ -36,7 +36,13 @@ fn identity_protocol_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'stat
         field_line("序列号", safe(row.serial.as_deref().unwrap_or("—"))),
         Line::from(""),
         section_line("EDP 协议"),
-        field_line("盘型", safe(&cells[6])),
+        styled_field_line(
+            "盘型",
+            safe(&cells[6]),
+            row.confirmed_provision_kind()
+                .map(|kind| crate::tui::theme::current().provision_kind(kind))
+                .unwrap_or_else(warning),
+        ),
         field_line("onlyid", safe(identity.onlyid.as_deref().unwrap_or("—"))),
         field_line(
             "device_id",

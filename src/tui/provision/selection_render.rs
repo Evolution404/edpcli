@@ -46,27 +46,34 @@ pub(super) fn draw_provision_selection(
     let row_visible = window.len();
     let rows = window.filter_map(|index| {
         let row = values.get(index)?;
+        let source = state.provision_device_at(index)?;
+        let kind = source.confirmed_provision_kind();
         Some(TableRow::new(
             viewport
                 .columns
                 .iter()
                 .map(|column| {
                     let logical = order[column.index];
-                    Cell::from(visible_cell(&row[logical], column)).style(
-                        if column.index == interaction.active_column() {
-                            accent().add_modifier(Modifier::BOLD)
-                        } else {
-                            Style::default()
-                        },
-                    )
+                    let base = if logical == 3 {
+                        kind.map(|kind| crate::tui::theme::current().provision_kind(kind))
+                            .unwrap_or_else(warning)
+                    } else {
+                        Style::default()
+                    };
+                    let style = crate::tui::theme::current().table_cell(
+                        base,
+                        column.index == interaction.active_column(),
+                        true,
+                    );
+                    Cell::from(visible_cell(&row[logical], column)).style(style)
                 })
                 .collect::<Vec<_>>(),
         ))
     });
     let title = format!(
-                "制盘 · 先选择 USB 目标 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
-                table_position_label(&layout, interaction, &viewport)
-            );
+        "制盘 · 选择 USB 目标 · {}",
+        table_position_label(&layout, interaction, &viewport)
+    );
     let header = TableRow::new(
         viewport
             .columns
@@ -75,11 +82,8 @@ pub(super) fn draw_provision_selection(
                 let logical = order[column.index];
                 let label = table_heading(headings[logical], logical, interaction);
                 Cell::from(visible_cell(&label, column)).style(
-                    if column.index == interaction.active_column() {
-                        accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
-                    } else {
-                        secondary().add_modifier(Modifier::BOLD)
-                    },
+                    crate::tui::theme::current()
+                        .table_header(column.index == interaction.active_column(), true),
                 )
             })
             .collect::<Vec<_>>(),

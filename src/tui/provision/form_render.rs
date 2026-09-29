@@ -16,6 +16,7 @@ pub(super) fn draw_provision_form(
         crate::tui::ui::ViewportClass::Wide | crate::tui::ui::ViewportClass::UltraWide
     );
     let focused_pane = state.provision_focused_pane();
+    let parameters_focused = focused_pane == crate::tui::pane::PaneId::ProvisionParameters;
     let (form_area, layout_area) = if wide {
         let areas = Layout::horizontal([Constraint::Percentage(56), Constraint::Percentage(44)])
             .split(main_area);
@@ -59,7 +60,10 @@ pub(super) fn draw_provision_form(
     }
 
     let mut form_lines = vec![Line::from(vec![
-        Span::styled(provision.kind.title(), provision_kind_style(provision.kind)),
+        Span::styled(
+            provision.kind.title(),
+            crate::tui::theme::current().provision_kind_emphasis(provision.kind.disk_kind()),
+        ),
         Span::raw("  "),
         Span::styled(provision.kind.description(), muted()),
     ])];
@@ -113,9 +117,10 @@ pub(super) fn draw_provision_form(
                 .saturating_sub(1)
                 .max(1);
 
+            let focused_active = active && parameters_focused;
             spans.push(Span::styled(
-                if active { "▌ " } else { "  " },
-                if active {
+                if focused_active { "▌ " } else { "  " },
+                if focused_active {
                     selection_marker()
                 } else {
                     Style::default()
@@ -141,7 +146,7 @@ pub(super) fn draw_provision_form(
                 if editing_active {
                     input_focused()
                 } else if active {
-                    selected()
+                    crate::tui::theme::current().apply_selection(input(), true, parameters_focused)
                 } else {
                     input()
                 },

@@ -3,7 +3,7 @@
 use ratatui::{
     layout::Rect,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Paragraph, Wrap},
     Frame,
 };
 
@@ -295,14 +295,13 @@ fn capacity_map_half_band_line(
             .iter()
             .zip(allocations.iter().copied())
             .map(|(segment, width)| {
-                let fill_color = theme.disk_region_fill_color(
-                    segment.kind,
-                    capacity_segment_active(segment, selection),
-                );
                 Span::styled(
                     glyph.repeat(width),
                     // Leave bg unset so the unused half-cell inherits the enclosing surface.
-                    ratatui::style::Style::default().fg(fill_color),
+                    theme.disk_region_half_block(
+                        segment.kind,
+                        capacity_segment_active(segment, selection),
+                    ),
                 )
             })
             .collect::<Vec<_>>(),
@@ -857,16 +856,7 @@ impl DiskLayoutModel {
         }
         frame.render_widget(
             Paragraph::new(lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(if pane.focused {
-                            theme.focused_panel()
-                        } else {
-                            theme.panel()
-                        })
-                        .title(pane.title.to_string()),
-                )
+                .block(super::ui::card(pane.title.to_string(), pane.focused))
                 .scroll((pane.scroll_y.min(u16::MAX as usize) as u16, 0))
                 .wrap(Wrap { trim: false }),
             area,

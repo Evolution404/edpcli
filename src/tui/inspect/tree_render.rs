@@ -57,9 +57,10 @@ pub(super) fn draw_inspect_tree_pane(
             InspectNodeKind::Partition => "▣ ",
             InspectNodeKind::UnknownRange => "? ",
         };
-        let active = index == selected_index;
+        let selected = index == selected_index;
+        let focused = tree_focus && selected;
         let region_style = region_kind(row.region_semantic)
-            .map(|kind| crate::tui::theme::current().disk_region_tree(kind, active));
+            .map(|kind| crate::tui::theme::current().disk_region_tree(kind, focused));
         let kind_style = region_style.unwrap_or_else(|| match row.kind {
             InspectNodeKind::Device => secondary().add_modifier(Modifier::BOLD),
             InspectNodeKind::Region | InspectNodeKind::Partition => accent(),
@@ -87,16 +88,17 @@ pub(super) fn draw_inspect_tree_pane(
             available,
             crate::tui::table_layout::TruncatePolicy::Ellipsis,
         );
-        let focused = tree_focus && active;
-        let content_style = if region_style.is_some() {
-            kind_style.add_modifier(Modifier::BOLD)
+        let base_style = if region_style.is_some() {
+            kind_style
         } else if focused {
-            selected()
+            crate::tui::theme::current().active_semantic(kind_style)
         } else {
             kind_style
         };
+        let content_style =
+            crate::tui::theme::current().apply_selection(base_style, selected, tree_focus);
         let marker_style = if let Some(style) = region_style {
-            style
+            crate::tui::theme::current().apply_selection(style, selected, tree_focus)
         } else if focused {
             selection_marker()
         } else {
@@ -111,16 +113,14 @@ pub(super) fn draw_inspect_tree_pane(
     });
     frame.render_widget(
         Paragraph::new(tree_lines.collect::<Vec<_>>())
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(if tree_focus { focused_panel() } else { panel() })
-                    .title(format!(
-                        "结构树  {}/{}",
-                        selected_index.saturating_add(1),
-                        rows.len()
-                    )),
-            )
+            .block(crate::tui::ui::card(
+                format!(
+                    "结构树  {}/{}",
+                    selected_index.saturating_add(1),
+                    rows.len()
+                ),
+                tree_focus,
+            ))
             .wrap(Wrap { trim: false }),
         tree_area,
     );

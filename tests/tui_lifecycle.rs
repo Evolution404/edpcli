@@ -593,16 +593,34 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         active_tab.replace(' ', "").contains("1业务字段"),
         "active Inspect panel tab should use active-tab style: {active_tab}"
     );
+    let pane_title_markers = buffer
+        .content()
+        .iter()
+        .filter(|cell| {
+            cell.symbol() == "▌"
+                && cell.style().fg == Some(palette.accent)
+                && cell.style().bg != Some(selection)
+                && cell.style().add_modifier.contains(Modifier::BOLD)
+        })
+        .count();
     assert_eq!(
-        text.matches('▌').count(),
-        1,
-        "▌ must identify the single keyboard-focused tree row: {text}"
+        pane_title_markers, 1,
+        "focused tree pane title should carry one accent/bold pane marker: {text}"
     );
-    let focus_row = buffer
+    let focused_tree_rows = buffer
         .content()
         .chunks(120)
-        .find(|row| row.iter().any(|cell| cell.symbol() == "▌"))
-        .expect("focused tree row");
+        .filter(|row| {
+            row.iter()
+                .any(|cell| cell.symbol() == "▌" && cell.style().bg == Some(selection))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        focused_tree_rows.len(),
+        1,
+        "exactly one tree row should carry the focused selection marker"
+    );
+    let focus_row = focused_tree_rows[0];
     let last_highlighted = focus_row
         .iter()
         .rposition(|cell| cell.style().bg == Some(selection))
@@ -734,7 +752,27 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
             .contains(&selected_label.replace(' ', "")),
         "narrow layout lost selected tree node {selected_label}: {text}"
     );
-    assert_eq!(text.matches('▌').count(), 1, "{text}");
+    let narrow_buffer = terminal.backend().buffer();
+    let narrow_pane_markers = narrow_buffer
+        .content()
+        .iter()
+        .filter(|cell| {
+            cell.symbol() == "▌"
+                && cell.style().fg == Some(palette.accent)
+                && cell.style().bg != Some(selection)
+                && cell.style().add_modifier.contains(Modifier::BOLD)
+        })
+        .count();
+    assert_eq!(narrow_pane_markers, 1, "{text}");
+    let narrow_row_markers = narrow_buffer
+        .content()
+        .chunks(60)
+        .filter(|row| {
+            row.iter()
+                .any(|cell| cell.symbol() == "▌" && cell.style().bg == Some(selection))
+        })
+        .count();
+    assert_eq!(narrow_row_markers, 1, "{text}");
     assert_eq!(
         state.advanced_inspect().unwrap().tree_selected,
         selected_before,

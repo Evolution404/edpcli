@@ -273,16 +273,10 @@ pub(super) fn draw_inspect_object_panes(
             .min(overview_lines.len().saturating_sub(1));
         frame.render_widget(
             Paragraph::new(overview_lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(if advanced.panel == AdvancedInspectPanel::Overview {
-                            focused_panel()
-                        } else {
-                            panel()
-                        })
-                        .title("对象快照"),
-                )
+                .block(crate::tui::ui::card(
+                    "对象快照",
+                    advanced.panel == AdvancedInspectPanel::Overview,
+                ))
                 .scroll((overview_scroll.min(u16::MAX as usize) as u16, 0))
                 .wrap(Wrap { trim: false }),
             overview_area,
@@ -317,16 +311,7 @@ pub(super) fn draw_inspect_object_panes(
             let detail_scroll = detail_offset.min(detail_lines.len().saturating_sub(1));
             frame.render_widget(
                 Paragraph::new(detail_lines)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(if detail_focus {
-                                focused_panel()
-                            } else {
-                                panel()
-                            })
-                            .title("字段详情 / Evidence"),
-                    )
+                    .block(crate::tui::ui::card("字段详情 / Evidence", detail_focus))
                     .wrap(Wrap { trim: false })
                     .scroll((detail_scroll.min(u16::MAX as usize) as u16, 0)),
                 detail_area,

@@ -157,12 +157,7 @@ pub(super) fn draw_advanced_inspect(
                         ),
                         warning(),
                     ))
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(panel())
-                            .title("磁盘概览"),
-                    ),
+                    .block(crate::tui::ui::panel("磁盘概览", false)),
                     compact_layout_area,
                 );
             }

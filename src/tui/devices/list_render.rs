@@ -18,6 +18,7 @@ pub(super) fn draw_device_list(frame: &mut Frame, area: ratatui::layout::Rect, s
     let search = crate::tui::overview::overview_search(state, "/ 搜索设备、部门、姓名、型号、盘型");
     crate::tui::ui::workspace_overview(frame, overview_area, "设备概览", &metrics, &search);
     let visible_count = state.visible_device_count();
+    let pane_focused = state.devices_focused_pane() == PaneId::DevicesList;
     let total_count = state.devices().len();
     let count_label = if state.workspace_filter_active() {
         format!("{visible_count}/{total_count}")
@@ -31,10 +32,7 @@ pub(super) fn draw_device_list(frame: &mut Frame, area: ratatui::layout::Rect, s
     };
 
     if visible_count == 0 {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(title)
-            .title_style(secondary());
+        let block = crate::tui::ui::card(title, pane_focused);
         let inner = block.inner(list_area);
         frame.render_widget(block, list_area);
         let (heading, message, hint) = if state.workspace_filter_active() {
@@ -111,17 +109,21 @@ pub(super) fn draw_device_list(frame: &mut Frame, area: ratatui::layout::Rect, s
                         let logical = order[column.index];
                         let value = &values[logical];
                         let style = match columns[logical].id {
-                            ColumnId::Device | ColumnId::ProvisionKind => accent(),
+                            ColumnId::Device => accent(),
+                            ColumnId::ProvisionKind => row
+                                .confirmed_provision_kind()
+                                .map(|kind| crate::tui::theme::current().provision_kind(kind))
+                                .unwrap_or_else(warning),
                             ColumnId::State => device_status_style(row),
                             ColumnId::Backups => secondary(),
                             ColumnId::Model => muted(),
                             _ => Style::default(),
                         };
-                        let style = if column.index == interaction.active_column() {
-                            style.add_modifier(Modifier::BOLD)
-                        } else {
-                            style
-                        };
+                        let style = crate::tui::theme::current().table_cell(
+                            style,
+                            column.index == interaction.active_column(),
+                            pane_focused,
+                        );
                         Cell::from(visible_cell(value, column)).style(style)
                     })
                     .collect::<Vec<_>>(),
@@ -134,11 +136,8 @@ pub(super) fn draw_device_list(frame: &mut Frame, area: ratatui::layout::Rect, s
             .map(|column| {
                 let logical = order[column.index];
                 let label = table_heading(headings[logical], logical, interaction);
-                let style = if column.index == interaction.active_column() {
-                    accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
-                } else {
-                    secondary().add_modifier(Modifier::BOLD)
-                };
+                let style = crate::tui::theme::current()
+                    .table_header(column.index == interaction.active_column(), pane_focused);
                 Cell::from(visible_cell(&label, column)).style(style)
             })
             .collect::<Vec<_>>(),
@@ -147,13 +146,8 @@ pub(super) fn draw_device_list(frame: &mut Frame, area: ratatui::layout::Rect, s
         "{title} · {}",
         table_position_label(&layout, interaction, &viewport)
     );
-    let table = crate::tui::ui::data_table(
-        &table_title,
-        header,
-        rows,
-        viewport.widths(),
-        state.devices_focused_pane() == PaneId::DevicesList,
-    );
+    let table =
+        crate::tui::ui::data_table(&table_title, header, rows, viewport.widths(), pane_focused);
     let mut table_state = TableState::default();
     table_state.select(Some(state.selected().saturating_sub(window_start)));
     frame.render_stateful_widget(table, list_area, &mut table_state);

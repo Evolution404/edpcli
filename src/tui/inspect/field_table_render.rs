@@ -44,27 +44,28 @@ pub(super) fn draw_inspect_field_table(
         .iter()
         .enumerate()
         .map(|(index, row)| {
+            let row_selected = row_start + index == selected;
+            let base = inspect_field_status_style(item.fields[row.field_index].status);
             TableRow::new(
                 viewport
                     .columns
                     .iter()
                     .map(|column| {
                         let logical = order[column.index];
-                        Cell::from(visible_cell(&safe(&row.cells[logical]), column)).style(
-                            if column.index == interaction.active_column() {
-                                Modifier::BOLD.into()
-                            } else {
-                                Style::default()
-                            },
-                        )
+                        let style = crate::tui::theme::current().table_cell(
+                            base,
+                            column.index == interaction.active_column(),
+                            detail_focus,
+                        );
+                        let style = crate::tui::theme::current().apply_selection(
+                            style,
+                            row_selected,
+                            detail_focus,
+                        );
+                        Cell::from(visible_cell(&safe(&row.cells[logical]), column)).style(style)
                     })
                     .collect::<Vec<_>>(),
             )
-            .style(if row_start + index == selected {
-                accent().add_modifier(Modifier::REVERSED)
-            } else {
-                inspect_field_status_style(item.fields[row.field_index].status)
-            })
         });
     let header = TableRow::new(
         viewport
@@ -74,32 +75,23 @@ pub(super) fn draw_inspect_field_table(
                 let logical = order[column.index];
                 let label = table_heading(headings[logical], logical, interaction);
                 Cell::from(visible_cell(&label, column)).style(
-                    if column.index == interaction.active_column() {
-                        accent().add_modifier(Modifier::BOLD | Modifier::REVERSED)
-                    } else {
-                        secondary().add_modifier(Modifier::BOLD)
-                    },
+                    crate::tui::theme::current()
+                        .table_header(column.index == interaction.active_column(), detail_focus),
                 )
             })
             .collect::<Vec<_>>(),
     );
+    let title = format!(
+        "字段详情 · 行 {}–{} / {} · {}",
+        if values.is_empty() { 0 } else { row_start + 1 },
+        row_end,
+        values.len(),
+        table_position_label(&layout, interaction, &viewport)
+    );
     frame.render_widget(
-        Table::new(rows, viewport.widths()).header(header).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(if detail_focus {
-                    focused_panel()
-                } else {
-                    panel()
-                })
-                .title(format!(
-                    "字段详情 · 行 {}–{} / {} · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
-                    if values.is_empty() { 0 } else { row_start + 1 },
-                    row_end,
-                    values.len(),
-                    table_position_label(&layout, interaction, &viewport)
-                )),
-        ),
+        Table::new(rows, viewport.widths())
+            .header(header)
+            .block(crate::tui::ui::card(title, detail_focus)),
         detail_area,
     );
     render_table_scrollbars(
