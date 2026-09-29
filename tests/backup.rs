@@ -167,6 +167,58 @@ fn write_plain_metadata_v3(
 }
 
 #[test]
+fn historical_v2_core_and_deep_backups_remain_readable_as_evidence() {
+    use edpcli::application::evidence::EvidenceSource;
+
+    let Some(data) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let tmp = TmpDir::new("historical_evidence_compat");
+    let device_id = "disk&ven_netac&prod_onlydisk";
+    let identity = current_identity(&data, device_id);
+    let core = CoreCapture {
+        snapshot_id: "historical-evidence".into(),
+        created_epoch: 1_789_000_200,
+        disk_number: Some(6),
+        vid: "0dd8".into(),
+        pid: "2005".into(),
+        device_id: device_id.into(),
+        onlyid: edpcli::diskio::lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR]),
+        total_sectors: Some(122_880_000),
+        logical_sector_size: SECTOR as u32,
+        edpcli_version: env!("CARGO_PKG_VERSION").into(),
+        device_state: "edp".into(),
+        lba0_12: &data,
+    };
+
+    let v2 = tmp.0.join("legacy-v2.edpb");
+    edpb::write_legacy_v2_core_backup_with_identity(&v2, &core, &identity).unwrap();
+    let v2_source = EvidenceSource::open_backup(&v2).expect("legacy v2 Core must remain readable");
+    assert_eq!(
+        v2_source.identity().provision_kind,
+        Some(edpcli::provision::DiskProvisionKind::Mode0)
+    );
+
+    let deep = tmp.0.join("historical-deep.edpb");
+    let deep_capture = MetadataCapture {
+        core,
+        partitions: Vec::new(),
+        regions: Vec::new(),
+        extents: Vec::new(),
+        artifacts: Vec::new(),
+        notes: Vec::new(),
+    };
+    edpb::write_deep_backup_with_identity(&deep, &deep_capture, &identity).unwrap();
+    let deep_source =
+        EvidenceSource::open_backup(&deep).expect("historical Deep must remain readable");
+    assert_eq!(
+        deep_source.identity().provision_kind,
+        Some(edpcli::provision::DiskProvisionKind::Mode0)
+    );
+}
+
+#[test]
 fn edpb_backup_label_id_comes_from_raw_lba4() {
     let Some(data) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
