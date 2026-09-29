@@ -148,7 +148,7 @@ Plain MBR 盘保存原始 LBA0 和类型化分区几何；Plain GPT 盘保存 pr
 
 EDP 盘保存原始 LBA0～12、由 LBA7 指针确认的 6 扇区 LCE，以及已识别的盘尾历史镜像与恢复节点。LBA0～12 内的 PassInfo、NeedEncrypt、EncryptMode、wrapped FileKey 与 CRC 保持原始字节；创建备份不要求用户密码，也不解包 FileKey。
 
-新建元数据备份不读取或保存数据分区文件系统引导扇区、FAT、分配位图、目录或普通文件负载。不能把 `filesystem_hint` 当作文件系统已备份的证据。
+新建元数据备份不保存数据分区文件系统引导扇区、FAT、分配位图、目录或普通文件负载。Plain 为生成 `filesystem_hint / volume_label_hint` 可进行**有界、瞬时、只读**提示采集：FAT16 只读取 boot sector 中的类型/卷标字段；exFAT 读取 boot sector，并沿根目录链只定位 `0x83 Volume Label` 条目，设有固定扫描预算，不保存目录项、文件名、位图或所读取扇区。EDP 不为卷标读取分区文件系统，交换区/保密区卷标只取已验证的 LBA10 EESI 协议字段。任何这些提示读取都不能生成新的可恢复 `Artifact`，也不能把 `filesystem_hint` 当作文件系统已备份的证据。
 
 ## 9. 元数据采集与缺失处理
 
@@ -284,7 +284,7 @@ edpcli backup verify
 - 采集平台、时间、edpcli 版本；
 - 磁盘分区方案；
 - 每个分区的序号、`start_lba`、`sector_count`、partition type / role；
-- 可识别时保存 `filesystem_hint` 和 `volume_label_hint`，仅用于恢复后的格式化建议。
+- 可可靠识别时保存 `filesystem_hint` 和 `volume_label_hint`，仅用于恢复后的格式化建议；未知卷标保持 `null`，禁止生成占位卷标。
 
 USB 序列号在新 `manifest` 中**直接保存原始字符串，不做 SHA-256 哈希**。`SerialQuality` 继续用于区分 `Usable / Suspicious / Missing`；当质量为 `Missing` 时 `serial = null`。恢复授权优先比较可用序列号的直接值，不能再依赖不可逆摘要。历史 v1/v2 中已有 `serial_sha256` 继续只读兼容，但新 v3 不再写 `serial_sha256`。
 
@@ -778,7 +778,7 @@ B0～B10 按阶段实施并小步提交；以下保留每阶段的验收证据�
 
 **B9 — CLI/TUI 清理**
 
-**实施状态（2026-09-29）：COMPLETE。** CLI/TUI 只保留元数据备份；第二备份等级及其参数、创建器、读取器、校验/检查兼容分支均已删除。TUI 恢复重构为 `Review → Confirm → Running → PostRestore` typed 状态机：恢复后按分区直接处理 `NeedsFormat / PasswordRequired / CryptoMetadataInvalid`，明文格式化、沿用原 FileKey 的加密格式化、密钥域重建分别要求独立确认，且任何后续失败都不反转已经读回验证的元数据恢复报告。系统 `diskN` 仅作为当前 selector 展示，不参与介质身份判断。制盘演示进度统一称“制盘前元数据备份”。
+**实施状态（2026-09-29）：COMPLETE。** CLI/TUI 只保留元数据备份；第二备份等级及其参数、创建器、读取器、校验/检查兼容分支均已删除。TUI 恢复重构为 `Review → Confirm → Running → PostRestore` typed 状态机：恢复后按分区直接处理 `NeedsFormat / PasswordRequired / CryptoMetadataInvalid`，明文格式化、沿用原 FileKey 的加密格式化、密钥域重建分别要求独立确认，且任何后续失败都不反转已经读回验证的元数据恢复报告。恢复后格式化增加独立卷标编辑步骤：新备份默认带入可靠的 `volume_label_hint`，用户可修改；旧备份或未知卷标默认留空，绝不自动生成占位名称。系统 `diskN` 仅作为当前 selector 展示，不参与介质身份判断。制盘演示进度统一称“制盘前元数据备份”。
 
 - 更新备份页、恢复完成页、`?` 帮助；
 - 制盘进度改“制盘前元数据备份”；

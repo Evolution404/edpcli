@@ -74,3 +74,19 @@ pub fn lba10_profiles_fail_closed() {
     nonzero[0] = 1;
     assert!(parse_lba10(&nonzero, 0, Lba10Eesi::AbsentZero).is_err());
 }
+
+#[test]
+pub fn lba10_semantic_volume_labels_decode_physical_evidence() {
+    let image = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("audit/protocol/physical-evidence/eesi/netac_onlydisk_20260804_lba0_12.bin"),
+    )
+    .unwrap();
+    let raw = &image[10 * 512..11 * 512];
+    let (share, encrypt) = edpcli::protocol::semantic::lba10_volume_labels(
+        raw,
+        "disk&ven_netac&prod_onlydisk&rev_0000",
+    );
+    assert_eq!(share.as_deref(), Some("交换区"));
+    assert_eq!(encrypt.as_deref(), Some("保密区"));
+}

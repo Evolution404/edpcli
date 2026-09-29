@@ -159,6 +159,15 @@ fn restore_post_processing_requires_a_second_yes_before_plain_format() {
     assert!(!state.is_critical_operation());
 
     state.begin_selected_post_restore_action();
+    assert_eq!(state.wizard().unwrap().stage, WizardStage::VolumeLabelInput);
+    assert_eq!(state.wizard().unwrap().volume_label_input, "普通卷");
+    state.backspace_wizard_volume_label();
+    state.backspace_wizard_volume_label();
+    state.backspace_wizard_volume_label();
+    for ch in "MYUSB".chars() {
+        state.push_wizard_volume_label_char(ch);
+    }
+    state.submit_wizard_volume_label();
     assert_eq!(state.wizard().unwrap().stage, WizardStage::FormatConfirm);
     assert_eq!(
         state
@@ -183,6 +192,7 @@ fn restore_post_processing_requires_a_second_yes_before_plain_format() {
         .expect("second YES starts format");
     assert_eq!(intent.disk, 4);
     assert_eq!(intent.request.partition_index, 1);
+    assert_eq!(intent.volume_label, "MYUSB");
     assert!(state.is_critical_operation());
     assert_eq!(state.wizard().unwrap().stage, WizardStage::Formatting);
 
@@ -252,6 +262,9 @@ fn password_required_flow_uses_secret_input_and_wrong_password_returns_without_l
     }
     assert_eq!(state.wizard_secret_len(), "old-password".chars().count());
     state.submit_wizard_secret();
+    assert_eq!(state.wizard().unwrap().stage, WizardStage::VolumeLabelInput);
+    assert_eq!(state.wizard().unwrap().volume_label_input, "普通卷");
+    state.submit_wizard_volume_label();
     assert_eq!(
         state.wizard().unwrap().stage,
         WizardStage::EncryptedFormatConfirm
@@ -269,6 +282,7 @@ fn password_required_flow_uses_secret_input_and_wrong_password_returns_without_l
         .expect("independent YES starts encrypted format");
     assert_eq!(intent.request.partition_index, 1);
     assert!(intent.password.is_some());
+    assert_eq!(intent.volume_label, "普通卷");
     assert_eq!(state.wizard().unwrap().stage, WizardStage::Formatting);
     assert!(state.is_critical_operation());
 
@@ -348,6 +362,9 @@ fn crypto_invalid_reinitialize_requires_two_matching_passwords_and_independent_y
         state.push_wizard_secret_char(ch);
     }
     state.submit_wizard_secret();
+    assert_eq!(state.wizard().unwrap().stage, WizardStage::VolumeLabelInput);
+    assert_eq!(state.wizard().unwrap().volume_label_input, "普通卷");
+    state.submit_wizard_volume_label();
     assert_eq!(
         state.wizard().unwrap().stage,
         WizardStage::ReinitializeConfirm
@@ -364,6 +381,7 @@ fn crypto_invalid_reinitialize_requires_two_matching_passwords_and_independent_y
         .submit_reinitialize_confirmation()
         .expect("independent YES starts reinitialize");
     assert_eq!(intent.request.partition_index, 1);
+    assert_eq!(intent.volume_label, "普通卷");
     assert_eq!(state.wizard().unwrap().stage, WizardStage::Reinitializing);
     assert!(state.is_critical_operation());
 
@@ -393,4 +411,26 @@ fn crypto_invalid_reinitialize_requires_two_matching_passwords_and_independent_y
             .metadata_restored
     );
     assert!(!state.is_critical_operation());
+}
+
+#[test]
+fn legacy_backup_without_volume_label_stays_empty_instead_of_inventing_a_name() {
+    let mut state = AppState::new();
+    let mut outcome = plain_needs_format_outcome();
+    outcome.partitions[0].volume_label_hint = None;
+    begin_post_restore(&mut state, outcome);
+
+    state.begin_selected_post_restore_action();
+    assert_eq!(state.wizard().unwrap().stage, WizardStage::VolumeLabelInput);
+    assert_eq!(state.wizard().unwrap().volume_label_input, "");
+    state.submit_wizard_volume_label();
+    assert_eq!(state.wizard().unwrap().stage, WizardStage::FormatConfirm);
+
+    for ch in ['Y', 'E', 'S'] {
+        state.push_wizard_confirmation(ch);
+    }
+    let intent = state
+        .submit_post_restore_format_confirmation()
+        .expect("empty label is a valid explicit choice");
+    assert_eq!(intent.volume_label, "");
 }

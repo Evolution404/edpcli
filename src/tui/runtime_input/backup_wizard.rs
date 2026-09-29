@@ -135,6 +135,20 @@ pub(super) fn handle_backup_wizard_key(
                 }
                 return Some(KeyOutcome::NextIteration);
             }
+            state::WizardStage::VolumeLabelInput => {
+                if let Some(action) = keys.map(state::InputMode::Insert, key) {
+                    match action {
+                        keymap::TuiAction::Text(ch) => state.push_wizard_volume_label_char(ch),
+                        keymap::TuiAction::Backspace => state.backspace_wizard_volume_label(),
+                        keymap::TuiAction::Submit => state.submit_wizard_volume_label(),
+                        keymap::TuiAction::Back | keymap::TuiAction::Cancel => {
+                            state.cancel_post_restore_volume_label();
+                        }
+                        _ => {}
+                    }
+                }
+                return Some(KeyOutcome::NextIteration);
+            }
             state::WizardStage::PasswordInput
             | state::WizardStage::ReinitializePassword
             | state::WizardStage::ReinitializePasswordConfirm => {

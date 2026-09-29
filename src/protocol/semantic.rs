@@ -7,10 +7,10 @@ use encoding_rs::GBK;
 
 use super::{
     edpf::{EdpfEntry64, EdpfEntry96},
-    lba11, lba12, lba6, lba7, lba8,
+    lba10, lba11, lba12, lba6, lba7, lba8,
     profile::{
-        HostHardinfoSource, Lba11Capacity, Lba12Mode, Lba7EntryCount, Lba7PassinfoVersion,
-        Lba8UsbOnlyInfo,
+        HostHardinfoSource, Lba10Eesi, Lba11Capacity, Lba12Mode, Lba7EntryCount,
+        Lba7PassinfoVersion, Lba8UsbOnlyInfo,
     },
 };
 
@@ -129,6 +129,29 @@ pub fn safe6_user(raw: &[u8]) -> Option<String> {
 
 pub fn safe6_gserial(raw: &[u8]) -> Option<String> {
     decode_text(lba6_view(raw)?.gserial.value())
+}
+
+pub fn lba10_volume_labels(raw: &[u8], device_id: &str) -> (Option<String>, Option<String>) {
+    let Ok(raw) = <&[u8; 512]>::try_from(raw) else {
+        return (None, None);
+    };
+    let profile = if raw.iter().all(|byte| *byte == 0) {
+        Lba10Eesi::AbsentZero
+    } else {
+        Lba10Eesi::EesiEnabled
+    };
+    let device_crc = crate::crypto::crc32_bare(device_id.as_bytes());
+    match lba10::parse_lba10(raw, device_crc, profile) {
+        Ok(lba10::Lba10View::Enabled {
+            share_label,
+            encrypt_label,
+            ..
+        }) => (
+            decode_text(share_label.value()),
+            decode_text(encrypt_label.value()),
+        ),
+        _ => (None, None),
+    }
 }
 
 pub fn infer_lba7(

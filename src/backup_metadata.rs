@@ -4,7 +4,9 @@
 //! from the current LBA12 EDPF table, captures bounded filesystem metadata
 //! extents, and preserves identified historical tail backup structures.
 
+use encoding_rs::GBK;
 use serde::Serialize;
+use std::collections::BTreeSet;
 
 use crate::common::SECTOR;
 use crate::crypto::{a6b0_full, crc32_bare, xor_rolling};
@@ -618,10 +620,206 @@ fn validate_plain_gpt_mirror(dev: &mut dyn SectorDev, total_sectors: u64) -> Res
     Ok(())
 }
 
+fn read_device_sector(dev: &mut dyn SectorDev, lba: u64) -> Result<Vec<u8>, String> {
+    let lba = u32::try_from(lba).map_err(|_| format!("LBA{lba} exceeds SectorDev u32 range"))?;
+    dev.read_sector(lba)
+        .map_err(|error| format!("read LBA{lba} failed: {error}"))
+}
+
+fn decode_fat16_boot_label(boot: &[u8]) -> Option<String> {
+    if boot.len() != SECTOR || boot.get(54..62) != Some(b"FAT16   ") {
+        return None;
+    }
+    let raw = boot.get(43..54)?;
+    if raw.iter().all(|byte| *byte == 0 || *byte == b' ') || raw == b"NO NAME    " {
+        return None;
+    }
+    let (decoded, _, had_errors) = GBK.decode(raw);
+    if had_errors {
+        return None;
+    }
+    let value = decoded
+        .trim_end_matches(' ')
+        .trim_end_matches(char::from(0))
+        .to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+fn read_exfat_volume_label(
+    dev: &mut dyn SectorDev,
+    partition_start: u64,
+    partition_sectors: u64,
+    boot: &[u8],
+) -> Result<Option<String>, String> {
+    if boot.len() != SECTOR || boot.get(3..11) != Some(b"EXFAT   ") {
+        return Ok(None);
+    }
+    let u16le = |offset: usize| -> u16 { u16::from_le_bytes([boot[offset], boot[offset + 1]]) };
+    let u32le =
+        |offset: usize| -> u32 { u32::from_le_bytes(boot[offset..offset + 4].try_into().unwrap()) };
+    let u64le =
+        |offset: usize| -> u64 { u64::from_le_bytes(boot[offset..offset + 8].try_into().unwrap()) };
+
+    let volume_length = u64le(72);
+    let fat_offset = u32le(80) as u64;
+    let fat_length = u32le(84) as u64;
+    let heap_offset = u32le(88) as u64;
+    let cluster_count = u32le(92);
+    let mut cluster = u32le(96);
+    let bps_shift = boot[108];
+    let spc_shift = boot[109];
+    let fats = boot[110] as u64;
+    let flags = u16le(106);
+
+    if bps_shift != 9
+        || spc_shift >= 26
+        || !matches!(fats, 1 | 2)
+        || volume_length == 0
+        || volume_length > partition_sectors
+        || fat_length == 0
+        || cluster_count == 0
+        || cluster < 2
+        || cluster >= cluster_count + 2
+    {
+        return Err("invalid exFAT geometry while reading volume label".into());
+    }
+
+    let sectors_per_cluster = 1u64 << spc_shift;
+    let active_fat = fat_offset
+        + if fats == 2 && flags & 1 != 0 {
+            fat_length
+        } else {
+            0
+        };
+    let mut visited = BTreeSet::new();
+    let mut directory_sectors_read = 0u64;
+    const MAX_LABEL_SCAN_SECTORS: u64 = 8192;
+
+    loop {
+        if cluster < 2 || cluster >= cluster_count + 2 || !visited.insert(cluster) {
+            return Err("invalid/cyclic exFAT root directory chain".into());
+        }
+        let relative_cluster = heap_offset
+            .checked_add(
+                (u64::from(cluster) - 2)
+                    .checked_mul(sectors_per_cluster)
+                    .ok_or("exFAT root cluster offset overflow")?,
+            )
+            .ok_or("exFAT root cluster LBA overflow")?;
+        let cluster_end = relative_cluster
+            .checked_add(sectors_per_cluster)
+            .ok_or("exFAT root cluster end overflow")?;
+        if cluster_end > volume_length {
+            return Err("exFAT root directory leaves volume".into());
+        }
+
+        for sector_offset in 0..sectors_per_cluster {
+            directory_sectors_read += 1;
+            if directory_sectors_read > MAX_LABEL_SCAN_SECTORS {
+                return Err("exFAT volume-label scan budget exceeded".into());
+            }
+            let absolute = partition_start
+                .checked_add(relative_cluster + sector_offset)
+                .ok_or("exFAT root directory absolute LBA overflow")?;
+            let sector = read_device_sector(dev, absolute)?;
+            if sector.len() != SECTOR {
+                return Err("truncated exFAT root directory sector".into());
+            }
+            for entry in sector.as_chunks::<32>().0 {
+                match entry[0] {
+                    0x00 => return Ok(None),
+                    0x83 => {
+                        let count = entry[1] as usize;
+                        if count > 11 {
+                            return Err("invalid exFAT volume-label length".into());
+                        }
+                        if count == 0 {
+                            return Ok(None);
+                        }
+                        let units = (0..count)
+                            .map(|index| {
+                                u16::from_le_bytes([entry[2 + index * 2], entry[3 + index * 2]])
+                            })
+                            .collect::<Vec<_>>();
+                        let label = String::from_utf16(&units)
+                            .map_err(|_| "invalid exFAT volume-label UTF-16")?;
+                        return Ok((!label.is_empty()).then_some(label));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let fat_byte_offset = u64::from(cluster)
+            .checked_mul(4)
+            .ok_or("exFAT FAT entry offset overflow")?;
+        let fat_sector_index = fat_byte_offset / SECTOR as u64;
+        if fat_sector_index >= fat_length {
+            return Err("exFAT root FAT entry leaves active FAT".into());
+        }
+        let fat_sector = read_device_sector(
+            dev,
+            partition_start
+                .checked_add(active_fat + fat_sector_index)
+                .ok_or("exFAT FAT absolute LBA overflow")?,
+        )?;
+        if fat_sector.len() != SECTOR {
+            return Err("truncated exFAT FAT sector".into());
+        }
+        let offset = (fat_byte_offset % SECTOR as u64) as usize;
+        let next = u32::from_le_bytes(
+            fat_sector[offset..offset + 4]
+                .try_into()
+                .map_err(|_| "truncated exFAT FAT entry")?,
+        );
+        if next >= 0xffff_fff8 {
+            return Ok(None);
+        }
+        if next < 2 || next >= cluster_count + 2 || next >= 0xffff_fff0 {
+            return Err("invalid exFAT root directory FAT link".into());
+        }
+        cluster = next;
+    }
+}
+
+fn probe_filesystem_hints(
+    dev: &mut dyn SectorDev,
+    start_lba: u64,
+    sector_count: u64,
+) -> Result<(Option<String>, Option<String>), String> {
+    let boot = read_device_sector(dev, start_lba)?;
+    if boot.len() != SECTOR {
+        return Err("filesystem boot sector is truncated".into());
+    }
+    let Some(kind) = crate::inspect_target::detect_plain_filesystem(sector_count, &boot) else {
+        return Ok((None, None));
+    };
+    let filesystem = Some(kind.label().to_ascii_lowercase());
+    let label = match kind {
+        crate::inspect_target::FilesystemBootKind::Fat16 => decode_fat16_boot_label(&boot),
+        crate::inspect_target::FilesystemBootKind::Exfat => {
+            read_exfat_volume_label(dev, start_lba, sector_count, &boot)?
+        }
+        crate::inspect_target::FilesystemBootKind::Fat12
+        | crate::inspect_target::FilesystemBootKind::Fat32
+        | crate::inspect_target::FilesystemBootKind::Ntfs => None,
+    };
+    Ok((filesystem, label))
+}
+
+fn probe_plain_filesystem_hints(
+    dev: &mut dyn SectorDev,
+    partition: &crate::partition_table::PhysicalPartition,
+) -> Result<(Option<String>, Option<String>), String> {
+    probe_filesystem_hints(dev, partition.start_lba, partition.sector_count)
+}
+
 fn manifest_partition_from_plain(
     partition: &crate::partition_table::PhysicalPartition,
+    filesystem_hint: Option<String>,
+    volume_label_hint: Option<String>,
 ) -> ManifestPartition {
-    let (role, partition_type, volume_label_hint) = match &partition.source {
+    let (role, partition_type) = match &partition.source {
         PartitionSource::Mbr {
             partition_type,
             primary_slot,
@@ -632,7 +830,6 @@ fn manifest_partition_from_plain(
                 "mbr_logical".to_string()
             }),
             Some(format!("mbr:0x{partition_type:02X}")),
-            None,
         ),
         PartitionSource::Gpt { type_guid, .. } => (
             Some("gpt_partition".to_string()),
@@ -643,7 +840,6 @@ fn manifest_partition_from_plain(
                     .map(|byte| format!("{byte:02x}"))
                     .collect::<String>()
             )),
-            None,
         ),
     };
     ManifestPartition {
@@ -652,7 +848,7 @@ fn manifest_partition_from_plain(
         partition_type,
         start_lba: partition.start_lba,
         sector_count: partition.sector_count,
-        filesystem_hint: partition.filesystem.clone(),
+        filesystem_hint,
         volume_label_hint,
     }
 }
@@ -671,14 +867,26 @@ pub fn acquire_plain_metadata(
         validate_plain_gpt_mirror(dev, total_sectors)?;
     }
 
-    let mut out = MetadataAcquisition {
-        partitions: table
-            .partitions
-            .iter()
-            .map(manifest_partition_from_plain)
-            .collect(),
-        ..MetadataAcquisition::default()
-    };
+    let mut out = MetadataAcquisition::default();
+    for partition in &table.partitions {
+        match probe_plain_filesystem_hints(dev, partition) {
+            Ok((filesystem_hint, volume_label_hint)) => {
+                out.partitions.push(manifest_partition_from_plain(
+                    partition,
+                    filesystem_hint,
+                    volume_label_hint,
+                ));
+            }
+            Err(error) => {
+                out.notes.push(format!(
+                    "P{} filesystem hint unavailable: {error}",
+                    partition.index
+                ));
+                out.partitions
+                    .push(manifest_partition_from_plain(partition, None, None));
+            }
+        }
+    }
     let region_id = "region.plain.partition_table";
     out.regions.push(Region {
         id: region_id.into(),
@@ -717,7 +925,11 @@ pub fn acquire_plain_metadata(
     Ok(out)
 }
 
-fn manifest_partition_from_edp(partition: &PartitionGeometry) -> ManifestPartition {
+fn manifest_partition_from_edp(
+    partition: &PartitionGeometry,
+    filesystem_hint: Option<String>,
+    volume_label_hint: Option<String>,
+) -> ManifestPartition {
     let role = match partition.partition_type {
         1 => "boot",
         2 => "share",
@@ -730,8 +942,8 @@ fn manifest_partition_from_edp(partition: &PartitionGeometry) -> ManifestPartiti
         partition_type: Some(format!("edp:{}", partition.partition_type)),
         start_lba: partition.start_sector,
         sector_count: partition.sector_count,
-        filesystem_hint: None,
-        volume_label_hint: None,
+        filesystem_hint,
+        volume_label_hint,
     }
 }
 
@@ -745,6 +957,10 @@ pub fn acquire_metadata(
         return Err("source disk is smaller than protocol region".into());
     }
     let partitions = parse_partition_geometry(lba0_12, device_id, total_sectors)?;
+    let (share_protocol_label, encrypt_protocol_label) = lba0_12
+        .get(10 * SECTOR..11 * SECTOR)
+        .map(|raw| crate::protocol::semantic::lba10_volume_labels(raw, device_id))
+        .unwrap_or((None, None));
     let mut out = MetadataAcquisition::default();
 
     let topology_json = serde_json::to_vec_pretty(&partitions)
@@ -775,7 +991,14 @@ pub fn acquire_metadata(
             sector_count: Some(partition.sector_count),
             semantic_status: SemanticStatus::Identified,
         });
-        out.partitions.push(manifest_partition_from_edp(partition));
+
+        let protocol_label = match partition.partition_type {
+            2 => share_protocol_label.clone(),
+            4 => encrypt_protocol_label.clone(),
+            _ => None,
+        };
+        out.partitions
+            .push(manifest_partition_from_edp(partition, None, protocol_label));
     }
 
     match parse_lba7_compatibility_geometry(lba0_12, device_id, total_sectors) {

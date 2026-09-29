@@ -152,12 +152,14 @@ fn align_up(value: u64, alignment: u64) -> Option<u64> {
 }
 
 fn fat16_label(label: &str) -> Result<[u8; 11], String> {
-    if label.is_empty()
-        || label
-            .chars()
-            .any(|ch| ch.is_control() || "\"*/:<>?\\|".contains(ch))
+    if label.is_empty() {
+        return Ok(*b"NO NAME    ");
+    }
+    if label
+        .chars()
+        .any(|ch| ch.is_control() || "\"*/:<>?\\|".contains(ch))
     {
-        return Err("FAT16 volume label is empty or contains forbidden characters".into());
+        return Err("FAT16 volume label contains forbidden characters".into());
     }
     let uppercase = label.to_uppercase();
     let (encoded, _, had_errors) = GBK.encode(&uppercase);
@@ -167,6 +169,26 @@ fn fat16_label(label: &str) -> Result<[u8; 11], String> {
     let mut out = [b' '; 11];
     out[..encoded.len()].copy_from_slice(&encoded);
     Ok(out)
+}
+
+pub fn validate_volume_label(
+    filesystem: OfficialFilesystemFormat,
+    label: &str,
+) -> Result<(), String> {
+    match filesystem {
+        OfficialFilesystemFormat::Fat16 => fat16_label(label).map(|_| ()),
+        OfficialFilesystemFormat::ExFat => {
+            if label.encode_utf16().count() > 11 {
+                Err("exFAT volume label exceeds 11 UTF-16 code units".into())
+            } else {
+                Ok(())
+            }
+        }
+        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => Err(format!(
+            "portable filesystem writer does not yet implement {}",
+            filesystem.config_token()
+        )),
+    }
 }
 
 /// Construct a complete empty FAT16 boot sector, mirrored FATs and fixed root
@@ -245,8 +267,10 @@ pub fn build_empty_fat16(
         }
     }
     let mut root = [0u8; SECTOR_SIZE];
-    root[..11].copy_from_slice(&label);
-    root[11] = 0x08;
+    if !volume_label.is_empty() {
+        root[..11].copy_from_slice(&label);
+        root[11] = 0x08;
+    }
     sectors.insert(root_start, root);
     for offset in 1..ROOT_SECTORS {
         sectors.insert(root_start + offset, [0u8; SECTOR_SIZE]);

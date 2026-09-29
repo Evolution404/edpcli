@@ -900,14 +900,24 @@ fn execute_partition_format_observed(
             .and_then(|units| String::from_utf16(&units).ok())
             .unwrap_or_default(),
         OfficialFilesystemFormat::Fat16 => {
-            if root[11] != 0x08 || boot[43..54] != root[..11] {
-                return Err(err(EXIT_IO, "错误: FAT16 卷标目录项读回不一致"));
+            if choice.volume_label.is_empty() {
+                if boot[43..54] != *b"NO NAME    " {
+                    return Err(err(EXIT_IO, "错误: FAT16 空卷标 BPB 读回不一致"));
+                }
+                if root[11] == 0x08 {
+                    return Err(err(EXIT_IO, "错误: FAT16 空卷标不应写入卷标目录项"));
+                }
+                String::new()
+            } else {
+                if root[11] != 0x08 || boot[43..54] != root[..11] {
+                    return Err(err(EXIT_IO, "错误: FAT16 卷标目录项读回不一致"));
+                }
+                let (decoded, _, had_errors) = GBK.decode(&root[..11]);
+                if had_errors {
+                    return Err(err(EXIT_IO, "错误: FAT16 卷标无法按 GBK 解码"));
+                }
+                decoded.trim_end_matches(' ').to_string()
             }
-            let (decoded, _, had_errors) = GBK.decode(&root[..11]);
-            if had_errors {
-                return Err(err(EXIT_IO, "错误: FAT16 卷标无法按 GBK 解码"));
-            }
-            decoded.trim_end_matches(' ').to_string()
         }
         OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => unreachable!(),
     };

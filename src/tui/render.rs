@@ -335,6 +335,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
             }
         }
         WizardStage::PostRestore => "备份 > 恢复 > 恢复后处理",
+        WizardStage::VolumeLabelInput => "备份 > 恢复 > 恢复后处理 > 卷标",
         WizardStage::PasswordInput => "备份 > 恢复 > 恢复后处理 > 原密码",
         WizardStage::EncryptedFormatConfirm => "备份 > 恢复 > 恢复后处理 > 加密格式化确认",
         WizardStage::FormatConfirm => "备份 > 恢复 > 恢复后处理 > 格式化确认",
@@ -602,6 +603,59 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 Span::raw(" 完成"),
             ]));
         }
+        WizardStage::VolumeLabelInput => {
+            let request = wizard.pending_format.as_ref();
+            let original_label = wizard.restore_outcome.as_ref().and_then(|outcome| {
+                request.and_then(|request| {
+                    outcome
+                        .partitions
+                        .iter()
+                        .find(|partition| partition.index == request.partition_index)
+                        .and_then(|partition| partition.volume_label_hint.as_deref())
+                })
+            });
+            lines.push(Line::from(Span::styled(
+                "恢复后的卷标",
+                accent().add_modifier(Modifier::BOLD),
+            )));
+            if let Some(request) = request {
+                lines.push(Line::from(vec![
+                    Span::styled("文件系统  ", muted()),
+                    Span::styled(request.filesystem.config_token(), accent()),
+                ]));
+            }
+            lines.push(Line::from(vec![
+                Span::styled("来源  ", muted()),
+                Span::styled(
+                    if original_label.is_some() {
+                        "备份中的原卷标"
+                    } else {
+                        "备份没有卷标提示"
+                    },
+                    secondary(),
+                ),
+            ]));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("卷标", muted())));
+            lines.push(Line::from(Span::styled(
+                format!(" {} ", safe(&wizard.volume_label_input)),
+                super::theme::current().input_focused(),
+            )));
+            lines.push(Line::from(Span::styled(
+                "留空表示创建无用户卷标的文件系统；程序不会自动生成占位名称。",
+                muted(),
+            )));
+            if let Some(message) = &wizard.message {
+                lines.push(Line::from(Span::styled(safe(message), warning())));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("Enter", accent().add_modifier(Modifier::BOLD)),
+                Span::raw(" 继续    "),
+                Span::styled("Esc", muted()),
+                Span::raw(" 返回"),
+            ]));
+        }
         WizardStage::PasswordInput => {
             lines.push(Line::from(Span::styled(
                 "验证原密码",
@@ -651,6 +705,17 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                     request.filesystem.config_token()
                 )));
             }
+            lines.push(Line::from(vec![
+                Span::styled("卷标  ", muted()),
+                Span::styled(
+                    if wizard.volume_label_input.is_empty() {
+                        "(无卷标)"
+                    } else {
+                        wizard.volume_label_input.as_str()
+                    },
+                    secondary(),
+                ),
+            ]));
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "✓ 不生成新 FileKey，不修改原密码或密钥记录",
@@ -727,6 +792,17 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                     request.filesystem.config_token()
                 )));
             }
+            lines.push(Line::from(vec![
+                Span::styled("卷标  ", muted()),
+                Span::styled(
+                    if wizard.volume_label_input.is_empty() {
+                        "(无卷标)"
+                    } else {
+                        wizard.volume_label_input.as_str()
+                    },
+                    secondary(),
+                ),
+            ]));
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "⚠ 将生成新的 FileKey，更新 LBA7/LBA12 密钥域，并创建新的空加密文件系统。",
@@ -795,6 +871,17 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                     Span::styled(request.filesystem.config_token(), accent()),
                 ]));
             }
+            lines.push(Line::from(vec![
+                Span::styled("卷标  ", muted()),
+                Span::styled(
+                    if wizard.volume_label_input.is_empty() {
+                        "(无卷标)"
+                    } else {
+                        wizard.volume_label_input.as_str()
+                    },
+                    secondary(),
+                ),
+            ]));
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "⚠ 将创建新的空文件系统，不会恢复原文件或目录。",
@@ -1021,6 +1108,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             WizardStage::Confirm => "输入 YES · Backspace 删除 · Enter 执行 · Esc 返回".to_string(),
             WizardStage::Running => "q / Ctrl-C 延迟退出".to_string(),
             WizardStage::PostRestore => "j/k 选择 · Enter 处理 · o 详情 · Esc 完成".to_string(),
+            WizardStage::VolumeLabelInput => {
+                "输入卷标 · Backspace 删除 · Enter 继续 · Esc 返回".to_string()
+            }
             WizardStage::PasswordInput => "输入原密码 · Enter 继续 · Esc 返回".to_string(),
             WizardStage::EncryptedFormatConfirm => {
                 "输入 YES · Enter 加密格式化 · Esc 返回".to_string()

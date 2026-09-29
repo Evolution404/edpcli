@@ -921,6 +921,17 @@ fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
         "post-restore screen must retain semantic color hierarchy"
     );
 
+    state.begin_selected_post_restore_action();
+    let (label_view, _) = rendered_text(&state);
+    let compact_label = label_view.replace(' ', "");
+    assert!(compact_label.contains("恢复后的卷标"), "{label_view}");
+    assert!(compact_label.contains("普通卷"), "{label_view}");
+    assert!(compact_label.contains("备份中的原卷标"), "{label_view}");
+    assert!(
+        compact_label.contains("不会自动生成占位名称"),
+        "{label_view}"
+    );
+
     let mut password_state = AppState::new();
     password_state.begin_write_wizard(WriteKind::Restore, 4, Some("edp.edpb".into()));
     password_state.advance_restore_review();

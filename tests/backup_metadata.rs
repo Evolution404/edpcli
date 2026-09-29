@@ -17,6 +17,7 @@ use edpcli::diskio::SectorDev;
 use edpcli::edpb::{
     self, CaptureLevel, CoreCapture, MetadataCapture, RestorePolicy, SemanticStatus,
 };
+use edpcli::provision::{build_empty_exfat, build_empty_fat16};
 
 const NETAC_DEVICE_ID: &str = "disk&ven_netac&prod_onlydisk";
 const NETAC_TOTAL_SECTORS: u64 = 122_880_000;
@@ -228,8 +229,8 @@ fn chapter_18_b2_plain_mbr_capture_reads_only_partition_metadata() {
 
     assert_eq!(dev.writes, 0);
     assert!(
-        !dev.reads.contains(&2_048),
-        "filesystem boot sector must not be read"
+        dev.reads.contains(&2_048),
+        "metadata backup may read the filesystem boot sector only to derive bounded hints"
     );
     assert_eq!(capture.partitions.len(), 1);
     assert_eq!(capture.partitions[0].start_lba, 2_048);
@@ -276,8 +277,8 @@ fn chapter_18_b2_plain_gpt_capture_requires_primary_and_backup_metadata_only() {
 
     assert_eq!(dev.writes, 0);
     assert!(
-        !dev.reads.contains(&2_048),
-        "filesystem boot sector must not be read"
+        dev.reads.contains(&2_048),
+        "metadata backup may read the filesystem boot sector only to derive bounded hints"
     );
     assert_eq!(capture.partitions.len(), 1);
     assert_eq!(capture.artifacts.len(), 5);
@@ -291,6 +292,67 @@ fn chapter_18_b2_plain_gpt_capture_requires_primary_and_backup_metadata_only() {
         .artifacts
         .iter()
         .all(|artifact| artifact.restore_policy == RestorePolicy::Restorable));
+}
+
+#[test]
+fn plain_exfat_metadata_capture_preserves_only_volume_label_hint() {
+    let total = 100_000u64;
+    let start = 2_048u64;
+    let count = 50_000u64;
+    let image = build_empty_exfat(start, count, 0x1234_5678, "原卷标").unwrap();
+    let mut dev = ReadOnlySparseDev::new();
+    dev.insert(0, test_mbr(0x07, start as u32, count as u32));
+    for (&relative_lba, sector) in image.sectors() {
+        dev.insert(start + relative_lba, sector.to_vec());
+    }
+
+    let capture = acquire_plain_metadata(&mut dev, total).unwrap();
+
+    assert_eq!(dev.writes, 0);
+    assert_eq!(capture.partitions.len(), 1);
+    assert_eq!(
+        capture.partitions[0].filesystem_hint.as_deref(),
+        Some("exfat")
+    );
+    assert_eq!(
+        capture.partitions[0].volume_label_hint.as_deref(),
+        Some("原卷标")
+    );
+    assert!(
+        capture
+            .artifacts
+            .iter()
+            .all(|artifact| !artifact.id.contains("filesystem")
+                && !artifact.kind.contains("filesystem")),
+        "filesystem sectors may be read transiently for hints but must never become backup artifacts"
+    );
+    assert_eq!(capture.artifacts.len(), 1);
+}
+
+#[test]
+fn plain_fat16_metadata_capture_preserves_volume_label_and_empty_label_is_none() {
+    let total = 40_000u64;
+    let start = 2_048u64;
+    let count = 20_417u64;
+
+    for (label, expected) in [("BOOTVOL", Some("BOOTVOL")), ("", None)] {
+        let image = build_empty_fat16(start, count, 0x8765_4321, label).unwrap();
+        let mut dev = ReadOnlySparseDev::new();
+        dev.insert(0, test_mbr(0x06, start as u32, count as u32));
+        for (&relative_lba, sector) in image.sectors() {
+            dev.insert(start + relative_lba, sector.to_vec());
+        }
+
+        let capture = acquire_plain_metadata(&mut dev, total).unwrap();
+
+        assert_eq!(dev.writes, 0);
+        assert_eq!(
+            capture.partitions[0].filesystem_hint.as_deref(),
+            Some("fat16")
+        );
+        assert_eq!(capture.partitions[0].volume_label_hint.as_deref(), expected);
+        assert_eq!(capture.artifacts.len(), 1);
+    }
 }
 
 #[test]
@@ -635,6 +697,43 @@ fn chapter_18_b5_edp_without_device_id_is_typed_unsupported() {
         assessment.partitions[0].state,
         PostRestorePartitionState::Unsupported
     );
+}
+
+#[test]
+fn edp_metadata_capture_maps_lba10_volume_labels_without_reading_partition_filesystems() {
+    const DEVICE_ID: &str = "disk&ven_netac&prod_onlydisk&rev_0000";
+    let image = include_bytes!(
+        "../audit/protocol/physical-evidence/eesi/netac_onlydisk_20260804_lba0_12.bin"
+    );
+    const TOTAL_SECTORS: u64 = 245_760_000;
+    let geometry = parse_partition_geometry(image, DEVICE_ID, TOTAL_SECTORS).unwrap();
+    let mut dev = ReadOnlySparseDev::new();
+
+    let acquired = acquire_metadata(&mut dev, image, DEVICE_ID, TOTAL_SECTORS).unwrap();
+
+    let share = acquired
+        .partitions
+        .iter()
+        .find(|partition| partition.role.as_deref() == Some("share"))
+        .expect("EESI evidence must contain a share partition");
+    let encrypt = acquired
+        .partitions
+        .iter()
+        .find(|partition| partition.role.as_deref() == Some("encrypt"))
+        .expect("EESI evidence must contain an encrypt partition");
+    assert_eq!(share.volume_label_hint.as_deref(), Some("交换区"));
+    assert_eq!(encrypt.volume_label_hint.as_deref(), Some("保密区"));
+
+    for partition in &geometry {
+        assert!(
+            !dev.reads
+                .contains(&u32::try_from(partition.start_sector).unwrap()),
+            "EDP label hints must come from protocol metadata, not filesystem reads"
+        );
+    }
+    assert!(acquired.artifacts.iter().all(|artifact| {
+        !artifact.id.contains("filesystem") && !artifact.kind.contains("filesystem")
+    }));
 }
 
 #[test]
