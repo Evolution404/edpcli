@@ -156,7 +156,7 @@ pub(super) fn handle_provision_key(
                     let _ = state.navigate(NavCommand::Escape, viewport_height);
                 }
                 TuiAction::Confirm => {
-                    state.set_notice("破坏性写盘仍需精确输入大写 YES 后按 Enter。")
+                    state.set_notice("写入目标介质前必须精确输入大写 YES 后按 Enter。")
                 }
                 _ => {}
             },

@@ -205,20 +205,24 @@ fn table_column_reorder_moves_whole_column_without_changing_h_l_or_sort_identity
 }
 
 #[test]
-fn transient_notice_has_its_own_area_and_expires() {
+fn permanent_message_bar_keeps_content_geometry_stable_when_notice_disappears() {
     let mut state = AppState::new();
     state.set_notice("批量选择只在备份页可用。");
-    let backend = TestBackend::new(130, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
-    let rows = terminal.backend().buffer().content().chunks(130);
-    let lines = rows
-        .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
-        .collect::<Vec<_>>();
+    let render_lines = |state: &AppState| {
+        let backend = TestBackend::new(130, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render::draw(frame, state)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .chunks(130)
+            .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+    };
+    let lines = render_lines(&state);
     assert!(
-        lines
-            .iter()
-            .any(|line| line.replace(' ', "").contains("批量选择")),
+        lines.last().unwrap().replace(' ', "").contains("批量选择"),
         "{lines:?}"
     );
     assert!(
@@ -227,8 +231,14 @@ fn transient_notice_has_its_own_area_and_expires() {
             .any(|line| line.replace(' ', "").contains("?帮助")),
         "{lines:?}"
     );
-    std::thread::sleep(std::time::Duration::from_millis(4_050));
-    assert_eq!(state.notice(), None);
+    state.clear_notice();
+    let idle = render_lines(&state);
+    assert!(idle.last().unwrap().replace(' ', "").contains("就绪"));
+    assert_eq!(
+        &lines[..23],
+        &idle[..23],
+        "notice presence must only change the permanent bottom message row"
+    );
 }
 
 #[test]
@@ -872,19 +882,16 @@ fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
 
     let (review, review_colors) = rendered_text(&state);
     let compact = review.replace(' ', "");
-    assert!(compact.contains("备份>恢复>确认"), "{review}");
-    assert!(compact.contains("恢复目标"), "{review}");
-    assert!(
-        compact.contains("当前系统设备节点；编号可随重新插拔变化，不参与物理身份判断"),
-        "{review}"
-    );
-    assert!(
-        compact.contains("文件名中的diskN仅记录备份时系统编号，不参与介质身份认证"),
-        "{review}"
-    );
-    assert!(compact.contains("⚠将执行元数据恢复"), "{review}");
-    assert!(compact.contains("安全检查"), "{review}");
-    assert!(!compact.contains("安全链："), "{review}");
+    assert!(compact.contains("恢复写入确认"), "{review}");
+    assert!(compact.contains("确认后将直接开始向disk4写入"), "{review}");
+    assert!(compact.contains("匹配度未知"), "{review}");
+    assert!(compact.contains("备份身份详情未加载"), "{review}");
+    assert!(compact.contains("当前设备disk4"), "{review}");
+    assert!(compact.contains("备份"), "{review}");
+    assert!(compact.contains("/Users/test/.edpcli-backup"), "{review}");
+    assert!(!compact.contains("写入前"), "{review}");
+    assert!(!compact.contains("写入链"), "{review}");
+    assert!(compact.contains("输入YES确认写入"), "{review}");
     assert!(
         review_colors
             .iter()
@@ -897,10 +904,9 @@ fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
             })
             .len()
             >= 4,
-        "restore review must use semantic color hierarchy"
+        "restore confirmation modal must use semantic color hierarchy"
     );
 
-    state.advance_restore_review();
     for ch in ['Y', 'E', 'S'] {
         state.push_wizard_confirmation(ch);
     }
@@ -975,7 +981,6 @@ fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
 
     let mut password_state = AppState::new();
     password_state.begin_write_wizard(WriteKind::Restore, 4, Some("edp.edpb".into()));
-    password_state.advance_restore_review();
     for ch in ['Y', 'E', 'S'] {
         password_state.push_wizard_confirmation(ch);
     }

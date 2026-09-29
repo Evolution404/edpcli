@@ -21,6 +21,8 @@ mod devices_render;
 mod inspect_render;
 #[path = "provision/render.rs"]
 mod provision_render;
+#[path = "restore_confirmation_render.rs"]
+mod restore_confirmation_render;
 
 use backups_render::{
     draw_backup_batch_delete, draw_backup_create_choice, draw_backup_delete, draw_backup_prune,
@@ -29,6 +31,7 @@ use backups_render::{
 use devices_render::draw_devices;
 use inspect_render::draw_advanced_inspect;
 use provision_render::{draw_provision, draw_scheme_picker};
+use restore_confirmation_render::draw_restore_write_confirmation;
 
 fn backup_health(backup: &crate::application::BackupWorkspaceItem) -> (&'static str, Style) {
     if !backup.size_ok {
@@ -291,6 +294,11 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         return;
     };
 
+    if wizard.kind == WriteKind::Restore && wizard.stage == WizardStage::Confirm {
+        draw_restore_write_confirmation(frame, area, state);
+        return;
+    }
+
     let mut lines: Vec<Line> = Vec::new();
     let title = if wizard.kind == WriteKind::Restore {
         "恢复向导"
@@ -299,10 +307,9 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     };
 
     let breadcrumb = match wizard.stage {
-        WizardStage::Review => "备份 > 恢复 > 确认",
         WizardStage::Confirm => {
             if wizard.kind == WriteKind::Restore {
-                "备份 > 恢复 > 最终确认"
+                "备份 > 恢复 > 写入确认"
             } else {
                 "备份 > 创建 > 确认"
             }
@@ -339,122 +346,21 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     lines.push(Line::from(""));
 
     match wizard.stage {
-        WizardStage::Review => {
-            lines.push(Line::from(Span::styled(
-                "恢复目标",
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
-            lines.push(Line::from(vec![
-                Span::styled(format!("disk{}", wizard.disk), accent()),
-                Span::styled(
-                    "  当前系统设备节点；编号可随重新插拔变化，不参与物理身份判断",
-                    muted(),
-                ),
-            ]));
-            lines.push(Line::from(""));
-
-            lines.push(Line::from(Span::styled(
-                "恢复来源",
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
-            if let Some(path) = &wizard.backup {
-                let name = path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("<无效文件名>");
-                lines.push(Line::from(Span::styled(safe(name), secondary())));
-                lines.push(Line::from(Span::styled(
-                    "文件名中的 diskN 仅记录备份时系统编号，不参与介质身份认证。",
-                    muted(),
-                )));
-                if wizard.detail_expanded {
-                    lines.push(Line::from(vec![
-                        Span::styled("路径  ", muted()),
-                        Span::styled(safe(&path.display().to_string()), muted()),
-                    ]));
-                }
-            }
-            lines.push(Line::from(""));
-
-            lines.push(Line::from(Span::styled(
-                "⚠ 将执行元数据恢复",
-                warning().add_modifier(Modifier::BOLD),
-            )));
-            lines.push(Line::from(vec![
-                Span::styled("恢复  ", success()),
-                Span::raw("分区结构、磁盘身份相关元数据"),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("不恢复  ", muted()),
-                Span::styled("文件系统、目录、文件内容", muted()),
-            ]));
-            lines.push(Line::from(""));
-
-            let (identity_text, identity_style) = if wizard.expected_identity.is_some() {
-                ("目标身份已固定 ✓", success())
-            } else {
-                ("目标身份尚未固定", warning())
-            };
-            lines.push(Line::from(vec![
-                Span::styled("安全检查  ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::styled(identity_text, identity_style),
-                Span::raw("  "),
-                Span::styled("备份/几何将在写前复核 ✓", success()),
-            ]));
-            if wizard.detail_expanded {
-                for item in [
-                    "系统盘 / USB 整盘检查",
-                    "selector pinning",
-                    "写前保护",
-                    "卸载 / 锁卷",
-                    "reopen 身份复核",
-                    "atomic write",
-                    "sync / readback / rollback",
-                ] {
-                    lines.push(Line::from(vec![
-                        Span::styled("  ✓ ", success()),
-                        Span::styled(item, muted()),
-                    ]));
-                }
-            } else {
-                lines.push(Line::from(Span::styled("o 展开安全链详情", muted())));
-            }
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("Enter", accent().add_modifier(Modifier::BOLD)),
-                Span::raw(" 继续    "),
-                Span::styled("Esc", muted()),
-                Span::raw(" 返回"),
-            ]));
-        }
         WizardStage::Confirm => {
-            let destructive = wizard.kind == WriteKind::Restore;
-            lines.push(Line::from(Span::styled(
-                if destructive {
-                    format!("⚠ 即将修改 disk{}", wizard.disk)
-                } else {
-                    format!("即将创建 disk{} 的元数据备份", wizard.disk)
-                },
-                if destructive {
-                    warning().add_modifier(Modifier::BOLD)
-                } else {
-                    accent().add_modifier(Modifier::BOLD)
-                },
-            )));
-            lines.push(Line::from(""));
-            lines.push(Line::from(if destructive {
-                "当前分区结构将被备份中的结构替换；该操作不会恢复文件内容。"
+            if wizard.kind == WriteKind::Restore {
+                lines.push(Line::from(Span::styled(
+                    format!("恢复写入已准备 · disk{}", wizard.disk),
+                    warning().add_modifier(Modifier::BOLD),
+                )));
+                lines.push(Line::from(
+                    "当前分区结构将被备份中的结构替换；文件系统、目录和用户文件不会恢复。",
+                ));
             } else {
-                "仅读取设备元数据，不会卸载或写入 U 盘。"
-            }));
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled("输入 YES 继续", warning())));
-            lines.push(Line::from(Span::styled(
-                format!(" {} ", safe(&wizard.confirmation)),
-                super::theme::current().input_focused(),
-            )));
-            if let Some(message) = &wizard.message {
-                lines.push(Line::from(Span::styled(safe(message), danger())));
+                lines.push(Line::from(Span::styled(
+                    format!("创建 disk{} 的元数据备份", wizard.disk),
+                    accent().add_modifier(Modifier::BOLD),
+                )));
+                lines.push(Line::from("只读采集设备元数据，不会向目标 U 盘写入。"));
             }
         }
         WizardStage::Running => {
@@ -704,18 +610,6 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
             lines.push(Line::from(
                 "将使用验证后的原 FileKey 创建新的空加密文件系统；原文件内容不会恢复。",
             ));
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "输入 YES 独立确认加密格式化",
-                warning(),
-            )));
-            lines.push(Line::from(Span::styled(
-                format!(" {} ", safe(&wizard.confirmation)),
-                super::theme::current().input_focused(),
-            )));
-            if let Some(message) = &wizard.message {
-                lines.push(Line::from(Span::styled(safe(message), secondary())));
-            }
         }
         WizardStage::ReinitializePassword | WizardStage::ReinitializePasswordConfirm => {
             let confirm = wizard.stage == WizardStage::ReinitializePasswordConfirm;
@@ -791,15 +685,6 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
             lines.push(Line::from(
                 "该动作不可恢复旧密钥域；元数据恢复本身的成功结果不会因此改变。",
             ));
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled("输入 YES 最终确认重建", danger())));
-            lines.push(Line::from(Span::styled(
-                format!(" {} ", safe(&wizard.confirmation)),
-                super::theme::current().input_focused(),
-            )));
-            if let Some(message) = &wizard.message {
-                lines.push(Line::from(Span::styled(safe(message), danger())));
-            }
         }
         WizardStage::Reinitializing => {
             lines.push(Line::from(Span::styled(
@@ -870,15 +755,6 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
             lines.push(Line::from(
                 "这是独立于元数据恢复的第二次破坏性操作，必须再次确认。",
             ));
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled("输入 YES 确认格式化", warning())));
-            lines.push(Line::from(Span::styled(
-                format!(" {} ", safe(&wizard.confirmation)),
-                super::theme::current().input_focused(),
-            )));
-            if let Some(message) = &wizard.message {
-                lines.push(Line::from(Span::styled(safe(message), danger())));
-            }
         }
         WizardStage::Formatting => {
             lines.push(Line::from(Span::styled(
@@ -944,6 +820,112 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         area,
     );
+
+    match wizard.stage {
+        WizardStage::Confirm if wizard.kind == WriteKind::BackupCreate => {
+            super::ui::render_action_confirmation_modal(
+                frame,
+                area,
+                super::ui::ActionConfirmationSpec {
+                    title: "创建元数据备份",
+                    headline: "开始只读元数据备份？",
+                    details: vec![
+                        Line::from(format!("目标  disk{}", wizard.disk)),
+                        Line::from("仅读取介质身份、几何、分区结构与协议元数据。"),
+                        Line::from(Span::styled("不会向目标设备写入。", muted())),
+                    ],
+                    tone: super::ui::ConfirmationTone::Neutral,
+                },
+            );
+        }
+        WizardStage::FormatConfirm => {
+            let partition = wizard
+                .pending_format
+                .as_ref()
+                .map(|request| request.partition_index);
+            let target = partition
+                .map(|index| format!("disk{} · 分区 {}", wizard.disk, index))
+                .unwrap_or_else(|| format!("disk{}", wizard.disk));
+            super::ui::render_write_confirmation_modal(
+                frame,
+                area,
+                super::ui::WriteConfirmationSpec {
+                    kind: super::ui::MediaWriteConfirmationKind::Format,
+                    title: "格式化写入确认",
+                    warning: format!("确认后将直接开始向 {target} 写入"),
+                    details: vec![
+                        Line::from(vec![
+                            Span::styled("目标  ", muted()),
+                            Span::styled(target, secondary()),
+                        ]),
+                        Line::from("创建新的空文件系统。"),
+                        Line::from("该分区原有文件系统内容不会被恢复。"),
+                    ],
+                    confirmation: &wizard.confirmation,
+                    message: wizard.message.as_deref(),
+                },
+            );
+        }
+        WizardStage::EncryptedFormatConfirm => {
+            let partition = wizard
+                .pending_format
+                .as_ref()
+                .map(|request| request.partition_index);
+            let target = partition
+                .map(|index| format!("disk{} · 加密分区 {}", wizard.disk, index))
+                .unwrap_or_else(|| format!("disk{}", wizard.disk));
+            super::ui::render_write_confirmation_modal(
+                frame,
+                area,
+                super::ui::WriteConfirmationSpec {
+                    kind: super::ui::MediaWriteConfirmationKind::EncryptedFormat,
+                    title: "加密格式化写入确认",
+                    warning: format!("确认后将直接开始向 {target} 写入"),
+                    details: vec![
+                        Line::from(vec![
+                            Span::styled("目标  ", muted()),
+                            Span::styled(target, secondary()),
+                        ]),
+                        Line::from("使用已验证原 FileKey 创建新的空加密文件系统。"),
+                        Line::from("不生成新 FileKey，不修改原密码或密钥记录。"),
+                        Line::from("原文件系统内容不会恢复。"),
+                    ],
+                    confirmation: &wizard.confirmation,
+                    message: wizard.message.as_deref(),
+                },
+            );
+        }
+        WizardStage::ReinitializeConfirm => {
+            let partition = wizard
+                .pending_format
+                .as_ref()
+                .map(|request| request.partition_index);
+            let target = partition
+                .map(|index| format!("disk{} · 加密分区 {}", wizard.disk, index))
+                .unwrap_or_else(|| format!("disk{}", wizard.disk));
+            super::ui::render_write_confirmation_modal(
+                frame,
+                area,
+                super::ui::WriteConfirmationSpec {
+                    kind: super::ui::MediaWriteConfirmationKind::Reinitialize,
+                    title: "加密分区重建写入确认",
+                    warning: format!("确认后将直接开始向 {target} 写入"),
+                    details: vec![
+                        Line::from(vec![
+                            Span::styled("目标  ", muted()),
+                            Span::styled(target, secondary()),
+                        ]),
+                        Line::from("生成新 FileKey、更新密钥域并创建空加密文件系统。"),
+                        Line::from(Span::styled("旧 FileKey 与旧密码将永久失效。", danger())),
+                        Line::from("该操作不能恢复旧密钥域中的文件内容。"),
+                    ],
+                    confirmation: &wizard.confirmation,
+                    message: wizard.message.as_deref(),
+                },
+            );
+        }
+        _ => {}
+    }
 }
 
 pub fn draw(frame: &mut Frame, state: &AppState) {
@@ -967,17 +949,12 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
     let notice = state.notice();
     let status = super::status::dynamic_status(state);
-    let mut constraints = vec![
+    let constraints = vec![
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(1),
+        Constraint::Length(1),
     ];
-    if notice.is_some() {
-        constraints.push(Constraint::Length(1));
-    }
-    if status.is_some() {
-        constraints.push(Constraint::Length(1));
-    }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
@@ -986,6 +963,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     super::shell::header(frame, chunks[0], state, core_mode);
     super::shell::navigation(frame, chunks[1], state);
     let content_area = chunks[2];
+    let restore_confirmation_open = state.wizard().is_some_and(|wizard| {
+        wizard.kind == WriteKind::Restore && wizard.stage == WizardStage::Confirm
+    });
 
     if state.workspace() == Workspace::Inspect && state.advanced_inspect().is_some() {
         draw_advanced_inspect(frame, content_area, state);
@@ -997,7 +977,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         draw_backup_batch_delete(frame, content_area, state);
     } else if state.backup_prune().is_some() {
         draw_backup_prune(frame, content_area, state);
-    } else if state.wizard().is_some() {
+    } else if state.wizard().is_some() && !restore_confirmation_open {
         draw_wizard(frame, content_area, state);
     } else if state.input_mode() == InputMode::Command {
         draw_command_palette(frame, content_area, state);
@@ -1020,18 +1000,11 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     if state.help_open() {
         super::help_overlay::draw_help_overlay(frame, content_area, state);
     }
+    if restore_confirmation_open {
+        draw_wizard(frame, content_area, state);
+    }
 
-    let mut tail = 3;
-    if let Some(message) = notice {
-        frame.render_widget(
-            super::ui::notice_banner(safe(message), super::ui::BannerTone::Warning),
-            chunks[tail],
-        );
-        tail += 1;
-    }
-    if let Some(status) = status {
-        super::shell::status_bar(frame, chunks[tail], &status);
-    }
+    super::shell::message_bar(frame, chunks[3], notice, status.as_deref());
 }
 
 #[cfg(test)]

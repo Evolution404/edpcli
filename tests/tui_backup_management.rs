@@ -52,7 +52,8 @@ fn backup_workspace_uses_one_create_modal_and_only_keeps_explicit_single_key_act
     assert!(state.contains("begin_backup_create_choice"));
     assert!(state.contains("pub struct BackupCreateChoiceState;"));
     assert!(render.contains("创建元数据备份"));
-    assert!(render.contains("✗ 用户文件"));
+    assert!(render.contains("不读取文件系统目录和用户文件"));
+    assert!(render.contains("不需要介质写入授权"));
     assert!(!render.contains("进一步采集可验证分区/文件系统证据"));
 }
 

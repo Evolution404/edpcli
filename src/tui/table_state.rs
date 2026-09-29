@@ -9,6 +9,16 @@ impl AppState {
             Workspace::Devices if self.devices_focused_pane() == PaneId::DevicesList => {
                 Some(TableKind::Devices)
             }
+            Workspace::Devices
+                if self.devices_focused_pane() == PaneId::DevicesDetail
+                    && matches!(
+                        self.device_info_selected_key(),
+                        DeviceInfoNodeKey::Status | DeviceInfoNodeKey::Backups
+                    )
+                    && !self.device_related_backups().is_empty() =>
+            {
+                Some(TableKind::RelatedBackups)
+            }
             Workspace::Backups if self.backups_focused_pane() == PaneId::BackupsList => {
                 Some(TableKind::Backups)
             }
@@ -85,6 +95,11 @@ impl AppState {
                 let source = self.backup_source_index_at_visible(self.shell.selected)?;
                 self.backups.table_view.rows.get(source).cloned()
             }
+            TableKind::RelatedBackups => self
+                .device_related_backup_table_view()
+                .rows
+                .get(self.device_related_backup_selected_index()?)
+                .cloned(),
             TableKind::ProvisionDevices => {
                 let row = self.provision_device_at(self.shell.selected)?;
                 Some(
@@ -178,6 +193,7 @@ impl AppState {
         match kind {
             TableKind::Devices => self.devices.table_view.content_widths.clone(),
             TableKind::Backups => self.backups.table_view.content_widths.clone(),
+            TableKind::RelatedBackups => self.device_related_backup_table_view().content_widths,
             TableKind::ProvisionDevices => {
                 let headings = ["设备", "容量", "USB 身份", "盘型", "onlyid"];
                 let mut widths = headings
@@ -224,6 +240,10 @@ impl AppState {
         use crate::tui::table_layout::TableKind;
         match kind {
             TableKind::Devices | TableKind::Backups => terminal_width.saturating_sub(4),
+            TableKind::RelatedBackups => terminal_width
+                .saturating_mul(7)
+                .saturating_div(10)
+                .saturating_sub(6),
             TableKind::InspectFields => terminal_width.saturating_sub(3),
             TableKind::ProvisionDevices => {
                 let class = crate::tui::ui::ViewportClass::for_width(terminal_width);
@@ -359,6 +379,12 @@ impl AppState {
         let backup_path = (kind == crate::tui::table_layout::TableKind::Backups)
             .then(|| self.selected_backup().map(|row| row.path.clone()))
             .flatten();
+        let related_backup_path = (kind == crate::tui::table_layout::TableKind::RelatedBackups)
+            .then(|| {
+                self.selected_device_related_backup()
+                    .map(|row| row.path.clone())
+            })
+            .flatten();
         let provision_disk = (kind == crate::tui::table_layout::TableKind::ProvisionDevices)
             .then(|| {
                 self.provision_device_at(self.shell.selected)
@@ -399,6 +425,19 @@ impl AppState {
                 self.shell.selected = position;
             }
         }
+        if let Some(path) = related_backup_path {
+            if let Some(position) = self
+                .device_related_backups()
+                .iter()
+                .position(|(source, _)| {
+                    self.backups()
+                        .get(*source)
+                        .is_some_and(|backup| backup.path == path)
+                })
+            {
+                self.devices.related_backup_selected = position;
+            }
+        }
         if let Some(disk) = provision_disk {
             if let Some(position) = self
                 .provision_selectable_device_indices()
@@ -423,6 +462,11 @@ impl AppState {
             }
         }
         changed
+    }
+
+    pub fn device_related_backup_table_view(&self) -> crate::tui::table_layout::TableViewData {
+        let related = self.device_related_backups();
+        crate::tui::table_layout::related_backup_table_view(self.backups(), &related)
     }
 
     pub fn table_scroll_offset(&self, kind: crate::tui::table_layout::TableKind) -> usize {

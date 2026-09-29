@@ -74,10 +74,30 @@ pub fn navigation(frame: &mut Frame, area: Rect, state: &AppState) {
     }
 }
 
-pub fn status_bar(frame: &mut Frame, area: Rect, text: &str) {
+pub fn message_bar(frame: &mut Frame, area: Rect, notice: Option<&str>, status: Option<&str>) {
+    let theme = theme::current();
+    let mut spans = Vec::new();
+    if let Some(notice) = notice {
+        spans.push(Span::styled("● ", theme.warning()));
+        spans.push(Span::styled(
+            crate::ui::sanitize_terminal_text(notice),
+            theme.warning(),
+        ));
+    }
+    if let Some(status) = status {
+        if !spans.is_empty() {
+            spans.push(Span::styled("  ·  ", theme.muted()));
+        }
+        spans.push(Span::styled(
+            crate::ui::sanitize_terminal_text(status),
+            theme.secondary_text(),
+        ));
+    }
+    if spans.is_empty() {
+        spans.push(Span::styled("就绪", theme.muted()));
+    }
     frame.render_widget(
-        Paragraph::new(crate::ui::sanitize_terminal_text(text))
-            .style(theme::current().secondary_text()),
+        Paragraph::new(Line::from(spans)).style(theme.surface()),
         area,
     );
 }

@@ -98,7 +98,7 @@ impl AppState {
             return None;
         }
         if self.provision.confirmation != "YES" {
-            self.provision.message = Some("必须精确输入 YES 才会执行破坏性写盘".into());
+            self.provision.message = Some("必须精确输入 YES 才会开始向目标设备写入".into());
             return None;
         }
         let prepared = self.provision.prepared.take()?;

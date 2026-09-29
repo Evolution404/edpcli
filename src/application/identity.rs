@@ -32,6 +32,43 @@ impl IdentityReliability {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityMatchLevel {
+    Strong,
+    Medium,
+    Weak,
+    Conflict,
+    Unknown,
+}
+
+impl IdentityMatchLevel {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Strong => "强",
+            Self::Medium => "较强",
+            Self::Weak => "弱",
+            Self::Conflict => "冲突",
+            Self::Unknown => "未知",
+        }
+    }
+
+    pub const fn from_relationship(relationship: Option<MediaRelationship>) -> Self {
+        match relationship {
+            Some(MediaRelationship::SamePhysicalMedia) => Self::Strong,
+            Some(MediaRelationship::SameEdpInstance | MediaRelationship::SameControlledLineage) => {
+                Self::Medium
+            }
+            Some(
+                MediaRelationship::ProbableSameMedia
+                | MediaRelationship::ModelOnlyMatch
+                | MediaRelationship::Ambiguous,
+            ) => Self::Weak,
+            Some(MediaRelationship::DifferentMedia) => Self::Conflict,
+            None => Self::Unknown,
+        }
+    }
+}
+
 pub fn device_identity_reliability(
     row: &crate::disk_scan::Row,
 ) -> (IdentityReliability, &'static str) {
@@ -109,6 +146,10 @@ impl CanonicalIdentityProjection {
             MediaRelationship::Ambiguous => "证据不足 · 不能确认",
             MediaRelationship::DifferentMedia => "硬件冲突 · 不同介质",
         }
+    }
+
+    pub fn match_level(&self) -> IdentityMatchLevel {
+        IdentityMatchLevel::from_relationship(Some(self.relationship))
     }
 
     pub fn evidence_lines(&self) -> Vec<String> {

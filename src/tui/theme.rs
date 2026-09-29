@@ -7,7 +7,7 @@ use ratatui::{
     widgets::BorderType,
 };
 
-use crate::application::identity::IdentityReliability;
+use crate::application::identity::{IdentityMatchLevel, IdentityReliability};
 use crate::provision::DiskProvisionKind;
 
 use super::disk_layout::DiskRegionKind;
@@ -34,8 +34,12 @@ pub struct Palette {
     pub border: Color,
     pub border_focus: Color,
     pub text_primary: Color,
+    pub text_body: Color,
     pub text_secondary: Color,
     pub text_muted: Color,
+    pub table_text: Color,
+    pub table_text_muted: Color,
+    pub table_text_active: Color,
     pub accent: Color,
     pub accent_soft: Color,
     pub success: Color,
@@ -84,9 +88,13 @@ impl Theme {
                 border_strong: Color::Rgb(0x4A, 0x6B, 0x7C),
                 border: Color::Rgb(0x30, 0x39, 0x45),
                 border_focus: Color::Rgb(0x58, 0x75, 0x8D),
-                text_primary: Color::Rgb(0xD7, 0xDC, 0xE2),
-                text_secondary: Color::Rgb(0x9B, 0xA7, 0xB3),
-                text_muted: Color::Rgb(0x68, 0x74, 0x81),
+                text_primary: Color::Rgb(0xC4, 0xCB, 0xD2),
+                text_body: Color::Rgb(0xA7, 0xB1, 0xBA),
+                text_secondary: Color::Rgb(0x89, 0x96, 0xA2),
+                text_muted: Color::Rgb(0x66, 0x73, 0x7E),
+                table_text: Color::Rgb(0xA7, 0xB1, 0xBA),
+                table_text_muted: Color::Rgb(0x7C, 0x89, 0x94),
+                table_text_active: Color::Rgb(0xC0, 0xC8, 0xCF),
                 accent: Color::Rgb(0x78, 0xA9, 0xC1),
                 accent_soft: Color::Rgb(0x52, 0x75, 0x8A),
                 success: Color::Rgb(0x7F, 0xA6, 0x8A),
@@ -122,9 +130,13 @@ impl Theme {
                 border_strong: Color::Indexed(67),
                 border: Color::Indexed(239),
                 border_focus: Color::Indexed(67),
-                text_primary: Color::Indexed(253),
-                text_secondary: Color::Indexed(145),
-                text_muted: Color::Indexed(244),
+                text_primary: Color::Indexed(251),
+                text_body: Color::Indexed(248),
+                text_secondary: Color::Indexed(245),
+                text_muted: Color::Indexed(242),
+                table_text: Color::Indexed(248),
+                table_text_muted: Color::Indexed(244),
+                table_text_active: Color::Indexed(250),
                 accent: Color::Indexed(109),
                 accent_soft: Color::Indexed(66),
                 success: Color::Indexed(108),
@@ -161,8 +173,12 @@ impl Theme {
                 border: Color::DarkGray,
                 border_focus: Color::Blue,
                 text_primary: Color::Gray,
-                text_secondary: Color::Gray,
+                text_body: Color::Gray,
+                text_secondary: Color::DarkGray,
                 text_muted: Color::DarkGray,
+                table_text: Color::Gray,
+                table_text_muted: Color::DarkGray,
+                table_text_active: Color::Gray,
                 accent: Color::Cyan,
                 accent_soft: Color::Blue,
                 success: Color::Green,
@@ -228,19 +244,19 @@ impl Theme {
 
     pub fn background(self) -> Style {
         Style::default()
-            .fg(self.palette.text_primary)
+            .fg(self.palette.text_body)
             .bg(self.palette.background)
     }
 
     pub fn canvas(self) -> Style {
         Style::default()
-            .fg(self.palette.text_primary)
+            .fg(self.palette.text_body)
             .bg(self.palette.canvas)
     }
 
     pub fn raised_surface(self) -> Style {
         Style::default()
-            .fg(self.palette.text_primary)
+            .fg(self.palette.text_body)
             .bg(self.palette.surface_raised)
     }
 
@@ -270,12 +286,28 @@ impl Theme {
 
     pub fn surface(self) -> Style {
         Style::default()
-            .fg(self.palette.text_primary)
+            .fg(self.palette.text_body)
             .bg(self.palette.surface)
     }
 
     pub fn text(self) -> Style {
-        Style::default().fg(self.palette.text_primary)
+        self.body_text()
+    }
+
+    pub fn heading_text(self) -> Style {
+        Style::default()
+            .fg(self.palette.text_primary)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    pub fn body_text(self) -> Style {
+        Style::default().fg(self.palette.text_body)
+    }
+
+    pub fn active_text(self) -> Style {
+        Style::default()
+            .fg(self.palette.table_text_active)
+            .add_modifier(Modifier::BOLD)
     }
 
     pub fn secondary_text(self) -> Style {
@@ -359,13 +391,11 @@ impl Theme {
     }
 
     pub fn pane_surface(self, focused: bool) -> Style {
-        Style::default()
-            .fg(self.palette.text_primary)
-            .bg(if focused {
-                self.palette.surface_focus
-            } else {
-                self.palette.surface_raised
-            })
+        Style::default().fg(self.palette.text_body).bg(if focused {
+            self.palette.surface_focus
+        } else {
+            self.palette.surface_raised
+        })
     }
 
     pub fn identity_reliability(self, reliability: IdentityReliability) -> Style {
@@ -378,15 +408,25 @@ impl Theme {
         }
     }
 
+    pub fn identity_match_level(self, level: IdentityMatchLevel) -> Style {
+        match level {
+            IdentityMatchLevel::Strong => self.success().add_modifier(Modifier::BOLD),
+            IdentityMatchLevel::Medium => self.secondary_accent().add_modifier(Modifier::BOLD),
+            IdentityMatchLevel::Weak => self.warning().add_modifier(Modifier::BOLD),
+            IdentityMatchLevel::Conflict => self.danger().add_modifier(Modifier::BOLD),
+            IdentityMatchLevel::Unknown => self.muted().add_modifier(Modifier::BOLD),
+        }
+    }
+
     pub fn input(self) -> Style {
         Style::default()
-            .fg(self.palette.text_primary)
+            .fg(self.palette.text_body)
             .bg(self.palette.surface)
     }
 
     pub fn input_focused(self) -> Style {
         Style::default()
-            .fg(self.palette.text_primary)
+            .fg(self.palette.table_text_active)
             .bg(self.palette.surface_active)
     }
 
@@ -414,6 +454,28 @@ impl Theme {
             .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
     }
 
+    pub fn table_text(self) -> Style {
+        Style::default().fg(self.palette.table_text)
+    }
+
+    pub fn table_text_muted(self) -> Style {
+        Style::default().fg(self.palette.table_text_muted)
+    }
+
+    pub fn table_text_active(self) -> Style {
+        Style::default()
+            .fg(self.palette.table_text_active)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    pub fn table_surface(self, focused: bool) -> Style {
+        Style::default().fg(self.palette.table_text).bg(if focused {
+            self.palette.surface_focus
+        } else {
+            self.palette.surface_raised
+        })
+    }
+
     pub fn table_header(self, active: bool, pane_focused: bool) -> Style {
         if active && pane_focused {
             self.accent()
@@ -424,14 +486,25 @@ impl Theme {
     }
 
     pub fn active_semantic(self, base: Style) -> Style {
-        let foreground = base
-            .fg
-            .map(|color| self.brighter_semantic_color(color))
-            .unwrap_or(self.palette.accent);
+        let foreground = match base.fg {
+            None => self.palette.table_text_active,
+            Some(color)
+                if color == self.palette.table_text_muted || color == self.palette.text_muted =>
+            {
+                self.palette.table_text
+            }
+            Some(color) if color == self.palette.table_text => self.palette.table_text_active,
+            Some(color) => self.brighter_semantic_color(color),
+        };
         base.fg(foreground).add_modifier(Modifier::BOLD)
     }
 
     pub fn table_cell(self, base: Style, column_active: bool, pane_focused: bool) -> Style {
+        let base = if base.fg.is_none() {
+            base.fg(self.palette.table_text)
+        } else {
+            base
+        };
         if column_active && pane_focused {
             self.active_semantic(base)
         } else if column_active {
@@ -794,9 +867,10 @@ mod tests {
         assert_eq!(palette.selection, Color::Rgb(0x26, 0x34, 0x42));
         assert_eq!(palette.border, Color::Rgb(0x30, 0x39, 0x45));
         assert_eq!(palette.border_focus, Color::Rgb(0x58, 0x75, 0x8D));
-        assert_eq!(palette.text_primary, Color::Rgb(0xD7, 0xDC, 0xE2));
-        assert_eq!(palette.text_secondary, Color::Rgb(0x9B, 0xA7, 0xB3));
-        assert_eq!(palette.text_muted, Color::Rgb(0x68, 0x74, 0x81));
+        assert_eq!(palette.text_primary, Color::Rgb(0xC4, 0xCB, 0xD2));
+        assert_eq!(palette.text_body, Color::Rgb(0xA7, 0xB1, 0xBA));
+        assert_eq!(palette.text_secondary, Color::Rgb(0x89, 0x96, 0xA2));
+        assert_eq!(palette.text_muted, Color::Rgb(0x66, 0x73, 0x7E));
         assert_eq!(palette.accent, Color::Rgb(0x78, 0xA9, 0xC1));
         assert_eq!(palette.accent_soft, Color::Rgb(0x52, 0x75, 0x8A));
         assert_eq!(palette.success, Color::Rgb(0x7F, 0xA6, 0x8A));

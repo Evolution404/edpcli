@@ -122,7 +122,9 @@ pub(super) fn draw_device_list(frame: &mut Frame, area: ratatui::layout::Rect, s
                                         .0;
                                 crate::tui::theme::current().identity_reliability(reliability)
                             }
-                            ColumnId::Model | ColumnId::Serial => muted(),
+                            ColumnId::Model | ColumnId::VidPid | ColumnId::Serial => {
+                                crate::tui::theme::current().table_text_muted()
+                            }
                             _ => Style::default(),
                         };
                         let style = crate::tui::theme::current().table_cell(

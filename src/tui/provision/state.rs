@@ -182,6 +182,10 @@ impl AppState {
         &mut self.provision
     }
 
+    pub const fn provision_target_disk(&self) -> Option<u32> {
+        self.provision.target_disk
+    }
+
     pub fn provision_begin_insert(&mut self) -> bool {
         if self.shell.workspace != Workspace::Provision
             || self.provision.stage != ProvisionStage::Form

@@ -32,15 +32,9 @@ pub(super) fn handle_backup_batch_key(
                 return Some(KeyOutcome::NextIteration);
             }
             BackupBatchDeleteStage::Confirm => {
-                if let Some(action) = keys.map(state::InputMode::Confirm, key) {
+                if let Some(action) = keys.map(state::InputMode::Normal, key) {
                     match action {
-                        keymap::TuiAction::Text(ch) => {
-                            state.backup_batch_delete_push_confirmation(ch);
-                        }
-                        keymap::TuiAction::Backspace => {
-                            state.backup_batch_delete_backspace();
-                        }
-                        keymap::TuiAction::Submit => {
+                        keymap::TuiAction::Activate | keymap::TuiAction::Submit => {
                             if let Some(plan) = state.backup_batch_delete_take_for_execute() {
                                 if let Err(message) = tasks.request_backup_batch_delete_execute(
                                     plan,
@@ -54,9 +48,6 @@ pub(super) fn handle_backup_batch_key(
                         }
                         keymap::TuiAction::Cancel | keymap::TuiAction::Back => {
                             state.close_backup_batch_delete();
-                        }
-                        keymap::TuiAction::Confirm => {
-                            state.set_notice("批量删除仍需精确输入大写 YES 后按 Enter。")
                         }
                         _ => {}
                     }

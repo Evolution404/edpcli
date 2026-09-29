@@ -4,7 +4,8 @@ use edpcli::tui::disk_layout::{DiskLayoutModel, DiskRegionKind};
 use edpcli::tui::pane::{PaneFocus, PaneId};
 use edpcli::tui::render;
 use edpcli::tui::state::{
-    AdvancedInspectSource, AppState, NavCommand, ProvisionKind, ProvisionStage, Workspace,
+    AdvancedInspectSource, AppState, NavCommand, ProvisionKind, ProvisionStage, WizardStage,
+    Workspace, WriteKind,
 };
 use ratatui::{backend::TestBackend, Terminal};
 
@@ -1034,8 +1035,11 @@ fn device_status_backup_table_omits_zero_counts_and_selects_restore_source() {
     let text = render_text(&state, 180, 46);
     assert!(text.contains("●2份确认"), "{text}");
     assert!(!text.contains("▲0份疑似"), "{text}");
-    assert!(text.contains("backup-1.edpb"), "{text}");
-    assert!(text.contains("backup-2.edpb"), "{text}");
+    for heading in [
+        "关系", "时间", "容量", "部门", "姓名", "型号", "盘型", "VID:PID",
+    ] {
+        assert!(text.contains(heading), "missing {heading}: {text}");
+    }
     assert!(text.contains("R恢复当前备份"), "{text}");
 
     state.navigate(NavCommand::Down, 20);
@@ -1053,6 +1057,80 @@ fn device_status_backup_table_omits_zero_counts_and_selects_restore_source() {
         state.selected_restore_backup_path(),
         Some("backup-2.edpb".into())
     );
+}
+
+#[test]
+fn restore_confirmation_prioritizes_backup_device_match_and_basic_identity() {
+    use edpcli::application::media_identity::SerialQuality;
+
+    let mut row = edp_device_with_layout();
+    row.hardware_model = Some("HIKSEMI".into());
+    row.device_id = None;
+    if let Some(pin) = row.identity_pin.as_mut() {
+        pin.snapshot.hardware.vid = Some(0x1234);
+        pin.snapshot.hardware.pid = Some(0x5678);
+        pin.snapshot.hardware.serial = row.serial.clone();
+        pin.snapshot.hardware.serial_sha256 = Some("11".repeat(32));
+        pin.snapshot.hardware.serial_quality = SerialQuality::Usable;
+    }
+    row.n_baks = 1;
+    let mut item = related_backup(1, &row);
+    item.display_time = "2026-09-29 14:48".into();
+    let path = item.path.clone();
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    state.replace_backups(vec![item]);
+    assert!(state.begin_write_wizard(WriteKind::Restore, 6, Some(path)));
+
+    let text = render_text(&state, 180, 46);
+    for expected in [
+        "恢复写入确认",
+        "匹配度强",
+        "物理介质一致",
+        "当前设备",
+        "HIKSEMI",
+        "1234:5678",
+        "SERIAL-D0-1234",
+        "备份",
+        "2026-09-2914:48",
+        "输电运检中心",
+        "测试用户",
+        "身份对照",
+        "序列号",
+        "VID:PID",
+        "容量",
+        "onlyid",
+        "部门",
+        "姓名",
+        "✓一致",
+    ] {
+        assert!(text.contains(expected), "missing {expected}: {text}");
+    }
+    assert!(!text.contains("写入前"), "{text}");
+    assert!(!text.contains("写入链"), "{text}");
+    assert!(!text.contains("恢复内容"), "{text}");
+}
+
+#[test]
+fn restore_overlay_escape_consumes_visible_layer_before_device_panes() {
+    use edpcli::tui::state::DeviceInfoNodeKey;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    state.focus_devices_pane(PaneId::DevicesTree);
+    state.navigate(NavCommand::Bottom, 20);
+    assert_eq!(state.device_info_selected_key(), DeviceInfoNodeKey::Status);
+    state.device_info_focus_detail();
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesDetail);
+
+    assert!(state.begin_write_wizard(WriteKind::Restore, 6, Some("backup-1.edpb".into())));
+    assert_eq!(state.wizard().unwrap().stage, WizardStage::Confirm);
+    assert_eq!(state.input_mode(), edpcli::tui::state::InputMode::Confirm);
+    state.navigate(NavCommand::Escape, 20);
+    assert!(state.wizard().is_none());
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesDetail);
+    assert_eq!(state.input_mode(), edpcli::tui::state::InputMode::Normal);
 }
 
 #[test]

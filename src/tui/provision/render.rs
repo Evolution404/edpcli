@@ -238,28 +238,32 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             );
         }
         ProvisionStage::Confirm => {
-            frame.render_widget(
-                Paragraph::new(vec![
-                    Line::from(Span::styled("破坏性写盘最终确认", danger())),
-                    Line::from(""),
-                    Line::from("请重新核对目标盘和计划。此操作会修改真实物理介质。"),
-                    Line::from(vec![
-                        Span::raw("精确输入 "),
-                        Span::styled("YES", danger()),
-                        Span::raw(" 后按 Enter： "),
-                        Span::styled(safe(&provision.confirmation), input_focused()),
-                    ]),
-                    Line::from(""),
-                    Line::from(Span::styled("Esc 返回计划页，不会写盘。", warning())),
-                ])
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(danger())
-                        .title("最终确认"),
-                )
-                .wrap(Wrap { trim: true }),
+            draw_provision_review(frame, main_area, state);
+            let target = state
+                .provision_target_disk()
+                .map(|disk| format!("disk{disk}"))
+                .unwrap_or_else(|| "未选择目标".into());
+            crate::tui::ui::render_write_confirmation_modal(
+                frame,
                 main_area,
+                crate::tui::ui::WriteConfirmationSpec {
+                    kind: crate::tui::ui::MediaWriteConfirmationKind::Provision,
+                    title: "制盘写入确认",
+                    warning: format!("确认后将直接开始向 {target} 写入"),
+                    details: vec![
+                        Line::from(vec![
+                            Span::styled("目标设备  ", muted()),
+                            Span::styled(target, secondary()),
+                        ]),
+                        Line::from("按已审核计划写入分区结构、文件系统与协议元数据。"),
+                        Line::from(Span::styled(
+                            "当前介质上的相关结构和数据可能被覆盖。",
+                            warning(),
+                        )),
+                    ],
+                    confirmation: &provision.confirmation,
+                    message: provision.message.as_deref(),
+                },
             );
         }
         ProvisionStage::Running => {

@@ -10,6 +10,7 @@ fn d0_device_schema_is_task_specific_and_backup_default_order_is_exact() {
     let shared = identity_column_specs();
     let devices = table_column_schema(TableKind::Devices).unwrap();
     let backups = table_column_schema(TableKind::Backups).unwrap();
+    let related = table_column_schema(TableKind::RelatedBackups).unwrap();
 
     assert_eq!(
         devices
@@ -39,6 +40,15 @@ fn d0_device_schema_is_task_specific_and_backup_default_order_is_exact() {
         vec![
             "选", "序号", "时间", "容量", "部门", "姓名", "型号", "盘型", "健康", "VID:PID",
             "onlyid", "名称",
+        ]
+    );
+    assert_eq!(
+        related
+            .iter()
+            .map(|column| column.heading)
+            .collect::<Vec<_>>(),
+        vec![
+            "关系", "时间", "容量", "部门", "姓名", "型号", "盘型", "VID:PID", "onlyid", "名称",
         ]
     );
     assert_eq!(

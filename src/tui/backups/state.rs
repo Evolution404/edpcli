@@ -8,7 +8,6 @@ pub struct BackupDeleteState {
     pub stage: WizardStage,
     pub path: std::path::PathBuf,
     pub expected_sha256: String,
-    pub confirmation: String,
     pub message: Option<String>,
 }
 
@@ -24,7 +23,6 @@ pub enum BackupBatchDeleteStage {
 pub struct BackupBatchDeleteState {
     pub stage: BackupBatchDeleteStage,
     pub prepared: Option<crate::application::backup::DeletePlan>,
-    pub confirmation: String,
     pub message: Option<String>,
 }
 
@@ -49,7 +47,6 @@ pub struct BackupPruneState {
     pub stage: BackupPruneStage,
     pub keep_input: String,
     pub prepared: Option<BackupPrunePrepared>,
-    pub confirmation: String,
     pub message: Option<String>,
 }
 
@@ -175,7 +172,6 @@ impl AppState {
         self.backups.batch_delete = Some(BackupBatchDeleteState {
             stage: BackupBatchDeleteStage::Planning,
             prepared: None,
-            confirmation: String::new(),
             message: Some("正在新鲜扫描并逐项复核 SHA-256，生成固定删除计划…".into()),
         });
         Some(targets)
@@ -209,27 +205,8 @@ impl AppState {
         if let Some(batch) = self.backups.batch_delete.as_mut() {
             if batch.stage == BackupBatchDeleteStage::Review {
                 batch.stage = BackupBatchDeleteStage::Confirm;
-                batch.confirmation.clear();
                 batch.message = None;
-                self.shell.input_mode = InputMode::Confirm;
-            }
-        }
-    }
-
-    pub fn backup_batch_delete_push_confirmation(&mut self, ch: char) {
-        if let Some(batch) = self.backups.batch_delete.as_mut() {
-            if batch.stage == BackupBatchDeleteStage::Confirm && batch.confirmation.len() < 16 {
-                batch.confirmation.push(ch);
-                batch.message = None;
-            }
-        }
-    }
-
-    pub fn backup_batch_delete_backspace(&mut self) {
-        if let Some(batch) = self.backups.batch_delete.as_mut() {
-            if batch.stage == BackupBatchDeleteStage::Confirm {
-                batch.confirmation.pop();
-                batch.message = None;
+                self.shell.input_mode = InputMode::Normal;
             }
         }
     }
@@ -239,10 +216,6 @@ impl AppState {
     ) -> Option<crate::application::backup::DeletePlan> {
         let batch = self.backups.batch_delete.as_mut()?;
         if batch.stage != BackupBatchDeleteStage::Confirm {
-            return None;
-        }
-        if batch.confirmation != "YES" {
-            batch.message = Some("必须精确输入 YES 才会批量删除备份。".into());
             return None;
         }
         let plan = batch.prepared.take()?;
@@ -292,7 +265,6 @@ impl AppState {
             stage: BackupPruneStage::Input,
             keep_input: "3".into(),
             prepared: None,
-            confirmation: String::new(),
             message: None,
         });
         true
@@ -312,16 +284,9 @@ impl AppState {
 
     pub fn backup_prune_backspace(&mut self) {
         if let Some(prune) = self.backups.prune.as_mut() {
-            match prune.stage {
-                BackupPruneStage::Input => {
-                    prune.keep_input.pop();
-                    prune.message = None;
-                }
-                BackupPruneStage::Confirm => {
-                    prune.confirmation.pop();
-                    prune.message = None;
-                }
-                _ => {}
+            if prune.stage == BackupPruneStage::Input {
+                prune.keep_input.pop();
+                prune.message = None;
             }
         }
     }
@@ -373,18 +338,8 @@ impl AppState {
         if let Some(prune) = self.backups.prune.as_mut() {
             if prune.stage == BackupPruneStage::Review {
                 prune.stage = BackupPruneStage::Confirm;
-                prune.confirmation.clear();
                 prune.message = None;
-                self.shell.input_mode = InputMode::Confirm;
-            }
-        }
-    }
-
-    pub fn backup_prune_push_confirmation(&mut self, ch: char) {
-        if let Some(prune) = self.backups.prune.as_mut() {
-            if prune.stage == BackupPruneStage::Confirm && prune.confirmation.len() < 16 {
-                prune.confirmation.push(ch);
-                prune.message = None;
+                self.shell.input_mode = InputMode::Normal;
             }
         }
     }
@@ -392,10 +347,6 @@ impl AppState {
     pub fn backup_prune_take_for_execute(&mut self) -> Option<BackupPrunePrepared> {
         let prune = self.backups.prune.as_mut()?;
         if prune.stage != BackupPruneStage::Confirm {
-            return None;
-        }
-        if prune.confirmation != "YES" {
-            prune.message = Some("必须精确输入 YES 才会删除备份".into());
             return None;
         }
         let prepared = prune.prepared.take()?;
@@ -433,42 +384,19 @@ impl AppState {
             self.set_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
             return false;
         }
-        self.shell.input_mode = InputMode::Confirm;
+        self.shell.input_mode = InputMode::Normal;
         self.backups.delete = Some(BackupDeleteState {
             stage: WizardStage::Confirm,
             path,
             expected_sha256,
-            confirmation: String::new(),
             message: None,
         });
         true
     }
 
-    pub fn push_backup_delete_confirmation(&mut self, ch: char) {
-        if let Some(delete) = self.backups.delete.as_mut() {
-            if delete.stage == WizardStage::Confirm && delete.confirmation.len() < 16 {
-                delete.confirmation.push(ch);
-                delete.message = None;
-            }
-        }
-    }
-
-    pub fn backspace_backup_delete_confirmation(&mut self) {
-        if let Some(delete) = self.backups.delete.as_mut() {
-            if delete.stage == WizardStage::Confirm {
-                delete.confirmation.pop();
-                delete.message = None;
-            }
-        }
-    }
-
     pub fn submit_backup_delete_confirmation(&mut self) -> Option<(std::path::PathBuf, String)> {
         let delete = self.backups.delete.as_mut()?;
         if delete.stage != WizardStage::Confirm {
-            return None;
-        }
-        if delete.confirmation != "YES" {
-            delete.message = Some("必须精确输入 YES 才会删除备份".to_string());
             return None;
         }
         delete.stage = WizardStage::Running;

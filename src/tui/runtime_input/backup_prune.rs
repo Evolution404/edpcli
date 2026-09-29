@@ -55,13 +55,9 @@ pub(super) fn handle_backup_prune_key(
                 return Some(KeyOutcome::NextIteration);
             }
             BackupPruneStage::Confirm => {
-                if let Some(action) = keys.map(state::InputMode::Confirm, key) {
+                if let Some(action) = keys.map(state::InputMode::Normal, key) {
                     match action {
-                        keymap::TuiAction::Text(ch) => {
-                            state.backup_prune_push_confirmation(ch);
-                        }
-                        keymap::TuiAction::Backspace => state.backup_prune_backspace(),
-                        keymap::TuiAction::Submit => {
+                        keymap::TuiAction::Activate | keymap::TuiAction::Submit => {
                             if let Some(prepared) = state.backup_prune_take_for_execute() {
                                 if let Err(message) = tasks.request_backup_prune_execute(
                                     prepared,
@@ -73,9 +69,6 @@ pub(super) fn handle_backup_prune_key(
                         }
                         keymap::TuiAction::Cancel | keymap::TuiAction::Back => {
                             state.close_backup_prune()
-                        }
-                        keymap::TuiAction::Confirm => {
-                            state.set_notice("备份清理仍需精确输入大写 YES 后按 Enter。")
                         }
                         _ => {}
                     }

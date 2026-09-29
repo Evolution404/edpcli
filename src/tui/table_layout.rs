@@ -13,6 +13,7 @@ pub enum TruncatePolicy {
 pub enum TableKind {
     Devices,
     Backups,
+    RelatedBackups,
     ProvisionDevices,
     InspectFields,
 }
@@ -21,6 +22,7 @@ pub enum TableKind {
 pub enum ColumnId {
     Device,
     Selected,
+    Relation,
     Index,
     Name,
     Time,
@@ -125,6 +127,18 @@ pub fn table_column_schema(kind: TableKind) -> Option<Vec<TableColumnSpec>> {
                 table_column(Name, "名称", column(10, 23, 48, 96, 2, true)),
             ])
         }
+        TableKind::RelatedBackups => Some(vec![
+            table_column(Relation, "关系", column(7, 9, 10, 100, 1, true)),
+            table_column(Time, "时间", column(12, 17, 20, 95, 1, true)),
+            table_column(Capacity, "容量", column(8, 10, 12, 90, 1, false)),
+            table_column(Dept, "部门", column(8, 16, 32, 85, 2, false)),
+            table_column(User, "姓名", column(6, 10, 18, 82, 1, false)),
+            table_column(Model, "型号", column(10, 18, 32, 78, 2, false)),
+            table_column(ProvisionKind, "盘型", column(12, 20, 28, 96, 1, true)),
+            table_column(VidPid, "VID:PID", column(9, 9, 12, 75, 1, false)),
+            table_column(Onlyid, "onlyid", column(8, 12, 20, 72, 1, false)),
+            table_column(Name, "名称", column(12, 24, 48, 70, 3, false)),
+        ]),
         _ => None,
     }
 }
@@ -582,6 +596,45 @@ pub fn backup_table_view(
     TableViewData::from_rows(generation, &columns, projected)
 }
 
+pub fn related_backup_table_view(
+    backups: &[crate::application::BackupWorkspaceItem],
+    related: &[(usize, crate::application::media_identity::BackupAffinity)],
+) -> TableViewData {
+    use crate::application::media_identity::BackupAffinity;
+    let columns = table_column_schema(TableKind::RelatedBackups).expect("related backup schema");
+    let projected = related
+        .iter()
+        .filter_map(|(source, affinity)| backups.get(*source).map(|backup| (backup, affinity)))
+        .map(|(backup, affinity)| {
+            let identity = crate::application::identity::WorkspaceIdentity::from_backup(backup);
+            let cells = identity.display_cells();
+            columns
+                .iter()
+                .map(|column| {
+                    safe(&match column.id {
+                        ColumnId::Relation => match affinity {
+                            BackupAffinity::Confirmed => "● 确认".into(),
+                            BackupAffinity::Possible => "▲ 疑似".into(),
+                            BackupAffinity::Unrelated => "—".into(),
+                        },
+                        ColumnId::Time => backup.display_time.clone(),
+                        ColumnId::Capacity => cells[0].clone(),
+                        ColumnId::VidPid => cells[1].clone(),
+                        ColumnId::Model => cells[2].clone(),
+                        ColumnId::Onlyid => cells[3].clone(),
+                        ColumnId::User => cells[4].clone(),
+                        ColumnId::Dept => cells[5].clone(),
+                        ColumnId::ProvisionKind => cells[6].clone(),
+                        ColumnId::Name => backup.file_name.clone(),
+                        _ => unreachable!("related backup schema"),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    TableViewData::from_rows(0, &columns, projected)
+}
+
 fn column(
     min: u16,
     preferred: u16,
@@ -604,7 +657,7 @@ fn column(
 pub fn layout_for(kind: TableKind) -> AdaptiveTableLayout {
     use TableKind::*;
     let specs = match kind {
-        Devices | Backups => table_column_schema(kind)
+        Devices | Backups | RelatedBackups => table_column_schema(kind)
             .expect("workspace tables have a column schema")
             .into_iter()
             .map(|column| column.layout)

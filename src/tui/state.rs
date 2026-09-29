@@ -37,7 +37,6 @@ pub enum WriteKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WizardStage {
-    Review,
     Confirm,
     Running,
     PostRestore,
@@ -461,12 +460,8 @@ impl AppState {
             self.set_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
             return false;
         }
-        let stage = if kind == WriteKind::Restore {
-            WizardStage::Review
-        } else {
-            WizardStage::Confirm
-        };
-        self.shell.input_mode = if stage == WizardStage::Confirm {
+        let stage = WizardStage::Confirm;
+        self.shell.input_mode = if kind == WriteKind::Restore {
             InputMode::Confirm
         } else {
             InputMode::Normal
@@ -493,15 +488,22 @@ impl AppState {
         true
     }
 
-    pub fn advance_restore_review(&mut self) {
-        if let Some(wizard) = self.shell.wizard.as_mut() {
-            if wizard.kind == WriteKind::Restore && wizard.stage == WizardStage::Review {
-                wizard.stage = WizardStage::Confirm;
-                wizard.confirmation.clear();
-                wizard.message = None;
-                self.shell.input_mode = InputMode::Confirm;
-            }
+    pub fn confirm_backup_create(&mut self) -> Option<WriteIntent> {
+        let wizard = self.shell.wizard.as_mut()?;
+        if wizard.kind != WriteKind::BackupCreate || wizard.stage != WizardStage::Confirm {
+            return None;
         }
+        let intent = WriteIntent {
+            kind: wizard.kind,
+            disk: wizard.disk,
+            backup: None,
+            expected_identity: wizard.expected_identity.clone(),
+        };
+        wizard.stage = WizardStage::Running;
+        wizard.message = Some("正在只读采集并创建元数据备份。".into());
+        self.shell.input_mode = InputMode::Normal;
+        self.shell.critical_operation = true;
+        Some(intent)
     }
 
     pub fn toggle_wizard_detail(&mut self) {
@@ -882,7 +884,7 @@ impl AppState {
             return None;
         }
         if wizard.confirmation != "YES" {
-            wizard.message = Some("加密格式化必须独立输入 YES。".into());
+            wizard.message = Some("开始加密格式化写入前必须独立输入 YES。".into());
             return None;
         }
         let outcome = wizard.restore_outcome.clone()?;
@@ -915,7 +917,7 @@ impl AppState {
             return None;
         }
         if wizard.confirmation != "YES" {
-            wizard.message = Some("重建密钥域必须独立输入 YES。".into());
+            wizard.message = Some("开始重建加密分区写入前必须独立输入 YES。".into());
             return None;
         }
         let outcome = wizard.restore_outcome.clone()?;
@@ -962,7 +964,7 @@ impl AppState {
             return None;
         }
         if wizard.confirmation != "YES" {
-            wizard.message = Some("格式化必须再次精确输入 YES。".into());
+            wizard.message = Some("开始格式化写入前必须再次精确输入 YES。".into());
             return None;
         }
         let outcome = wizard.restore_outcome.clone()?;
@@ -983,14 +985,14 @@ impl AppState {
 
     pub fn push_wizard_confirmation(&mut self, ch: char) {
         if let Some(wizard) = self.shell.wizard.as_mut() {
-            if matches!(
-                wizard.stage,
-                WizardStage::Confirm
-                    | WizardStage::FormatConfirm
-                    | WizardStage::EncryptedFormatConfirm
-                    | WizardStage::ReinitializeConfirm
-            ) && wizard.confirmation.len() < 16
-            {
+            let media_write_confirmation = match wizard.stage {
+                WizardStage::Confirm => wizard.kind == WriteKind::Restore,
+                WizardStage::FormatConfirm
+                | WizardStage::EncryptedFormatConfirm
+                | WizardStage::ReinitializeConfirm => true,
+                _ => false,
+            };
+            if media_write_confirmation && wizard.confirmation.len() < 16 {
                 wizard.confirmation.push(ch);
                 wizard.message = None;
             }
@@ -999,13 +1001,14 @@ impl AppState {
 
     pub fn backspace_wizard_confirmation(&mut self) {
         if let Some(wizard) = self.shell.wizard.as_mut() {
-            if matches!(
-                wizard.stage,
-                WizardStage::Confirm
-                    | WizardStage::FormatConfirm
-                    | WizardStage::EncryptedFormatConfirm
-                    | WizardStage::ReinitializeConfirm
-            ) {
+            let media_write_confirmation = match wizard.stage {
+                WizardStage::Confirm => wizard.kind == WriteKind::Restore,
+                WizardStage::FormatConfirm
+                | WizardStage::EncryptedFormatConfirm
+                | WizardStage::ReinitializeConfirm => true,
+                _ => false,
+            };
+            if media_write_confirmation {
                 wizard.confirmation.pop();
                 wizard.message = None;
             }
@@ -1021,11 +1024,11 @@ impl AppState {
 
     pub fn submit_wizard_confirmation(&mut self) -> Option<WriteIntent> {
         let wizard = self.shell.wizard.as_mut()?;
-        if wizard.stage != WizardStage::Confirm {
+        if wizard.stage != WizardStage::Confirm || wizard.kind != WriteKind::Restore {
             return None;
         }
         if wizard.confirmation != "YES" {
-            wizard.message = Some("必须精确输入 YES 才会进入写盘阶段".to_string());
+            wizard.message = Some("必须精确输入 YES 才会开始向目标设备写入".to_string());
             return None;
         }
         let intent = WriteIntent {
@@ -1723,6 +1726,48 @@ impl AppState {
                 self.provision_close_scheme_picker();
                 return StateEffect::None;
             }
+            if self.backup_create_choice().is_some() {
+                self.cancel_backup_create_choice();
+                return StateEffect::None;
+            }
+            if self.backups.delete.is_some() {
+                self.backups.delete = None;
+                self.shell.input_mode = InputMode::Normal;
+                return StateEffect::None;
+            }
+            if self.backups.batch_delete.is_some() {
+                self.close_backup_batch_delete();
+                return StateEffect::None;
+            }
+            if self.backups.prune.is_some() {
+                self.close_backup_prune();
+                return StateEffect::None;
+            }
+            if let Some(stage) = self.shell.wizard.as_ref().map(|wizard| wizard.stage) {
+                match stage {
+                    WizardStage::Confirm => {
+                        self.shell.wizard = None;
+                        self.shell.input_mode = InputMode::Normal;
+                    }
+                    WizardStage::FormatConfirm => self.cancel_post_restore_format(),
+                    WizardStage::VolumeLabelInput => self.cancel_post_restore_volume_label(),
+                    WizardStage::PasswordInput
+                    | WizardStage::EncryptedFormatConfirm
+                    | WizardStage::ReinitializePassword
+                    | WizardStage::ReinitializePasswordConfirm
+                    | WizardStage::ReinitializeConfirm => self.cancel_post_restore_secret_flow(),
+                    WizardStage::PostRestore | WizardStage::Result => {
+                        self.shell.wizard = None;
+                        self.shell.input_mode = InputMode::Normal;
+                    }
+                    WizardStage::Running
+                    | WizardStage::Formatting
+                    | WizardStage::Reinitializing => {
+                        self.set_notice("关键操作正在执行，当前不能关闭。".to_string());
+                    }
+                }
+                return StateEffect::None;
+            }
             if let Some(advanced) = self
                 .inspect
                 .advanced
@@ -1790,16 +1835,6 @@ impl AppState {
                 self.backups
                     .pane_focus
                     .focus(crate::tui::pane::PaneId::BackupsList);
-                return StateEffect::None;
-            }
-            if self.shell.wizard.is_some() {
-                self.shell.wizard = None;
-                self.shell.input_mode = InputMode::Normal;
-                return StateEffect::None;
-            }
-            if self.backups.delete.is_some() {
-                self.backups.delete = None;
-                self.shell.input_mode = InputMode::Normal;
                 return StateEffect::None;
             }
             if self.shell.input_mode != InputMode::Normal {

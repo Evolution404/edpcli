@@ -64,8 +64,12 @@ pub fn workspace_overview(
         spans.push(Span::styled(metric.value.to_string(), metric.style));
     }
     frame.render_widget(
-        Paragraph::new(Line::from(spans))
-            .block(Block::default().borders(Borders::ALL).title(title)),
+        Paragraph::new(Line::from(spans)).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme::current().pane_border(false))
+                .title(title),
+        ),
         parts[0],
     );
 
@@ -81,7 +85,11 @@ pub fn workspace_overview(
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(search_style)
+                    .border_style(if search.active {
+                        theme::current().pane_border(true)
+                    } else {
+                        theme::current().pane_border(false)
+                    })
                     .title(if search.active {
                         "搜索 · 实时过滤"
                     } else {

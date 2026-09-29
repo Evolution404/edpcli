@@ -101,10 +101,7 @@ fn ch14_write_progress_batch_reaches_tui_state_without_losing_milestones() {
     use edpcli::tui::state::WriteKind;
     let mut state = AppState::new();
     assert!(state.begin_write_wizard(WriteKind::BackupCreate, 6, None));
-    for ch in "YES".chars() {
-        state.push_wizard_confirmation(ch);
-    }
-    assert!(state.submit_wizard_confirmation().is_some());
+    assert!(state.confirm_backup_create().is_some());
     for event in [
         WriteEvent::BackupCreated {
             path: std::path::PathBuf::from("a.edpb"),

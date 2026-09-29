@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use edpcli::application::identity::IdentityMatchLevel;
 use edpcli::provision::DiskProvisionKind;
 use edpcli::tui::disk_layout::DiskRegionKind;
 use edpcli::tui::{
@@ -8,7 +9,13 @@ use edpcli::tui::{
     state::AppState,
     theme::{Theme, ThemeMode},
 };
-use ratatui::{backend::TestBackend, layout::Constraint, style::Color, widgets::Row, Terminal};
+use ratatui::{
+    backend::TestBackend,
+    layout::Constraint,
+    style::{Color, Style},
+    widgets::Row,
+    Terminal,
+};
 
 fn rust_files(root: &Path, out: &mut Vec<PathBuf>) {
     for entry in
@@ -34,9 +41,13 @@ fn chapter_ten_truecolor_palette_is_exact() {
     assert_eq!(palette.selection, Color::Rgb(0x26, 0x34, 0x42));
     assert_eq!(palette.border, Color::Rgb(0x30, 0x39, 0x45));
     assert_eq!(palette.border_focus, Color::Rgb(0x58, 0x75, 0x8D));
-    assert_eq!(palette.text_primary, Color::Rgb(0xD7, 0xDC, 0xE2));
-    assert_eq!(palette.text_secondary, Color::Rgb(0x9B, 0xA7, 0xB3));
-    assert_eq!(palette.text_muted, Color::Rgb(0x68, 0x74, 0x81));
+    assert_eq!(palette.text_primary, Color::Rgb(0xC4, 0xCB, 0xD2));
+    assert_eq!(palette.text_body, Color::Rgb(0xA7, 0xB1, 0xBA));
+    assert_eq!(palette.text_secondary, Color::Rgb(0x89, 0x96, 0xA2));
+    assert_eq!(palette.text_muted, Color::Rgb(0x66, 0x73, 0x7E));
+    assert_eq!(palette.table_text, Color::Rgb(0xA7, 0xB1, 0xBA));
+    assert_eq!(palette.table_text_muted, Color::Rgb(0x7C, 0x89, 0x94));
+    assert_eq!(palette.table_text_active, Color::Rgb(0xC0, 0xC8, 0xCF));
     assert_eq!(palette.accent, Color::Rgb(0x78, 0xA9, 0xC1));
     assert_eq!(palette.accent_soft, Color::Rgb(0x52, 0x75, 0x8A));
     assert_eq!(palette.success, Color::Rgb(0x7F, 0xA6, 0x8A));
@@ -238,6 +249,102 @@ fn selection_overlay_never_overwrites_semantic_foreground() {
     assert_eq!(style.fg, None);
     assert_eq!(style.bg, Some(Color::Rgb(0x26, 0x34, 0x42)));
     assert_ne!(style.bg, Some(Color::Cyan));
+}
+
+#[test]
+fn neutral_table_columns_brighten_without_becoming_accent_blue() {
+    let theme = Theme::truecolor_dark();
+    let palette = theme.palette();
+
+    let ordinary = theme.table_cell(Style::default(), false, true);
+    assert_eq!(ordinary.fg, Some(palette.table_text));
+    assert_ne!(ordinary.fg, Some(palette.text_primary));
+
+    let ordinary_active = theme.table_cell(Style::default(), true, true);
+    assert_eq!(ordinary_active.fg, Some(palette.table_text_active));
+    assert_ne!(ordinary_active.fg, Some(palette.accent));
+
+    let muted = theme.table_text_muted();
+    let muted_active = theme.table_cell(muted, true, true);
+    assert_eq!(muted_active.fg, Some(palette.table_text));
+    assert_ne!(muted_active.fg, Some(palette.accent));
+
+    let semantic = theme.provision_kind(DiskProvisionKind::Mode2);
+    let semantic_active = theme.table_cell(semantic, true, true);
+    assert_ne!(semantic_active.fg, semantic.fg);
+    assert_ne!(semantic_active.fg, Some(palette.accent));
+}
+
+#[test]
+fn shared_surfaces_default_to_soft_body_text_not_heading_white() {
+    let theme = Theme::truecolor_dark();
+    let palette = theme.palette();
+
+    assert_eq!(theme.background().fg, Some(palette.text_body));
+    assert_eq!(theme.canvas().fg, Some(palette.text_body));
+    assert_eq!(theme.raised_surface().fg, Some(palette.text_body));
+    assert_eq!(theme.surface().fg, Some(palette.text_body));
+    assert_eq!(theme.pane_surface(false).fg, Some(palette.text_body));
+    assert_eq!(theme.pane_surface(true).fg, Some(palette.text_body));
+    assert_eq!(theme.input().fg, Some(palette.text_body));
+    assert_eq!(theme.text().fg, Some(palette.text_body));
+    assert_eq!(theme.heading_text().fg, Some(palette.text_primary));
+    assert_ne!(palette.text_body, palette.text_primary);
+    assert_ne!(palette.text_body, palette.accent);
+}
+
+#[test]
+fn restore_match_levels_escalate_from_green_to_red() {
+    let theme = Theme::truecolor_dark();
+
+    assert_eq!(
+        theme.identity_match_level(IdentityMatchLevel::Strong).fg,
+        theme.success().fg
+    );
+    assert_eq!(
+        theme.identity_match_level(IdentityMatchLevel::Medium).fg,
+        theme.secondary_accent().fg
+    );
+    assert_eq!(
+        theme.identity_match_level(IdentityMatchLevel::Weak).fg,
+        theme.warning().fg
+    );
+    assert_eq!(
+        theme.identity_match_level(IdentityMatchLevel::Conflict).fg,
+        theme.danger().fg
+    );
+    assert_eq!(
+        theme.identity_match_level(IdentityMatchLevel::Unknown).fg,
+        theme.muted().fg
+    );
+}
+
+#[test]
+fn workspace_overview_uses_shared_inactive_pane_border() {
+    use edpcli::tui::ui::{workspace_overview, OverviewMetric, OverviewSearch};
+
+    let theme = edpcli::tui::theme::current();
+    let mut terminal = Terminal::new(TestBackend::new(100, 5)).unwrap();
+    terminal
+        .draw(|frame| {
+            workspace_overview(
+                frame,
+                frame.area(),
+                "设备概览",
+                &[OverviewMetric::new("总计", 1, theme.table_text())],
+                &OverviewSearch {
+                    text: String::new(),
+                    active: false,
+                    filtered: false,
+                },
+            );
+        })
+        .unwrap();
+    assert_eq!(
+        terminal.backend().buffer()[(0, 1)].style().fg,
+        Some(theme.palette().border_subtle),
+        "overview must use the same subtle border as any inactive pane"
+    );
 }
 
 #[test]

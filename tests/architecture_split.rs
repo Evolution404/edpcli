@@ -73,6 +73,8 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
         ("src/tui/status.rs", 140),
         ("src/tui/overview.rs", 180),
         ("src/tui/ui/modal.rs", 100),
+        ("src/tui/ui/confirmation.rs", 180),
+        ("src/tui/restore_confirmation_render.rs", 260),
         ("src/tui/ui/workspace_overview.rs", 160),
         ("src/tui/devices/state.rs", 400),
         ("src/tui/disk_layout_state.rs", 120),
@@ -1228,8 +1230,53 @@ fn tui_renderers_do_not_assume_parent_surface_palette_colors() {
     assert!(layout.contains("disk_region_half_block"));
     let table = fs::read_to_string(root.join("src/tui/ui/table.rs")).expect("read shared table");
     let card = fs::read_to_string(root.join("src/tui/ui/card.rs")).expect("read shared card");
-    assert!(table.contains("pane_surface(focused)"));
+    assert!(table.contains("table_surface(focused)"));
     assert!(card.contains("pane_surface(focused)"));
+}
+
+#[test]
+fn media_write_yes_prompt_has_one_ui_owner_and_backup_management_does_not_reuse_it() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let confirmation = fs::read_to_string(root.join("src/tui/ui/confirmation.rs"))
+        .expect("read confirmation component");
+    let root_render = fs::read_to_string(root.join("src/tui/render.rs")).expect("read root render");
+    let provision_render = fs::read_to_string(root.join("src/tui/provision/render.rs"))
+        .expect("read provision render");
+    let backup_render =
+        fs::read_to_string(root.join("src/tui/backups/render.rs")).expect("read backup render");
+    let backup_state =
+        fs::read_to_string(root.join("src/tui/backups/state.rs")).expect("read backup state");
+    let batch_input = fs::read_to_string(root.join("src/tui/runtime_input/backup_batch.rs"))
+        .expect("read batch input");
+    let prune_input = fs::read_to_string(root.join("src/tui/runtime_input/backup_prune.rs"))
+        .expect("read prune input");
+
+    assert!(confirmation.contains("输入 YES 确认写入"));
+    assert!(confirmation.contains("Enter\", theme.accent().add_modifier(Modifier::BOLD)"));
+    assert!(confirmation.contains("开始恢复"));
+    assert!(root_render.contains("render_write_confirmation_modal"));
+    assert!(provision_render.contains("render_write_confirmation_modal"));
+    assert!(backup_render.contains("render_action_confirmation_modal"));
+    for (name, source) in [
+        ("root renderer", root_render.as_str()),
+        ("provision renderer", provision_render.as_str()),
+        ("backup renderer", backup_render.as_str()),
+    ] {
+        assert!(
+            !source.contains("输入 YES"),
+            "{name} must delegate the write-authorization prompt to the shared component"
+        );
+    }
+    for (name, source) in [
+        ("backup state", backup_state.as_str()),
+        ("backup batch input", batch_input.as_str()),
+        ("backup prune input", prune_input.as_str()),
+    ] {
+        assert!(
+            !source.contains("YES"),
+            "{name} must not reuse media-write authorization for backup-file management"
+        );
+    }
 }
 
 #[test]
@@ -1261,7 +1308,7 @@ fn help_and_status_information_architecture_has_single_owners() {
     assert!(help.contains("TABLE_HELP"));
     assert!(status.contains("pub(super) fn dynamic_status"));
     assert!(shell.contains("\"? 帮助\""));
-    assert!(shell.contains("pub fn status_bar"));
+    assert!(shell.contains("pub fn message_bar"));
     assert!(!shell.contains("pub fn footer"));
     let dispatch = controller
         .split_once("pub(super) fn dispatch_action")

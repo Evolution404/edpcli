@@ -14,6 +14,15 @@ pub(super) fn dispatch_table_action_with_clipboard(
     let Some(kind) = state.active_table_kind() else {
         return false;
     };
+    if kind == crate::tui::table_layout::TableKind::RelatedBackups
+        && matches!(
+            action,
+            TuiAction::TableSortToggle | TuiAction::TableSortClear
+        )
+    {
+        state.set_notice("关联备份保持身份关系顺序，不支持排序。");
+        return true;
+    }
     match action {
         TuiAction::TableColumnLeft => {
             state.move_table_column_for_viewport(kind, true, viewport_width, viewport_height);

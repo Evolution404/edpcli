@@ -48,6 +48,9 @@ fn draw_status_backup_detail(
     focused: bool,
 ) {
     use crate::application::media_identity::BackupAffinity;
+    use crate::tui::table_layout::{
+        table_column_schema, table_heading, table_position_label, visible_cell, ColumnId, TableKind,
+    };
 
     let block = crate::tui::ui::card(title, focused);
     let inner = block.inner(area);
@@ -93,39 +96,80 @@ fn draw_status_backup_detail(
         return;
     }
 
-    let header = TableRow::new(["关系", "时间", "容量", "备份文件"])
-        .style(crate::tui::theme::current().table_header(false, focused));
-    let rows = related.iter().map(|(source, affinity)| {
-        let backup = &state.backups()[*source];
-        let (relation, relation_style) = match affinity {
-            BackupAffinity::Confirmed => ("● 确认", success()),
-            BackupAffinity::Possible => ("▲ 疑似", warning()),
-            BackupAffinity::Unrelated => ("—", muted()),
-        };
-        let capacity = backup
-            .size_bytes
-            .map(crate::common::fmt_capacity)
-            .unwrap_or_else(|| "—".into());
-        TableRow::new([
-            Cell::from(relation).style(relation_style),
-            Cell::from(safe(&backup.display_time)),
-            Cell::from(capacity),
-            Cell::from(safe(&backup.file_name)),
-        ])
-    });
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(9),
-            Constraint::Length(19),
-            Constraint::Length(12),
-            Constraint::Min(12),
-        ],
-    )
-    .style(crate::tui::theme::current().pane_surface(focused))
-    .header(header)
-    .row_highlight_style(crate::tui::theme::current().selection_overlay(focused))
-    .highlight_symbol("▌ ");
+    let kind = TableKind::RelatedBackups;
+    let columns = table_column_schema(kind).expect("related backup schema");
+    let headings = columns
+        .iter()
+        .map(|column| column.heading)
+        .collect::<Vec<_>>();
+    let view = state.device_related_backup_table_view();
+    let order = state.table_column_order(kind);
+    let layout = state.table_visual_layout(kind);
+    let visual_widths = state.table_visual_widths(kind, &view.content_widths);
+    let interaction = state.table_interaction(kind);
+    let viewport = layout.layout_with_active(
+        sections[1].width.saturating_sub(4),
+        &visual_widths,
+        interaction.viewport_offset(),
+        Some(interaction.active_column()),
+    );
+    let rows = related
+        .iter()
+        .enumerate()
+        .map(|(position, (source, affinity))| {
+            let backup = &state.backups()[*source];
+            let values = &view.rows[position];
+            TableRow::new(
+                viewport
+                    .columns
+                    .iter()
+                    .map(|column| {
+                        let logical = order[column.index];
+                        let value = &values[logical];
+                        let style = match columns[logical].id {
+                            ColumnId::Relation => match affinity {
+                                BackupAffinity::Confirmed => success(),
+                                BackupAffinity::Possible => warning(),
+                                BackupAffinity::Unrelated => muted(),
+                            },
+                            ColumnId::ProvisionKind => backup
+                                .provision_kind
+                                .map(|kind| crate::tui::theme::current().provision_kind(kind))
+                                .unwrap_or_else(warning),
+                            ColumnId::Model
+                            | ColumnId::VidPid
+                            | ColumnId::Onlyid
+                            | ColumnId::Name => crate::tui::theme::current().table_text_muted(),
+                            _ => Style::default(),
+                        };
+                        let style = crate::tui::theme::current().table_cell(
+                            style,
+                            column.index == interaction.active_column(),
+                            focused,
+                        );
+                        Cell::from(visible_cell(value, column)).style(style)
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        });
+    let header = TableRow::new(
+        viewport
+            .columns
+            .iter()
+            .map(|column| {
+                let logical = order[column.index];
+                let label = table_heading(headings[logical], logical, interaction);
+                let style = crate::tui::theme::current()
+                    .table_header(column.index == interaction.active_column(), focused);
+                Cell::from(visible_cell(&label, column)).style(style)
+            })
+            .collect::<Vec<_>>(),
+    );
+    let table_title = format!(
+        "关联备份 · {}",
+        table_position_label(&layout, interaction, &viewport)
+    );
+    let table = crate::tui::ui::data_table(&table_title, header, rows, viewport.widths(), focused);
     let mut table_state = TableState::default();
     table_state.select(state.device_related_backup_selected_index());
     frame.render_stateful_widget(table, sections[1], &mut table_state);
@@ -133,7 +177,11 @@ fn draw_status_backup_detail(
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("j/k", accent()),
-            Span::raw(" 选择  ·  "),
+            Span::raw(" 选择 · "),
+            Span::styled("h/l", accent()),
+            Span::raw(" 列 · "),
+            Span::styled("H/L", accent()),
+            Span::raw(" 横移 · "),
             Span::styled("R", accent()),
             Span::raw(" 恢复当前备份"),
         ])),

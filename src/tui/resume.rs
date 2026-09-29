@@ -8,7 +8,7 @@ const RESUME_IDENTITY_PIN_FLAG: &str = "--_resume-identity-pin";
 /// Serialize a confirmed write intent for an elevated TUI restart.
 ///
 /// The disk is converted to the platform-native selector before crossing the privilege boundary;
-/// restore additionally pins the exact backup path. The resumed TUI requires a second explicit YES.
+/// restore additionally pins the exact backup path. Media-write authorization is re-established by the TUI before any write begins.
 pub fn resume_argv(intent: &state::WriteIntent) -> Vec<String> {
     let mut argv = vec![
         "tui".to_string(),

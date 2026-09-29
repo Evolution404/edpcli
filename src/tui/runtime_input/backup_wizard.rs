@@ -11,15 +11,9 @@ pub(super) fn handle_backup_wizard_key(
     if let Some(stage) = state.backup_delete().map(|delete| delete.stage) {
         match stage {
             state::WizardStage::Confirm => {
-                if let Some(action) = keys.map(state::InputMode::Confirm, key) {
+                if let Some(action) = keys.map(state::InputMode::Normal, key) {
                     match action {
-                        keymap::TuiAction::Text(ch) => {
-                            state.push_backup_delete_confirmation(ch);
-                        }
-                        keymap::TuiAction::Backspace => {
-                            state.backspace_backup_delete_confirmation();
-                        }
-                        keymap::TuiAction::Submit => {
+                        keymap::TuiAction::Activate | keymap::TuiAction::Submit => {
                             if let Some((path, expected_sha256)) =
                                 state.submit_backup_delete_confirmation()
                             {
@@ -34,9 +28,6 @@ pub(super) fn handle_backup_wizard_key(
                         }
                         keymap::TuiAction::Cancel | keymap::TuiAction::Back => {
                             let _ = state.navigate(NavCommand::Escape, 1);
-                        }
-                        keymap::TuiAction::Confirm => {
-                            state.set_notice("删除备份仍需精确输入大写 YES 后按 Enter。")
                         }
                         _ => {}
                     }
@@ -61,38 +52,36 @@ pub(super) fn handle_backup_wizard_key(
 
     if let Some(stage) = state.wizard().map(|wizard| wizard.stage) {
         match stage {
-            state::WizardStage::Review => {
-                if let Some(action) = keys.map(state::InputMode::Normal, key) {
-                    match action {
-                        keymap::TuiAction::Activate => state.advance_restore_review(),
-                        keymap::TuiAction::Open => state.toggle_wizard_detail(),
-                        keymap::TuiAction::Back => {
-                            let _ = state.navigate(NavCommand::Escape, 1);
-                        }
-                        _ => {}
-                    }
-                }
-                return Some(KeyOutcome::NextIteration);
-            }
             state::WizardStage::Confirm => {
-                if let Some(action) = keys.map(state::InputMode::Confirm, key) {
-                    match action {
-                        keymap::TuiAction::Text(ch) => state.push_wizard_confirmation(ch),
-                        keymap::TuiAction::Backspace => {
-                            state.backspace_wizard_confirmation();
-                        }
-                        keymap::TuiAction::Submit => {
-                            if let Some(intent) = state.submit_wizard_confirmation() {
-                                if !crate::elevate::is_root() {
-                                    return Some(KeyOutcome::Elevate(intent));
-                                }
-                                if intent.kind == state::WriteKind::BackupCreate {
+                let kind = state.wizard().map(|wizard| wizard.kind);
+                if kind == Some(state::WriteKind::BackupCreate) {
+                    if let Some(action) = keys.map(state::InputMode::Normal, key) {
+                        match action {
+                            keymap::TuiAction::Activate | keymap::TuiAction::Submit => {
+                                if let Some(intent) = state.confirm_backup_create() {
                                     if let Err(message) = tasks
                                         .request_backup_create(intent, backup_dir.to_path_buf())
                                     {
                                         state.finish_write(Err(message.to_string()));
                                     }
-                                } else if let Err(message) =
+                                }
+                            }
+                            keymap::TuiAction::Cancel | keymap::TuiAction::Back => {
+                                let _ = state.navigate(NavCommand::Escape, 1);
+                            }
+                            _ => {}
+                        }
+                    }
+                } else if let Some(action) = keys.map(state::InputMode::Confirm, key) {
+                    match action {
+                        keymap::TuiAction::Text(ch) => state.push_wizard_confirmation(ch),
+                        keymap::TuiAction::Backspace => state.backspace_wizard_confirmation(),
+                        keymap::TuiAction::Submit => {
+                            if let Some(intent) = state.submit_wizard_confirmation() {
+                                if !crate::elevate::is_root() {
+                                    return Some(KeyOutcome::Elevate(intent));
+                                }
+                                if let Err(message) =
                                     tasks.request_write(intent, backup_dir.to_path_buf())
                                 {
                                     state.finish_restore(Err(message.to_string()));
@@ -103,7 +92,7 @@ pub(super) fn handle_backup_wizard_key(
                             let _ = state.navigate(NavCommand::Escape, 1);
                         }
                         keymap::TuiAction::Confirm => {
-                            state.set_notice("破坏性操作仍需精确输入大写 YES 后按 Enter。")
+                            state.set_notice("写入目标介质前必须精确输入大写 YES 后按 Enter。")
                         }
                         _ => {}
                     }

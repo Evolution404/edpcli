@@ -46,31 +46,19 @@ pub(super) fn draw_backup_create_choice(
     let Some(_choice) = state.backup_create_choice() else {
         return;
     };
-    let mut lines = vec![
-        Line::from(Span::styled("创建元数据备份", accent())),
-        Line::from(""),
-        Line::from("恢复内容"),
-        Line::from("  ✓ 物理身份/几何"),
-        Line::from("  ✓ 分区结构"),
-        Line::from("  ✓ EDP 协议（如适用）"),
-        Line::from("  ✗ 文件系统"),
-        Line::from("  ✗ 目录"),
-        Line::from("  ✗ 用户文件"),
-    ];
-    lines.extend([
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Enter/o", success()),
-            Span::raw(" 确认   "),
-            Span::styled("Esc/q", warning()),
-            Span::raw(" 取消"),
-        ]),
-    ]);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(crate::tui::ui::card("元数据备份", true))
-            .wrap(Wrap { trim: true }),
+    crate::tui::ui::render_action_confirmation_modal(
+        frame,
         area,
+        crate::tui::ui::ActionConfirmationSpec {
+            title: "创建元数据备份",
+            headline: "创建只读元数据备份？",
+            details: vec![
+                Line::from("✓ 物理身份 / 几何 / 分区结构 / EDP 协议元数据"),
+                Line::from("✗ 不读取文件系统目录和用户文件"),
+                Line::from(Span::styled("这是只读操作，不需要介质写入授权。", muted())),
+            ],
+            tone: crate::tui::ui::ConfirmationTone::Neutral,
+        },
     );
 }
 
@@ -524,6 +512,29 @@ pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect,
     let Some(delete) = state.backup_delete() else {
         return;
     };
+    if delete.stage == WizardStage::Confirm {
+        crate::tui::ui::render_action_confirmation_modal(
+            frame,
+            area,
+            crate::tui::ui::ActionConfirmationSpec {
+                title: "删除备份",
+                headline: "永久删除当前备份？",
+                details: vec![
+                    Line::from(vec![
+                        Span::styled("文件  ", muted()),
+                        Span::raw(safe(&delete.path.display().to_string())),
+                    ]),
+                    Line::from("删除前仍会重新扫描并复核固定 SHA-256 与保留底线。"),
+                    Line::from(Span::styled(
+                        "此操作不可撤销，但不是目标介质写入。",
+                        warning(),
+                    )),
+                ],
+                tone: crate::tui::ui::ConfirmationTone::Destructive,
+            },
+        );
+        return;
+    }
     let mut lines = vec![
         Line::from(Span::styled("删除备份", danger())),
         Line::from(vec![
@@ -533,13 +544,6 @@ pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect,
         Line::from("安全规则：固定选中时 SHA-256 → 删除前重新扫描 → 内容复核 → 至少保留该盘 1 份备份 → 删除单文件 .edpb"),
     ];
     match delete.stage {
-        WizardStage::Confirm => {
-            lines.push(Line::from(Span::styled(
-                "这是不可撤销操作。请输入 YES 确认删除：",
-                warning(),
-            )));
-            lines.push(Line::from(format!("> {}", safe(&delete.confirmation))));
-        }
         WizardStage::Running => {
             lines.push(Line::from(
                 "正在复核并删除；q / Esc / Ctrl-C 将延迟到安全结束点。",
@@ -601,22 +605,28 @@ pub(super) fn draw_backup_batch_delete(
                     format!("计划已固定：将删除 {planned} 份备份。"),
                     warning(),
                 )),
-                Line::from("Enter 进入最终 YES 确认；Esc 取消计划并保留勾选。"),
+                Line::from("Enter 打开删除确认；Esc 取消计划并保留勾选。"),
             ]);
         }
         BackupBatchDeleteStage::Confirm => {
-            lines.extend([
-                Line::from(Span::styled(
-                    format!("不可撤销：即将删除 {planned} 份备份。"),
-                    danger(),
-                )),
-                Line::from(vec![
-                    Span::raw("精确输入 "),
-                    Span::styled("YES", danger()),
-                    Span::raw(" 后按 Enter： "),
-                    Span::styled(safe(&batch.confirmation), input_focused()),
-                ]),
-            ]);
+            crate::tui::ui::render_action_confirmation_modal(
+                frame,
+                area,
+                crate::tui::ui::ActionConfirmationSpec {
+                    title: "批量删除备份",
+                    headline: "确认执行批量删除？",
+                    details: vec![
+                        Line::from(format!("将删除 {planned} 份已固定备份。")),
+                        Line::from("执行时逐条复核路径、SHA-256 与保留底线。"),
+                        Line::from(Span::styled(
+                            "此操作不可撤销，但不是目标介质写入。",
+                            warning(),
+                        )),
+                    ],
+                    tone: crate::tui::ui::ConfirmationTone::Destructive,
+                },
+            );
+            return;
         }
         BackupBatchDeleteStage::Running => {
             lines.push(Line::from(Span::styled(
@@ -691,7 +701,7 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
                     )),
                     Line::from(""),
                     Line::from(Span::styled(
-                        "Enter 进入 YES 确认；执行时逐条按固定 SHA-256 复核。",
+                        "Enter 打开清理确认；执行时逐条按固定 SHA-256 复核。",
                         warning(),
                     )),
                 ]);
@@ -703,18 +713,24 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
                 .as_ref()
                 .map(|prepared| prepared.plan.targets.len())
                 .unwrap_or(0);
-            lines.extend([
-                Line::from(Span::styled(
-                    format!("即将删除 {count} 份旧备份，这是不可撤销操作。"),
-                    danger(),
-                )),
-                Line::from(vec![
-                    Span::raw("精确输入 "),
-                    Span::styled("YES", danger()),
-                    Span::raw(" 后按 Enter： "),
-                    Span::styled(safe(&prune.confirmation), input_focused()),
-                ]),
-            ]);
+            crate::tui::ui::render_action_confirmation_modal(
+                frame,
+                area,
+                crate::tui::ui::ActionConfirmationSpec {
+                    title: "备份清理确认",
+                    headline: "确认执行 keep-N 清理？",
+                    details: vec![
+                        Line::from(format!("将删除 {count} 份旧备份。")),
+                        Line::from("删除前逐条复核固定摘要与保留底线。"),
+                        Line::from(Span::styled(
+                            "此操作不可撤销，但不是目标介质写入。",
+                            warning(),
+                        )),
+                    ],
+                    tone: crate::tui::ui::ConfirmationTone::Destructive,
+                },
+            );
+            return;
         }
         BackupPruneStage::Running => {
             lines.push(Line::from(Span::styled(
