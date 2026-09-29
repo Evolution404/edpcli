@@ -8,7 +8,9 @@ use edpcli::application::media_identity::{
     MediaRelationship, ProtocolIdentityEvidence, RestoreAuthorizationDecision,
     RestoreAuthorizationPolicy, RestoreGeometryRequirements, RestoreRejection, SerialQuality,
 };
-use edpcli::application::media_identity_observer::observe_media_identity_readonly;
+use edpcli::application::media_identity_observer::{
+    media_identity_from_protocol_image, observe_media_identity_readonly,
+};
 use edpcli::diskio::SectorDev;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::provision::DiskProvisionKind;
@@ -480,6 +482,123 @@ impl SectorDev for ReadOnlyAuditDev {
             "identity observation attempted a read-write reopen",
         ))
     }
+}
+
+#[cfg(target_os = "macos")]
+struct StaleEdpRunner;
+
+#[cfg(target_os = "macos")]
+impl CmdRunner for StaleEdpRunner {
+    fn check_output(&self, cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+        if cmd == ["diskutil", "info", "-plist", "disk26"] {
+            return Ok(
+                r#"<plist version="1.0"><dict><key>DiskSize</key><integer>125829120000</integer></dict></plist>"#
+                    .into(),
+            );
+        }
+        Err(io::Error::other("platform query unavailable in stale fixture"))
+    }
+
+    fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
+        Some(HardwareProbe {
+            vid: Some(0x3535),
+            pid: Some(0x6300),
+            transport: NativeTransport::Uas,
+            windows_pnp_instance_id: None,
+            inquiry: Some(InquiryInfo {
+                vendor: "AIGO".into(),
+                product: "U335".into(),
+                revision: "PMAP".into(),
+            }),
+        })
+    }
+
+    fn hardware_serial(&self, _disk: u32) -> Option<String> {
+        Some("AIGO-STALE-EDP-PLAIN".into())
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct StaleEdpPlainDev {
+    protocol: Vec<u8>,
+    boot: Vec<u8>,
+    reads: usize,
+    writes: usize,
+}
+
+#[cfg(target_os = "macos")]
+impl SectorDev for StaleEdpPlainDev {
+    fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+        self.reads += 1;
+        if lba < 13 {
+            let start = lba as usize * 512;
+            return Ok(self.protocol[start..start + 512].to_vec());
+        }
+        if lba == 2_048 {
+            return Ok(self.boot.clone());
+        }
+        Ok(vec![0u8; 512])
+    }
+
+    fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+        self.writes += 1;
+        Err(io::Error::other("stale identity observation attempted a write"))
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn formatted_plain_layout_overrides_stale_valid_edp_protocol_for_readonly_identity() {
+    const TOTAL: u64 = 245_760_000;
+    let runner = StaleEdpRunner;
+    let original = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/backup/disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_mode1_20260916_233626.bin"
+    ))
+    .to_vec();
+    assert_eq!(original.len(), 13 * 512);
+    let original_identity =
+        media_identity_from_protocol_image(&runner, 26, &original).expect("original EDP identity");
+    assert_eq!(
+        original_identity.protocol.provision_kind,
+        Some(DiskProvisionKind::Mode1),
+        "authentic EDP fixture must remain recognized before the MBR is replaced"
+    );
+
+    let mut protocol = original;
+    protocol[..512].fill(0);
+    let entry = 0x1be;
+    protocol[entry + 4] = 0x07;
+    protocol[entry + 8..entry + 12].copy_from_slice(&2_048u32.to_le_bytes());
+    protocol[entry + 12..entry + 16]
+        .copy_from_slice(&u32::try_from(TOTAL - 2_048).unwrap().to_le_bytes());
+    protocol[510..512].copy_from_slice(&[0x55, 0xaa]);
+
+    let fs = edpcli::provision::build_empty_exfat(
+        2_048,
+        TOTAL - 2_048,
+        0x1234_5678,
+        "PLAIN",
+    )
+    .expect("build strict exFAT boot");
+    let boot = fs.sectors().get(&0).expect("exFAT boot sector").to_vec();
+    let mut dev = StaleEdpPlainDev {
+        protocol,
+        boot,
+        reads: 0,
+        writes: 0,
+    };
+
+    let observed =
+        observe_media_identity_readonly(&runner, 26, &mut dev).expect("readonly stale-media audit");
+    assert_eq!(
+        observed.snapshot.protocol.provision_kind,
+        Some(DiskProvisionKind::Plain)
+    );
+    assert_eq!(observed.snapshot.protocol.device_id, None);
+    assert_eq!(observed.snapshot.protocol.onlyid, None);
+    assert_eq!(dev.writes, 0);
+    assert!(dev.reads > 13, "runtime Plain proof must inspect the live filesystem boot");
 }
 
 #[test]
