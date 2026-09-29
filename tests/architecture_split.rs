@@ -251,6 +251,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/dispatch.rs",
         "src/tui/controller.rs",
         "src/tui/controller/provision.rs",
+        "src/tui/task_gate.rs",
         "src/tui/table_state.rs",
         "src/inspect/model.rs",
         "src/inspect_adapter.rs",
@@ -274,7 +275,11 @@ fn large_modules_are_split_by_domain_boundary() {
         "shared table interaction state must stay isolated from AppState orchestration"
     );
     assert!(lines("src/tui/render.rs") < 1_500);
-    assert!(lines("src/tui/task.rs") < 1_000);
+    assert!(lines("src/tui/task.rs") < 800);
+    assert!(
+        lines("src/tui/task_gate.rs") < 180,
+        "generation/single-flight task gates must stay isolated from business worker routing"
+    );
     assert!(
         lines("src/tui/mod.rs") < 400,
         "TUI module root must remain lifecycle-oriented; action dispatch belongs in dispatch.rs"
