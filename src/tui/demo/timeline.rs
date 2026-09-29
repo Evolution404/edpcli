@@ -1,13 +1,37 @@
-//! Fixed progress events projected into the production ProvisionRunState.
+//! Fixed progress events projected into the production OperationRunState.
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use crate::application::progress::{
-    OperationKind, Phase, ProgressEvent, Severity, Step, TransactionActivity,
-    TransactionActivityPhase, Unit,
+    LogPolicy, OperationKind, OperationRunState, Phase, ProgressEvent, Severity, Step,
+    TransactionActivity, TransactionActivityPhase, WorkProgress,
 };
-use crate::tui::state::{BackupVerifyRunState, ProvisionRunState};
+use crate::tui::state::BackupVerifyRunState;
+
+fn demo_progress(
+    operation: OperationKind,
+    phase: Phase,
+    step: Step,
+    progress: (u64, u64),
+    work: Option<TransactionActivity>,
+    detail: impl Into<String>,
+    emitted_at: Instant,
+) -> ProgressEvent {
+    let (current, total) = progress;
+    let mut event = ProgressEvent::new(phase, step, current, total);
+    event.operation = operation;
+    event.work = work.map(WorkProgress::from_activity);
+    event.detail = Some(detail.into());
+    event.severity = Severity::Info;
+    event.log_policy = if event.work.is_some() {
+        LogPolicy::SnapshotOnly
+    } else {
+        LogPolicy::AppendOnChange
+    };
+    event.emitted_at = emitted_at;
+    event
+}
 
 pub struct DemoTimeline;
 
@@ -17,7 +41,7 @@ impl DemoTimeline {
     pub const LONG_LAST_TICK: usize = 44;
     pub const BACKUP_LAST_TICK: usize = 3;
 
-    pub fn at_tick(tick: usize, base: Instant) -> ProvisionRunState {
+    pub fn at_tick(tick: usize, base: Instant) -> OperationRunState {
         let steps = [
             (
                 Phase::Backup,
@@ -63,25 +87,24 @@ impl DemoTimeline {
             .enumerate()
             .take(tick.min(Self::LAST_TICK) + 1)
         {
-            log.push_back(ProgressEvent {
-                operation: OperationKind::Provision,
+            log.push_back(demo_progress(
+                OperationKind::Provision,
                 phase,
                 step,
-                current: (index + 1) as u64,
-                total,
-                unit: Unit::Steps,
-                work: activity.map(|phase| TransactionActivity {
+                ((index + 1) as u64, total),
+                activity.map(|phase| TransactionActivity {
                     phase,
                     current: 7,
                     total: 13,
                 }),
-                detail: Some(detail.into()),
-                severity: Severity::Info,
-                emitted_at: base + Duration::from_secs(index as u64 * 2),
-            });
+                detail,
+                base + Duration::from_secs(index as u64 * 2),
+            ));
         }
         let latest = log.back().cloned();
-        ProvisionRunState {
+        OperationRunState {
+            operation: OperationKind::Provision,
+            target: "DEMO disk".into(),
             started_at: base,
             last_activity_at: latest.as_ref().map_or(base, |event| event.emitted_at),
             latest,
@@ -89,7 +112,7 @@ impl DemoTimeline {
         }
     }
 
-    pub fn long_at_tick(tick: usize, base: Instant) -> ProvisionRunState {
+    pub fn long_at_tick(tick: usize, base: Instant) -> OperationRunState {
         use crate::provision::PartitionRole;
 
         let total = 8;
@@ -100,22 +123,19 @@ impl DemoTimeline {
                         work: Option<(TransactionActivityPhase, u64, u64)>,
                         detail: String| {
             let index = events.len();
-            events.push(ProgressEvent {
-                operation: OperationKind::Provision,
+            events.push(demo_progress(
+                OperationKind::Provision,
                 phase,
                 step,
-                current,
-                total,
-                unit: Unit::Steps,
-                work: work.map(|(phase, current, total)| TransactionActivity {
+                (current, total),
+                work.map(|(phase, current, total)| TransactionActivity {
                     phase,
                     current,
                     total,
                 }),
-                detail: Some(detail),
-                severity: Severity::Info,
-                emitted_at: base + Duration::from_secs(index as u64),
-            });
+                detail,
+                base + Duration::from_secs(index as u64),
+            ));
         };
 
         push(
@@ -277,7 +297,9 @@ impl DemoTimeline {
             .take(tick.min(Self::LONG_LAST_TICK) + 1)
             .collect();
         let latest = log.back().cloned();
-        ProvisionRunState {
+        OperationRunState {
+            operation: OperationKind::Provision,
+            target: "DEMO slow disk".into(),
             started_at: base,
             last_activity_at: latest.as_ref().map_or(base, |event| event.emitted_at),
             latest,
@@ -309,17 +331,16 @@ impl DemoTimeline {
             .into_iter()
             .enumerate()
             .take(tick.min(Self::BACKUP_LAST_TICK) + 1)
-            .map(|(index, (phase, step, detail))| ProgressEvent {
-                operation: OperationKind::Backup,
-                phase,
-                step,
-                current: (index + 1) as u64,
-                total,
-                unit: Unit::Steps,
-                work: None,
-                detail: Some(detail.into()),
-                severity: Severity::Info,
-                emitted_at: base + Duration::from_secs(index as u64 * 2),
+            .map(|(index, (phase, step, detail))| {
+                demo_progress(
+                    OperationKind::Backup,
+                    phase,
+                    step,
+                    ((index + 1) as u64, total),
+                    None,
+                    detail,
+                    base + Duration::from_secs(index as u64 * 2),
+                )
             })
             .collect();
         BackupVerifyRunState {

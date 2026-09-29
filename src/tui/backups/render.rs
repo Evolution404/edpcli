@@ -38,50 +38,24 @@ fn backup_table_values(
         .collect()
 }
 
-pub(super) fn draw_backup_create_choice(
-    frame: &mut Frame,
-    area: ratatui::layout::Rect,
-    state: &AppState,
-) {
-    let Some(_choice) = state.backup_create_choice() else {
-        return;
-    };
-    crate::tui::ui::render_action_confirmation_modal(
-        frame,
-        area,
-        crate::tui::ui::ActionConfirmationSpec {
-            title: "创建元数据备份",
-            headline: "创建只读元数据备份？",
-            details: vec![
-                Line::from("✓ 物理身份 / 几何 / 分区结构 / EDP 协议元数据"),
-                Line::from("✗ 不读取文件系统目录和用户文件"),
-                Line::from(Span::styled("这是只读操作，不需要介质写入授权。", muted())),
-            ],
-            tone: crate::tui::ui::ConfirmationTone::Neutral,
-        },
-    );
-}
-
 pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     if let Some(run) = state.backup_verify_run() {
         let mut lines = vec![
             Line::from(Span::styled("备份校验进行中", accent())),
             Line::from(format!("对象  {}", safe(&run.path.display().to_string()))),
             Line::from(format!(
-                "当前阶段  {} · {} · {}/{}",
+                "当前阶段  {} · {} · {:.2}%",
                 run.latest.phase.label(),
                 run.latest.step.label(),
-                run.latest.current,
-                run.latest.total
+                f64::from(run.latest.overall.basis_points()) / 100.0
             )),
             Line::from(""),
             Line::from(Span::styled("运行日志", secondary())),
         ];
         lines.extend(run.log.iter().map(|event| {
             Line::from(safe(&format!(
-                "[{}/{}] {}  {}",
-                event.current,
-                event.total,
+                "[{:.2}%] {}  {}",
+                f64::from(event.overall.basis_points()) / 100.0,
                 event.phase.label(),
                 event.detail.as_deref().unwrap_or(event.step.label())
             )))
@@ -764,63 +738,4 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
             .wrap(Wrap { trim: true }),
         area,
     );
-}
-
-/// 把类型化写盘事件映射为向导 Running 阶段的单行显示文本。
-/// 直接从事件类型映射，不经 ANSI 文本反解析；调用方负责经 `safe` 消毒。
-pub(super) fn write_progress_text(event: &crate::application::WriteEvent) -> String {
-    use crate::application::WriteEvent;
-    match event {
-        WriteEvent::BackupCreated { path } => format!(
-            "备份完成：{}",
-            path.file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.to_string_lossy().into_owned())
-        ),
-        WriteEvent::RestoreMatchesHeader { onlyid, count, .. } => {
-            format!("onlyid={onlyid} 匹配 {count} 个备份")
-        }
-        WriteEvent::RestoreMatchRow { index, time, .. } => {
-            format!("[{index}] {time}")
-        }
-        WriteEvent::RestoreSelectionRetry { message } => message.clone(),
-        WriteEvent::BackupShaVerified { .. } => "备份 SHA-256 校验通过".to_string(),
-        WriteEvent::RestoreDryRunNotice { .. } => "[dry-run] 还原预览完成，未写入".to_string(),
-        WriteEvent::RestoreTargetHeader { path } => format!(
-            "还原目标已确认：{}",
-            path.file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.to_string_lossy().into_owned())
-        ),
-        WriteEvent::RestoreWriteCompleted => {
-            "元数据恢复成功；文件系统未恢复，部分分区可能需要格式化".to_string()
-        }
-        WriteEvent::PostRestoreAssessment { assessment } => {
-            use crate::application::post_restore::PostRestorePartitionState;
-            let needs_format = assessment
-                .partitions
-                .iter()
-                .filter(|partition| partition.state == PostRestorePartitionState::NeedsFormat)
-                .count();
-            let password_required = assessment
-                .partitions
-                .iter()
-                .filter(|partition| partition.state == PostRestorePartitionState::PasswordRequired)
-                .count();
-            let invalid = assessment
-                .partitions
-                .iter()
-                .filter(|partition| {
-                    partition.state == PostRestorePartitionState::CryptoMetadataInvalid
-                })
-                .count();
-            format!(
-                "恢复后检查：{} 个分区；需格式化 {}；需原密码 {}；加密元数据异常 {}",
-                assessment.partitions.len(),
-                needs_format,
-                password_required,
-                invalid
-            )
-        }
-    }
 }

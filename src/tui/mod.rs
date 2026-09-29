@@ -16,6 +16,7 @@ mod help_overlay;
 pub mod keymap;
 mod overview;
 pub mod pane;
+mod progress_transport;
 pub mod render;
 mod resume;
 mod runtime_input;
@@ -164,7 +165,10 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             }
 
             let now = Instant::now();
-            const MIN_RENDER_INTERVAL: Duration = Duration::from_millis(16);
+            // Long-running operations may produce one progress snapshot per sector.
+            // Rendering at 20 Hz keeps gauges responsive without tying terminal paints
+            // to storage event frequency.
+            const MIN_RENDER_INTERVAL: Duration = Duration::from_millis(50);
             if redraw_requested
                 && last_render_at.is_none_or(|last| now.duration_since(last) >= MIN_RENDER_INTERVAL)
             {

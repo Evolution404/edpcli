@@ -48,13 +48,14 @@ fn backup_workspace_uses_one_create_modal_and_only_keeps_explicit_single_key_act
     let state = include_str!("../src/tui/backups/state.rs");
     assert!(keymap.contains("KeyCode::Char('R') => Some(TuiAction::Restore)"));
 
-    let render = include_str!("../src/tui/backups/render.rs");
-    assert!(state.contains("begin_backup_create_choice"));
-    assert!(state.contains("pub struct BackupCreateChoiceState;"));
+    let render = include_str!("../src/tui/render.rs");
+    let runtime_input = include_str!("../src/tui/runtime_input.rs");
+    assert!(!state.contains("BackupCreateChoiceState"));
+    assert!(!state.contains("begin_backup_create_choice"));
+    assert!(!state.contains("create_choice:"));
+    assert!(!runtime_input.contains("backup_choice"));
     assert!(render.contains("创建元数据备份"));
-    assert!(render.contains("不读取文件系统目录和用户文件"));
-    assert!(render.contains("不需要介质写入授权"));
-    assert!(!render.contains("进一步采集可验证分区/文件系统证据"));
+    assert!(render.contains("不会向目标设备写入"));
 }
 
 #[test]

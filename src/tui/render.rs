@@ -19,17 +19,19 @@ mod backups_render;
 mod devices_render;
 #[path = "inspect/render.rs"]
 mod inspect_render;
+#[path = "operation_progress_render.rs"]
+mod operation_progress_render;
 #[path = "provision/render.rs"]
 mod provision_render;
 #[path = "restore_confirmation_render.rs"]
 mod restore_confirmation_render;
 
 use backups_render::{
-    draw_backup_batch_delete, draw_backup_create_choice, draw_backup_delete, draw_backup_prune,
-    draw_backups, write_progress_text,
+    draw_backup_batch_delete, draw_backup_delete, draw_backup_prune, draw_backups,
 };
 use devices_render::draw_devices;
 use inspect_render::draw_advanced_inspect;
+use operation_progress_render::draw_operation_progress;
 use provision_render::{draw_provision, draw_scheme_picker};
 use restore_confirmation_render::draw_restore_write_confirmation;
 
@@ -298,6 +300,29 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         draw_restore_write_confirmation(frame, area, state);
         return;
     }
+    if wizard.kind == WriteKind::BackupCreate && wizard.stage == WizardStage::Confirm {
+        super::ui::render_action_confirmation_modal(
+            frame,
+            area,
+            super::ui::ActionConfirmationSpec {
+                title: "创建元数据备份",
+                headline: "开始只读元数据备份？",
+                details: vec![
+                    Line::from(format!("目标  disk{}", wizard.disk)),
+                    Line::from("仅读取介质身份、几何、分区结构与协议元数据。"),
+                    Line::from(Span::styled("不会向目标设备写入。", muted())),
+                ],
+                tone: super::ui::ConfirmationTone::Neutral,
+            },
+        );
+        return;
+    }
+    if wizard.stage == WizardStage::Running {
+        if let Some(run) = wizard.run.as_ref() {
+            draw_operation_progress(frame, area, run);
+        }
+        return;
+    }
 
     let mut lines: Vec<Line> = Vec::new();
     let title = if wizard.kind == WriteKind::Restore {
@@ -363,48 +388,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 lines.push(Line::from("只读采集设备元数据，不会向目标 U 盘写入。"));
             }
         }
-        WizardStage::Running => {
-            lines.push(Line::from(Span::styled(
-                if wizard.kind == WriteKind::Restore {
-                    "元数据恢复进行中"
-                } else {
-                    "元数据备份进行中"
-                },
-                accent().add_modifier(Modifier::BOLD),
-            )));
-            lines.push(Line::from(Span::styled(
-                if wizard.kind == WriteKind::Restore {
-                    "关键事务执行期间 q / Esc / Ctrl-C 不会中断写入、读回或回滚。"
-                } else {
-                    "只读备份任务执行期间可等待安全结束点。"
-                },
-                muted(),
-            )));
-            lines.push(Line::from(""));
-            if let Some(event) = wizard.progress.as_ref() {
-                lines.push(Line::from(vec![
-                    Span::styled("● ", accent()),
-                    Span::raw(safe(&write_progress_text(event))),
-                ]));
-            } else if let Some(message) = &wizard.message {
-                lines.push(Line::from(vec![
-                    Span::styled("● ", accent()),
-                    Span::raw(safe(message)),
-                ]));
-            }
-            if wizard.detail_expanded {
-                lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled("详细日志", muted())));
-                for event in wizard.progress_log.iter().rev().take(8).rev() {
-                    lines.push(Line::from(vec![
-                        Span::styled("  · ", muted()),
-                        Span::styled(safe(&write_progress_text(event)), muted()),
-                    ]));
-                }
-            } else {
-                lines.push(Line::from(Span::styled("o 展开详细日志", muted())));
-            }
-        }
+        WizardStage::Running => unreachable!("running wizard uses shared operation renderer"),
         WizardStage::PostRestore => {
             lines.push(Line::from(Span::styled(
                 "元数据恢复成功 ✓",
@@ -822,22 +806,6 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     );
 
     match wizard.stage {
-        WizardStage::Confirm if wizard.kind == WriteKind::BackupCreate => {
-            super::ui::render_action_confirmation_modal(
-                frame,
-                area,
-                super::ui::ActionConfirmationSpec {
-                    title: "创建元数据备份",
-                    headline: "开始只读元数据备份？",
-                    details: vec![
-                        Line::from(format!("目标  disk{}", wizard.disk)),
-                        Line::from("仅读取介质身份、几何、分区结构与协议元数据。"),
-                        Line::from(Span::styled("不会向目标设备写入。", muted())),
-                    ],
-                    tone: super::ui::ConfirmationTone::Neutral,
-                },
-            );
-        }
         WizardStage::FormatConfirm => {
             let partition = wizard
                 .pending_format
@@ -963,21 +931,20 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     super::shell::header(frame, chunks[0], state, core_mode);
     super::shell::navigation(frame, chunks[1], state);
     let content_area = chunks[2];
-    let restore_confirmation_open = state.wizard().is_some_and(|wizard| {
-        wizard.kind == WriteKind::Restore && wizard.stage == WizardStage::Confirm
+    let write_confirmation_open = state.wizard().is_some_and(|wizard| {
+        matches!(wizard.kind, WriteKind::Restore | WriteKind::BackupCreate)
+            && wizard.stage == WizardStage::Confirm
     });
 
     if state.workspace() == Workspace::Inspect && state.advanced_inspect().is_some() {
         draw_advanced_inspect(frame, content_area, state);
-    } else if state.backup_create_choice().is_some() {
-        draw_backup_create_choice(frame, content_area, state);
     } else if state.backup_delete().is_some() {
         draw_backup_delete(frame, content_area, state);
     } else if state.backup_batch_delete().is_some() {
         draw_backup_batch_delete(frame, content_area, state);
     } else if state.backup_prune().is_some() {
         draw_backup_prune(frame, content_area, state);
-    } else if state.wizard().is_some() && !restore_confirmation_open {
+    } else if state.wizard().is_some() && !write_confirmation_open {
         draw_wizard(frame, content_area, state);
     } else if state.input_mode() == InputMode::Command {
         draw_command_palette(frame, content_area, state);
@@ -1000,7 +967,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     if state.help_open() {
         super::help_overlay::draw_help_overlay(frame, content_area, state);
     }
-    if restore_confirmation_open {
+    if write_confirmation_open {
         draw_wizard(frame, content_area, state);
     }
 

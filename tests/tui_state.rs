@@ -110,10 +110,14 @@ fn ch14_write_progress_batch_reaches_tui_state_without_losing_milestones() {
     ] {
         state.set_write_progress(event);
     }
-    let log = &state.wizard().unwrap().progress_log;
-    assert_eq!(log.len(), 2);
-    assert!(matches!(log[0], WriteEvent::BackupCreated { .. }));
-    assert!(matches!(log[1], WriteEvent::RestoreWriteCompleted));
+    let log = &state.wizard().unwrap().run.as_ref().unwrap().log;
+    assert_eq!(log.len(), 3);
+    assert_eq!(
+        log[0].step,
+        edpcli::application::progress::Step::BackupCreate
+    );
+    assert_eq!(log[1].phase, edpcli::application::progress::Phase::Complete);
+    assert_eq!(log[2].phase, edpcli::application::progress::Phase::Readback);
 }
 
 #[test]

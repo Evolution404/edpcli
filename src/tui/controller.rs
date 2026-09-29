@@ -436,8 +436,7 @@ pub(super) fn dispatch_action(
         TuiAction::BackupCreate
             if matches!(state.workspace(), Workspace::Devices | Workspace::Backups) =>
         {
-            state.begin_backup_create_choice();
-            ActionOutcome::handled()
+            ActionOutcome::request(ActionRequest::Navigate(NavCommand::BeginBackupCreate))
         }
         TuiAction::Restore
             if state.workspace() == Workspace::Backups

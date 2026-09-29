@@ -709,6 +709,7 @@ mod export;
 mod identity_lineage;
 mod migration;
 mod prepare;
+mod progress_projection;
 
 pub use commit::{
     capture_manufacturer_lba3, commit_new_provision, commit_plain_provision, commit_provision,
@@ -900,7 +901,9 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
     prompt: &mut dyn super::Prompter,
     sink: &mut dyn FnMut(crate::application::progress::ProgressEvent),
 ) -> EdpCliResult<ProvisionWriteOutcome> {
-    use crate::application::progress::{emit_isolated, Phase, ProgressEvent, Step};
+    use crate::application::progress::{
+        emit_isolated, LogPolicy, Phase, ProgressEvent, Severity, Step,
+    };
     let format_count = match prepared {
         PreparedProvision::Official(official) => official
             .format_targets
@@ -941,8 +944,7 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
             if work.is_none() && step != Step::LockAndReopen {
                 current += 1;
             }
-            let mut event = ProgressEvent::new(phase, step, current, total);
-            event.work = work;
+            let event = progress_projection::commit_event(phase, step, current, total, work);
             emit_isolated(sink, event);
         })?;
     let mut outcome = ProvisionWriteOutcome {
@@ -953,6 +955,11 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
     if matches!(&outcome.commit, ProvisionCommitOutcome::Official(report) if report.formats.iter().any(|format| format.result.is_err()))
     {
         outcome.warnings.push(ProvisionWarning::IncompleteFormat);
+        let mut complete = ProgressEvent::new(Phase::Complete, Step::Completed, total, total);
+        complete.severity = Severity::Warning;
+        complete.log_policy = LogPolicy::Append;
+        complete.detail = Some("制盘事务完成，但至少一个分区格式化失败".into());
+        emit_isolated(sink, complete);
         return Ok(outcome);
     }
     if let Err(warning) = record_lineage_after_commit(
@@ -969,6 +976,10 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
         sink,
         ProgressEvent::new(Phase::Lineage, Step::PostWriteIdentity, current, total),
     );
+    let mut complete = ProgressEvent::new(Phase::Complete, Step::Completed, total, total);
+    complete.log_policy = LogPolicy::Append;
+    complete.detail = Some("制盘全部步骤完成".into());
+    emit_isolated(sink, complete);
     Ok(outcome)
 }
 

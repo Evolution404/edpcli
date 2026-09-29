@@ -211,6 +211,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/application/provision/prepare.rs",
         "src/application/provision/commit.rs",
         "src/application/provision/export.rs",
+        "src/application/provision/progress_projection.rs",
         "src/diskio/device.rs",
         "src/diskio/transaction.rs",
         "src/diskio/backup_config.rs",
@@ -235,13 +236,13 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/scheme_picker_render.rs",
         "src/tui/provision/form_render.rs",
         "src/tui/provision/review_render.rs",
-        "src/tui/provision/running_render.rs",
+        "src/tui/operation_progress_render.rs",
+        "src/tui/progress_transport.rs",
         "src/tui/runtime_updates.rs",
         "src/tui/resume.rs",
         "src/tui/runtime_input.rs",
         "src/tui/runtime_input/inspect.rs",
         "src/tui/runtime_input/provision.rs",
-        "src/tui/runtime_input/backup_choice.rs",
         "src/tui/runtime_input/backup_batch.rs",
         "src/tui/runtime_input/backup_prune.rs",
         "src/tui/runtime_input/backup_wizard.rs",
@@ -287,6 +288,7 @@ fn large_modules_are_split_by_domain_boundary() {
     }
 
     assert!(lines("src/application/provision.rs") < 1_000);
+    assert!(lines("src/application/provision/progress_projection.rs") < 120);
     assert!(lines("src/diskio.rs") < 500);
     assert!(lines("src/tui/state.rs") < 2_200);
     assert!(
@@ -324,7 +326,6 @@ fn large_modules_are_split_by_domain_boundary() {
     for path in [
         "src/tui/runtime_input/inspect.rs",
         "src/tui/runtime_input/provision.rs",
-        "src/tui/runtime_input/backup_choice.rs",
         "src/tui/runtime_input/backup_batch.rs",
         "src/tui/runtime_input/backup_prune.rs",
         "src/tui/runtime_input/backup_wizard.rs",
@@ -478,7 +479,8 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/provision/selection_render.rs") < 260);
     assert!(lines("src/tui/provision/form_render.rs") < 300);
     assert!(lines("src/tui/provision/review_render.rs") < 170);
-    assert!(lines("src/tui/provision/running_render.rs") < 210);
+    assert!(lines("src/tui/operation_progress_render.rs") < 260);
+    assert!(lines("src/tui/progress_transport.rs") < 180);
     let field_source = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/fields.rs"),
     )
@@ -1134,7 +1136,6 @@ fn app_state_owns_backups_through_backups_substate() {
         "backup_delete: Option<BackupDeleteState>",
         "backup_batch_delete: Option<BackupBatchDeleteState>",
         "backup_selection: std::collections::BTreeSet<std::path::PathBuf>",
-        "backup_create_choice: Option<BackupCreateChoiceState>",
         "backup_prune: Option<BackupPruneState>",
         "backups_pane_focus: crate::tui::pane::PaneFocus",
     ] {
@@ -1151,7 +1152,6 @@ fn app_state_owns_backups_through_backups_substate() {
         "delete: Option<BackupDeleteState>",
         "batch_delete: Option<BackupBatchDeleteState>",
         "selection: std::collections::BTreeSet<std::path::PathBuf>",
-        "create_choice: Option<BackupCreateChoiceState>",
         "prune: Option<BackupPruneState>",
         "pane_focus: crate::tui::pane::PaneFocus",
     ] {
@@ -1160,6 +1160,8 @@ fn app_state_owns_backups_through_backups_substate() {
             "BackupsState must own field: {owned_field}"
         );
     }
+    assert!(!backups.contains("BackupCreateChoiceState"));
+    assert!(!backups.contains("create_choice:"));
 }
 
 #[test]
@@ -1384,13 +1386,17 @@ fn provision_stage_renderers_are_split_from_workspace_root() {
         ("selection_render.rs", "fn draw_provision_selection"),
         ("form_render.rs", "fn draw_provision_form"),
         ("review_render.rs", "fn draw_provision_review"),
-        ("running_render.rs", "fn draw_provision_running"),
     ] {
         let source = fs::read_to_string(root.join("src/tui/provision").join(path))
             .unwrap_or_else(|error| panic!("read {path}: {error}"));
         assert!(source.contains(marker), "{path} must own {marker}");
         assert!(!render.contains(marker), "{marker} leaked into render.rs");
     }
+    let shared = fs::read_to_string(root.join("src/tui/operation_progress_render.rs"))
+        .expect("read shared operation progress renderer");
+    assert!(shared.contains("fn draw_operation_progress"));
+    assert!(!root.join("src/tui/provision/running_render.rs").exists());
+    assert!(!root.join("src/tui/runtime_input/backup_choice.rs").exists());
 }
 
 #[test]

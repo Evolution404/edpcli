@@ -1,8 +1,5 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BackupCreateChoiceState;
-
 #[derive(Debug, Clone)]
 pub struct BackupDeleteState {
     pub stage: WizardStage,
@@ -65,7 +62,6 @@ pub struct BackupsState {
     pub(super) delete: Option<BackupDeleteState>,
     pub(super) batch_delete: Option<BackupBatchDeleteState>,
     pub(super) selection: std::collections::BTreeSet<std::path::PathBuf>,
-    pub(super) create_choice: Option<BackupCreateChoiceState>,
     pub(super) prune: Option<BackupPruneState>,
     pub(super) pane_focus: crate::tui::pane::PaneFocus,
 }
@@ -80,7 +76,6 @@ impl Default for BackupsState {
             delete: None,
             batch_delete: None,
             selection: std::collections::BTreeSet::new(),
-            create_choice: None,
             prune: None,
             pane_focus: crate::tui::pane::PaneFocus::backups(),
         }
@@ -88,32 +83,6 @@ impl Default for BackupsState {
 }
 
 impl AppState {
-    pub fn backup_create_choice(&self) -> Option<BackupCreateChoiceState> {
-        self.backups.create_choice
-    }
-
-    pub fn begin_backup_create_choice(&mut self) -> bool {
-        if self.shell.critical_operation || self.shell.wizard.is_some() {
-            self.set_notice("已有关键操作或向导正在执行。");
-            return false;
-        }
-        if self.selected_device().is_none() {
-            self.set_notice("创建备份需要先在设备页选定目标 U 盘，再进入备份页。");
-            return false;
-        }
-        self.backups.create_choice = Some(BackupCreateChoiceState);
-        self.shell.input_mode = InputMode::Normal;
-        true
-    }
-
-    pub fn take_backup_create_choice(&mut self) -> bool {
-        self.backups.create_choice.take().is_some()
-    }
-
-    pub fn cancel_backup_create_choice(&mut self) {
-        self.backups.create_choice = None;
-    }
-
     pub fn backup_delete(&self) -> Option<&BackupDeleteState> {
         self.backups.delete.as_ref()
     }

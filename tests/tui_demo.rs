@@ -121,7 +121,7 @@ fn long_provision_demo_exercises_slow_protocol_and_partition_progress() {
     assert!(run.log.iter().any(|event| {
         event.step == Step::ProtocolWrite
             && event.work.is_some_and(|work| {
-                work.phase == TransactionActivityPhase::Write
+                work.activity == Some(TransactionActivityPhase::Write)
                     && work.current > 0
                     && work.current < work.total
             })
@@ -133,15 +133,15 @@ fn long_provision_demo_exercises_slow_protocol_and_partition_progress() {
     ] {
         assert!(run.log.iter().any(|event| {
             event.step == Step::PartitionFormat(role)
-                && event
-                    .work
-                    .is_some_and(|work| work.phase == TransactionActivityPhase::FormatWrite)
+                && event.work.is_some_and(|work| {
+                    work.activity == Some(TransactionActivityPhase::FormatWrite)
+                })
         }));
         assert!(run.log.iter().any(|event| {
             event.step == Step::PartitionFormat(role)
-                && event
-                    .work
-                    .is_some_and(|work| work.phase == TransactionActivityPhase::FormatReadback)
+                && event.work.is_some_and(|work| {
+                    work.activity == Some(TransactionActivityPhase::FormatReadback)
+                })
         }));
     }
     assert!(run

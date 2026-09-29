@@ -62,10 +62,10 @@ fn provision_tui_has_one_mandatory_backup_path_and_no_optional_prebackup_worker(
 #[test]
 fn chapter_18_b0_metadata_restore_and_prebackup_wording_are_locked() {
     let cli_ui = include_str!("../src/ui.rs");
-    let tui_backup = include_str!("../src/tui/backups/render.rs");
+    let tui_restore = include_str!("../src/tui/render.rs");
     let progress = include_str!("../src/application/progress.rs");
 
-    for source in [cli_ui, tui_backup] {
+    for source in [cli_ui, tui_restore, progress] {
         assert!(
             !source.contains("请拔出重插"),
             "metadata restore must not imply that the filesystem is usable after restore"

@@ -341,6 +341,69 @@ fn provision_scheme_picker_uses_shared_modal_surface_instead_of_terminal_black()
 }
 
 #[test]
+fn backup_confirm_is_overlay_and_escape_preserves_device_selection() {
+    let mut state = AppState::new();
+    let row = device();
+    let identity = row
+        .identity_pin
+        .as_ref()
+        .map(edpcli::tui::state::ExpectedIdentity::from_pin)
+        .expect("test device identity pin");
+    state.replace_devices(vec![row]);
+    assert_eq!(state.selected_device_disk(), Some(6));
+
+    let width = 120;
+    let height = 32;
+    let content_area = ratatui::layout::Rect::new(0, 2, width, height - 3);
+    let popup = edpcli::tui::ui::centered_modal_rect(content_area, 76, 11);
+
+    let mut before_terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    before_terminal
+        .draw(|frame| render::draw(frame, &state))
+        .unwrap();
+    let before = before_terminal.backend().buffer().clone();
+
+    assert!(state.begin_write_wizard_for_identity(
+        WriteKind::BackupCreate,
+        6,
+        None,
+        Some(identity),
+    ));
+    assert_eq!(state.wizard().unwrap().stage, WizardStage::Confirm);
+
+    let mut modal_terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    modal_terminal
+        .draw(|frame| render::draw(frame, &state))
+        .unwrap();
+    let modal = modal_terminal.backend().buffer();
+    for y in content_area.y..content_area.bottom() {
+        for x in content_area.x..content_area.right() {
+            if x >= popup.x && x < popup.right() && y >= popup.y && y < popup.bottom() {
+                continue;
+            }
+            assert_eq!(
+                modal[(x, y)].symbol(),
+                before[(x, y)].symbol(),
+                "backup confirmation must preserve workspace symbol at ({x},{y})"
+            );
+            assert_eq!(
+                modal[(x, y)].style(),
+                before[(x, y)].style(),
+                "backup confirmation must preserve workspace style at ({x},{y})"
+            );
+        }
+    }
+
+    assert_eq!(
+        state.navigate(NavCommand::Escape, 20),
+        edpcli::tui::state::StateEffect::None
+    );
+    assert!(state.wizard().is_none());
+    assert_eq!(state.workspace(), Workspace::Devices);
+    assert_eq!(state.selected_device_disk(), Some(6));
+}
+
+#[test]
 fn inspect_tree_jk_changes_tree_selection_only() {
     let mut state = inspect_state();
     state.advanced_inspect_focus_pane(PaneId::InspectTree);

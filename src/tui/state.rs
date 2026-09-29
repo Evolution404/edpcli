@@ -112,9 +112,7 @@ pub struct WizardState {
     pub volume_label_target: Option<PostRestoreLabelTarget>,
     pub secret_input: crate::provision::SecretBytes,
     pub secret_first: crate::provision::SecretBytes,
-    /// Running 阶段最新收到的类型化进度事件；渲染层映射为单行显示。
-    pub progress: Option<crate::application::WriteEvent>,
-    pub progress_log: std::collections::VecDeque<crate::application::WriteEvent>,
+    pub run: Option<crate::application::progress::OperationRunState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -482,8 +480,7 @@ impl AppState {
             volume_label_target: None,
             secret_input: crate::provision::SecretBytes::default(),
             secret_first: crate::provision::SecretBytes::default(),
-            progress: None,
-            progress_log: std::collections::VecDeque::new(),
+            run: None,
         });
         true
     }
@@ -501,6 +498,17 @@ impl AppState {
         };
         wizard.stage = WizardStage::Running;
         wizard.message = Some("正在只读采集并创建元数据备份。".into());
+        let mut run = crate::application::progress::OperationRunState::new(
+            crate::application::progress::OperationKind::Backup,
+            format!("disk{}", wizard.disk),
+        );
+        run.push(crate::application::progress::ProgressEvent::started(
+            crate::application::progress::OperationKind::Backup,
+            crate::application::progress::Phase::Backup,
+            crate::application::progress::Step::BackupCreate,
+            "正在只读采集设备元数据",
+        ));
+        wizard.run = Some(run);
         self.shell.input_mode = InputMode::Normal;
         self.shell.critical_operation = true;
         Some(intent)
@@ -1039,6 +1047,17 @@ impl AppState {
         };
         wizard.stage = WizardStage::Running;
         wizard.message = Some("关键写盘阶段进行中，不可中断".to_string());
+        let mut run = crate::application::progress::OperationRunState::new(
+            crate::application::progress::OperationKind::Restore,
+            format!("disk{}", wizard.disk),
+        );
+        run.push(crate::application::progress::ProgressEvent::started(
+            crate::application::progress::OperationKind::Restore,
+            crate::application::progress::Phase::Backup,
+            crate::application::progress::Step::RestoreVerification,
+            "正在校验备份并固定恢复目标",
+        ));
+        wizard.run = Some(run);
         self.shell.input_mode = InputMode::Normal;
         self.shell.critical_operation = true;
         Some(intent)
@@ -1047,11 +1066,17 @@ impl AppState {
     pub fn set_write_progress(&mut self, event: crate::application::WriteEvent) {
         if let Some(wizard) = self.shell.wizard.as_mut() {
             if wizard.stage == WizardStage::Running {
-                wizard.progress = Some(event.clone());
-                if wizard.progress_log.len() == 200 {
-                    wizard.progress_log.pop_front();
+                if let Some(run) = wizard.run.as_mut() {
+                    let operation = match wizard.kind {
+                        WriteKind::BackupCreate => {
+                            crate::application::progress::OperationKind::Backup
+                        }
+                        WriteKind::Restore => crate::application::progress::OperationKind::Restore,
+                    };
+                    run.push(crate::application::progress::project_write_event(
+                        operation, &event,
+                    ));
                 }
-                wizard.progress_log.push_back(event);
             }
         }
     }
@@ -1067,7 +1092,6 @@ impl AppState {
         match result {
             Ok(outcome) => {
                 wizard.stage = WizardStage::PostRestore;
-                wizard.progress = None;
                 wizard.restore_outcome = Some(outcome);
                 wizard.post_restore_selected = 0;
                 wizard.pending_format = None;
@@ -1077,7 +1101,17 @@ impl AppState {
             }
             Err(message) => {
                 wizard.stage = WizardStage::Result;
-                wizard.progress = None;
+                if let Some(run) = wizard.run.as_mut() {
+                    let mut event = crate::application::progress::ProgressEvent::started(
+                        crate::application::progress::OperationKind::Restore,
+                        crate::application::progress::Phase::Transaction,
+                        crate::application::progress::Step::RestoreWrite,
+                        message.clone(),
+                    );
+                    event.severity = crate::application::progress::Severity::Error;
+                    event.log_policy = crate::application::progress::LogPolicy::Append;
+                    run.push(event);
+                }
                 wizard.message = Some(message);
                 self.shell.input_mode = InputMode::Normal;
             }
@@ -1290,7 +1324,19 @@ impl AppState {
         self.shell.critical_operation = false;
         if let Some(wizard) = self.shell.wizard.as_mut() {
             wizard.stage = WizardStage::Result;
-            wizard.progress = None;
+            if let Err(message) = result.as_ref() {
+                if let Some(run) = wizard.run.as_mut() {
+                    let mut event = crate::application::progress::ProgressEvent::started(
+                        crate::application::progress::OperationKind::Backup,
+                        crate::application::progress::Phase::Backup,
+                        crate::application::progress::Step::BackupCreate,
+                        message.clone(),
+                    );
+                    event.severity = crate::application::progress::Severity::Error;
+                    event.log_policy = crate::application::progress::LogPolicy::Append;
+                    run.push(event);
+                }
+            }
             wizard.message = Some(match result {
                 Ok(()) if wizard.kind == WriteKind::BackupCreate => {
                     "备份创建完成；备份列表已刷新".to_string()
@@ -1724,10 +1770,6 @@ impl AppState {
             }
             if self.provision.scheme_picker_open {
                 self.provision_close_scheme_picker();
-                return StateEffect::None;
-            }
-            if self.backup_create_choice().is_some() {
-                self.cancel_backup_create_choice();
                 return StateEffect::None;
             }
             if self.backups.delete.is_some() {

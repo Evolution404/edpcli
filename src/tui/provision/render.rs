@@ -18,10 +18,6 @@ use form_render::draw_provision_form;
 mod review_render;
 use review_render::draw_provision_review;
 
-#[path = "running_render.rs"]
-mod running_render;
-use running_render::draw_provision_running;
-
 fn provision_content_layout(
     area: ratatui::layout::Rect,
     stage: ProvisionStage,
@@ -267,7 +263,9 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             );
         }
         ProvisionStage::Running => {
-            draw_provision_running(frame, main_area, state);
+            if let Some(run) = provision.run.as_ref() {
+                super::operation_progress_render::draw_operation_progress(frame, main_area, run);
+            }
         }
         ProvisionStage::Result => {
             use crate::application::provision::ProvisionExecutionStatus as Status;
@@ -326,9 +324,8 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 lines.push(Line::from(Span::styled("最近进度事件", accent())));
                 for event in run.log.iter().rev().take(6).rev() {
                     lines.push(Line::from(safe(&format!(
-                        "[{}/{}] {}  {}",
-                        event.current,
-                        event.total,
+                        "[{:.2}%] {}  {}",
+                        f64::from(event.overall.basis_points()) / 100.0,
                         event.phase.label(),
                         event.step.label()
                     ))));

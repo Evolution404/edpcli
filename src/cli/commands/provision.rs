@@ -399,9 +399,8 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                 &mut |event| {
                     if event.work.is_none() {
                         println!(
-                            "[制盘进度 {}/{}] {}：{}",
-                            event.current,
-                            event.total,
+                            "[制盘进度 {:.2}%] {}：{}",
+                            f64::from(event.overall.basis_points()) / 100.0,
                             event.phase.label(),
                             event.step.label(),
                         );

@@ -383,7 +383,7 @@ fn normal_mode_keeps_inspect_and_backup_as_single_key_actions() {
         &[
             "TuiAction::BackupCreate",
             "if matches!(state.workspace(), Workspace::Devices | Workspace::Backups)",
-            "state.begin_backup_create_choice()",
+            "ActionRequest::Navigate(NavCommand::BeginBackupCreate)",
         ],
     ));
     assert!(contains_tokens_in_order(

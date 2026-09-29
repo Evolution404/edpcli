@@ -106,7 +106,10 @@ impl AppState {
         self.shell.input_mode = InputMode::Normal;
         self.provision.message = Some("事务写盘进行中；退出请求会延迟到安全检查点".into());
         self.provision.result_status = None;
-        self.provision.run = Some(ProvisionRunState::new());
+        self.provision.run = Some(crate::application::progress::OperationRunState::new(
+            crate::application::progress::OperationKind::Provision,
+            format!("disk{}", prepared.disk()),
+        ));
         self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_running();
         self.shell.critical_operation = true;
         Some(prepared)

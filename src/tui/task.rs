@@ -552,7 +552,11 @@ impl TaskHub {
                     event,
                 } => {
                     if self.active_operation == Some(operation_id) {
-                        updates.provision_progress.push((operation_id, event));
+                        super::progress_transport::push_progress_coalesced(
+                            &mut updates.provision_progress,
+                            operation_id,
+                            event,
+                        );
                     }
                 }
                 WorkerResult::ProvisionWrite {

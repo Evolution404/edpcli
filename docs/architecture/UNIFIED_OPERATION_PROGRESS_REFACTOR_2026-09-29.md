@@ -66,9 +66,9 @@ state.backup_create_choice().is_some()
 - `draw_backup_create_choice()` 直接占整个 content area；
 - Modal 背后不是当前页面，而是空白内容区。
 
-这违反统一 Modal 的 overlay 语义。
+这违反统一 Modal 的“覆盖在当前页面之上”语义。
 
-### 1.3 Backup / Restore / Provision 的 Running UI 没有真正统一
+### 1.3 备份 / 恢复 / 制盘的运行进度界面没有真正统一
 
 已有领域基础：
 
@@ -76,7 +76,7 @@ state.backup_create_choice().is_some()
 
 明确声明：
 
-> Application-owned progress contract shared by provisioning, backup and restore.
+> 应用层统一拥有制盘、备份与恢复共用的进度契约。
 
 并已有：
 
@@ -91,7 +91,7 @@ pub enum OperationKind {
 但实际 TUI 尚未统一：
 
 - Provision：`ProgressEvent` + `ProvisionRunState` + `provision/running_render.rs`
-- Backup / Restore：仍大量依赖 `WriteEvent`、`write_progress_text()`、Wizard 自身 progress/log
+- Backup / `Restore`：仍大量依赖 `WriteEvent`、`write_progress_text()`、Wizard 自身 progress/log
 - 三者在页面结构、日志语义、进度计算上仍是不同实现
 
 ### 1.4 制盘总体进度只按“步骤数”前进
@@ -197,7 +197,7 @@ Devices 关联备份 / Backups 表格
 - 身份对照；
 - 写入 YES 授权。
 
-不得重新引入 Restore Review 全屏中间页。
+不得重新引入 `Restore` Review 全屏中间页。
 
 ### 2.3 制盘
 
@@ -236,7 +236,7 @@ Idle
 | 操作 | Confirm 类型 | YES |
 | --- | --- | --- |
 | Backup Create | 只读 Action Modal | 否 |
-| Restore | Media Write Modal | 是 |
+| `Restore` | Media Write Modal | 是 |
 | Provision | Media Write Modal | 是 |
 
 ### 3.1 删除 BackupCreateChoiceState
@@ -259,7 +259,7 @@ NavCommand::BeginBackupCreate
 
 并建立唯一的 BackupCreate Confirm。
 
-### 3.2 Modal 一律 Overlay
+### 3.2 Modal 一律 `Overlay`
 
 顶层 render 顺序统一为：
 
@@ -409,13 +409,13 @@ pub struct OperationRunState {
 }
 ```
 
-Backup / Restore / Provision 均使用这一模型。
+Backup / `Restore` / Provision 均使用这一模型。
 
 删除 / 收敛：
 
 - `ProvisionRunState` 私有重复语义；
 - Wizard 内独立的 `progress` / `progress_log`；
-- Backup / Restore 的 `WriteEvent -> write_progress_text()` 作为主 Running UI 数据源。
+- Backup / `Restore` 的 `WriteEvent -> write_progress_text()` 作为主 Running UI 数据源。
 
 `WriteEvent` 若仍有领域事件价值，可以：
 
@@ -468,7 +468,7 @@ draw_operation_progress(frame, area, state)
 - Panel / Card 风格；
 - Gauge 样式；
 - 标题层级；
-- body / secondary / muted 文字；
+- `body` / secondary / muted 文字；
 - 运行时间；
 - 当前活动；
 - 日志窗口；
@@ -480,7 +480,7 @@ draw_operation_progress(frame, area, state)
 仅标题不同：
 
 - Backup：`备份制作`
-- Restore：`恢复备份`
+- `Restore`：`恢复备份`
 - Provision：`制盘执行`
 
 ---
@@ -491,8 +491,8 @@ draw_operation_progress(frame, area, state)
 
 以下事件只更新 latest / gauges：
 
-- sector current 变化；
-- bytes current 变化；
+- sector `current` 变化；
+- bytes `current` 变化；
 - 相同步骤内的高频 transaction activity；
 - 格式化连续写入 / readback progress。
 
@@ -538,9 +538,9 @@ ProgressUpdate::Log(...)
 - 状态保存最新值；
 - TUI refresh 目标 10～20 Hz；
 - phase / warning / error / completion 事件立即刷新；
-- 不丢失最终 current / total。
+- 不丢失最终 `current` / total。
 
-节流只能在 UI / event transport 层做，不允许牺牲事务安全与底层真实计数。
+节流只能在 UI / event `transport` 层做，不允许牺牲事务安全与底层真实计数。
 
 ---
 
@@ -569,7 +569,7 @@ ProgressUpdate::Log(...)
 
 ---
 
-## 10. Restore Progress
+## 10. `Restore` Progress
 
 建议步骤：
 
@@ -587,9 +587,9 @@ ProgressUpdate::Log(...)
 
 恢复仍必须保留：
 
-- physical identity pin；
+- `physical` identity pin；
 - system disk / whole USB checks；
-- geometry checks；
+- `geometry` checks；
 - lock / reopen identity recheck；
 - atomic transaction；
 - sync / readback；
@@ -608,13 +608,13 @@ UI 重构不得降低任何写盘安全门槛。
 1. 顶部总体 Gauge 改为 overall；
 2. 当前步骤单独 Gauge 使用 work；
 3. 当前步骤显示真实：
-   - current；
+   - `current`；
    - total；
    - unit；
    - percent；
 4. sector progress 不进入 log；
 5. phase / step 日志只记录状态边界；
-6. Backup / Restore 与 Provision 最终使用同一 renderer。
+6. Backup / `Restore` 与 Provision 最终使用同一 renderer。
 
 ---
 
@@ -630,7 +630,7 @@ UI 重构不得降低任何写盘安全门槛。
 - 一次 Enter 即 Confirm -> Running；
 - 不再存在两层 BackupCreate confirm；
 - Esc 关闭 Modal 后焦点 / 选择不变；
-- Backup / Restore / Provision Running 使用同一 renderer；
+- Backup / `Restore` / Provision Running 使用同一 renderer；
 - overall 随 work 连续增加；
 - high-frequency work 不污染 log。
 
@@ -639,8 +639,8 @@ UI 重构不得降低任何写盘安全门槛。
 完成：
 
 - `b` 直达唯一 BackupCreate Confirm；
-- 删除 create_choice 状态和 input handler；
-- Confirm 作为 overlay。
+- 删除 create_choice 状态和 input `handler`；
+- Confirm 作为 `overlay`。
 
 P1 完成后先单独验收：
 
@@ -650,7 +650,7 @@ Devices -> b -> Modal -> Enter -> Running
 
 ### P2 — 建立共享 OperationRunState
 
-把三类操作统一到一个 Running state。
+把三类操作统一到一个 Running `state`。
 
 只迁移状态，不先改底层 progress contract。
 
@@ -660,7 +660,7 @@ Devices -> b -> Modal -> Enter -> Running
 
 - overall progress；
 - work progress；
-- log policy / semantic log event。
+- log policy / `semantic` log event。
 
 建立 progress span / interpolation。
 
@@ -668,9 +668,9 @@ Devices -> b -> Modal -> Enter -> Running
 
 创建唯一共享页面。
 
-先让三类操作都能用同一 renderer，哪怕部分 backend 仍经过 adapter。
+先让三类操作都能用同一 renderer，哪怕部分 backend 仍经过 `adapter`。
 
-### P5 — Backup / Restore 接入统一 ProgressEvent
+### P5 — Backup / `Restore` 接入统一 ProgressEvent
 
 清理：
 
@@ -700,8 +700,8 @@ Devices -> b -> Modal -> Enter -> Running
 
 - 不存在 `BackupCreateChoiceState`
 - 不存在第二套 long-operation progress renderer
-- 不存在 backup/restore 私有 progress log
-- 不存在每 sector append log 的实现
+- 不存在 backup/`restore` 私有 progress log
+- 不存在每 sector `append` log 的实现
 
 ---
 
@@ -754,7 +754,7 @@ final_progress_snapshot_is_preserved
 - log 不得增加 1000 行；
 - 只允许阶段 / step / 完成语义日志。
 
-### 13.5 Overlay Geometry
+### 13.5 `Overlay` `Geometry`
 
 用 `TestBackend`：
 
@@ -770,10 +770,10 @@ final_progress_snapshot_is_preserved
 在 `tests/architecture_split.rs` 增加：
 
 - BackupCreate 不得再拥有 create-choice 中间状态；
-- Running UI 只有一个共享 owner；
+- Running UI 只有一个共享 `owner`；
 - ProgressEvent 只有 application 层定义；
 - renderer 不得自行计算业务 overall；
-- Backup / Restore / Provision 不得各自维护重复 Gauge / Running 页面。
+- Backup / `Restore` / Provision 不得各自维护重复 Gauge / Running 页面。
 
 不允许通过提高文件行数上限掩盖拆分问题。
 
@@ -807,7 +807,7 @@ zsh -lic 'cd /Users/zhangyuxi/Desktop/edpcli && python3 scripts/test-full.py --p
 
 Virtual Disk / real USB HIL 与 fast/full 分开。
 
-如本轮修改触及真实写盘 transaction / restore / provision backend，必须补受影响的 Virtual Disk HIL；若只修改事件投影和 TUI renderer，也至少运行已有 progress / transaction 专项测试。
+如本轮修改触及真实写盘 transaction / `restore` / provision backend，必须补受影响的 Virtual Disk HIL；若只修改事件投影和 TUI renderer，也至少运行已有 progress / transaction 专项测试。
 
 ---
 
@@ -842,10 +842,10 @@ git fetch origin
    - 只弹一次 Modal；
    - Modal 背后仍是当前 Devices 页面；
    - 一次 Enter 直接开始备份。
-2. Restore：
+2. `Restore`：
    - `R -> YES -> Running`；
    - 无额外 Review / Confirm 页面。
-3. Backup / Restore / Provision：
+3. Backup / `Restore` / Provision：
    - 完全使用同一 Running 页面；
    - 同一 Theme / Gauge / Card / footer / log 规则。
 4. Progress：
@@ -858,7 +858,7 @@ git fetch origin
    - warning / error / rollback 不丢失。
 6. 架构：
    - 删除 `BackupCreateChoiceState`；
-   - 删除重复 Running renderer / progress state；
+   - 删除重复 Running renderer / progress `state`；
    - application progress contract 成为唯一事实源。
 7. 门禁：
    - fmt / diff check；

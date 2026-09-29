@@ -3,8 +3,6 @@ use std::path::Path;
 
 #[path = "runtime_input/backup_batch.rs"]
 mod backup_batch;
-#[path = "runtime_input/backup_choice.rs"]
-mod backup_choice;
 #[path = "runtime_input/backup_prune.rs"]
 mod backup_prune;
 #[path = "runtime_input/backup_wizard.rs"]
@@ -45,11 +43,6 @@ pub(super) fn handle_key(
     }
     if let Some(outcome) =
         provision::handle_provision_key(state, tasks, keys, key, backup_dir, terminal_size)
-    {
-        return outcome;
-    }
-    if let Some(outcome) =
-        backup_choice::handle_backup_choice_key(state, tasks, keys, key, backup_dir, terminal_size)
     {
         return outcome;
     }

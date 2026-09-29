@@ -125,7 +125,6 @@ mod run;
 #[path = "scheme_picker_state.rs"]
 mod scheme_picker_state;
 pub(crate) use review::{ProvisionReviewRowKind, ProvisionReviewTone};
-pub use run::ProvisionRunState;
 #[path = "validation.rs"]
 mod validation;
 
@@ -147,7 +146,7 @@ pub struct ProvisionState {
     pub export_path: String,
     pub message: Option<String>,
     pub result_status: Option<crate::application::provision::ProvisionExecutionStatus>,
-    pub run: Option<ProvisionRunState>,
+    pub run: Option<crate::application::progress::OperationRunState>,
     pub pane_focus: crate::tui::pane::PaneFocus,
     pub(super) target_disk: Option<u32>,
     form_initialized_for: Option<(u32, u64, Option<String>, ProvisionKind)>,

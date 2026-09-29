@@ -157,12 +157,13 @@ fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
     state.provision_mut().stage = ProvisionStage::Running;
     state.provision_mut().pane_focus = edpcli::tui::pane::PaneFocus::provision_running();
     let now = std::time::Instant::now();
-    state.provision_mut().run = Some(edpcli::tui::state::ProvisionRunState {
-        started_at: now,
-        last_activity_at: now,
-        latest: None,
-        log: std::collections::VecDeque::new(),
-    });
+    let mut run = edpcli::application::progress::OperationRunState::new(
+        edpcli::application::progress::OperationKind::Provision,
+        "disk6",
+    );
+    run.started_at = now;
+    run.last_activity_at = now;
+    state.provision_mut().run = Some(run);
     state.provision_push_progress(ProgressEvent::new(
         Phase::Transaction,
         Step::ProtocolReadback,
