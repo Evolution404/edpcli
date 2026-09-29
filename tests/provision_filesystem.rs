@@ -10,9 +10,9 @@ use edpcli::{
     partition_transform::{decrypt_mode2, EdpSm4Transform},
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
     provision::{
-        build_official_exfat_partitions, build_official_partition_filesystem, wrap_file_key,
-        wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialPartitionFilesystems,
-        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, PartitionRole,
+        build_official_partition_filesystem, wrap_file_key, wrap_legacy_lba7_file_key,
+        FileKeyWrapMode, OfficialPartitionFilesystems, OfficialPartitionMode,
+        OfficialPartitionSizes, OfficialProvisionPlan, PartitionRole,
     },
 };
 
@@ -257,7 +257,7 @@ fn mode2_sparse_encryption_round_trips_to_the_same_valid_exfat() {
 }
 
 #[test]
-fn all_four_modes_build_the_verified_plaintext_and_encrypted_exfat_matrix() {
+fn all_four_modes_build_the_verified_filesystem_and_encryption_matrix() {
     let cases = [
         (
             OfficialPartitionMode::DefaultThreePartition,
@@ -276,7 +276,25 @@ fn all_four_modes_build_the_verified_plaintext_and_encrypted_exfat_matrix() {
         let serials = (0..logical_count)
             .map(|index| 0x1111_0001u32.wrapping_add(index as u32))
             .collect::<Vec<_>>();
-        let images = build_official_exfat_partitions(&plan, &FILE_KEY, "SAFE6", &serials).unwrap();
+        let targets = plan.format_targets().unwrap();
+        let format_targets = targets
+            .iter()
+            .enumerate()
+            .filter(|(_, target)| target.format_capable)
+            .collect::<Vec<_>>();
+        let images = format_targets
+            .iter()
+            .map(|(index, target)| {
+                build_official_partition_filesystem(
+                    &plan,
+                    target,
+                    &FILE_KEY,
+                    "SAFE6",
+                    serials[*index],
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(
             images
                 .iter()
@@ -285,12 +303,18 @@ fn all_four_modes_build_the_verified_plaintext_and_encrypted_exfat_matrix() {
             expected_encryption,
             "mode {mode:?}"
         );
-        for image in images {
+        for (image, (_, target)) in images.into_iter().zip(format_targets) {
+            let filesystem = target.filesystem.unwrap();
             let raw = image.image.sectors().get(&0).unwrap();
+            let (signature_range, signature): (std::ops::Range<usize>, &[u8]) = match filesystem {
+                FilesystemKind::Fat16 => (54..62, b"FAT16   "),
+                FilesystemKind::ExFat => (3..11, b"EXFAT   "),
+                other => panic!("unexpected writable filesystem {other:?}"),
+            };
             if image.physically_encrypted {
                 assert_ne!(
-                    &raw[3..11],
-                    b"EXFAT   ",
+                    &raw[signature_range.clone()],
+                    signature,
                     "encrypted physical boot leaked in mode {mode:?}"
                 );
             }
@@ -299,14 +323,9 @@ fn all_four_modes_build_the_verified_plaintext_and_encrypted_exfat_matrix() {
             } else {
                 raw.to_vec()
             };
-            assert_eq!(&boot[3..11], b"EXFAT   ", "mode {mode:?}");
             assert_eq!(
-                u64::from_le_bytes(boot[64..72].try_into().unwrap()),
-                image.geometry.start_sector
-            );
-            assert_eq!(
-                u64::from_le_bytes(boot[72..80].try_into().unwrap()),
-                image.geometry.sector_count()
+                &boot[signature_range], signature,
+                "mode {mode:?}, filesystem {filesystem:?}"
             );
         }
     }
@@ -408,11 +427,21 @@ fn filesystem_stage_fails_closed_on_wrong_key_or_unsupported_portable_profile() 
     let serials = [1, 2];
     let mut wrong = FILE_KEY;
     wrong[0] ^= 1;
-    assert!(
-        build_official_exfat_partitions(&plan, &wrong, "SAFE6", &serials)
-            .unwrap_err()
-            .contains("FileKeyCRC")
-    );
+    let encrypted_target = plan
+        .format_targets()
+        .unwrap()
+        .into_iter()
+        .find(|target| target.format_capable && target.physically_encrypted)
+        .unwrap();
+    assert!(build_official_partition_filesystem(
+        &plan,
+        &encrypted_target,
+        &wrong,
+        "SAFE6",
+        serials[1]
+    )
+    .unwrap_err()
+    .contains("FileKeyCRC"));
 
     let compat = locate_lba7_compatibility_extent_from_geometry(1024, 255, 63, 512).unwrap();
     let ntfs_plan = OfficialProvisionPlan::new_with_filesystem(
@@ -427,11 +456,21 @@ fn filesystem_stage_fails_closed_on_wrong_key_or_unsupported_portable_profile() 
         wrap_file_key(b"ProofPass1!", FILE_KEY, FileKeyWrapMode::Sm4),
     )
     .unwrap();
-    assert!(
-        build_official_exfat_partitions(&ntfs_plan, &FILE_KEY, "SAFE6", &serials)
-            .unwrap_err()
-            .contains("does not yet implement ntfs")
-    );
+    let ntfs_target = ntfs_plan
+        .format_targets()
+        .unwrap()
+        .into_iter()
+        .find(|target| target.format_capable)
+        .unwrap();
+    let ntfs_error = build_official_partition_filesystem(
+        &ntfs_plan,
+        &ntfs_target,
+        &FILE_KEY,
+        "SAFE6",
+        serials[0],
+    )
+    .unwrap_err();
+    assert!(ntfs_error.to_ascii_lowercase().contains("ntfs"));
     assert!(
         plan_format_targets(&ntfs_plan, &FormatOptions::default(), &serials, &FILE_KEY).is_err()
     );

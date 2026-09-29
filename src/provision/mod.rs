@@ -43,10 +43,7 @@ pub use migration::{
     MigrationManifest, MigrationManifestEntry, MigrationPreflightError, MigrationStagedEntry,
     MAX_MIGRATION_ENTRIES,
 };
-pub use partition_format::{
-    build_official_exfat_partition, build_official_exfat_partitions,
-    build_official_partition_filesystem, PartitionFilesystemImage,
-};
+pub use partition_format::{build_official_partition_filesystem, PartitionFilesystemImage};
 pub use plain::{
     build_plain_migrated_provision_write_plan, build_plain_provision_write_plan,
     max_plain_sector_count, plain_gaps, validate_plain_partitions, PlainCleanupExtent, PlainGap,
