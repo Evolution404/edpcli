@@ -13,7 +13,7 @@ use std::time::Duration;
 use crate::backup_metadata::{parse_lba7_compatibility_geometry, PartitionGeometry};
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_OK, EXIT_TARGET, SECTOR};
 use crate::diskio::{self, SectorDev};
-use crate::filesystem_analysis::{
+use crate::filesystem::analysis::{
     analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
 };
 use crate::partition_transform::EdpSm4Transform;

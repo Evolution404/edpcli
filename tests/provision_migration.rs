@@ -1,6 +1,6 @@
 use edpcli::{
     backup_metadata::PartitionGeometry,
-    filesystem_analysis::{
+    filesystem::analysis::{
         analyze_partition, stream_file_payload, AnalysisStatus, FileEntry, FilePayloadExtent,
         FilePayloadLocator, PartitionReader,
     },

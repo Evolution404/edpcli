@@ -1,3 +1,4 @@
+pub mod analysis;
 mod driver;
 mod error;
 mod exfat;

@@ -15,7 +15,7 @@ mod macos {
     use edpcli::backup_metadata::PartitionGeometry;
     use edpcli::common::SECTOR;
     use edpcli::diskio::{raw_path, FileDev, SectorDev};
-    use edpcli::filesystem_analysis::{
+    use edpcli::filesystem::analysis::{
         analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
     };
     use edpcli::provision::{

@@ -1,5 +1,5 @@
 use super::*;
-use crate::filesystem_analysis::{
+use crate::filesystem::analysis::{
     analyze_partition, stream_file_payload, AnalysisStatus, FileEntry, PartitionReader,
 };
 use crate::provision::{

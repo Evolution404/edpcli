@@ -5,7 +5,7 @@ use edpcli::{
     backup_metadata::PartitionGeometry,
     common::SECTOR,
     diskio::{execute_write_transaction, SectorDev, WriteTransactionPlan},
-    filesystem_analysis::{analyze_partition, AnalysisStatus, PartitionReader},
+    filesystem::analysis::{analyze_partition, AnalysisStatus, PartitionReader},
     provision::{
         build_plain_provision_write_plan, DiskProvisionKind, FilesystemKind, PlainCleanupExtent,
         PlainPartitionSpec, PlainProvisionPlan,

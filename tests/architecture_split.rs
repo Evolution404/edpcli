@@ -121,7 +121,7 @@ fn complete_dependency_direction_is_guarded() {
         "src/disk_layout.rs",
         "src/inspect_target.rs",
         "src/backup_metadata.rs",
-        "src/filesystem_analysis.rs",
+        "src/filesystem/analysis/mod.rs",
         "src/backup_catalog.rs",
         "src/disk_scan.rs",
     ] {
@@ -818,7 +818,7 @@ fn critical_io_paths_have_no_panicking_shortcuts() {
         "src/application/evidence.rs",
         "src/diskio/device.rs",
         "src/diskio/transaction.rs",
-        "src/filesystem_analysis.rs",
+        "src/filesystem/analysis/mod.rs",
     ] {
         let source = fs::read_to_string(root.join(path))
             .unwrap_or_else(|error| panic!("read {path}: {error}"));
@@ -829,7 +829,7 @@ fn critical_io_paths_have_no_panicking_shortcuts() {
             );
         }
     }
-    let fat = fs::read_to_string(root.join("src/filesystem_analysis/fat.rs"))
+    let fat = fs::read_to_string(root.join("src/filesystem/analysis/fat.rs"))
         .expect("read FAT parser source");
     let parse = fat
         .split("pub(super) fn parse(")
