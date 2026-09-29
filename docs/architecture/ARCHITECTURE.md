@@ -16,7 +16,7 @@
 - `src/provision/`：纯内存制盘领域模型与验证器；Plain 与官方 mode0～3 都通过统一 `ProvisionRequest` 进入应用层。
 - `src/protocol/`：LBA0～12、IIR、LCE 的类型化协议模型；`protocol::semantic` 提供跨业务语义，不包含 UI 字段名、颜色或渲染结构。
 - `src/diskio/`：块设备、写事务、备份配置、备份目录和备份创建按职责拆分。
-- `src/backup_*` / `src/edpb/`：元数据/深度备份与自包含 EDPB 容器；容器模型、编解码、身份、写入、读取、校验及历史兼容分离。
+- `src/backup_*` / `src/edpb/`：元数据备份与自包含 EDPB 容器；容器模型、编解码、身份、写入、读取和校验按职责分离。
 - `src/platform/`：macOS/Linux/Windows 的设备、锁定、卸载和平台探测边界。
 - `src/disk_scan.rs` 只负责设备只读扫描；CLI 列表排版位于 `src/disk_scan_render.rs`。`src/text_width.rs` 提供无终端依赖的显示宽度与填充原语。
 

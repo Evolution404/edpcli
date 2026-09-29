@@ -111,7 +111,7 @@ fn backup_workspace_shows_detail_coverage_and_no_animation_sidebar() {
         "区域覆盖",
         "EDP主协议区",
         "12/20sector",
-        "普通用户文件不保证完整备份",
+        "目录和用户文件不在备份范围内",
         "身份未验证",
     ] {
         assert!(wide.contains(value), "missing {value}");
@@ -137,7 +137,7 @@ fn compact_backup_detail_and_coverage_remain_reachable_and_escape_returns() {
     state.focus_backups_pane(PaneId::BackupSummary);
     let detail = text(&state, 40, 10).replace(' ', "");
     assert!(detail.contains("健康"));
-    assert!(detail.contains("普通用户文件"));
+    assert!(detail.contains("目录和用户文件"));
     state.focus_backups_pane(PaneId::BackupCoverage);
     let coverage = text(&state, 40, 10).replace(' ', "");
     assert!(coverage.contains("区域覆盖"));

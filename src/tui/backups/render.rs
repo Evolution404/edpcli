@@ -369,7 +369,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                     Span::styled(health, health_style.add_modifier(Modifier::BOLD)),
                 ]),
                 Line::from(Span::styled(
-                    "普通用户文件不保证完整备份；恢复前核对覆盖范围。",
+                    "不备份目录和用户文件；恢复仅用于结构与协议元数据。",
                     warning(),
                 )),
                 Line::from(""),
@@ -412,7 +412,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             ));
             lines.extend([
                 Line::from(""),
-                Line::from("EDPB 保存协议与选定元数据范围，不保证包含普通分区全部用户文件。"),
+                Line::from("EDPB 仅保存结构与协议元数据；不保存目录或用户文件。"),
                 Line::from(""),
                 Line::from(Span::styled(
                     "可用操作",
@@ -525,7 +525,7 @@ fn draw_backup_coverage(frame: &mut Frame, area: ratatui::layout::Rect, state: &
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "普通用户文件不保证完整备份。",
+        "目录和用户文件不在备份范围内。",
         warning(),
     )));
     frame.render_widget(

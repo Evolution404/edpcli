@@ -165,17 +165,9 @@ fn coverage() -> BackupCoverage {
                 artifact_count: 1,
                 completeness: ArtifactCompleteness::Complete,
             },
-            BackupCoverageRegion {
-                id: "user-files".into(),
-                role: "普通用户文件".into(),
-                total_sectors: Some(2_048),
-                captured_sectors: 512,
-                artifact_count: 1,
-                completeness: ArtifactCompleteness::Partial,
-            },
         ],
-        extent_count: 3,
-        artifact_count: 3,
+        extent_count: 2,
+        artifact_count: 2,
     }
 }
 

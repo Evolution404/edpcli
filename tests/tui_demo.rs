@@ -69,6 +69,13 @@ fn demo_fixtures_expose_typed_inspect_layout_backups_and_running_progress() {
         .as_ref()
         .expect("typed demo backup coverage");
     assert!(!coverage.regions.is_empty());
+    assert!(
+        coverage
+            .regions
+            .iter()
+            .all(|region| region.id != "user-files" && region.role != "普通用户文件"),
+        "metadata-only demo coverage must not imply user-file capture"
+    );
     assert!(coverage.extent_count > 0);
     assert!(coverage.artifact_count > 0);
 

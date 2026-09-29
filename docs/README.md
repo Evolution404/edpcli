@@ -14,7 +14,6 @@
 ## 备份
 
 - [`backup/EDPB_FORMAT_V1.md`](backup/EDPB_FORMAT_V1.md)：EDPB v1 容器与 `Artifact`/`Region` 规范。
-- [`backup/DEEP_BACKUP_V1.md`](backup/DEEP_BACKUP_V1.md)：深度备份的只读文件系统目录清单、解密和证据边界。
 
 ## EDP 协议
 
