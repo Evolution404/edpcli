@@ -2,9 +2,11 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Cell, Paragraph, Row, Table, Wrap},
+    widgets::{Paragraph, Wrap},
     Frame,
 };
+
+use super::result_table::{render_result_table, ResultTable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResultTone {
@@ -85,14 +87,6 @@ impl ResultField {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ResultTable {
-    pub title: String,
-    pub headers: Vec<String>,
-    pub rows: Vec<Vec<ResultValue>>,
-    pub widths: Vec<Constraint>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResultCard {
     pub title: String,
@@ -122,7 +116,7 @@ fn tone_style(tone: ResultTone) -> Style {
     }
 }
 
-fn value_style(value: &ResultValue) -> Style {
+pub(super) fn value_style(value: &ResultValue) -> Style {
     let style = tone_style(value.tone);
     if value.bold {
         style.add_modifier(Modifier::BOLD)
@@ -176,51 +170,6 @@ fn render_summary(frame: &mut Frame, area: Rect, spec: &OperationResultSpec) {
     );
 }
 
-fn render_table(frame: &mut Frame, area: Rect, table: &ResultTable) {
-    if area.width < 88 || table.headers.is_empty() {
-        let mut lines = Vec::new();
-        for row in &table.rows {
-            lines.push(Line::from(
-                row.iter()
-                    .map(|cell| cell.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" · "),
-            ));
-        }
-        frame.render_widget(
-            Paragraph::new(lines)
-                .block(crate::tui::ui::card(table.title.clone(), false))
-                .wrap(Wrap { trim: true }),
-            area,
-        );
-        return;
-    }
-
-    let header = Row::new(
-        table
-            .headers
-            .iter()
-            .map(|header| Cell::from(header.clone()))
-            .collect::<Vec<_>>(),
-    )
-    .style(crate::tui::theme::current().table_header(false, false));
-
-    let rows = table.rows.iter().map(|row| {
-        Row::new(
-            row.iter()
-                .map(|cell| Cell::from(cell.text.clone()).style(value_style(cell)))
-                .collect::<Vec<_>>(),
-        )
-    });
-
-    frame.render_widget(
-        Table::new(rows, table.widths.clone())
-            .header(header)
-            .block(crate::tui::ui::card(table.title.clone(), false)),
-        area,
-    );
-}
-
 fn render_card(frame: &mut Frame, area: Rect, card: &ResultCard) {
     let lines = card
         .lines
@@ -266,7 +215,7 @@ pub fn render_operation_result(frame: &mut Frame, area: Rect, spec: &OperationRe
         (Some(table), false) if area.width >= 110 => {
             let body = Layout::horizontal([Constraint::Percentage(68), Constraint::Percentage(32)])
                 .split(root[1]);
-            render_table(frame, body[0], table);
+            render_result_table(frame, body[0], table);
             let cards = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints(card_constraints(spec.cards.len()))
@@ -276,9 +225,13 @@ pub fn render_operation_result(frame: &mut Frame, area: Rect, spec: &OperationRe
             }
         }
         (Some(table), false) => {
-            let body = Layout::vertical([Constraint::Percentage(58), Constraint::Percentage(42)])
-                .split(root[1]);
-            render_table(frame, body[0], table);
+            let split = if table.supplement.is_some() {
+                [Constraint::Percentage(70), Constraint::Percentage(30)]
+            } else {
+                [Constraint::Percentage(58), Constraint::Percentage(42)]
+            };
+            let body = Layout::vertical(split).split(root[1]);
+            render_result_table(frame, body[0], table);
             let cards = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints(card_constraints(spec.cards.len()))
@@ -287,7 +240,7 @@ pub fn render_operation_result(frame: &mut Frame, area: Rect, spec: &OperationRe
                 render_card(frame, cards[index], card);
             }
         }
-        (Some(table), true) => render_table(frame, root[1], table),
+        (Some(table), true) => render_result_table(frame, root[1], table),
         (None, false) => {
             let cards = Layout::default()
                 .direction(Direction::Vertical)

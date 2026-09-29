@@ -117,6 +117,12 @@ fn result_table(provision: &ProvisionState) -> Option<crate::tui::ui::ResultTabl
             Constraint::Length(12),
             Constraint::Min(18),
         ],
+        supplement: plan.disk_layout_model().ok().map(|model| {
+            crate::tui::ui::ResultSupplement::DiskCapacityMap {
+                title: "新盘全局布局".into(),
+                model,
+            }
+        }),
     })
 }
 

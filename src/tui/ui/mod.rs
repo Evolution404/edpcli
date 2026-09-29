@@ -6,6 +6,8 @@ pub mod card;
 pub mod confirmation;
 pub mod modal;
 pub mod operation_result;
+mod result_supplement;
+mod result_table;
 pub mod panel;
 pub mod responsive;
 pub mod table;
@@ -20,9 +22,10 @@ pub use confirmation::{
 };
 pub use modal::{centered_modal_rect, render_modal};
 pub use operation_result::{
-    render_operation_result, OperationResultSpec, ResultCard, ResultField, ResultTable, ResultTone,
-    ResultValue,
+    render_operation_result, OperationResultSpec, ResultCard, ResultField, ResultTone, ResultValue,
 };
+pub use result_supplement::ResultSupplement;
+pub use result_table::ResultTable;
 pub use panel::panel;
 pub use responsive::ViewportClass;
 pub use table::data_table;

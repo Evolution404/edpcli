@@ -1,6 +1,9 @@
-use edpcli::tui::ui::{
-    render_operation_result, OperationResultSpec, ResultCard, ResultField, ResultTable, ResultTone,
-    ResultValue,
+use edpcli::tui::{
+    disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind},
+    ui::{
+        render_operation_result, OperationResultSpec, ResultCard, ResultField, ResultSupplement,
+        ResultTable, ResultTone, ResultValue,
+    },
 };
 use ratatui::{backend::TestBackend, layout::Constraint, Terminal};
 
@@ -58,6 +61,38 @@ fn rendered(width: u16, height: u16) -> String {
                 Constraint::Length(12),
                 Constraint::Min(18),
             ],
+            supplement: Some(ResultSupplement::DiskCapacityMap {
+                title: "新盘全局布局".into(),
+                model: DiskLayoutModel::new(
+                    1_000,
+                    vec![
+                        DiskLayoutSegment {
+                            label: "EDP 主协议区".into(),
+                            start_lba: 0,
+                            sector_count: 13,
+                            kind: DiskRegionKind::Protocol,
+                        },
+                        DiskLayoutSegment {
+                            label: "启动/交换区".into(),
+                            start_lba: 13,
+                            sector_count: 700,
+                            kind: DiskRegionKind::Combined,
+                        },
+                        DiskLayoutSegment {
+                            label: "保密区".into(),
+                            start_lba: 713,
+                            sector_count: 200,
+                            kind: DiskRegionKind::Encrypt,
+                        },
+                        DiskLayoutSegment {
+                            label: "尾部区域".into(),
+                            start_lba: 913,
+                            sector_count: 87,
+                            kind: DiskRegionKind::Tail,
+                        },
+                    ],
+                ),
+            }),
         }),
         cards: vec![
             ResultCard {
@@ -108,6 +143,9 @@ fn shared_result_page_prioritizes_outcome_in_wide_and_narrow_viewports() {
             "9.97MiB",
             "交换区",
             "31.00GiB",
+            "新盘全局布局",
+            "0%",
+            "100%",
             "验收结果",
             "自动备份已创建",
             "总耗时",
@@ -119,4 +157,63 @@ fn shared_result_page_prioritizes_outcome_in_wide_and_narrow_viewports() {
         }
         assert!(!text.contains("最近进度事件"));
     }
+}
+
+#[test]
+fn provision_result_snapshot_rebuilds_complete_official_disk_layout() {
+    use edpcli::{
+        provision::{OfficialPartitionMode, PartitionRole, ProvisionTarget},
+        tui::state::{ProvisionResultPartition, ProvisionResultSnapshot},
+    };
+
+    let total_sectors = 245_760_000u64;
+    let snapshot = ProvisionResultSnapshot {
+        disk: 4,
+        target: ProvisionTarget::Official(OfficialPartitionMode::BootShareCombined),
+        total_bytes: total_sectors * 512,
+        partitions: vec![
+            ProvisionResultPartition {
+                role: Some(PartitionRole::BootShareCombined),
+                filesystem: None,
+                start_lba: 63,
+                size_bytes: 100_000 * 512,
+                selected_for_format: true,
+                disposition: None,
+            },
+            ProvisionResultPartition {
+                role: Some(PartitionRole::Encrypt),
+                filesystem: None,
+                start_lba: 200_000,
+                size_bytes: 1_000_000 * 512,
+                selected_for_format: true,
+                disposition: None,
+            },
+        ],
+    };
+
+    let model = snapshot.disk_layout_model().expect("result disk layout");
+    model.validate_complete().expect("complete result disk layout");
+    let collapsed = model.collapsed_tail_model();
+    for kind in [
+        DiskRegionKind::Protocol,
+        DiskRegionKind::Combined,
+        DiskRegionKind::Encrypt,
+        DiskRegionKind::Tail,
+    ] {
+        assert!(
+            collapsed.segments.iter().any(|segment| segment.kind == kind),
+            "missing {kind:?}"
+        );
+    }
+}
+
+#[test]
+fn provision_result_page_attaches_shared_full_disk_map() {
+    let source = include_str!("../src/tui/provision/result_render.rs");
+    let supplement = include_str!("../src/tui/ui/result_supplement.rs");
+    assert!(source.contains("disk_layout_model"));
+    assert!(source.contains("ResultSupplement::DiskCapacityMap"));
+    assert!(source.contains("新盘全局布局"));
+    assert!(supplement.contains("DiskCapacityMapProfile::Full"));
+    assert!(supplement.contains("TailExpansion::Collapsed"));
 }
