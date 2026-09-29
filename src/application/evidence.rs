@@ -355,6 +355,12 @@ impl EvidenceSource {
                 runner, disk, &protocol,
             )
             .map_err(|error| EvidenceError::Target(error.msg))?;
+        let canonical = crate::application::media_identity_observer::apply_runtime_plain_override(
+            canonical,
+            &protocol,
+            total_sectors,
+            |lba| SectorReader::read_sector(&mut dev, lba).map_err(|error| error.to_string()),
+        );
         let identity = EvidenceIdentity {
             device_id: canonical.protocol.device_id.clone(),
             vid: canonical.hardware.vid.map(|value| format!("{value:04x}")),
