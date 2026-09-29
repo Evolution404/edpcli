@@ -185,19 +185,18 @@ impl AppState {
                     let materialized_count = children.len() as u64;
                     for child in children {
                         let child = if child.kind == InspectNodeKind::Sector {
-                            workspace
+                            if let Some(item) = workspace
                                 .items
                                 .iter()
                                 .find(|item| item.lba == child.range.start_lba)
-                                .map(|item| {
-                                    crate::application::inspect_tree::sector_node_with_fields(
-                                        child.range.start_lba,
-                                        child.decoder,
-                                        child.status,
-                                        &item.fields,
-                                    )
-                                })
-                                .unwrap_or(child)
+                            {
+                                crate::application::inspect_tree::enrich_sector_node(
+                                    child,
+                                    &item.fields,
+                                )
+                            } else {
+                                child
+                            }
                         } else {
                             child
                         };

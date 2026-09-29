@@ -13,7 +13,7 @@ mod search;
 mod topology;
 
 use build::sector_stub;
-pub use build::{field_node, sector_node_with_fields};
+pub use build::{enrich_sector_node, field_node, standalone_sector_node_with_fields};
 use model::node_paths_match;
 pub use model::{
     format_lba_closed_range, DiskRegionSemantic, InspectChildren, InspectLazySectorLocation,

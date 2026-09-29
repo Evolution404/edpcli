@@ -316,6 +316,76 @@ fn protocol_lba0_sector_stub_exposes_partition_table_structure() {
 }
 
 #[test]
+fn cached_sector_enrichment_preserves_canonical_topology_identity_and_semantic() {
+    let topology = build_inspect_topology(&context(10_000));
+    let region = topology
+        .primary_region_for_lba(30)
+        .expect("free region containing LBA30");
+    assert_eq!(
+        region.region_semantic,
+        Some(DiskRegionSemantic::Unallocated)
+    );
+    let offset = 30 - region.range.start_lba;
+    let base = region
+        .materialize_sector_page(offset, 1)
+        .into_iter()
+        .next()
+        .expect("LBA30");
+    let identity = (
+        base.id.clone(),
+        base.label.clone(),
+        base.kind,
+        base.range,
+        base.decoder,
+        base.status,
+        base.region_semantic,
+    );
+    let field = InspectField {
+        key: super::super::inspect::InspectFieldKey::Synthetic,
+        range: AbsoluteByteRange {
+            start: 30 * SECTOR as u64,
+            end_exclusive: 30 * SECTOR as u64 + 4,
+        },
+        field_type: super::super::inspect::InspectFieldType::Identity,
+        raw: vec![1, 2, 3, 4],
+        decoded: vec![1, 2, 3, 4],
+        field_logical: None,
+        transform: None,
+        status: super::super::inspect::InspectFieldStatus::Known,
+        label: "cached".into(),
+        value: "value".into(),
+        style: FieldStyle::Identity,
+        group: None,
+        children: Vec::new(),
+    };
+
+    let enriched = enrich_sector_node(base, &[field]);
+    assert_eq!(
+        (
+            enriched.id.clone(),
+            enriched.label.clone(),
+            enriched.kind,
+            enriched.range,
+            enriched.decoder,
+            enriched.status,
+            enriched.region_semantic,
+        ),
+        identity
+    );
+    assert_eq!(
+        enriched.region_semantic,
+        Some(DiskRegionSemantic::Unallocated),
+        "decode hydration must not change the region color/semantic"
+    );
+    let InspectChildren::Materialized(children) = enriched.children else {
+        panic!("enriched sector must expose decoded field children");
+    };
+    assert!(children
+        .iter()
+        .any(|child| child.kind == InspectNodeKind::Field));
+}
+
+#[test]
 fn field_nodes_keep_cross_sector_absolute_ranges() {
     let field = InspectField {
         key: super::super::inspect::InspectFieldKey::Synthetic,

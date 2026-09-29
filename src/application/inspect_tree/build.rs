@@ -141,7 +141,11 @@ pub fn field_node(index: usize, field: &InspectField) -> InspectNode {
     }
 }
 
-pub fn sector_node_with_fields(
+/// Build a standalone sector tree when there is no canonical topology node to enrich.
+///
+/// Topology consumers must use enrich_sector_node so region identity/semantics survive
+/// cached decode hydration.
+pub fn standalone_sector_node_with_fields(
     lba: u64,
     decoder: Option<InspectDecoderKind>,
     status: SemanticStatus,
@@ -151,6 +155,41 @@ pub fn sector_node_with_fields(
     let mut children = match node.children {
         InspectChildren::Materialized(children) => children,
         InspectChildren::None | InspectChildren::LazySectors { .. } => Vec::new(),
+    };
+    children.extend(
+        fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| field_node(index, field)),
+    );
+    node.children = if children.is_empty() {
+        InspectChildren::None
+    } else {
+        InspectChildren::Materialized(children)
+    };
+    node
+}
+
+/// Attach decoded fields to an existing topology sector without rebuilding its identity.
+///
+/// The topology owns id/label/kind/range/decoder/status/region_semantic. Decode hydration may
+/// only replace Field children; structural children such as the LBA0 MBR table are preserved.
+pub fn enrich_sector_node(mut node: InspectNode, fields: &[InspectField]) -> InspectNode {
+    if node.kind != InspectNodeKind::Sector {
+        return node;
+    }
+
+    let existing = std::mem::replace(&mut node.children, InspectChildren::None);
+    let mut children = match existing {
+        InspectChildren::Materialized(children) => children
+            .into_iter()
+            .filter(|child| child.kind != InspectNodeKind::Field)
+            .collect::<Vec<_>>(),
+        InspectChildren::None => Vec::new(),
+        lazy @ InspectChildren::LazySectors { .. } => {
+            node.children = lazy;
+            return node;
+        }
     };
     children.extend(
         fields

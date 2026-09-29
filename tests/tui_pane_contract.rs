@@ -1303,7 +1303,10 @@ fn device_capacity_map_half_bands_align_exactly_with_content_fills() {
     let mut terminal = Terminal::new(TestBackend::new(200, 60)).unwrap();
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
     let buffer = terminal.backend().buffer();
-    let background = edpcli::tui::theme::current().palette().background;
+    let surface = edpcli::tui::theme::current()
+        .raised_surface()
+        .bg
+        .expect("raised card surface background");
 
     let top_y = (0..60)
         .find(|&y| (0..200).filter(|&x| buffer[(x, y)].symbol() == "▄").count() > 20)
@@ -1334,13 +1337,13 @@ fn device_capacity_map_half_bands_align_exactly_with_content_fills() {
         let bottom_style = buffer[(x, bottom_y)].style();
         assert_eq!(
             top_style.bg,
-            Some(background),
-            "upper outer half must be page background at x={x}"
+            Some(surface),
+            "upper outer half must inherit the enclosing card surface at x={x}"
         );
         assert_eq!(
             bottom_style.bg,
-            Some(background),
-            "lower outer half must be page background at x={x}"
+            Some(surface),
+            "lower outer half must inherit the enclosing card surface at x={x}"
         );
         assert_eq!(
             top_style.fg, value_style.bg,

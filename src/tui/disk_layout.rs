@@ -288,7 +288,6 @@ fn capacity_map_half_band_line(
     top: bool,
 ) -> Line<'static> {
     let theme = super::theme::current();
-    let page_background = theme.palette().background;
     let glyph = if top { "▄" } else { "▀" };
     Line::from(
         model
@@ -296,14 +295,14 @@ fn capacity_map_half_band_line(
             .iter()
             .zip(allocations.iter().copied())
             .map(|(segment, width)| {
-                let fill = theme
-                    .disk_region_fill(segment.kind, capacity_segment_active(segment, selection));
-                let fill_color = fill.bg.unwrap_or(page_background);
+                let fill_color = theme.disk_region_fill_color(
+                    segment.kind,
+                    capacity_segment_active(segment, selection),
+                );
                 Span::styled(
                     glyph.repeat(width),
-                    ratatui::style::Style::default()
-                        .fg(fill_color)
-                        .bg(page_background),
+                    // Leave bg unset so the unused half-cell inherits the enclosing surface.
+                    ratatui::style::Style::default().fg(fill_color),
                 )
             })
             .collect::<Vec<_>>(),

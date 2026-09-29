@@ -417,8 +417,8 @@ impl Theme {
         }
     }
 
-    pub fn disk_region_fill(self, kind: DiskRegionKind, active: bool) -> Style {
-        let background = match self.mode {
+    pub fn disk_region_fill_color(self, kind: DiskRegionKind, active: bool) -> Color {
+        match self.mode {
             ThemeMode::TrueColorDark => match (kind, active) {
                 (DiskRegionKind::Protocol, false) => Color::Rgb(0x2C, 0x62, 0x70),
                 (DiskRegionKind::Protocol, true) => Color::Rgb(0x39, 0x7A, 0x89),
@@ -505,7 +505,11 @@ impl Theme {
                     Color::Black
                 }
             }
-        };
+        }
+    }
+
+    pub fn disk_region_fill(self, kind: DiskRegionKind, active: bool) -> Style {
+        let background = self.disk_region_fill_color(kind, active);
         let foreground = if active {
             self.disk_region_active_color(kind)
         } else {

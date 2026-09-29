@@ -1169,6 +1169,51 @@ fn inspect_tree_and_detail_renderers_are_split_from_workspace_root() {
 }
 
 #[test]
+fn inspect_cached_decode_enriches_topology_nodes_instead_of_rebuilding_identity() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tree_state = fs::read_to_string(root.join("src/tui/inspect/tree_state.rs"))
+        .expect("read inspect tree state");
+    let build = fs::read_to_string(root.join("src/application/inspect_tree/build.rs"))
+        .expect("read inspect tree build");
+
+    assert!(tree_state.contains("enrich_sector_node("));
+    assert!(
+        !tree_state.contains("standalone_sector_node_with_fields("),
+        "TUI cache hydration must enrich canonical topology nodes rather than reconstruct them"
+    );
+    assert!(build.contains("pub fn enrich_sector_node"));
+    assert!(build.contains("pub fn standalone_sector_node_with_fields"));
+}
+
+#[test]
+fn tui_renderers_do_not_assume_parent_surface_palette_colors() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for path in rust_sources_under("src/tui") {
+        if path.ends_with("theme.rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        for forbidden in [
+            "palette().background",
+            "palette().canvas",
+            "palette().surface",
+            "palette().surface_raised",
+            "palette().surface_active",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{} must consume surface styles through theme APIs or inherit the parent buffer; found {forbidden}",
+                path.display()
+            );
+        }
+    }
+    let layout =
+        fs::read_to_string(root.join("src/tui/disk_layout.rs")).expect("read disk layout renderer");
+    assert!(layout.contains("disk_region_fill_color"));
+}
+
+#[test]
 fn provision_stage_renderers_are_split_from_workspace_root() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let render = fs::read_to_string(root.join("src/tui/provision/render.rs"))

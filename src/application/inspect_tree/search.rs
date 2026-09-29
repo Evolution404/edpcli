@@ -23,7 +23,7 @@ pub fn find_sector_structured_paths(
     if query.is_empty() {
         return Vec::new();
     }
-    let sector = sector_node_with_fields(lba, decoder, status, fields);
+    let sector = standalone_sector_node_with_fields(lba, decoder, status, fields);
     let mut out = Vec::new();
     node_paths_match(
         &sector,
