@@ -8,9 +8,9 @@ use edpcli::application::media_identity::{
     MediaRelationship, ProtocolIdentityEvidence, RestoreAuthorizationDecision,
     RestoreAuthorizationPolicy, RestoreGeometryRequirements, RestoreRejection, SerialQuality,
 };
-use edpcli::application::media_identity_observer::{
-    media_identity_from_protocol_image, observe_media_identity_readonly,
-};
+use edpcli::application::media_identity_observer::observe_media_identity_readonly;
+#[cfg(target_os = "macos")]
+use edpcli::application::media_identity_observer::media_identity_from_protocol_image;
 use edpcli::diskio::SectorDev;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::provision::DiskProvisionKind;
