@@ -741,7 +741,7 @@ B0～B10 按阶段实施并小步提交；以下保留每阶段的验收证据�
 
 **B6 — 格式化引导**
 
-**实施状态（2026-09-28）：COMPLETE。** 新增显式 `PartitionFormatRequest` / `PostRestoreFormatResult`，只有 assessment 为 `NeedsFormat` 的目标分区才能进入格式化；构造 assessment/request 本身不会写盘。Plain 与 EDP 明文分区均复用 provision 的 `build_empty_fat16/build_empty_exfat`，并抽取共享 sparse-`filesystem` write/sync/readback executor，原 provision 格式化路径也改为调用同一执行器，未引入第二套 FAT/exFAT `writer`。无 `filesystem` hint 时必须由调用方显式选择已验证格式；当前 portable `writer` 对 FAT32/NTFS 继续 fail-closed。格式化结果按分区返回，格式化失败不会修改已经成功的 `MetadataRestoreReport`。Focused tests：B6 3/3、provision `formatter` 18/18、Clippy `-D warnings` PASS。
+**实施状态（2026-09-28）：COMPLETE。** 新增显式 `PartitionFormatRequest` / `PostRestoreFormatResult`，只有 assessment 为 `NeedsFormat` 的目标分区才能进入格式化；构造 assessment/request 本身不会写盘。Plain 与 EDP 明文分区均通过 `filesystem::build_empty_filesystem` / driver registry 复用统一文件系统领域实现，并抽取共享 sparse-`filesystem` write/sync/readback executor，原 provision 格式化路径也改为调用同一执行器，未引入第二套 FAT/exFAT `writer`。无 `filesystem` hint 时必须由调用方显式选择已验证格式；当前 portable `writer` 对 FAT32/NTFS 继续 fail-closed。格式化结果按分区返回，格式化失败不会修改已经成功的 `MetadataRestoreReport`。Focused tests：B6 3/3、provision `formatter` 18/18、Clippy `-D warnings` PASS。
 
 - Plain / EDP 明文分区；
 - 复用现有格式化器；

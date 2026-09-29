@@ -13,7 +13,7 @@
 - `src/provision/spec.rs`
 - `src/provision/profile.rs`
 - `src/provision/generate.rs`
-- `src/provision/filesystem.rs`
+- `src/provision/partition_format.rs`
 - `src/provision/validate.rs`
 
 该模块禁止打开设备、执行系统命令或提权。硬件发现和真实写盘属于应用层/平台层。
@@ -6935,7 +6935,7 @@ exFAT cluster count exceeds edpcli validated parser range
 根因已定位：
 
 ```text
-src/provision/filesystem.rs::choose_cluster_shift()
+当时的 provision 文件系统 formatter（现对应 `src/filesystem/exfat.rs::choose_shift()`）
 ```
 
 当前仅按卷大小做固定分段：
@@ -6952,7 +6952,7 @@ src/provision/filesystem.rs::choose_cluster_shift()
 cluster_count <= 4_194_304
 ```
 
-而 `filesystem_analysis/exfat.rs` 的 exFAT parser 也使用相同的 `4_194_304` clusters 验证预算。因此问题不是用户输入非法，也不是 exFAT 无法支持该容量，而是：
+而当前位于 `src/filesystem/analysis/exfat.rs` 的 exFAT parser 使用相同的 `4_194_304` clusters 验证预算。因此问题不是用户输入非法，也不是 exFAT 无法支持该容量，而是：
 
 > **formatter 的 cluster-size policy 可以构造出一个超出 edpcli 自己 parser 验证预算的 geometry。**
 
@@ -6975,7 +6975,7 @@ ReadbackVerifierAccepts(formatter_output)
 ```text
 build_exfat_sparse_image(...)
   -> geometry.cluster_count <= EXFAT_MAX_VALIDATED_CLUSTERS
-  -> filesystem_analysis::exfat parser 接受同一 boot geometry
+  -> filesystem::analysis::exfat parser 接受同一 boot geometry
 ```
 
 如果 formatter 无法在当前验证能力内找到合法 geometry，则必须在**计划生成阶段**返回明确的“当前 edpcli 不支持该 geometry”错误，绝不能先构造一个自己后续无法验证的文件系统。
@@ -6987,8 +6987,8 @@ build_exfat_sparse_image(...)
 当前 `4_194_304` 至少分别出现在：
 
 ```text
-provision/filesystem.rs
-filesystem_analysis/exfat.rs
+src/filesystem/exfat.rs
+src/filesystem/analysis/exfat.rs
 ```
 
 本次治理将它提升为 UI-neutral / filesystem-domain 的共享 capability 常量或结构，例如：
@@ -7338,15 +7338,15 @@ src/tui/disk_layout.rs
 DiskLayout typed semantic / typed presentation row 治理仍然有效。
 
 ```text
-src/provision/filesystem.rs
-  choose_cluster_shift()
-  cluster_count > 4_194_304
+src/filesystem/exfat.rs
+  choose_shift()
+  cluster_count <= EXFAT_MAX_VALIDATED_CLUSTERS
 
-src/filesystem_analysis/exfat.rs
-  cluster_count > 4_194_304
+src/filesystem/analysis/exfat.rs
+  cluster_count <= EXFAT_MAX_VALIDATED_CLUSTERS
 ```
 
-14.13 的 exFAT producer/consumer capability 闭环问题在当前 main 仍未修复，必须保留。
+14.13 的 exFAT producer/consumer capability 闭环问题已完成治理：formatter 与 analyzer 共用 canonical validated-limit，`choose_shift()` 会在候选 cluster shift 间升级直到落入验证预算，边界与大容量回归测试继续保留为门禁。
 
 #### 14.14.3 Chapter 12 已落地后，第 14 章需要新增的兼容门禁
 

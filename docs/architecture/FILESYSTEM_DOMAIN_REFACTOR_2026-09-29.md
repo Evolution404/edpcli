@@ -21,17 +21,11 @@
 - EDP 加密属于分区转换层，不属于 FAT/exFAT/NTFS 驱动。
 - 不引入运行时动态插件机制。
 
-## 3. 当前技术债
+## 3. 重构前技术债（历史基线）
 
-文件系统职责目前分散在：
+编写本计划时，文件系统职责曾分散在 provision 下的旧文件系统实现模块、顶层旧分析模块、`inspect_target`、`backup_metadata` 与恢复格式化应用逻辑中；其中包含重复的 FAT/exFAT 构建、识别、卷标读取和读回校验，并一度把文件系统输出与 SM4 变换耦合。
 
-- `src/provision/filesystem.rs`：FAT16/exFAT 构建、卷标校验、稀疏镜像，以及与 SM4 变换耦合的辅助逻辑。
-- `src/filesystem_analysis.rs` 及其 FAT/exFAT 子模块：文件系统分析。
-- `src/inspect_target.rs`：`FilesystemBootKind` 以及 FAT12/FAT16/FAT32/exFAT/NTFS 识别。
-- `src/backup_metadata.rs`：FAT16 卷标解析，以及 exFAT 根目录/FAT 链上 `0x83 Volume Label` 查找。
-- `src/application/post_restore/format_operation.rs`：直接依赖具体文件系统格式类型和部分格式化后校验逻辑。
-
-这些重复实现使每增加一种文件系统都要横跨多个业务域修改。
+F0～F6 实施后，这些历史实现入口已删除或迁入 `src/filesystem/`；本节只保留问题来源，不再代表当前代码位置。
 
 ## 4. 目标目录
 
@@ -45,6 +39,8 @@ src/filesystem/
 ├── format.rs
 ├── driver.rs
 ├── registry.rs
+├── image.rs
+├── migration.rs
 ├── fat12.rs
 ├── fat16.rs
 ├── fat32.rs
@@ -261,7 +257,7 @@ FilesystemDriver::build_format_plan()
 
 ## 9. 分析能力边界
 
-现有 `filesystem_analysis` 保留价值，但迁移到 `filesystem/analysis/` 作为可选扩展。核心能力是识别、有限元数据、格式化和校验；目录遍历、使用量统计、文件枚举、文件内容定位与流式读取属于可选分析能力。一个文件系统即使暂时没有分析器，也可以注册检测或格式化能力。
+原有分析能力已迁入 `src/filesystem/analysis/` 作为可选扩展。核心能力是识别、有限元数据、格式化和校验；目录遍历、使用量统计、文件枚举、文件内容定位与流式读取属于可选分析能力。一个文件系统即使暂时没有分析器，也可以注册检测或格式化能力。
 
 ## 10. 业务域迁移后的行为
 
@@ -306,7 +302,7 @@ EDP 备份继续以协议为事实源：原始 LBA0-12、验证后的 LBA7 兼�
 - `src/filesystem` 之外的文件系统特定格式化分支；
 - `src/filesystem` 之外的文件系统特定卷标校验；
 - `src/filesystem` 之外的文件系统特定格式化读回校验；
-- 迁移后的顶层 `src/filesystem_analysis.rs` 及旧子路径；
+- 迁移前位于顶层的旧分析模块及其旧子路径；
 - 位于文件系统格式化模块内的 EDP 加密 helper。
 
 同时审计 `PARTITION_PREFIX_SECTORS` / `PARTITION_SUFFIX_SECTORS` 等历史“文件系统元数据范围”假设；没有当前协议/迁移消费者的直接删除。
@@ -357,7 +353,7 @@ EDP 备份继续以协议为事实源：原始 LBA0-12、验证后的 LBA7 兼�
 
 状态：`IN_PROGRESS`
 
-把 `filesystem_analysis` 迁到 `filesystem/analysis`；把仍位于 `provision/filesystem/migration.rs` 的 FAT/exFAT 专用迁移实现迁入文件系统领域，仅保留业务编排入口；更新正式迁移消费者，删除旧模块、适配层、别名和重复辅助函数，并执行 grep 门禁证明具体文件系统知识不再泄漏到业务域。
+把分析能力迁到 `src/filesystem/analysis/`；把 FAT/exFAT 专用 migration writer 迁入 `src/filesystem/migration.rs`，仅在 provision 保留 manifest、region mapping、key-domain 和 staged-entry 等真实业务编排；更新正式迁移消费者，删除旧模块、适配层、别名和重复辅助函数，并执行 grep 门禁证明具体文件系统知识不再泄漏到业务域。
 
 ## 14. 最终 grep 门禁
 
@@ -370,7 +366,7 @@ rg "build_empty_fat16|build_empty_exfat" src --glob '!filesystem/**'
 rg "0x83" src --glob '!filesystem/**'
 ```
 
-结果应为空，或仅存在于明确标记的迁移兼容/测试声明中。业务域不得根据具体文件系统名称决定备份/检查/恢复/制盘逻辑。
+旧类型、旧 helper 与 FAT/exFAT builder 的业务域结果应为空。`0x83` 门禁用于审计 exFAT Volume Label 结构知识：`src/filesystem/` 外不得存在 exFAT `0x83` 目录项解析/构造；主题 RGB、分区表类型字节、密码原语表等无关十六进制常量不是文件系统领域泄漏，不应为了让原始文本 grep 为空而改写。业务域不得根据具体文件系统磁盘结构决定备份/检查/恢复/制盘逻辑。
 
 ## 15. 测试门禁
 
