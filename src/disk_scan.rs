@@ -257,13 +257,40 @@ pub fn scan_disks(
                 for lba in 0..crate::common::METADATA_SECTOR_COUNT as u32 {
                     protocol_image.extend_from_slice(&read_exact(lba)?);
                 }
-                let identity = crate::media_identity_observer::media_identity_from_protocol_image(
-                    runner,
-                    d.n,
-                    &protocol_image,
-                )
-                .map_err(|error| io::Error::other(error.msg))?;
+                let mut identity =
+                    crate::media_identity_observer::media_identity_from_protocol_image(
+                        runner,
+                        d.n,
+                        &protocol_image,
+                    )
+                    .map_err(|error| io::Error::other(error.msg))?;
                 let total_sectors = d.size / SECTOR as u64;
+                identity = crate::media_identity_observer::apply_runtime_plain_override(
+                    identity,
+                    &protocol_image,
+                    total_sectors,
+                    |lba| {
+                        let lba = u32::try_from(lba)
+                            .map_err(|_| format!("LBA{lba} 超出当前扫描器 u32 范围"))?;
+                        read_exact(lba).map_err(|error| error.to_string())
+                    },
+                );
+                if identity.protocol.provision_kind == Some(DiskProvisionKind::Plain) {
+                    row.device_id = None;
+                    row.onlyid = None;
+                    row.dept = None;
+                    row.user = None;
+                    row.label = None;
+                    row.force_change_password = None;
+                    row.cancel_password_complexity_check = None;
+                    row.max_share_password_errors = None;
+                    row.max_encrypt_password_errors = None;
+                    row.provision_kind = DiskProvisionKind::Plain;
+                    row.partitions = None;
+                    row.lce = None;
+                } else if let Some(kind) = identity.protocol.provision_kind {
+                    row.provision_kind = kind;
+                }
                 if identity.protocol.provision_kind != Some(DiskProvisionKind::Plain) {
                     if let Some(device_id) = identity.protocol.device_id.as_deref() {
                         row.lce = crate::backup_metadata::parse_lba7_compatibility_geometry(
