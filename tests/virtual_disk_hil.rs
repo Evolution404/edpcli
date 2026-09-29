@@ -13,7 +13,7 @@ use edpcli::diskio::{
     atomic_write_sectors, execute_write_transaction, FileDev, SectorDev, SectorWriteStage,
     WriteTransactionPlan,
 };
-use edpcli::filesystem_analysis::{
+use edpcli::filesystem::analysis::{
     analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
 };
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};

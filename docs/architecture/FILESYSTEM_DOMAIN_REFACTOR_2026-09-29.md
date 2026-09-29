@@ -349,13 +349,13 @@ EDP 备份继续以协议为事实源：原始 LBA0-12、验证后的 LBA7 兼�
 
 ### F5 — 抽离分区转换层
 
-状态：`IN_PROGRESS`
+状态：`COMPLETE`
 
 把 SM4 文件系统输出变换移出文件系统领域；同一个明文文件系统驱动同时服务 Plain 和加密 EDP 分区。保持现有加密格式化/重建安全语义。
 
 ### F6 — 迁移 analysis 并清理技术债
 
-状态：`PENDING`
+状态：`IN_PROGRESS`
 
 把 `filesystem_analysis` 迁到 `filesystem/analysis`；把仍位于 `provision/filesystem/migration.rs` 的 FAT/exFAT 专用迁移实现迁入文件系统领域，仅保留业务编排入口；更新正式迁移消费者，删除旧模块、适配层、别名和重复辅助函数，并执行 grep 门禁证明具体文件系统知识不再泄漏到业务域。
 

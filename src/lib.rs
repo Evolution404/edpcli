@@ -22,7 +22,6 @@ pub mod diskio;
 pub mod edpb;
 pub(crate) mod elevate;
 pub mod filesystem;
-pub mod filesystem_analysis;
 pub mod filesystem_capability;
 pub mod identify;
 pub mod inspect;

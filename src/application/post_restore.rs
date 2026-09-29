@@ -10,10 +10,10 @@ use crate::common::SECTOR;
 use crate::diskio::SectorDev;
 use crate::edpb::ManifestPartition;
 use crate::filesystem::FilesystemKind;
-use crate::provision::decrypt_mode2;
+use crate::partition_transform::{decrypt_mode2, EdpSm4Transform};
 use crate::provision::{
-    build_empty_exfat, build_empty_fat16, encrypt_sparse_mode2, parse_existing_provision,
-    ExistingFileKeyError, FileKeyWrapMode, ProvisionImage, SecretBytes,
+    build_empty_exfat, build_empty_fat16, parse_existing_provision, ExistingFileKeyError,
+    FileKeyWrapMode, ProvisionImage, SecretBytes,
 };
 
 mod format_operation;
@@ -232,7 +232,7 @@ pub(crate) fn format_partition_after_restore(
             return Err("格式化镜像写入范围超出所选分区".into());
         }
         let image = if let Some(file_key) = file_key {
-            encrypt_sparse_mode2(&plain_image, file_key)
+            plain_image.transformed(&EdpSm4Transform::new(*file_key))
         } else {
             plain_image
         };

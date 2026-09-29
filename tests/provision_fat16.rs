@@ -2,7 +2,7 @@ use std::io;
 
 use edpcli::{
     backup_metadata::PartitionGeometry,
-    filesystem_analysis::{analyze_partition, AnalysisStatus, PartitionReader},
+    filesystem::analysis::{analyze_partition, AnalysisStatus, PartitionReader},
     provision::{build_empty_exfat, build_empty_fat16, SparseFilesystemImage},
 };
 

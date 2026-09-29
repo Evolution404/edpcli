@@ -1,5 +1,5 @@
 use super::*;
-use crate::filesystem_analysis::{
+use crate::filesystem::analysis::{
     analyze_partition, stream_file_payload, AnalysisStatus, FileEntry, PartitionReader,
 };
 use crate::provision::{
@@ -55,7 +55,9 @@ impl PartitionReader for MigrationPartitionReader<'_> {
             ));
         }
         match self.file_key {
-            Some(key) => crate::provision::decrypt_mode2(&raw, &key).map_err(std::io::Error::other),
+            Some(key) => {
+                crate::partition_transform::decrypt_mode2(&raw, &key).map_err(std::io::Error::other)
+            }
             None => Ok(raw),
         }
     }
