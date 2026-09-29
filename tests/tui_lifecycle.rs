@@ -245,9 +245,12 @@ fn two_top_level_tabs_and_nested_provision_render_at_all_terminal_sizes() {
     state.navigate(NavCommand::PreviousWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Devices);
     assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
-    assert_eq!(state.workspace(), Workspace::Provision);
+    assert_eq!(state.workspace(), Workspace::Devices);
+    assert!(state.provision_scheme_picker_open());
 
     state.provision_begin_selected();
+    state.provision_enter_form_workspace();
+    assert_eq!(state.workspace(), Workspace::Provision);
     assert_eq!(state.provision().stage, ProvisionStage::Form);
     for (width, height) in [(40, 10), (80, 24), (160, 60)] {
         let backend = TestBackend::new(width, height);

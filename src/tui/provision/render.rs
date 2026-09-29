@@ -3,6 +3,13 @@ use super::*;
 mod selection_render;
 use selection_render::draw_provision_selection;
 
+#[path = "scheme_picker_render.rs"]
+mod scheme_picker_render;
+
+pub(super) fn draw_scheme_picker(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    scheme_picker_render::draw_scheme_picker(frame, area, state);
+}
+
 #[path = "form_render.rs"]
 mod form_render;
 use form_render::draw_provision_form;
@@ -46,7 +53,7 @@ fn provision_content_layout(
 fn draw_provision_stepper(frame: &mut Frame, area: ratatui::layout::Rect, stage: ProvisionStage) {
     let current = match stage {
         ProvisionStage::SelectDisk => 0,
-        ProvisionStage::Menu | ProvisionStage::Form => 1,
+        ProvisionStage::Form => 1,
         ProvisionStage::Planning => 2,
         ProvisionStage::Review
         | ProvisionStage::ExportPath
@@ -168,8 +175,8 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
     }
 
     match provision.stage {
-        ProvisionStage::SelectDisk | ProvisionStage::Menu => {
-            draw_provision_selection(frame, main_area, state, provision.stage);
+        ProvisionStage::SelectDisk => {
+            draw_provision_selection(frame, main_area, state);
         }
         ProvisionStage::Form => {
             draw_provision_form(frame, main_area, state);

@@ -4,7 +4,7 @@ use edpcli::tui::disk_layout::{DiskLayoutModel, DiskRegionKind};
 use edpcli::tui::pane::{PaneFocus, PaneId};
 use edpcli::tui::render;
 use edpcli::tui::state::{
-    AdvancedInspectSource, AppState, NavCommand, ProvisionKind, ProvisionStage,
+    AdvancedInspectSource, AppState, NavCommand, ProvisionKind, ProvisionStage, Workspace,
 };
 use ratatui::{backend::TestBackend, Terminal};
 
@@ -191,6 +191,31 @@ fn table_footer_advertises_cell_and_row_copy_across_workspaces() {
     assert!(render_text(&devices, 240, 60).contains("y单元格·Y整行"));
     assert_eq!(devices.provision_select_disk(), Some(6));
     assert!(render_text(&devices, 240, 60).contains("y单元格·Y整行"));
+}
+
+#[test]
+fn provision_scheme_picker_is_centered_over_devices_before_entering_form() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+    assert_eq!(state.workspace(), Workspace::Devices);
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    assert_eq!(state.workspace(), Workspace::Devices);
+    assert!(state.provision_scheme_picker_open());
+
+    let text = render_text(&state, 120, 32);
+    assert!(text.contains("选择制盘方案"), "{text}");
+    assert!(text.contains("选择方案后直接进入参数表单"), "{text}");
+    assert!(text.contains("j/k"), "{text}");
+    assert!(text.contains("Enter"), "{text}");
+    assert!(text.contains("Esc"), "{text}");
+
+    state.navigate(NavCommand::Down, 20);
+    assert_eq!(state.provision_scheme_selected(), 1);
+    state.provision_begin_selected();
+    state.provision_enter_form_workspace();
+    assert_eq!(state.workspace(), Workspace::Provision);
+    assert_eq!(state.provision().stage, ProvisionStage::Form);
+    assert_eq!(state.provision().kind, ProvisionKind::Mode1);
 }
 
 #[test]

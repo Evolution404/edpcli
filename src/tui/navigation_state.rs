@@ -43,7 +43,6 @@ impl AppState {
             Workspace::Inspect => 0,
             Workspace::Provision => match self.provision.stage {
                 ProvisionStage::SelectDisk => self.provision_selectable_devices().count(),
-                ProvisionStage::Menu => ProvisionKind::ALL.len(),
                 ProvisionStage::Form
                 | ProvisionStage::Planning
                 | ProvisionStage::Review

@@ -1519,49 +1519,10 @@ impl AppState {
         self.devices.rows.get(source)
     }
 
-    pub fn provision_menu_order(&self) -> Vec<usize> {
-        let mut order = (0..ProvisionKind::ALL.len()).collect::<Vec<_>>();
-        if let Some(sort) = self.table_sort(super::table_layout::TableKind::ProvisionMenu) {
-            order.sort_by(|left, right| {
-                let value = |index: usize| {
-                    let kind = ProvisionKind::ALL[index];
-                    match sort.column {
-                        0 => index.to_string(),
-                        1 => kind.title().to_string(),
-                        2 => kind.description().to_string(),
-                        _ => String::new(),
-                    }
-                };
-                let ordering = super::table_layout::smart_cell_cmp(&value(*left), &value(*right))
-                    .then_with(|| left.cmp(right));
-                match sort.direction {
-                    super::table_layout::SortDirection::Ascending => ordering,
-                    super::table_layout::SortDirection::Descending => ordering.reverse(),
-                }
-            });
-        }
-        order
-    }
-
-    pub fn provision_kind_at_visible(&self, position: usize) -> Option<ProvisionKind> {
-        let actual = *self.provision_menu_order().get(position)?;
-        ProvisionKind::ALL.get(actual).copied()
-    }
-
-    pub fn provision_menu_source_index(&self, position: usize) -> Option<usize> {
-        self.provision_menu_order().get(position).copied()
-    }
-
-    pub fn provision_menu_source_index_or_default(&self, position: usize) -> usize {
-        self.provision_menu_source_index(position)
-            .unwrap_or(position)
-            .min(ProvisionKind::ALL.len() - 1)
-    }
-
-    pub fn provision_menu_visible_position(&self, source_index: usize) -> Option<usize> {
-        self.provision_menu_order()
+    pub(super) fn provision_visible_device_position(&self, disk: u32) -> Option<usize> {
+        self.provision_selectable_device_indices()
             .iter()
-            .position(|index| *index == source_index)
+            .position(|index| self.devices.rows[*index].disk == disk)
     }
 
     pub fn provision_select_disk(&mut self) -> Option<u32> {
@@ -1573,19 +1534,16 @@ impl AppState {
         let disk = self.provision_device_at(self.shell.selected)?.disk;
         self.shell.pinned_disk = Some(disk);
         self.provision.target_disk = Some(disk);
-        self.provision.stage = ProvisionStage::Menu;
         self.provision.message = None;
-        self.shell.selected = self
-            .provision
-            .menu_selected
-            .min(ProvisionKind::ALL.len().saturating_sub(1));
-        self.set_item_count(ProvisionKind::ALL.len());
+        self.provision.scheme_picker_open = true;
         Some(disk)
     }
 
     pub fn begin_provision_for_selected_device(&mut self) -> Result<u32, String> {
-        if self.shell.workspace != Workspace::Devices {
-            return Err("请先在设备页选择目标 USB 盘。".into());
+        if self.shell.workspace != Workspace::Devices
+            || self.devices_focused_pane() != crate::tui::pane::PaneId::DevicesList
+        {
+            return Err("请先在设备列表选中目标 USB 盘。".into());
         }
         let row = self
             .selected_device()
@@ -1597,18 +1555,20 @@ impl AppState {
             return Err("当前盘型未确认；为避免把未知/损坏介质误当普通盘，拒绝进入制盘。".into());
         }
         let disk = row.disk;
-        self.push_navigation_frame(NavigationLocation::Devices);
         self.provision.target_disk = Some(disk);
-        self.switch_workspace(Workspace::Provision);
+        self.provision.stage = ProvisionStage::SelectDisk;
         self.shell.pinned_disk = Some(disk);
-        self.provision.stage = ProvisionStage::Menu;
         self.provision.message = None;
-        self.shell.selected = self
-            .provision
-            .menu_selected
-            .min(ProvisionKind::ALL.len().saturating_sub(1));
-        self.set_item_count(ProvisionKind::ALL.len());
+        self.provision.scheme_picker_open = true;
         Ok(disk)
+    }
+
+    pub fn provision_enter_form_workspace(&mut self) {
+        if self.shell.workspace == Workspace::Devices {
+            self.push_navigation_frame(NavigationLocation::Devices);
+            self.switch_workspace(Workspace::Provision);
+        }
+        self.provision.scheme_picker_open = false;
     }
 
     pub fn selected_device_disk(&self) -> Option<u32> {
@@ -1752,6 +1712,10 @@ impl AppState {
         }
 
         if command == NavCommand::Escape {
+            if self.provision.scheme_picker_open {
+                self.provision_close_scheme_picker();
+                return StateEffect::None;
+            }
             if let Some(advanced) = self
                 .inspect
                 .advanced
@@ -1769,7 +1733,7 @@ impl AppState {
             }
             if self.shell.workspace == Workspace::Provision {
                 match self.provision.stage {
-                    ProvisionStage::SelectDisk | ProvisionStage::Menu => {
+                    ProvisionStage::SelectDisk => {
                         self.restore_workspace_frame();
                     }
                     ProvisionStage::Running => {
@@ -1788,6 +1752,7 @@ impl AppState {
                     }
                     ProvisionStage::Form | ProvisionStage::Result => {
                         self.provision_reset();
+                        self.restore_workspace_frame();
                     }
                     ProvisionStage::Planning => {
                         self.set_notice("制盘计划正在后台生成，请等待完成。");
@@ -1839,6 +1804,26 @@ impl AppState {
 
         if command == NavCommand::Quit {
             return StateEffect::ExitRequested;
+        }
+
+        if self.provision.scheme_picker_open {
+            match command {
+                NavCommand::Up => self.provision_move_scheme_picker(-1),
+                NavCommand::Down => self.provision_move_scheme_picker(1),
+                NavCommand::Top => {
+                    self.provision_select_scheme_index(0);
+                }
+                NavCommand::Bottom => {
+                    self.provision_select_scheme_index(ProvisionKind::ALL.len().saturating_sub(1));
+                }
+                _ => {}
+            }
+            if matches!(
+                command,
+                NavCommand::Up | NavCommand::Down | NavCommand::Top | NavCommand::Bottom
+            ) {
+                return StateEffect::None;
+            }
         }
 
         if command == NavCommand::NextMatch {

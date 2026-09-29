@@ -81,6 +81,8 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
         ("src/tui/inspect/field_table_render.rs", 180),
         ("src/tui/provision/state.rs", 400),
         ("src/tui/provision/execution_state.rs", 220),
+        ("src/tui/provision/scheme_picker_state.rs", 120),
+        ("src/tui/provision/scheme_picker_render.rs", 160),
         ("src/tui/provision/field_presentation.rs", 340),
         ("src/tui/provision/field_layout.rs", 180),
         ("src/cli_args.rs", 400),
@@ -206,6 +208,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/diskio/backup_create.rs",
         "src/tui/provision/state.rs",
         "src/tui/provision/execution_state.rs",
+        "src/tui/provision/scheme_picker_state.rs",
         "src/tui/provision/form.rs",
         "src/tui/provision/plain_editor.rs",
         "src/tui/provision/fields.rs",
@@ -219,6 +222,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/editor.rs",
         "src/tui/provision/render.rs",
         "src/tui/provision/selection_render.rs",
+        "src/tui/provision/scheme_picker_render.rs",
         "src/tui/provision/form_render.rs",
         "src/tui/provision/review_render.rs",
         "src/tui/provision/running_render.rs",
@@ -420,6 +424,8 @@ fn large_modules_are_split_by_domain_boundary() {
         lines("src/tui/provision/execution_state.rs") < 220,
         "Provision export/confirm/write lifecycle must stay isolated from form orchestration"
     );
+    assert!(lines("src/tui/provision/scheme_picker_state.rs") < 120);
+    assert!(lines("src/tui/provision/scheme_picker_render.rs") < 160);
     assert!(
         lines("src/tui/provision/editor.rs") < 300,
         "Provision edit actions must stay bounded"
@@ -662,7 +668,9 @@ fn workspace_modules_do_not_import_platform_or_diskio_directly() {
     for path in [
         "src/tui/provision/state.rs",
         "src/tui/provision/execution_state.rs",
+        "src/tui/provision/scheme_picker_state.rs",
         "src/tui/provision/render.rs",
+        "src/tui/provision/scheme_picker_render.rs",
         "src/tui/inspect/state.rs",
         "src/tui/inspect/search_state.rs",
         "src/tui/inspect/render.rs",

@@ -112,6 +112,7 @@ pub enum WidgetRole {
     Table,
     Input,
     SectorInspector,
+    Picker,
     Other,
 }
 

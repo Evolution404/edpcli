@@ -300,7 +300,7 @@ fn every_interactive_table_renderer_uses_unified_active_column_layout() {
         (
             "provision",
             include_str!("../src/tui/provision/selection_render.rs"),
-            2usize,
+            1usize,
         ),
         (
             "inspect",

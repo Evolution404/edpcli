@@ -18,11 +18,55 @@ fn move_provision(state: &mut AppState, delta: isize, viewport_height: usize) ->
     ActionOutcome::handled()
 }
 
+fn activate_scheme(state: &mut AppState) -> ActionOutcome {
+    let Some(disk) = state.selected_device_disk() else {
+        state.set_notice("物理制盘需要先在设备列表明确选择 USB 目标。");
+        return ActionOutcome::handled();
+    };
+    let kind = state.provision_begin_selected();
+    state.provision_enter_form_workspace();
+    if kind == ProvisionKind::Plain {
+        ActionOutcome::handled()
+    } else {
+        ActionOutcome::request(ActionRequest::ProvisionKeyProbe { disk })
+    }
+}
+
 pub(super) fn dispatch_provision(
     state: &mut AppState,
     action: TuiAction,
     viewport_height: usize,
 ) -> Option<ActionOutcome> {
+    if state.provision_scheme_picker_open() {
+        return Some(match action {
+            TuiAction::MoveUp => {
+                state.provision_move_scheme_picker(-1);
+                ActionOutcome::handled()
+            }
+            TuiAction::MoveDown => {
+                state.provision_move_scheme_picker(1);
+                ActionOutcome::handled()
+            }
+            TuiAction::Top => {
+                state.provision_select_scheme_index(0);
+                ActionOutcome::handled()
+            }
+            TuiAction::Bottom => {
+                state.provision_select_scheme_index(ProvisionKind::ALL.len().saturating_sub(1));
+                ActionOutcome::handled()
+            }
+            TuiAction::Activate => activate_scheme(state),
+            TuiAction::Back => {
+                state.provision_close_scheme_picker();
+                ActionOutcome::handled()
+            }
+            TuiAction::Quit => {
+                ActionOutcome::effect(state.navigate(NavCommand::Quit, viewport_height))
+            }
+            _ => ActionOutcome::handled(),
+        });
+    }
+
     if state.workspace() != Workspace::Provision {
         return None;
     }
@@ -47,36 +91,6 @@ pub(super) fn dispatch_provision(
                     state.set_notice("请选择可读取的 USB 整盘目标。");
                 }
                 ActionOutcome::handled()
-            }
-            TuiAction::Back => {
-                ActionOutcome::effect(state.navigate(NavCommand::Escape, viewport_height))
-            }
-            _ => return None,
-        },
-        ProvisionStage::Menu => match action {
-            TuiAction::MoveUp => {
-                ActionOutcome::effect(state.navigate(NavCommand::Up, viewport_height))
-            }
-            TuiAction::MoveDown => {
-                ActionOutcome::effect(state.navigate(NavCommand::Down, viewport_height))
-            }
-            TuiAction::Top => {
-                ActionOutcome::effect(state.navigate(NavCommand::Top, viewport_height))
-            }
-            TuiAction::Bottom => {
-                ActionOutcome::effect(state.navigate(NavCommand::Bottom, viewport_height))
-            }
-            TuiAction::Activate => {
-                let Some(disk) = state.selected_device_disk() else {
-                    state.set_notice("物理制盘需要先在制盘页明确选择 USB 目标。");
-                    return Some(ActionOutcome::handled());
-                };
-                let kind = state.provision_begin_selected();
-                if kind == ProvisionKind::Plain {
-                    ActionOutcome::handled()
-                } else {
-                    ActionOutcome::request(ActionRequest::ProvisionKeyProbe { disk })
-                }
             }
             TuiAction::Back => {
                 ActionOutcome::effect(state.navigate(NavCommand::Escape, viewport_height))

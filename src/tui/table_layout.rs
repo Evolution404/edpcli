@@ -14,7 +14,6 @@ pub enum TableKind {
     Devices,
     Backups,
     ProvisionDevices,
-    ProvisionMenu,
     InspectFields,
 }
 
@@ -594,11 +593,6 @@ pub fn layout_for(kind: TableKind) -> AdaptiveTableLayout {
             column(9, 13, 20, 50, 1, false),
             column(12, 18, 25, 95, 1, true),
             column(8, 15, 24, 35, 1, false),
-        ],
-        ProvisionMenu => vec![
-            column(3, 4, 5, 100, 1, true),
-            column(12, 24, 36, 90, 1, false),
-            column(16, 35, 80, 30, 3, false),
         ],
         InspectFields => vec![
             column(7, 7, 12, 100, 1, true),

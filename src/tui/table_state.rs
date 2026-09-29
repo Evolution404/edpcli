@@ -14,7 +14,6 @@ impl AppState {
             }
             Workspace::Provision => match self.provision.stage {
                 ProvisionStage::SelectDisk => Some(TableKind::ProvisionDevices),
-                ProvisionStage::Menu => Some(TableKind::ProvisionMenu),
                 _ => None,
             },
             Workspace::Inspect
@@ -97,20 +96,6 @@ impl AppState {
                             .map(|kind| kind.full_name().to_string())
                             .unwrap_or_else(|| "未知 / 未确认".into()),
                         row.onlyid.clone().unwrap_or_else(|| "—".into()),
-                    ]
-                    .into_iter()
-                    .map(sanitize)
-                    .collect(),
-                )
-            }
-            TableKind::ProvisionMenu => {
-                let source = *self.provision_menu_order().get(self.shell.selected)?;
-                let kind = ProvisionKind::ALL.get(source).copied()?;
-                Some(
-                    vec![
-                        source.to_string(),
-                        kind.title().to_string(),
-                        kind.description().to_string(),
                     ]
                     .into_iter()
                     .map(sanitize)
@@ -215,24 +200,6 @@ impl AppState {
                 }
                 widths
             }
-            TableKind::ProvisionMenu => {
-                let headings = ["#", "制盘方案", "布局 / 行为"];
-                let mut widths = headings
-                    .iter()
-                    .map(|value| display_width(value))
-                    .collect::<Vec<_>>();
-                for (index, kind) in ProvisionKind::ALL.into_iter().enumerate() {
-                    let values = [
-                        index.to_string(),
-                        kind.title().to_string(),
-                        kind.description().to_string(),
-                    ];
-                    for (column, value) in values.iter().enumerate() {
-                        widths[column] = widths[column].max(display_width(value));
-                    }
-                }
-                widths
-            }
             TableKind::InspectFields => {
                 let mut widths = INSPECT_DETAIL_HEADINGS
                     .iter()
@@ -258,7 +225,7 @@ impl AppState {
         match kind {
             TableKind::Devices | TableKind::Backups => terminal_width.saturating_sub(4),
             TableKind::InspectFields => terminal_width.saturating_sub(3),
-            TableKind::ProvisionDevices | TableKind::ProvisionMenu => {
+            TableKind::ProvisionDevices => {
                 let class = crate::tui::ui::ViewportClass::for_width(terminal_width);
                 let content_height = terminal_height.saturating_sub(5);
                 let main_width = if matches!(
@@ -398,9 +365,6 @@ impl AppState {
                     .map(|row| row.disk)
             })
             .flatten();
-        let provision_kind = (kind == crate::tui::table_layout::TableKind::ProvisionMenu)
-            .then(|| self.provision_kind_at_visible(self.shell.selected))
-            .flatten();
         let inspect_key = (kind == crate::tui::table_layout::TableKind::InspectFields)
             .then(|| {
                 self.advanced_inspect_detail_selected_row()
@@ -442,20 +406,6 @@ impl AppState {
                 .position(|index| self.devices.rows[*index].disk == disk)
             {
                 self.shell.selected = position;
-            }
-        }
-        if let Some(kind) = provision_kind {
-            if let Some(actual) = ProvisionKind::ALL
-                .iter()
-                .position(|candidate| *candidate == kind)
-            {
-                if let Some(position) = self
-                    .provision_menu_order()
-                    .iter()
-                    .position(|index| *index == actual)
-                {
-                    self.shell.selected = position;
-                }
             }
         }
         if let Some(key) = inspect_key {

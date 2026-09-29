@@ -8,7 +8,7 @@ pub(super) fn handle_provision_key(
     backup_dir: &Path,
     terminal_size: ratatui::layout::Size,
 ) -> Option<KeyOutcome> {
-    if state.workspace() == state::Workspace::Provision {
+    if state.provision_scheme_picker_open() || state.workspace() == state::Workspace::Provision {
         use keymap::TuiAction;
         use state::ProvisionStage;
 
@@ -62,7 +62,7 @@ pub(super) fn handle_provision_key(
         }
 
         match state.provision().stage {
-            ProvisionStage::SelectDisk | ProvisionStage::Menu => {
+            ProvisionStage::SelectDisk => {
                 match dispatch_tui_action(
                     state,
                     tasks,

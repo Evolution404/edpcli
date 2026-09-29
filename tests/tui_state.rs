@@ -18,7 +18,12 @@ fn chapter_11_provision_escape_restores_device_selection() {
     let expected_scroll = state.table_scroll_offset(TableKind::Devices);
     assert!(expected_scroll > 0);
     state.begin_provision_for_selected_device().unwrap();
+    assert!(state.provision_scheme_picker_open());
+    assert_eq!(state.workspace(), Workspace::Devices);
+    state.provision_begin_selected();
+    state.provision_enter_form_workspace();
     assert_eq!(state.navigation().depth(), 1);
+    assert_eq!(state.workspace(), Workspace::Provision);
     assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
     assert_eq!(state.workspace(), Workspace::Devices);
     assert_eq!(state.selected_device_disk(), Some(7));
@@ -250,13 +255,13 @@ fn provision_has_four_official_modes_plus_plain_after_explicit_disk_selection() 
 
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
     assert_eq!(state.item_count(), 1);
-    assert!(state.selected_device_disk().is_none());
-    assert_eq!(state.provision_select_disk(), Some(6));
-    assert_eq!(state.provision().stage, ProvisionStage::Menu);
-    assert_eq!(state.item_count(), ProvisionKind::ALL.len());
+    assert_eq!(state.workspace(), Workspace::Devices);
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    assert_eq!(state.workspace(), Workspace::Devices);
+    assert!(state.provision_scheme_picker_open());
+    assert_eq!(state.provision_scheme_selected(), 0);
+    assert_eq!(state.item_count(), 1);
 }
 
 #[test]
@@ -270,6 +275,7 @@ fn provision_requires_a_new_explicit_usb_selection_after_other_workspace_selecti
     state.provision_begin_selected();
     assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
     assert_eq!(state.provision_select_disk(), Some(6));
+    assert!(state.provision_scheme_picker_open());
     state.provision_begin_selected();
     assert_eq!(state.provision().stage, ProvisionStage::Form);
 }
@@ -278,20 +284,17 @@ fn provision_requires_a_new_explicit_usb_selection_after_other_workspace_selecti
 fn provision_escape_walks_back_one_level_without_exiting() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
-
-    assert_eq!(state.provision_select_disk(), Some(6));
-    assert_eq!(state.provision().stage, ProvisionStage::Menu);
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    assert!(state.provision_scheme_picker_open());
     assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
     assert_eq!(state.workspace(), Workspace::Devices);
+    assert!(!state.provision_scheme_picker_open());
 
     assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
-    assert_eq!(state.provision().stage, ProvisionStage::Menu);
     state.provision_begin_selected();
+    state.provision_enter_form_workspace();
     assert_eq!(state.provision().stage, ProvisionStage::Form);
-    assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
-    assert_eq!(state.provision().stage, ProvisionStage::Menu);
+    assert_eq!(state.workspace(), Workspace::Provision);
     assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
     assert_eq!(state.workspace(), Workspace::Devices);
 }
@@ -1808,37 +1811,18 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
 }
 
 #[test]
-fn provision_menu_sort_preserves_selected_scheme_and_enter_target() {
-    use edpcli::tui::table_layout::TableKind;
-
+fn provision_scheme_picker_moves_without_moving_device_selection() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
-    assert!(state.provision_select_disk().is_some());
-    assert_eq!(state.provision().stage, ProvisionStage::Menu);
+    assert_eq!(state.selected(), 0);
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    assert!(state.provision_scheme_picker_open());
 
     state.navigate(NavCommand::Down, 20);
     state.navigate(NavCommand::Down, 20);
-    let selected_kind = state
-        .provision_kind_at_visible(state.selected())
-        .expect("selected provision kind");
-
-    assert!(state.move_table_column(TableKind::ProvisionMenu, false));
-    assert_eq!(state.table_active_column(TableKind::ProvisionMenu), 1);
-
-    state.toggle_table_sort(TableKind::ProvisionMenu);
-    assert_eq!(
-        state.provision_kind_at_visible(state.selected()),
-        Some(selected_kind)
-    );
-    state.toggle_table_sort(TableKind::ProvisionMenu);
-    assert_eq!(
-        state.provision_kind_at_visible(state.selected()),
-        Some(selected_kind)
-    );
-
-    assert_eq!(state.provision_begin_selected(), selected_kind);
+    assert_eq!(state.selected(), 0);
+    assert_eq!(state.provision_scheme_selected(), 2);
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode2);
 }
 
 #[test]
@@ -1849,7 +1833,6 @@ fn every_table_kind_supports_shared_whole_column_reordering() {
         TableKind::Devices,
         TableKind::Backups,
         TableKind::ProvisionDevices,
-        TableKind::ProvisionMenu,
         TableKind::InspectFields,
     ] {
         let mut state = AppState::new();
@@ -1925,7 +1908,7 @@ fn table_copy_follows_logical_column_after_runtime_reorder() {
 }
 
 #[test]
-fn provision_select_and_menu_copy_use_active_column_and_current_order() {
+fn provision_select_copy_uses_active_column_and_current_order() {
     use edpcli::tui::table_layout::TableKind;
 
     let mut state = AppState::new();
@@ -1943,11 +1926,6 @@ fn provision_select_and_menu_copy_use_active_column_and_current_order() {
     assert_eq!(row.split('\t').next(), Some(second.as_str()));
 
     assert_eq!(state.provision_select_disk(), Some(6));
-    let kind = TableKind::ProvisionMenu;
-    assert_eq!(state.active_table_kind(), Some(kind));
-    let first = state.table_copy_payload(kind, false).unwrap();
-    assert!(state.move_table_column_edge_for_viewport(kind, true, 160, 30));
-    let last = state.table_copy_payload(kind, false).unwrap();
-    assert_ne!(first, last);
-    assert!(state.table_copy_payload(kind, true).unwrap().contains('\t'));
+    assert!(state.provision_scheme_picker_open());
+    assert_eq!(state.active_table_kind(), Some(TableKind::ProvisionDevices));
 }

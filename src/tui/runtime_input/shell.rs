@@ -40,7 +40,7 @@ pub(super) fn handle_shell_key(
                                             viewport_height,
                                         );
                                         state.set_notice(
-                                            "请在设备页选定 USB 盘后按 Enter 进入制盘。",
+                                            "请在设备列表选定 USB 盘后按 p 选择制盘方案。",
                                         );
                                     } else if let Err(message) =
                                         state.begin_provision_for_selected_device()

@@ -68,7 +68,6 @@ impl ProvisionKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionStage {
     SelectDisk,
-    Menu,
     Form,
     Planning,
     Review,
@@ -113,6 +112,8 @@ mod plain_editor;
 mod review;
 #[path = "run.rs"]
 mod run;
+#[path = "scheme_picker_state.rs"]
+mod scheme_picker_state;
 pub(crate) use review::{ProvisionReviewRowKind, ProvisionReviewTone};
 pub use run::ProvisionRunState;
 #[path = "validation.rs"]
@@ -125,7 +126,8 @@ pub use form::{PlainPartitionForm, PlainProvisionForm, ProvisionForm};
 pub struct ProvisionState {
     pub stage: ProvisionStage,
     pub kind: ProvisionKind,
-    pub menu_selected: usize,
+    pub scheme_selected: usize,
+    pub scheme_picker_open: bool,
     pub field_selected: usize,
     pub field_cursor: usize,
     pub form: ProvisionForm,
@@ -144,9 +146,10 @@ pub struct ProvisionState {
 impl Default for ProvisionState {
     fn default() -> Self {
         Self {
-            stage: ProvisionStage::Menu,
+            stage: ProvisionStage::SelectDisk,
             kind: ProvisionKind::Mode0,
-            menu_selected: 0,
+            scheme_selected: 0,
+            scheme_picker_open: false,
             field_selected: 0,
             field_cursor: 0,
             form: ProvisionForm::default(),
@@ -191,37 +194,38 @@ impl AppState {
         self.shell.input_mode = InputMode::Normal;
         let selected = self
             .provision
-            .menu_selected
+            .scheme_selected
             .min(ProvisionKind::ALL.len() - 1);
         let target_disk = self.provision.target_disk;
         self.provision = ProvisionState::default();
-        self.provision.menu_selected = selected;
+        self.provision.scheme_selected = selected;
         self.provision.kind = ProvisionKind::ALL[selected];
         self.provision.target_disk = target_disk;
         self.shell.pinned_disk = target_disk;
         if self.shell.workspace == Workspace::Provision {
-            if target_disk.is_some() {
-                self.provision.stage = ProvisionStage::Menu;
-                self.set_item_count(ProvisionKind::ALL.len());
-                self.shell.selected = self.provision_menu_visible_position(selected).unwrap_or(0);
-            } else {
-                self.provision.stage = ProvisionStage::SelectDisk;
-                self.set_item_count(self.provision_selectable_devices().count());
-                self.shell.selected = 0;
-            }
+            self.provision.stage = ProvisionStage::SelectDisk;
+            self.provision.scheme_picker_open = false;
+            self.set_item_count(self.provision_selectable_devices().count());
+            self.shell.selected = target_disk
+                .and_then(|disk| self.provision_visible_device_position(disk))
+                .unwrap_or(0);
         }
     }
 
     pub fn provision_begin_selected(&mut self) -> ProvisionKind {
-        let index = self.provision_menu_source_index_or_default(self.shell.selected);
+        let index = self
+            .provision
+            .scheme_selected
+            .min(ProvisionKind::ALL.len() - 1);
         let kind = ProvisionKind::ALL[index];
         if self.selected_device().is_none() {
             self.provision.stage = ProvisionStage::SelectDisk;
-            self.provision.message = Some("请先在制盘页明确选择 USB 目标盘。".into());
+            self.provision.message = Some("请先在设备列表明确选择 USB 目标盘。".into());
             self.set_item_count(self.provision_selectable_devices().count());
             return kind;
         }
-        self.provision.menu_selected = index;
+        self.provision.scheme_selected = index;
+        self.provision.scheme_picker_open = false;
         self.provision.kind = kind;
         self.provision.field_selected = 0;
         self.provision.field_cursor = 0;

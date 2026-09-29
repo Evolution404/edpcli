@@ -28,7 +28,7 @@ use backups_render::{
 };
 use devices_render::draw_devices;
 use inspect_render::draw_advanced_inspect;
-use provision_render::draw_provision;
+use provision_render::{draw_provision, draw_scheme_picker};
 
 fn backup_health(backup: &crate::application::BackupWorkspaceItem) -> (&'static str, Style) {
     if !backup.size_ok {
@@ -978,7 +978,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         || state.active_scan_pending()
         || state.wizard().is_some()
         || (state.workspace() == Workspace::Provision
-            && state.provision().stage != ProvisionStage::Menu)
+            && state.provision().stage != ProvisionStage::SelectDisk)
     {
         CoreMode::Busy
     } else {
@@ -1063,6 +1063,10 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         }
     }
 
+    if state.provision_scheme_picker_open() {
+        draw_scheme_picker(frame, content_area, state);
+    }
+
     let status = if state.is_critical_operation() && state.backup_delete().is_some() {
         "备份删除正在执行：Esc 不退出；q / Ctrl-C 将延迟到安全检查点".to_string()
     } else if state.is_critical_operation() && state.backup_batch_delete().is_some() {
@@ -1071,6 +1075,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         "备份清理正在执行：Esc 不退出；q / Ctrl-C 将延迟到安全检查点".to_string()
     } else if state.is_critical_operation() {
         "关键写盘阶段：Esc 不退出；q / Ctrl-C 将延迟到安全检查点".to_string()
+    } else if state.provision_scheme_picker_open() {
+        "制盘方案：j/k 或 ↑/↓ 选择 · Enter 确认进入制盘表单 · Esc 取消".to_string()
     } else if let Some(advanced) = state.advanced_inspect() {
         use super::state::AdvancedInspectStage;
         match advanced.stage {
@@ -1201,15 +1207,6 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
                     let total = crate::tui::table_layout::layout_for(kind).specs().len();
                     format!(
                         "制盘选盘：j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 固定目标 · Esc 返回设备页",
-                        state.table_active_column(kind) + 1,
-                        total
-                    )
-                }
-                ProvisionStage::Menu => {
-                    let kind = crate::tui::table_layout::TableKind::ProvisionMenu;
-                    let total = crate::tui::table_layout::layout_for(kind).specs().len();
-                    format!(
-                        "j/k 行 · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认排序 · {}/{} 列 · Enter 打开 · Esc 返回 · q 退出",
                         state.table_active_column(kind) + 1,
                         total
                     )

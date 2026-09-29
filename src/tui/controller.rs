@@ -270,11 +270,12 @@ pub(super) fn active_widget_role(state: &AppState) -> WidgetRole {
         return WidgetRole::Other;
     }
 
+    if state.provision_scheme_picker_open() {
+        return WidgetRole::Picker;
+    }
+
     if state.workspace() == Workspace::Provision
-        && matches!(
-            state.provision().stage,
-            ProvisionStage::SelectDisk | ProvisionStage::Menu
-        )
+        && state.provision().stage == ProvisionStage::SelectDisk
     {
         return WidgetRole::Table;
     }
@@ -297,6 +298,12 @@ pub(super) fn dispatch_action(
     viewport_width: u16,
     clipboard: &mut dyn ClipboardBackend,
 ) -> ActionOutcome {
+    if state.provision_scheme_picker_open() {
+        if let Some(outcome) = provision::dispatch_provision(state, action, viewport_height) {
+            return outcome;
+        }
+    }
+
     if matches!(action, TuiAction::FocusNext | TuiAction::FocusPrevious) {
         let reverse = action == TuiAction::FocusPrevious;
         return match state.workspace() {
@@ -384,7 +391,9 @@ pub(super) fn dispatch_action(
             Workspace::Inspect | Workspace::Provision => ActionOutcome::unhandled(),
         },
         TuiAction::Provision if state.workspace() == Workspace::Devices => {
-            if let Err(message) = state.begin_provision_for_selected_device() {
+            if state.devices_focused_pane() != PaneId::DevicesList {
+                state.set_notice("请先回到设备列表，再按 p 选择制盘方案。");
+            } else if let Err(message) = state.begin_provision_for_selected_device() {
                 state.set_notice(message);
             }
             ActionOutcome::handled()
