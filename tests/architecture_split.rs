@@ -71,7 +71,8 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
         ("src/tui/inspect/search_state.rs", 450),
         ("src/tui/inspect/jump_state.rs", 200),
         ("src/tui/inspect/detail_render.rs", 500),
-        ("src/tui/provision/state.rs", 470),
+        ("src/tui/provision/state.rs", 400),
+        ("src/tui/provision/execution_state.rs", 220),
         ("src/tui/provision/field_presentation.rs", 420),
         ("src/cli_args.rs", 550),
         ("src/cli.rs", 350),
@@ -191,6 +192,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/diskio/backup_catalog.rs",
         "src/diskio/backup_create.rs",
         "src/tui/provision/state.rs",
+        "src/tui/provision/execution_state.rs",
         "src/tui/provision/form.rs",
         "src/tui/provision/plain_editor.rs",
         "src/tui/provision/fields.rs",
@@ -353,8 +355,12 @@ fn large_modules_are_split_by_domain_boundary() {
     }
     assert!(lines("src/inspect/render.rs") < 400);
     assert!(
-        lines("src/tui/provision/state.rs") < 470,
+        lines("src/tui/provision/state.rs") < 400,
         "Provision orchestration state must not absorb form/capacity/plain model again"
+    );
+    assert!(
+        lines("src/tui/provision/execution_state.rs") < 220,
+        "Provision export/confirm/write lifecycle must stay isolated from form orchestration"
     );
     assert!(
         lines("src/tui/provision/editor.rs") < 300,
@@ -589,6 +595,7 @@ fn edpb_container_is_split_by_protocol_responsibility() {
 fn workspace_modules_do_not_import_platform_or_diskio_directly() {
     for path in [
         "src/tui/provision/state.rs",
+        "src/tui/provision/execution_state.rs",
         "src/tui/provision/render.rs",
         "src/tui/inspect/state.rs",
         "src/tui/inspect/search_state.rs",

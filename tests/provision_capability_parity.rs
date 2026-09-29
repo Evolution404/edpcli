@@ -42,7 +42,7 @@ fn cli_and_tui_share_provision_prepare_commit_and_export_entrypoints() {
 fn plain_is_a_first_class_target_and_not_mode4() {
     let args = source("src/cli_args.rs");
     let application = source("src/application/provision.rs");
-    let tui_state = source("src/tui/provision/state.rs");
+    let tui_execution = source("src/tui/provision/execution_state.rs");
 
     assert!(args.contains("mode0|mode1|mode2|mode3|plain"));
     assert!(args.contains("--partition"));
@@ -53,7 +53,7 @@ fn plain_is_a_first_class_target_and_not_mode4() {
     assert!(application.contains("Official(Box<OfficialProvisionRequest>)"));
     assert!(application.contains("Plain(PlainProvisionRequest)"));
     assert!(application.contains("enum PreparedProvision"));
-    assert!(tui_state.contains("./edp-plain.img"));
+    assert!(tui_execution.contains("./edp-plain.img"));
 }
 
 #[test]
@@ -73,11 +73,11 @@ fn optional_format_choices_are_not_forced_on_by_rebuild_actions() {
 
 #[test]
 fn plain_export_is_available_in_tui_review_flow() {
-    let state = source("src/tui/provision/state.rs");
+    let execution = source("src/tui/provision/execution_state.rs");
     let render = source("src/tui/render.rs");
 
     assert!(
-        !state.contains("ProvisionPrepared::Plain(_) => return None"),
+        !execution.contains("ProvisionPrepared::Plain(_) => return None"),
         "Plain export must not be blocked by TUI state"
     );
     assert!(render.contains("e 导出镜像"));
