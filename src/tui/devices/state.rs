@@ -92,15 +92,7 @@ impl AppState {
 
     pub fn device_info_tree_rows(&self) -> Vec<DeviceInfoTreeNode> {
         fn size_text(bytes: u64) -> String {
-            if bytes >= 1_000_000_000 {
-                format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
-            } else if bytes >= 1_000_000 {
-                format!("{:.2} MB", bytes as f64 / 1_000_000.0)
-            } else if bytes >= 1_000 {
-                format!("{:.2} kB", bytes as f64 / 1_000.0)
-            } else {
-                format!("{bytes} B")
-            }
+            crate::common::fmt_capacity(bytes)
         }
 
         fn reliability_label(row: &crate::disk_scan::Row) -> &'static str {

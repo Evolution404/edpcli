@@ -76,15 +76,7 @@ fn context_from_backup_meta(meta: &diskio::BackupMeta) -> SemanticContext {
 }
 
 fn human_bytes(value: u64) -> String {
-    if value >= 1_000_000_000 {
-        format!("{:.2} GB", value as f64 / 1_000_000_000.0)
-    } else if value >= 1_000_000 {
-        format!("{:.2} MB", value as f64 / 1_000_000.0)
-    } else if value >= 1_000 {
-        format!("{:.2} KB", value as f64 / 1_000.0)
-    } else {
-        format!("{} B", value)
-    }
+    crate::common::fmt_capacity(value)
 }
 
 fn partition_info(partition: semantic::PartitionSemantics) -> PartitionInfo {
@@ -268,7 +260,7 @@ pub fn render_with_source(summary: &MetaInfoSummary, source: Option<&str>) -> St
         out.push_str(&format!(
             "  {}  {}\n",
             crate::ui::dim(&crate::ui::pad_to("容量", 18)),
-            crate::ui::magenta(&crate::common::fmt_gb(size))
+            crate::ui::magenta(&crate::common::fmt_capacity(size))
         ));
     }
     row(

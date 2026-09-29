@@ -668,7 +668,7 @@ fn disk_table_rendering() {
         "{}",
         edpf
     );
-    assert!(edpf.contains("Boot 0.00GB (LBA 32~63)"), "{}", edpf);
+    assert!(edpf.contains("Boot 16.38KB (LBA 32~63)"), "{}", edpf);
     let meta = lines.iter().find(|l| l.contains("onlyid")).unwrap();
     assert!(
         meta.contains("onlyid=1402259934")

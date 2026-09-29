@@ -40,7 +40,7 @@ fn backup_model_name(meta: &BackupMeta) -> String {
 fn backup_capacity(meta: &BackupMeta) -> String {
     meta.secs
         .and_then(|s| s.checked_mul(SECTOR as u64))
-        .map(crate::common::fmt_gb)
+        .map(crate::common::fmt_capacity)
         .unwrap_or_else(|| "容量未知".into())
 }
 

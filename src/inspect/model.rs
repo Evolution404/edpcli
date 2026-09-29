@@ -124,15 +124,7 @@ pub(super) fn mbr_type_name(t: u8) -> &'static str {
 }
 
 pub(super) fn human_bytes(v: u64) -> String {
-    if v >= 1_000_000_000 {
-        format!("{:.2} GB", v as f64 / 1_000_000_000.0)
-    } else if v >= 1_000_000 {
-        format!("{:.2} MB", v as f64 / 1_000_000.0)
-    } else if v >= 1_000 {
-        format!("{:.2} KB", v as f64 / 1_000.0)
-    } else {
-        format!("{} B", v)
-    }
+    crate::common::fmt_capacity(v)
 }
 
 pub(super) fn c_string_bytes(b: &[u8]) -> &[u8] {

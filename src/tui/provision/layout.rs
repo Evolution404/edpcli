@@ -30,10 +30,10 @@ impl AppState {
                 "重建"
             };
             lines.push(format!(
-                "{}  {} sector (~{} MiB)  ·  LBA {}–{}  ·  {}",
+                "{}  {} sector (~{})  ·  LBA {}–{}  ·  {}",
                 part.role.label(),
                 part.sector_count,
-                part.sector_count / 2048,
+                crate::common::fmt_capacity_sectors(part.sector_count),
                 part.start_lba,
                 end,
                 action
@@ -48,14 +48,7 @@ impl AppState {
     }
 
     pub(crate) fn format_sector_size(sectors: u64) -> String {
-        let mib = sectors as f64 / 2048.0;
-        if mib >= 1024.0 {
-            format!("{:.2} GiB", mib / 1024.0)
-        } else if mib >= 1.0 {
-            format!("{mib:.1} MiB")
-        } else {
-            format!("{sectors} sector")
-        }
+        crate::common::fmt_capacity_sectors(sectors)
     }
 
     fn provision_plain_layout_editor_lines(&self) -> Vec<String> {

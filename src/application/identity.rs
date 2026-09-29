@@ -206,7 +206,7 @@ impl WorkspaceIdentity {
         };
         [
             self.size_bytes
-                .map(crate::common::fmt_gb)
+                .map(crate::common::fmt_capacity)
                 .unwrap_or_else(|| "—".into()),
             self.vid_pid(),
             self.model(),

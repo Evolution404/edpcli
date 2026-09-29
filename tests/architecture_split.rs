@@ -1502,3 +1502,42 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
     assert!(!commit.contains("Migrate 当前 unsupported"));
     assert!(commit.contains("Migrate 写集合缺少目标文件系统引导扇区"));
 }
+
+#[test]
+fn passive_capacity_display_uses_one_global_unit_system() {
+    for path in [
+        "src/disk_scan_render.rs",
+        "src/ui.rs",
+        "src/inspect_cli.rs",
+        "src/backup_cli.rs",
+        "src/application/identity.rs",
+        "src/metainfo.rs",
+        "src/inspect/model.rs",
+        "src/tui/render.rs",
+        "src/tui/table_state.rs",
+        "src/tui/devices/state.rs",
+        "src/tui/devices/presentation.rs",
+        "src/tui/disk_layout.rs",
+        "src/tui/provision/layout.rs",
+        "src/tui/provision/render.rs",
+        "src/tui/provision/selection_render.rs",
+        "src/tui/provision/scheme_picker_render.rs",
+    ] {
+        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
+            .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        assert!(
+            source.contains("fmt_capacity"),
+            "{path} must route passive capacity text through the global formatter"
+        );
+        for forbidden in [
+            "1_073_741_824.0",
+            "1_000_000_000.0",
+            "/ 1024.0 / 1024.0 / 1024.0",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{path} hardcodes capacity conversion {forbidden}"
+            );
+        }
+    }
+}

@@ -15,7 +15,7 @@ pub(super) fn draw_provision_selection(
             let row = state.provision_device_at(index)?;
             Some(vec![
                 format!("disk{}", row.disk),
-                format!("{:.2} GiB", row.size as f64 / 1_073_741_824.0),
+                crate::common::fmt_capacity(row.size),
                 format!("{}:{}", safe(&row.vid), safe(&row.pid)),
                 row.confirmed_provision_kind()
                     .map(|kind| kind.full_name().to_string())

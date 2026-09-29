@@ -1,6 +1,6 @@
 //! CLI presentation for read-only device scan rows.
 
-use crate::common::{fmt_gb, group_digits};
+use crate::common::{fmt_capacity, group_digits};
 use crate::disk_scan::Row;
 use crate::provision::DiskProvisionKind;
 
@@ -35,7 +35,7 @@ pub fn print_disk_table(rows: &[Row]) -> String {
             };
             vec![
                 TableCell::left(format!("disk{}", row.disk), Tone::Bold),
-                TableCell::right(fmt_gb(row.size), Tone::Magenta),
+                TableCell::right(fmt_capacity(row.size), Tone::Magenta),
                 TableCell::left(
                     row.proto.clone(),
                     if row.proto == "USB" {
@@ -89,7 +89,7 @@ pub fn print_disk_table(rows: &[Row]) -> String {
                         format!(
                             "{} {} (LBA {}~{})",
                             part.type_name(),
-                            fmt_gb(part.size_bytes),
+                            fmt_capacity(part.size_bytes),
                             group_digits(part.start_lba),
                             group_digits(part.end_lba())
                         )

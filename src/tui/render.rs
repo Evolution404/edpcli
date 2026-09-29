@@ -552,7 +552,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                     } else {
                         " "
                     };
-                    let capacity = crate::common::fmt_gb(
+                    let capacity = crate::common::fmt_capacity(
                         partition
                             .sector_count
                             .saturating_mul(crate::common::SECTOR as u64),

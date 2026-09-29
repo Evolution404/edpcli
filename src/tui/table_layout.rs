@@ -448,13 +448,21 @@ fn numeric_cell(value: &str) -> Option<f64> {
     }
     let mut value = number.parse::<f64>().ok()?;
     let lower = trimmed.to_ascii_lowercase();
-    if lower.contains("tib") || lower.contains("tb") {
+    if lower.contains("tib") {
+        value *= 1_099_511_627_776.0;
+    } else if lower.contains("tb") {
         value *= 1_000_000_000_000.0;
-    } else if lower.contains("gib") || lower.contains("gb") {
+    } else if lower.contains("gib") {
+        value *= 1_073_741_824.0;
+    } else if lower.contains("gb") {
         value *= 1_000_000_000.0;
-    } else if lower.contains("mib") || lower.contains("mb") {
+    } else if lower.contains("mib") {
+        value *= 1_048_576.0;
+    } else if lower.contains("mb") {
         value *= 1_000_000.0;
-    } else if lower.contains("kib") || lower.contains("kb") {
+    } else if lower.contains("kib") {
+        value *= 1_024.0;
+    } else if lower.contains("kb") {
         value *= 1_000.0;
     }
     Some(value)

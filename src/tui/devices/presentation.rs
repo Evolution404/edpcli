@@ -510,15 +510,7 @@ fn styled_field_line(
 }
 
 fn format_bytes(bytes: u64) -> String {
-    if bytes >= 1_000_000_000 {
-        format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
-    } else if bytes >= 1_000_000 {
-        format!("{:.2} MB", bytes as f64 / 1_000_000.0)
-    } else if bytes >= 1_000 {
-        format!("{:.2} kB", bytes as f64 / 1_000.0)
-    } else {
-        format!("{bytes} B")
-    }
+    crate::common::fmt_capacity(bytes)
 }
 
 fn percentage(sectors: u64, total: u64) -> String {

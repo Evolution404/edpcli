@@ -87,7 +87,7 @@ fn print_inspect_meta(
         parts.push(format!("USB {v}:{p}"));
     }
     if let Some(size) = meta.size_bytes {
-        parts.push(crate::common::fmt_gb(size));
+        parts.push(crate::common::fmt_capacity(size));
     }
     if !parts.is_empty() {
         println!("{}  {}", crate::ui::bold("设备"), parts.join(" · "));

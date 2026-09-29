@@ -52,8 +52,8 @@ pub(super) fn draw_scheme_picker(frame: &mut Frame, area: ratatui::layout::Rect,
                     accent().add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(format!(
-                    "  ·  {:.2} GiB  ·  {}:{}",
-                    row.size as f64 / 1_073_741_824.0,
+                    "  ·  {}  ·  {}:{}",
+                    crate::common::fmt_capacity(row.size),
                     safe(&row.vid),
                     safe(&row.pid)
                 )),

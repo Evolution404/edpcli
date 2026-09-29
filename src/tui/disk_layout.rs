@@ -629,16 +629,7 @@ fn percentage(sectors: u64, total: u64) -> String {
 }
 
 fn format_sector_size(sectors: u64) -> String {
-    let bytes = sectors.saturating_mul(crate::common::SECTOR as u64);
-    if bytes >= 1_000_000_000 {
-        format!("{:.2} GB", bytes as f64 / 1_000_000_000.0)
-    } else if bytes >= 1_000_000 {
-        format!("{:.2} MB", bytes as f64 / 1_000_000.0)
-    } else if bytes >= 1_000 {
-        format!("{:.2} kB", bytes as f64 / 1_000.0)
-    } else {
-        format!("{bytes} B")
-    }
+    crate::common::fmt_capacity_sectors(sectors)
 }
 
 impl DiskRegionKind {

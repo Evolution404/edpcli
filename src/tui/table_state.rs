@@ -90,7 +90,7 @@ impl AppState {
                 Some(
                     vec![
                         format!("disk{}", row.disk),
-                        format!("{:.2} GiB", row.size as f64 / 1_073_741_824.0),
+                        crate::common::fmt_capacity(row.size),
                         format!("{}:{}", row.vid, row.pid),
                         row.confirmed_provision_kind()
                             .map(|kind| kind.full_name().to_string())
@@ -187,7 +187,7 @@ impl AppState {
                 for row in self.provision_selectable_devices() {
                     let values = [
                         format!("disk{}", row.disk),
-                        format!("{:.2} GiB", row.size as f64 / 1_073_741_824.0),
+                        crate::common::fmt_capacity(row.size),
                         format!("{}:{}", row.vid, row.pid),
                         row.confirmed_provision_kind()
                             .map(|kind| kind.full_name().to_string())

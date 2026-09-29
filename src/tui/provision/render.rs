@@ -113,10 +113,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
         vec![
             Line::from(vec![
                 Span::styled(format!("disk{}", row.disk), accent()),
-                Span::raw(format!(
-                    "  {:.2} GiB",
-                    row.size as f64 / 1024.0 / 1024.0 / 1024.0
-                )),
+                Span::raw(format!("  {}", crate::common::fmt_capacity(row.size))),
             ]),
             Line::from(vec![
                 Span::styled("接口  ", muted()),

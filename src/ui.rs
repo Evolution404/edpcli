@@ -330,7 +330,7 @@ pub fn disk_menu_str(disks: &[crate::sysinfo::ExtDisk]) -> String {
                 crate::ui::TableCell::right((i + 1).to_string(), crate::ui::Tone::BoldCyan),
                 crate::ui::TableCell::left(format!("disk{}", d.n), crate::ui::Tone::Bold),
                 crate::ui::TableCell::right(
-                    crate::common::fmt_gb(d.size),
+                    crate::common::fmt_capacity(d.size),
                     crate::ui::Tone::Magenta,
                 ),
                 crate::ui::TableCell::left(format!("{}:{}", d.vid, d.pid), crate::ui::Tone::Yellow),
