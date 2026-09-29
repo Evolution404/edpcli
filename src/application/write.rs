@@ -632,6 +632,12 @@ pub fn backup_create_level_flow(
     dev: &mut dyn SectorDev,
     deep: bool,
 ) -> EdpCliResult<BackupReport> {
+    if deep {
+        return Err(err(
+            EXIT_USAGE,
+            "错误: --deep 已移除；最新版只允许创建 metadata-only EDPB v3",
+        ));
+    }
     guard_usb_disk(ctx.runner, disk)?;
     let observed =
         super::media_identity_observer::observe_media_identity_readonly(ctx.runner, disk, dev)?;
@@ -666,23 +672,15 @@ pub fn backup_create_level_flow(
             pid,
             label_id: identity.protocol.onlyid.clone(),
         };
-        let acquire = if deep {
-            crate::backup_deep::acquire_deep
-        } else {
-            crate::backup_metadata::acquire_metadata
-        };
-        let metadata = acquire(dev, &img, &device_id, total_sectors).map_err(|message| {
-            err(
-                EXIT_BACKUP,
-                format!("错误: Metadata 级备份采集失败: {message}"),
-            )
-        })?;
-        let save = if deep {
-            diskio::create_deep_backup
-        } else {
-            diskio::create_metadata_backup
-        };
-        save(
+        let metadata =
+            crate::backup_metadata::acquire_metadata(dev, &img, &device_id, total_sectors)
+                .map_err(|message| {
+                    err(
+                        EXIT_BACKUP,
+                        format!("错误: Metadata 级备份采集失败: {message}"),
+                    )
+                })?;
+        diskio::create_metadata_backup(
             &facts,
             &img,
             &device_id,
@@ -692,12 +690,6 @@ pub fn backup_create_level_flow(
             ctx.clock,
         )?
     } else {
-        if deep {
-            return Err(err(
-                EXIT_BACKUP,
-                "错误: Plain 盘没有 EDP 分区语义，--deep 备份不可用；请使用普通 backup create",
-            ));
-        }
         if identity.protocol.provision_kind != Some(crate::provision::DiskProvisionKind::Plain) {
             return Err(err(
                 EXIT_BACKUP,
