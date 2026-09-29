@@ -192,7 +192,9 @@ fn provision_result_snapshot_rebuilds_complete_official_disk_layout() {
     };
 
     let model = snapshot.disk_layout_model().expect("result disk layout");
-    model.validate_complete().expect("complete result disk layout");
+    model
+        .validate_complete()
+        .expect("complete result disk layout");
     let collapsed = model.collapsed_tail_model();
     for kind in [
         DiskRegionKind::Protocol,
@@ -201,7 +203,10 @@ fn provision_result_snapshot_rebuilds_complete_official_disk_layout() {
         DiskRegionKind::Tail,
     ] {
         assert!(
-            collapsed.segments.iter().any(|segment| segment.kind == kind),
+            collapsed
+                .segments
+                .iter()
+                .any(|segment| segment.kind == kind),
             "missing {kind:?}"
         );
     }

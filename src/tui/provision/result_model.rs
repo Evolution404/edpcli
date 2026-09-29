@@ -68,9 +68,7 @@ impl ProvisionResultSnapshot {
         }
     }
 
-    pub fn disk_layout_model(
-        &self,
-    ) -> Result<crate::tui::disk_layout::DiskLayoutModel, String> {
+    pub fn disk_layout_model(&self) -> Result<crate::tui::disk_layout::DiskLayoutModel, String> {
         use crate::tui::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
 
         let total_sectors = self.total_bytes / crate::common::SECTOR as u64;

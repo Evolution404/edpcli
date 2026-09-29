@@ -6,10 +6,10 @@ pub mod card;
 pub mod confirmation;
 pub mod modal;
 pub mod operation_result;
-mod result_supplement;
-mod result_table;
 pub mod panel;
 pub mod responsive;
+mod result_supplement;
+mod result_table;
 pub mod table;
 pub mod workspace_overview;
 
@@ -24,9 +24,9 @@ pub use modal::{centered_modal_rect, render_modal};
 pub use operation_result::{
     render_operation_result, OperationResultSpec, ResultCard, ResultField, ResultTone, ResultValue,
 };
-pub use result_supplement::ResultSupplement;
-pub use result_table::ResultTable;
 pub use panel::panel;
 pub use responsive::ViewportClass;
+pub use result_supplement::ResultSupplement;
+pub use result_table::ResultTable;
 pub use table::data_table;
 pub use workspace_overview::{workspace_overview, OverviewMetric, OverviewSearch};
