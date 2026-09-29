@@ -20,10 +20,10 @@ mod macos {
     use edpcli::common::SECTOR;
     use edpcli::diskio::{raw_path, FileDev, SectorDev};
     use edpcli::provision::{
-        parse_existing_provision, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
-        OfficialFilesystemFormat, OfficialPartitionMode, PartitionAction, PartitionRole,
-        ProvisionImage, ProvisionTarget, RegionDisposition, SourcePasswordKnowledge,
-        TargetIdentity, DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_SAFE6_LABEL,
+        parse_existing_provision, FilesystemKind, KeyDomainRole, KeyDomainSecretPair,
+        KeyDomainSecrets, OfficialPartitionMode, PartitionAction, PartitionRole, ProvisionImage,
+        ProvisionTarget, RegionDisposition, SourcePasswordKnowledge, TargetIdentity,
+        DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_SAFE6_LABEL,
     };
     use edpcli::sysinfo::{disk_total_sectors, CmdRunner, SysRunner};
     use sha2::{Digest, Sha256};
@@ -361,9 +361,9 @@ mod macos {
             boot_label: "BOOT".into(),
             share_label: "SHARE".into(),
             encrypt_label: "ENCRYPT".into(),
-            boot_fs: OfficialFilesystemFormat::Fat16,
-            share_fs: OfficialFilesystemFormat::ExFat,
-            encrypt_fs: OfficialFilesystemFormat::ExFat,
+            boot_fs: FilesystemKind::Fat16,
+            share_fs: FilesystemKind::ExFat,
+            encrypt_fs: FilesystemKind::ExFat,
         }
     }
 

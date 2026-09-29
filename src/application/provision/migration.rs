@@ -376,10 +376,10 @@ fn analyze_plain_partition(
                 .filesystem
                 .as_deref()
                 .and_then(|name| match name {
-                    "fat16" => Some(OfficialFilesystemFormat::Fat16),
-                    "fat32" => Some(OfficialFilesystemFormat::Fat32),
-                    "exfat" => Some(OfficialFilesystemFormat::ExFat),
-                    "ntfs" => Some(OfficialFilesystemFormat::Ntfs),
+                    "fat16" => Some(FilesystemKind::Fat16),
+                    "fat32" => Some(FilesystemKind::Fat32),
+                    "exfat" => Some(FilesystemKind::ExFat),
+                    "ntfs" => Some(FilesystemKind::Ntfs),
                     _ => None,
                 })
                 .map(FilesystemProfile::Known)

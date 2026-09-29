@@ -32,8 +32,8 @@ fn finish_preserves_business_error_exit_code() {
 fn target_plan_summary_reports_exact_geometry_and_data_fate() {
     use crate::protocol::edpf::EdpPartitionType;
     use crate::provision::{
-        OfficialFilesystemFormat, OfficialPartitionMode, PartitionAction, PartitionRole,
-        RegionDisposition, SourcePasswordKnowledge, TargetPartitionGeometry, TargetPartitionPlan,
+        FilesystemKind, OfficialPartitionMode, PartitionAction, PartitionRole, RegionDisposition,
+        SourcePasswordKnowledge, TargetPartitionGeometry, TargetPartitionPlan,
         TargetPasswordPolicy, TargetProvisionPlan,
     };
 
@@ -47,7 +47,7 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
                     start_lba: 63,
                     sector_count: 100,
                     physically_encrypted: false,
-                    filesystem: Some(OfficialFilesystemFormat::ExFat),
+                    filesystem: Some(FilesystemKind::ExFat),
                 },
                 action: PartitionAction::Rebuild,
                 disposition: RegionDisposition::Rebuild,
@@ -64,7 +64,7 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
                     start_lba: 1000,
                     sector_count: 200,
                     physically_encrypted: true,
-                    filesystem: Some(OfficialFilesystemFormat::ExFat),
+                    filesystem: Some(FilesystemKind::ExFat),
                 },
                 action: PartitionAction::PreserveExact,
                 disposition: RegionDisposition::PreserveOpaque,

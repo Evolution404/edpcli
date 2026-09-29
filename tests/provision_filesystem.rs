@@ -9,9 +9,9 @@ use edpcli::{
     provision::{
         build_empty_exfat, build_empty_fat16, build_official_exfat_partitions,
         build_official_partition_filesystem, encrypt_sparse_mode2, wrap_file_key,
-        wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialFilesystemFormat,
-        OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
-        OfficialProvisionPlan, PartitionRole, SparseFilesystemImage,
+        wrap_legacy_lba7_file_key, FileKeyWrapMode, FilesystemKind, OfficialPartitionFilesystems,
+        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, PartitionRole,
+        SparseFilesystemImage,
     },
 };
 
@@ -72,10 +72,7 @@ fn official_plan(mode: OfficialPartitionMode) -> OfficialProvisionPlan {
 
 #[test]
 fn first_party_filesystem_config_defaults_and_normalizes_like_the_writer() {
-    assert_eq!(
-        OfficialFilesystemFormat::first_party_default(),
-        OfficialFilesystemFormat::ExFat
-    );
+    assert_eq!(FilesystemKind::first_party_default(), FilesystemKind::ExFat);
     for value in [
         None,
         Some("exfat"),
@@ -84,23 +81,20 @@ fn first_party_filesystem_config_defaults_and_normalizes_like_the_writer() {
         Some("fat16"),
     ] {
         assert_eq!(
-            OfficialFilesystemFormat::from_first_party_config(value),
-            OfficialFilesystemFormat::ExFat
+            FilesystemKind::from_first_party_config(value),
+            FilesystemKind::ExFat
         );
     }
     assert_eq!(
-        OfficialFilesystemFormat::from_first_party_config(Some("NTFS")),
-        OfficialFilesystemFormat::Ntfs
+        FilesystemKind::from_first_party_config(Some("NTFS")),
+        FilesystemKind::Ntfs
     );
     assert_eq!(
-        OfficialFilesystemFormat::from_first_party_config(Some("fat32")),
-        OfficialFilesystemFormat::Fat32
+        FilesystemKind::from_first_party_config(Some("fat32")),
+        FilesystemKind::Fat32
     );
-    assert_eq!(OfficialFilesystemFormat::Ntfs.windows_format_name(), "NTFS");
-    assert_eq!(
-        OfficialFilesystemFormat::ExFat.windows_format_name(),
-        "exFat"
-    );
+    assert_eq!(FilesystemKind::Ntfs.windows_format_name(), "NTFS");
+    assert_eq!(FilesystemKind::ExFat.windows_format_name(), "exFat");
 }
 
 #[test]
@@ -423,7 +417,7 @@ fn filesystem_stage_fails_closed_on_wrong_key_or_unsupported_portable_profile() 
     let ntfs_plan = OfficialProvisionPlan::new_with_filesystem(
         OfficialPartitionMode::BootShareCombined,
         OfficialPartitionSizes::new(32, 64, 128),
-        OfficialFilesystemFormat::Ntfs,
+        FilesystemKind::Ntfs,
         compat,
         wrap_legacy_lba7_file_key(
             b"0000aaaa",
@@ -446,9 +440,9 @@ fn filesystem_stage_fails_closed_on_wrong_key_or_unsupported_portable_profile() 
 fn fat16_and_exfat_can_each_be_physically_encrypted_when_selected() {
     let plan = official_plan(OfficialPartitionMode::DefaultThreePartition).with_filesystems(
         OfficialPartitionFilesystems {
-            boot: OfficialFilesystemFormat::ExFat,
-            share: OfficialFilesystemFormat::Fat16,
-            encrypt: OfficialFilesystemFormat::ExFat,
+            boot: FilesystemKind::ExFat,
+            share: FilesystemKind::Fat16,
+            encrypt: FilesystemKind::ExFat,
         },
     );
     let targets = plan.format_targets().unwrap();

@@ -5,19 +5,14 @@ use edpcli::{
     },
     provision::{
         build_plain_migrated_provision_write_plan, build_plain_provision_write_plan,
-        max_plain_sector_count, MigrationStagedEntry, MigrationTransform, OfficialFilesystemFormat,
+        max_plain_sector_count, FilesystemKind, MigrationStagedEntry, MigrationTransform,
         PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan, PlainProvisionWritePlan,
         PlainSectorOwner, DEFAULT_PLAIN_START_LBA,
     },
 };
 
 fn part(start_lba: u64, sector_count: u64) -> PlainPartitionSpec {
-    PlainPartitionSpec::new(
-        start_lba,
-        sector_count,
-        OfficialFilesystemFormat::ExFat,
-        "DATA",
-    )
+    PlainPartitionSpec::new(start_lba, sector_count, FilesystemKind::ExFat, "DATA")
 }
 
 #[test]

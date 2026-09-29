@@ -11,7 +11,7 @@ use edpcli::application::Prompter;
 use edpcli::common::SECTOR;
 use edpcli::diskio::SectorDev;
 use edpcli::edpb::ManifestPartition;
-use edpcli::provision::OfficialFilesystemFormat;
+use edpcli::provision::FilesystemKind;
 use std::collections::BTreeMap;
 use std::io;
 use std::time::Duration;
@@ -143,7 +143,7 @@ fn fixture(dev: &mut SparseFormatDev) -> (common::FakeRunner, MetadataRestoreOut
 fn request() -> PartitionFormatRequest {
     PartitionFormatRequest {
         partition_index: 1,
-        filesystem: OfficialFilesystemFormat::ExFat,
+        filesystem: FilesystemKind::ExFat,
     }
 }
 
@@ -328,7 +328,7 @@ fn encrypted_edp_partition_cannot_enter_plaintext_format() {
         &outcome,
         &PartitionFormatRequest {
             partition_index: index as u32 + 1,
-            filesystem: OfficialFilesystemFormat::ExFat,
+            filesystem: FilesystemKind::ExFat,
         },
         "恢复卷",
         0x1234_5678,
@@ -464,7 +464,7 @@ fn original_password_format_preserves_key_records_and_verifies_encrypted_boot() 
     let target = &outcome.partitions[2];
     let request = PartitionFormatRequest {
         partition_index: target.index,
-        filesystem: OfficialFilesystemFormat::ExFat,
+        filesystem: FilesystemKind::ExFat,
     };
     assert_eq!(
         outcome.assessment.partitions[2].state,
@@ -578,7 +578,7 @@ fn edp_plaintext_partition_uses_the_same_authorized_format_path() {
         &outcome,
         &PartitionFormatRequest {
             partition_index: 1,
-            filesystem: OfficialFilesystemFormat::Fat16,
+            filesystem: FilesystemKind::Fat16,
         },
         "启动区",
         0x1234_5678,
@@ -618,7 +618,7 @@ fn corrupted_file_key_crc_is_typed_and_has_zero_writes() {
         Some(edpcli::application::media_identity::MediaIdentityResumePin::from_pin(&pin));
     let request = PartitionFormatRequest {
         partition_index: 3,
-        filesystem: OfficialFilesystemFormat::ExFat,
+        filesystem: FilesystemKind::ExFat,
     };
     let result = format_encrypted_partition_on_disk(
         &runner,
@@ -665,7 +665,7 @@ fn run_reinitialize(
         outcome.format_target_pin.as_ref().unwrap(),
         outcome,
         &reinitialize_request(),
-        OfficialFilesystemFormat::ExFat,
+        FilesystemKind::ExFat,
         "保密区",
         0x1234_5678,
     )
@@ -687,7 +687,7 @@ fn reinitialize_requires_new_password_twice_and_a_distinct_password() {
         outcome.format_target_pin.as_ref().unwrap(),
         &outcome,
         &same,
-        OfficialFilesystemFormat::ExFat,
+        FilesystemKind::ExFat,
         "保密区",
         0x1234_5678,
     );

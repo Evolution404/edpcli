@@ -7,8 +7,8 @@ use edpcli::{
     diskio::{execute_write_transaction, FileDev, SectorDev, WriteTransactionPlan},
     platform,
     provision::{
-        build_plain_provision_write_plan, DiskProvisionKind, OfficialFilesystemFormat,
-        PlainPartitionSpec, PlainProvisionPlan,
+        build_plain_provision_write_plan, DiskProvisionKind, FilesystemKind, PlainPartitionSpec,
+        PlainProvisionPlan,
     },
     sysinfo::SysRunner,
 };
@@ -38,7 +38,7 @@ fn macos_plain_virtual_disk_provisions_and_reidentifies() {
         vec![PlainPartitionSpec::new(
             2_048,
             total_sectors - 2_048,
-            OfficialFilesystemFormat::ExFat,
+            FilesystemKind::ExFat,
             "EDPCLI-HIL",
         )],
     )

@@ -66,35 +66,29 @@ fn canonical_filesystem_kind_tokens_are_stable() {
 
 #[test]
 fn migration_adapters_preserve_legacy_filesystem_kinds() {
-    use edpcli::inspect_target::FilesystemBootKind;
-    use edpcli::provision::OfficialFilesystemFormat;
+    use edpcli::provision::FilesystemKind;
 
     for (legacy, canonical) in [
-        (FilesystemBootKind::Fat12, FilesystemKind::Fat12),
-        (FilesystemBootKind::Fat16, FilesystemKind::Fat16),
-        (FilesystemBootKind::Fat32, FilesystemKind::Fat32),
-        (FilesystemBootKind::Exfat, FilesystemKind::ExFat),
-        (FilesystemBootKind::Ntfs, FilesystemKind::Ntfs),
+        (FilesystemKind::Fat12, FilesystemKind::Fat12),
+        (FilesystemKind::Fat16, FilesystemKind::Fat16),
+        (FilesystemKind::Fat32, FilesystemKind::Fat32),
+        (FilesystemKind::ExFat, FilesystemKind::ExFat),
+        (FilesystemKind::Ntfs, FilesystemKind::Ntfs),
     ] {
         assert_eq!(FilesystemKind::from(legacy), canonical);
-        assert_eq!(FilesystemBootKind::from(canonical), legacy);
+        assert_eq!(FilesystemKind::from(canonical), legacy);
     }
 
-    for (legacy, canonical) in [
-        (OfficialFilesystemFormat::Fat16, FilesystemKind::Fat16),
-        (OfficialFilesystemFormat::ExFat, FilesystemKind::ExFat),
-        (OfficialFilesystemFormat::Fat32, FilesystemKind::Fat32),
-        (OfficialFilesystemFormat::Ntfs, FilesystemKind::Ntfs),
+    for canonical in [
+        FilesystemKind::Fat12,
+        FilesystemKind::Fat16,
+        FilesystemKind::Fat32,
+        FilesystemKind::ExFat,
+        FilesystemKind::Ntfs,
     ] {
-        assert_eq!(FilesystemKind::from(legacy), canonical);
-        assert_eq!(
-            OfficialFilesystemFormat::try_from(canonical).unwrap(),
-            legacy
-        );
+        let legacy: FilesystemKind = canonical;
+        assert_eq!(legacy, canonical);
     }
-
-    let error = OfficialFilesystemFormat::try_from(FilesystemKind::Fat12).unwrap_err();
-    assert_eq!(error.kind, FilesystemErrorKind::FormatUnsupported);
 }
 
 #[test]

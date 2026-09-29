@@ -1,11 +1,14 @@
 mod driver;
 mod error;
 mod exfat;
+mod fat12;
 mod fat16;
+mod fat32;
 mod format;
 mod io;
 mod kind;
 mod metadata;
+mod ntfs;
 pub mod registry;
 
 pub use driver::{DetectionConfidence, DetectionResult, FilesystemCapabilities, FilesystemDriver};
@@ -16,11 +19,14 @@ pub(crate) use exfat::{
     put_u32, put_u64, upcase_mapping,
 };
 pub use exfat::{ExFatDriver, EXFAT_DRIVER};
+pub use fat12::{Fat12Driver, FAT12_DRIVER};
 pub use fat16::{Fat16Driver, FAT16_DRIVER};
+pub use fat32::{Fat32Driver, FAT32_DRIVER};
 pub use format::{
     FilesystemGeometry, FilesystemWrite, FormatPlan, FormatRequest, FormatVerification,
 };
 pub use io::{BootSectorReader, FilesystemReader};
 pub use kind::FilesystemKind;
 pub use metadata::FilesystemMetadata;
-pub use registry::{DetectedFilesystem, DriverRegistry};
+pub use ntfs::{NtfsDriver, NTFS_DRIVER};
+pub use registry::{default_registry, DetectedFilesystem, DriverRegistry};

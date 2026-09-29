@@ -39,9 +39,9 @@ pub struct ProvisionForm {
     pub format_encrypt: bool,
     pub share_label: String,
     pub encrypt_label: String,
-    pub boot_fs: crate::provision::OfficialFilesystemFormat,
-    pub share_fs: crate::provision::OfficialFilesystemFormat,
-    pub encrypt_fs: crate::provision::OfficialFilesystemFormat,
+    pub boot_fs: crate::provision::FilesystemKind,
+    pub share_fs: crate::provision::FilesystemKind,
+    pub encrypt_fs: crate::provision::FilesystemKind,
     pub force_change_password: bool,
     pub cancel_password_complexity_check: bool,
     pub max_share_password_errors: String,
@@ -74,7 +74,7 @@ pub struct PlainPartitionForm {
     pub quick_capacity: String,
     pub sector_count: String,
     pub(super) capacity_edited: bool,
-    pub filesystem: crate::provision::OfficialFilesystemFormat,
+    pub filesystem: crate::provision::FilesystemKind,
     pub volume_label: String,
 }
 
@@ -206,13 +206,11 @@ impl ProvisionInputPolicy {
 }
 
 pub(super) fn toggle_supported_fs(
-    value: crate::provision::OfficialFilesystemFormat,
-) -> crate::provision::OfficialFilesystemFormat {
+    value: crate::provision::FilesystemKind,
+) -> crate::provision::FilesystemKind {
     match value {
-        crate::provision::OfficialFilesystemFormat::Fat16 => {
-            crate::provision::OfficialFilesystemFormat::ExFat
-        }
-        _ => crate::provision::OfficialFilesystemFormat::Fat16,
+        crate::provision::FilesystemKind::Fat16 => crate::provision::FilesystemKind::ExFat,
+        _ => crate::provision::FilesystemKind::Fat16,
     }
 }
 
@@ -260,9 +258,9 @@ impl Default for ProvisionForm {
             format_encrypt: false,
             share_label: "交换区".into(),
             encrypt_label: "保密区".into(),
-            boot_fs: crate::provision::OfficialFilesystemFormat::Fat16,
-            share_fs: crate::provision::OfficialFilesystemFormat::ExFat,
-            encrypt_fs: crate::provision::OfficialFilesystemFormat::ExFat,
+            boot_fs: crate::provision::FilesystemKind::Fat16,
+            share_fs: crate::provision::FilesystemKind::ExFat,
+            encrypt_fs: crate::provision::FilesystemKind::ExFat,
             force_change_password: false,
             cancel_password_complexity_check: false,
             max_share_password_errors: u8::MAX.to_string(),

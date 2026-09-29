@@ -8,7 +8,7 @@ use crate::protocol::{
     edpf::EdpPartitionType, lba7::Lba7PartitionMode, lba7_compat::Lba7CompatibilityExtentLayout,
 };
 
-use super::{LegacyLba7KeyMaterial, OfficialFilesystemFormat, ProvisionKeyMaterial};
+use super::{FilesystemKind, LegacyLba7KeyMaterial, ProvisionKeyMaterial};
 
 pub type OfficialPartitionMode = Lba7PartitionMode;
 
@@ -31,35 +31,36 @@ pub const fn official_mbr_partition_type(mode: OfficialPartitionMode) -> u8 {
 
 pub const fn visible_mbr_partition_type(
     mode: OfficialPartitionMode,
-    front_filesystem: OfficialFilesystemFormat,
+    front_filesystem: FilesystemKind,
 ) -> u8 {
     if matches!(mode, OfficialPartitionMode::WholeDiskEncrypted) {
         return official_mbr_partition_type(mode);
     }
     match front_filesystem {
-        OfficialFilesystemFormat::Fat16 => 0x0e,
-        OfficialFilesystemFormat::Fat32 => 0x0c,
-        OfficialFilesystemFormat::ExFat | OfficialFilesystemFormat::Ntfs => 0x07,
+        FilesystemKind::Fat12 => 0x01,
+        FilesystemKind::Fat16 => 0x0e,
+        FilesystemKind::Fat32 => 0x0c,
+        FilesystemKind::ExFat | FilesystemKind::Ntfs => 0x07,
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OfficialPartitionFilesystems {
-    pub boot: OfficialFilesystemFormat,
-    pub share: OfficialFilesystemFormat,
-    pub encrypt: OfficialFilesystemFormat,
+    pub boot: FilesystemKind,
+    pub share: FilesystemKind,
+    pub encrypt: FilesystemKind,
 }
 
 impl OfficialPartitionFilesystems {
     pub const fn defaults() -> Self {
         Self {
-            boot: OfficialFilesystemFormat::Fat16,
-            share: OfficialFilesystemFormat::ExFat,
-            encrypt: OfficialFilesystemFormat::ExFat,
+            boot: FilesystemKind::Fat16,
+            share: FilesystemKind::ExFat,
+            encrypt: FilesystemKind::ExFat,
         }
     }
 
-    pub const fn all(format: OfficialFilesystemFormat) -> Self {
+    pub const fn all(format: FilesystemKind) -> Self {
         Self {
             boot: format,
             share: format,
@@ -67,7 +68,7 @@ impl OfficialPartitionFilesystems {
         }
     }
 
-    pub const fn for_role(self, role: PartitionRole) -> Option<OfficialFilesystemFormat> {
+    pub const fn for_role(self, role: PartitionRole) -> Option<FilesystemKind> {
         match role {
             PartitionRole::Boot => Some(self.boot),
             PartitionRole::Share | PartitionRole::BootShareCombined => Some(self.share),
@@ -139,7 +140,7 @@ pub struct OfficialProvisionPlan {
     pub sizes: OfficialPartitionSizes,
     /// Compatibility setting for the explicit legacy exFAT builder. New disk
     /// provisioning uses `filesystems` for every partition and for the MBR.
-    pub filesystem_format: OfficialFilesystemFormat,
+    pub filesystem_format: FilesystemKind,
     pub filesystems: OfficialPartitionFilesystems,
     pub lba7_compatibility_extent: Lba7CompatibilityExtentLayout,
     pub lba7_key_material: LegacyLba7KeyMaterial,
@@ -160,7 +161,7 @@ impl OfficialProvisionPlan {
         let mut plan = Self::new_with_filesystem(
             mode,
             sizes,
-            OfficialFilesystemFormat::ExFat,
+            FilesystemKind::ExFat,
             lba7_compatibility_extent,
             lba7_key_material,
             lba12_key_material,
@@ -172,7 +173,7 @@ impl OfficialProvisionPlan {
     pub fn new_with_filesystem(
         mode: OfficialPartitionMode,
         sizes: OfficialPartitionSizes,
-        filesystem_format: OfficialFilesystemFormat,
+        filesystem_format: FilesystemKind,
         lba7_compatibility_extent: Lba7CompatibilityExtentLayout,
         lba7_key_material: LegacyLba7KeyMaterial,
         lba12_key_material: ProvisionKeyMaterial,
@@ -320,7 +321,7 @@ pub struct PartitionFormatTarget {
     pub geometry: OfficialPartitionGeometry,
     pub physically_encrypted: bool,
     pub format_capable: bool,
-    pub filesystem: Option<OfficialFilesystemFormat>,
+    pub filesystem: Option<FilesystemKind>,
     pub visible_mbr_type: Option<u8>,
 }
 

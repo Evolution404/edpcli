@@ -7,8 +7,8 @@ use edpcli::{
     diskio::{execute_write_transaction, SectorDev, WriteTransactionPlan},
     filesystem_analysis::{analyze_partition, AnalysisStatus, PartitionReader},
     provision::{
-        build_plain_provision_write_plan, DiskProvisionKind, OfficialFilesystemFormat,
-        PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
+        build_plain_provision_write_plan, DiskProvisionKind, FilesystemKind, PlainCleanupExtent,
+        PlainPartitionSpec, PlainProvisionPlan,
     },
 };
 
@@ -54,12 +54,7 @@ impl PartitionReader for PartitionView<'_> {
 }
 
 fn exfat(start_lba: u64, sector_count: u64, label: &str) -> PlainPartitionSpec {
-    PlainPartitionSpec::new(
-        start_lba,
-        sector_count,
-        OfficialFilesystemFormat::ExFat,
-        label,
-    )
+    PlainPartitionSpec::new(start_lba, sector_count, FilesystemKind::ExFat, label)
 }
 
 fn geometry(index: usize, part: &PlainPartitionSpec, count: usize) -> PartitionGeometry {

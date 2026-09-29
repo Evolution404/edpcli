@@ -8,8 +8,8 @@ use crate::{
 };
 
 use super::{
-    MigrationTransform, OfficialFilesystemFormat, OfficialPartitionMode, PartitionRole,
-    PassInfoPolicy, RegionMappingKind, RegionMappingPlanner, SourceRegion, TargetRegion,
+    FilesystemKind, MigrationTransform, OfficialPartitionMode, PartitionRole, PassInfoPolicy,
+    RegionMappingKind, RegionMappingPlanner, SourceRegion, TargetRegion,
     DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
     WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };

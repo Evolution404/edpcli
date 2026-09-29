@@ -869,26 +869,23 @@ fn execute_partition_format_observed(
     let mut reader = PreparedImageReader {
         image: verification_image,
     };
-    if matches!(
-        filesystem,
-        OfficialFilesystemFormat::Fat16 | OfficialFilesystemFormat::ExFat
-    ) {
+    if matches!(filesystem, FilesystemKind::Fat16 | FilesystemKind::ExFat) {
         let (kind, expected_label, driver): (
             crate::filesystem::FilesystemKind,
             Option<String>,
             &dyn crate::filesystem::FilesystemDriver,
         ) = match filesystem {
-            OfficialFilesystemFormat::Fat16 => (
+            FilesystemKind::Fat16 => (
                 crate::filesystem::FilesystemKind::Fat16,
                 (!choice.volume_label.is_empty()).then(|| choice.volume_label.to_uppercase()),
                 &crate::filesystem::FAT16_DRIVER,
             ),
-            OfficialFilesystemFormat::ExFat => (
+            FilesystemKind::ExFat => (
                 crate::filesystem::FilesystemKind::ExFat,
                 (!choice.volume_label.is_empty()).then(|| choice.volume_label.clone()),
                 &crate::filesystem::EXFAT_DRIVER,
             ),
-            OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => unreachable!(),
+            FilesystemKind::Fat12 | FilesystemKind::Fat32 | FilesystemKind::Ntfs => unreachable!(),
         };
         let expected = crate::filesystem::FilesystemMetadata {
             kind,

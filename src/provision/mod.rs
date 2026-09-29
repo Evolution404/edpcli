@@ -19,11 +19,13 @@ mod spec;
 mod validate;
 mod write_plan;
 
+pub use crate::filesystem::FilesystemKind;
+
 pub use filesystem::{
     build_empty_exfat, build_empty_fat16, build_migrated_filesystem,
     build_official_exfat_partition, build_official_exfat_partitions,
     build_official_partition_filesystem, encrypt_sparse_mode2, validate_volume_label,
-    OfficialFilesystemFormat, PartitionFilesystemImage, SparseFilesystemImage,
+    PartitionFilesystemImage, SparseFilesystemImage,
 };
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
 pub use key_domain::{

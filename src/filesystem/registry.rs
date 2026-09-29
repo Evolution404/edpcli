@@ -3,6 +3,18 @@ use super::{
     FilesystemKind, FilesystemReader,
 };
 
+static DEFAULT_DRIVERS: [&'static dyn FilesystemDriver; 5] = [
+    &super::EXFAT_DRIVER,
+    &super::NTFS_DRIVER,
+    &super::FAT32_DRIVER,
+    &super::FAT16_DRIVER,
+    &super::FAT12_DRIVER,
+];
+
+pub fn default_registry() -> DriverRegistry<'static> {
+    DriverRegistry::new(&DEFAULT_DRIVERS)
+}
+
 pub struct DetectedFilesystem<'a> {
     pub driver: &'a dyn FilesystemDriver,
     pub result: DetectionResult,

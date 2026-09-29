@@ -8,12 +8,12 @@ use edpcli::{
         parse_existing_provision, prefill_for_target_mode, wrap_file_key,
         wrap_legacy_lba7_file_key, CapacityInput, CapacityInputMode, CapacitySource,
         DiskProvisionKind, ExistingFileKeyError, ExistingPartition, ExistingProvisionProfile,
-        FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, MigrationTransform,
-        OfficialFilesystemFormat, OfficialPartitionMode, OfficialPartitionSizes,
-        OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, PassInfoPolicy,
-        ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget,
-        QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge, TargetGeometryOverrides,
-        TargetIdentity, TargetProvisionPlan, OFFICIAL_PARTITION_START_SECTOR,
+        FileKeyWrapMode, FilesystemKind, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
+        MigrationTransform, OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
+        OnlyId, PartitionAction, PartitionRole, PassInfoPolicy, ProvisionEntropy,
+        ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget, QuickCapacityUnit,
+        RegionDisposition, SourcePasswordKnowledge, TargetGeometryOverrides, TargetIdentity,
+        TargetProvisionPlan, OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
@@ -58,9 +58,9 @@ fn part(
         sector_count,
         physically_encrypted: encrypted,
         filesystem: Some(match role {
-            PartitionRole::Boot => OfficialFilesystemFormat::Fat16,
-            PartitionRole::CompatibilityReserve => OfficialFilesystemFormat::ExFat,
-            _ => OfficialFilesystemFormat::ExFat,
+            PartitionRole::Boot => FilesystemKind::Fat16,
+            PartitionRole::CompatibilityReserve => FilesystemKind::ExFat,
+            _ => FilesystemKind::ExFat,
         }),
     }
 }
@@ -843,7 +843,7 @@ fn default_password_probe_is_per_domain_and_enables_verified_preserve() {
     );
 
     source
-        .confirm_filesystem(PartitionRole::Encrypt, OfficialFilesystemFormat::ExFat)
+        .confirm_filesystem(PartitionRole::Encrypt, FilesystemKind::ExFat)
         .unwrap();
     let prefill = prefill_for_target_mode(
         Some(&source.profile),
@@ -1213,7 +1213,7 @@ fn target_plan_preserves_only_verified_matching_data() {
     assert_eq!(unknown_fs.partitions[1].action, PartitionAction::Rebuild);
 
     source
-        .confirm_filesystem(PartitionRole::Encrypt, OfficialFilesystemFormat::ExFat)
+        .confirm_filesystem(PartitionRole::Encrypt, FilesystemKind::ExFat)
         .unwrap();
     let plan = TargetProvisionPlan::build(
         Some(&source),
@@ -1319,7 +1319,7 @@ fn exact_encrypted_extent_with_unknown_password_stays_a_preserve_candidate() {
         .unwrap()
         .unwrap();
     source
-        .confirm_filesystem(PartitionRole::Encrypt, OfficialFilesystemFormat::ExFat)
+        .confirm_filesystem(PartitionRole::Encrypt, FilesystemKind::ExFat)
         .unwrap();
 
     let prefill = prefill_for_target_mode(
@@ -1362,7 +1362,7 @@ fn verified_source_with_different_target_password_plans_rewrap_without_rebuild()
         .unwrap()
         .unwrap();
     source
-        .confirm_filesystem(PartitionRole::Encrypt, OfficialFilesystemFormat::ExFat)
+        .confirm_filesystem(PartitionRole::Encrypt, FilesystemKind::ExFat)
         .unwrap();
     let prefill = prefill_for_target_mode(
         Some(&source.profile),

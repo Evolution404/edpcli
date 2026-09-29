@@ -21,8 +21,8 @@ use edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verifie
 use edpcli::provision::{
     build_migrated_filesystem, generate_official_image, parse_existing_provision,
     prefill_for_target_mode, unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key,
-    FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, MigrationStagedEntry,
-    MigrationTransform, OfficialFilesystemFormat, OfficialPartitionMode, OfficialPartitionSizes,
+    FileKeyWrapMode, FilesystemKind, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
+    MigrationStagedEntry, MigrationTransform, OfficialPartitionMode, OfficialPartitionSizes,
     OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, ProvisionEntropy,
     ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec, RegionDisposition,
     SourcePasswordKnowledge, TargetIdentity, TargetProvisionPlan,
@@ -247,13 +247,13 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
     );
 
     source
-        .confirm_filesystem(PartitionRole::Boot, OfficialFilesystemFormat::Fat16)
+        .confirm_filesystem(PartitionRole::Boot, FilesystemKind::Fat16)
         .unwrap();
     source
-        .confirm_filesystem(PartitionRole::Share, OfficialFilesystemFormat::ExFat)
+        .confirm_filesystem(PartitionRole::Share, FilesystemKind::ExFat)
         .unwrap();
     source
-        .confirm_filesystem(PartitionRole::Encrypt, OfficialFilesystemFormat::ExFat)
+        .confirm_filesystem(PartitionRole::Encrypt, FilesystemKind::ExFat)
         .unwrap();
 
     let exact_prefill = prefill_for_target_mode(
@@ -441,7 +441,7 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
         .find(|part| part.role == PartitionRole::BootShareCombined)
         .unwrap();
     assert!(!combined.physically_encrypted);
-    assert_eq!(combined.filesystem, Some(OfficialFilesystemFormat::ExFat));
+    assert_eq!(combined.filesystem, Some(FilesystemKind::ExFat));
     assert_eq!(
         KeyDomainRole::from_partition_role(combined.role),
         Some(KeyDomainRole::Share)
@@ -467,7 +467,7 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
         ctime: None,
     }];
     let migrated = build_migrated_filesystem(
-        OfficialFilesystemFormat::ExFat,
+        FilesystemKind::ExFat,
         share_target.start_lba,
         share_target.sector_count,
         0x4b36_4849,

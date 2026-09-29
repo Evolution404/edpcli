@@ -9,11 +9,12 @@ use std::path::PathBuf;
 use crate::common::SECTOR;
 use crate::diskio::SectorDev;
 use crate::edpb::ManifestPartition;
-use crate::inspect_target::{detect_plain_filesystem, FilesystemBootKind};
+use crate::filesystem::FilesystemKind;
+use crate::inspect_target::detect_plain_filesystem;
 use crate::provision::decrypt_mode2;
 use crate::provision::{
     build_empty_exfat, build_empty_fat16, encrypt_sparse_mode2, parse_existing_provision,
-    ExistingFileKeyError, FileKeyWrapMode, OfficialFilesystemFormat, ProvisionImage, SecretBytes,
+    ExistingFileKeyError, FileKeyWrapMode, ProvisionImage, SecretBytes,
 };
 
 mod format_operation;
@@ -69,7 +70,7 @@ pub struct PostRestorePartition {
     pub start_lba: u64,
     pub sector_count: u64,
     pub filesystem_hint: Option<String>,
-    pub detected_filesystem: Option<FilesystemBootKind>,
+    pub detected_filesystem: Option<FilesystemKind>,
     pub requires_original_key: bool,
     pub state: PostRestorePartitionState,
     pub detail: String,
@@ -107,13 +108,13 @@ impl PostRestoreAssessment {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PartitionFormatRequest {
     pub partition_index: u32,
-    pub filesystem: OfficialFilesystemFormat,
+    pub filesystem: FilesystemKind,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PostRestoreFormatResult {
     pub partition_index: u32,
-    pub filesystem: OfficialFilesystemFormat,
+    pub filesystem: FilesystemKind,
     pub result: Result<(), String>,
 }
 
@@ -126,7 +127,7 @@ pub enum EncryptedPostRestoreError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EncryptedPostRestoreFormatResult {
     pub partition_index: u32,
-    pub filesystem: OfficialFilesystemFormat,
+    pub filesystem: FilesystemKind,
     pub result: Result<(), EncryptedPostRestoreError>,
 }
 
@@ -138,24 +139,24 @@ pub struct EncryptedPartitionReinitializeRequest {
 
 pub(crate) fn build_empty_partition_image(
     partition: &ManifestPartition,
-    filesystem: OfficialFilesystemFormat,
+    filesystem: FilesystemKind,
     volume_label: &str,
     volume_serial: u32,
 ) -> Result<crate::provision::SparseFilesystemImage, String> {
     match filesystem {
-        OfficialFilesystemFormat::Fat16 => build_empty_fat16(
+        FilesystemKind::Fat16 => build_empty_fat16(
             partition.start_lba,
             partition.sector_count,
             volume_serial,
             volume_label,
         ),
-        OfficialFilesystemFormat::ExFat => build_empty_exfat(
+        FilesystemKind::ExFat => build_empty_exfat(
             partition.start_lba,
             partition.sector_count,
             volume_serial,
             volume_label,
         ),
-        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => Err(format!(
+        FilesystemKind::Fat12 | FilesystemKind::Fat32 | FilesystemKind::Ntfs => Err(format!(
             "portable filesystem writer does not yet implement {}",
             filesystem.config_token()
         )),
@@ -252,9 +253,9 @@ pub(crate) fn format_partition_after_restore(
         let detected = detect_plain_filesystem(partition.sector_count, &plain_boot)
             .ok_or_else(|| "格式化后文件系统 boot sector 未通过严格校验".to_string())?;
         let expected = match request.filesystem {
-            OfficialFilesystemFormat::Fat16 => FilesystemBootKind::Fat16,
-            OfficialFilesystemFormat::ExFat => FilesystemBootKind::Exfat,
-            OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => unreachable!(),
+            FilesystemKind::Fat16 => FilesystemKind::Fat16,
+            FilesystemKind::ExFat => FilesystemKind::ExFat,
+            FilesystemKind::Fat12 | FilesystemKind::Fat32 | FilesystemKind::Ntfs => unreachable!(),
         };
         if detected != expected {
             return Err(format!(
@@ -360,11 +361,7 @@ fn edp_crypto_state(
     boot: &[u8],
     sector_count: u64,
     password: Option<&[u8]>,
-) -> (
-    PostRestorePartitionState,
-    Option<FilesystemBootKind>,
-    String,
-) {
+) -> (PostRestorePartitionState, Option<FilesystemKind>, String) {
     let password_source = if password.is_some() {
         "原密码"
     } else {

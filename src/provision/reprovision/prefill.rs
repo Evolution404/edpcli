@@ -42,7 +42,7 @@ impl ProvisionPrefill {
                     self.boot_start_lba.ok_or("missing boot start")?,
                     self.boot.ok_or("missing boot capacity")?,
                     false,
-                    Some(OfficialFilesystemFormat::Fat16),
+                    Some(FilesystemKind::Fat16),
                 );
                 push(
                     PartitionRole::Share,
@@ -50,7 +50,7 @@ impl ProvisionPrefill {
                     self.share_start_lba.ok_or("missing share start")?,
                     self.share.ok_or("missing share capacity")?,
                     true,
-                    Some(OfficialFilesystemFormat::ExFat),
+                    Some(FilesystemKind::ExFat),
                 );
                 push(
                     PartitionRole::Encrypt,
@@ -58,7 +58,7 @@ impl ProvisionPrefill {
                     self.encrypt_start_lba.ok_or("missing encrypt start")?,
                     self.encrypt.ok_or("missing encrypt capacity")?,
                     true,
-                    Some(OfficialFilesystemFormat::ExFat),
+                    Some(FilesystemKind::ExFat),
                 );
             }
             OfficialPartitionMode::BootShareCombined => {
@@ -68,7 +68,7 @@ impl ProvisionPrefill {
                     self.share_start_lba.ok_or("missing combined start")?,
                     self.share.ok_or("missing combined capacity")?,
                     false,
-                    Some(OfficialFilesystemFormat::ExFat),
+                    Some(FilesystemKind::ExFat),
                 );
                 push(
                     PartitionRole::Encrypt,
@@ -76,7 +76,7 @@ impl ProvisionPrefill {
                     self.encrypt_start_lba.ok_or("missing encrypt start")?,
                     self.encrypt.ok_or("missing encrypt capacity")?,
                     true,
-                    Some(OfficialFilesystemFormat::ExFat),
+                    Some(FilesystemKind::ExFat),
                 );
             }
             OfficialPartitionMode::WholeDiskEncrypted => {
@@ -94,7 +94,7 @@ impl ProvisionPrefill {
                     self.encrypt_start_lba.ok_or("missing encrypt start")?,
                     self.encrypt.ok_or("missing encrypt capacity")?,
                     true,
-                    Some(OfficialFilesystemFormat::ExFat),
+                    Some(FilesystemKind::ExFat),
                 );
             }
             OfficialPartitionMode::IntranetExtranetDualPartition => {
@@ -104,7 +104,7 @@ impl ProvisionPrefill {
                     self.boot_start_lba.ok_or("missing boot start")?,
                     self.boot.ok_or("missing boot capacity")?,
                     false,
-                    Some(OfficialFilesystemFormat::Fat16),
+                    Some(FilesystemKind::Fat16),
                 );
                 push(
                     PartitionRole::Share,
@@ -112,7 +112,7 @@ impl ProvisionPrefill {
                     self.share_start_lba.ok_or("missing share start")?,
                     self.share.ok_or("missing share capacity")?,
                     true,
-                    Some(OfficialFilesystemFormat::ExFat),
+                    Some(FilesystemKind::ExFat),
                 );
             }
         }

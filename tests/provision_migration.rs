@@ -6,9 +6,9 @@ use edpcli::{
     },
     protocol::edpf::EdpPartitionType,
     provision::{
-        build_migrated_filesystem, build_migration_manifest, Extent, FilesystemProfile,
-        MigrationBudgets, MigrationInventory, MigrationPreflightError, MigrationSource,
-        MigrationStagedEntry, MigrationTransform, OfficialFilesystemFormat, PartitionRole,
+        build_migrated_filesystem, build_migration_manifest, Extent, FilesystemKind,
+        FilesystemProfile, MigrationBudgets, MigrationInventory, MigrationPreflightError,
+        MigrationSource, MigrationStagedEntry, MigrationTransform, PartitionRole,
         PhysicalCryptoProfile, SourceRegion, TargetPartitionGeometry,
     },
 };
@@ -27,7 +27,7 @@ fn source_region(
             sector_count,
         },
         physical_crypto: PhysicalCryptoProfile::Plain,
-        filesystem: FilesystemProfile::Known(OfficialFilesystemFormat::ExFat),
+        filesystem: FilesystemProfile::Known(FilesystemKind::ExFat),
         key_profile: None,
     }
 }
@@ -71,7 +71,7 @@ fn combined_target(sector_count: u64) -> TargetPartitionGeometry {
         start_lba: 63,
         sector_count,
         physically_encrypted: false,
-        filesystem: Some(OfficialFilesystemFormat::ExFat),
+        filesystem: Some(FilesystemKind::ExFat),
     }
 }
 
@@ -214,7 +214,7 @@ impl PartitionReader for ImageReader<'_> {
     }
 }
 
-fn roundtrip_migrated_filesystem(filesystem: OfficialFilesystemFormat, volume_sectors: u64) {
+fn roundtrip_migrated_filesystem(filesystem: FilesystemKind, volume_sectors: u64) {
     let payload = (0..1_537)
         .map(|index| (index % 251) as u8)
         .collect::<Vec<_>>();
@@ -285,10 +285,10 @@ fn roundtrip_migrated_filesystem(filesystem: OfficialFilesystemFormat, volume_se
 
 #[test]
 fn populated_fat16_migration_image_roundtrips_inventory_and_payload() {
-    roundtrip_migrated_filesystem(OfficialFilesystemFormat::Fat16, 20_417);
+    roundtrip_migrated_filesystem(FilesystemKind::Fat16, 20_417);
 }
 
 #[test]
 fn populated_exfat_migration_image_roundtrips_inventory_and_payload() {
-    roundtrip_migrated_filesystem(OfficialFilesystemFormat::ExFat, 262_144);
+    roundtrip_migrated_filesystem(FilesystemKind::ExFat, 262_144);
 }

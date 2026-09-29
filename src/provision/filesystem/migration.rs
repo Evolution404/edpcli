@@ -5,7 +5,7 @@ use crate::filesystem::{
     exfat_boot_checksum, exfat_geometry, exfat_upcase_table, fat_chain, put_stream, put_u16,
     put_u32, put_u64, upcase_mapping,
 };
-use crate::provision::{MigrationStagedEntry, OfficialFilesystemFormat};
+use crate::provision::{FilesystemKind, MigrationStagedEntry};
 
 #[derive(Clone, Debug)]
 struct TreeEntry<'a> {
@@ -718,7 +718,7 @@ fn build_migrated_exfat(
 }
 
 pub fn build_migrated_filesystem(
-    filesystem: OfficialFilesystemFormat,
+    filesystem: FilesystemKind,
     partition_offset: u64,
     volume_sectors: u64,
     volume_serial: u32,
@@ -726,21 +726,21 @@ pub fn build_migrated_filesystem(
     staged: &[MigrationStagedEntry],
 ) -> Result<SparseFilesystemImage, String> {
     match filesystem {
-        OfficialFilesystemFormat::Fat16 => build_migrated_fat16(
+        FilesystemKind::Fat16 => build_migrated_fat16(
             partition_offset,
             volume_sectors,
             volume_serial,
             volume_label,
             staged,
         ),
-        OfficialFilesystemFormat::ExFat => build_migrated_exfat(
+        FilesystemKind::ExFat => build_migrated_exfat(
             partition_offset,
             volume_sectors,
             volume_serial,
             volume_label,
             staged,
         ),
-        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => Err(format!(
+        FilesystemKind::Fat12 | FilesystemKind::Fat32 | FilesystemKind::Ntfs => Err(format!(
             "K6 first-party migration writer does not implement {}",
             filesystem.config_token()
         )),

@@ -109,7 +109,7 @@ impl PlainProvisionForm {
         let spec = crate::provision::PlainPartitionSpec::new(
             next_start,
             plan.total_sectors - next_start,
-            crate::provision::OfficialFilesystemFormat::ExFat,
+            crate::provision::FilesystemKind::ExFat,
             format!("普通卷{number}"),
         );
         self.partitions.push(PlainPartitionForm::from_spec(&spec));

@@ -23,11 +23,11 @@ use crate::provision::{
     build_official_provision_protocol_image, build_plain_migrated_provision_write_plan,
     build_plain_provision_write_plan, encrypt_sparse_mode2, parse_existing_provision,
     prefill_for_target_mode, unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key,
-    CapacityInput, CapacitySource, FileKeyWrapMode, KeyDomainRole, KeyDomainSecrets,
-    OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
-    OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId,
-    ParsedExistingProvision, PartitionAction, PartitionFilesystemImage, PartitionFormatTarget,
-    PartitionRole, PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
+    CapacityInput, CapacitySource, FileKeyWrapMode, FilesystemKind, KeyDomainRole,
+    KeyDomainSecrets, OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision,
+    PartitionAction, PartitionFilesystemImage, PartitionFormatTarget, PartitionRole,
+    PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
     PlainProvisionWritePlan, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
     ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge,
     SparseFilesystemImage, TargetGeometryOverrides, TargetIdentity, TargetPasswordPolicy,
@@ -101,7 +101,7 @@ impl PlainPartitionSize {
 pub struct PlainPartitionRequest {
     pub start_lba: u64,
     pub size: PlainPartitionSize,
-    pub filesystem: OfficialFilesystemFormat,
+    pub filesystem: FilesystemKind,
     pub volume_label: String,
 }
 
@@ -185,9 +185,9 @@ pub struct FormatOptions {
     pub boot_label: String,
     pub share_label: String,
     pub encrypt_label: String,
-    pub boot_fs: OfficialFilesystemFormat,
-    pub share_fs: OfficialFilesystemFormat,
-    pub encrypt_fs: OfficialFilesystemFormat,
+    pub boot_fs: FilesystemKind,
+    pub share_fs: FilesystemKind,
+    pub encrypt_fs: FilesystemKind,
 }
 
 impl Default for FormatOptions {
@@ -199,9 +199,9 @@ impl Default for FormatOptions {
             boot_label: "启动区".into(),
             share_label: "交换区".into(),
             encrypt_label: "保密区".into(),
-            boot_fs: OfficialFilesystemFormat::Fat16,
-            share_fs: OfficialFilesystemFormat::ExFat,
-            encrypt_fs: OfficialFilesystemFormat::ExFat,
+            boot_fs: FilesystemKind::Fat16,
+            share_fs: FilesystemKind::ExFat,
+            encrypt_fs: FilesystemKind::ExFat,
         }
     }
 }
@@ -228,24 +228,24 @@ impl FormatOptions {
 
 fn build_plain_format_image(
     target: &PartitionFormatTarget,
-    filesystem: OfficialFilesystemFormat,
+    filesystem: FilesystemKind,
     volume_label: &str,
     volume_serial: u32,
 ) -> Result<SparseFilesystemImage, String> {
     match filesystem {
-        OfficialFilesystemFormat::Fat16 => build_empty_fat16(
+        FilesystemKind::Fat16 => build_empty_fat16(
             target.geometry.start_sector,
             target.geometry.sector_count(),
             volume_serial,
             volume_label,
         ),
-        OfficialFilesystemFormat::ExFat => build_empty_exfat(
+        FilesystemKind::ExFat => build_empty_exfat(
             target.geometry.start_sector,
             target.geometry.sector_count(),
             volume_serial,
             volume_label,
         ),
-        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => Err(format!(
+        FilesystemKind::Fat12 | FilesystemKind::Fat32 | FilesystemKind::Ntfs => Err(format!(
             "portable filesystem writer does not yet implement {}",
             filesystem.config_token()
         )),
@@ -310,7 +310,7 @@ fn plan_format_targets_with_keys(
     for choice in planned.iter().filter(|choice| choice.target.format_capable) {
         if !matches!(
             choice.filesystem,
-            Some(OfficialFilesystemFormat::Fat16 | OfficialFilesystemFormat::ExFat)
+            Some(FilesystemKind::Fat16 | FilesystemKind::ExFat)
         ) {
             return Err(format!(
                 "{} 文件系统尚无可验证的写入实现",
@@ -357,7 +357,7 @@ fn plan_format_targets_with_keys(
 pub struct PlannedPartitionFormat {
     pub target: PartitionFormatTarget,
     pub selected: bool,
-    pub filesystem: Option<OfficialFilesystemFormat>,
+    pub filesystem: Option<FilesystemKind>,
     pub volume_label: String,
     pub volume_serial: u32,
     pub prepared_image: Option<PartitionFilesystemImage>,

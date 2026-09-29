@@ -1,10 +1,6 @@
 use super::*;
 
-fn confirmed_filesystem(
-    boot: &[u8],
-    start_lba: u64,
-    sectors: u64,
-) -> Option<OfficialFilesystemFormat> {
+fn confirmed_filesystem(boot: &[u8], start_lba: u64, sectors: u64) -> Option<FilesystemKind> {
     if boot.len() != SECTOR {
         return None;
     }
@@ -18,7 +14,7 @@ fn confirmed_filesystem(
     )
     .ok()?
     {
-        return Some(OfficialFilesystemFormat::ExFat);
+        return Some(FilesystemKind::ExFat);
     }
     let mut fat16_reader = crate::filesystem::BootSectorReader::new(boot, sectors);
     let fat16_geometry =
@@ -30,7 +26,7 @@ fn confirmed_filesystem(
     )
     .ok()?
     {
-        return Some(OfficialFilesystemFormat::Fat16);
+        return Some(FilesystemKind::Fat16);
     }
     None
 }

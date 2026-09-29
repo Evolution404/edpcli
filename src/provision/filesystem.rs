@@ -21,78 +21,8 @@ use super::{
 
 const SECTOR_SIZE: usize = 512;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum OfficialFilesystemFormat {
-    Fat16,
-    ExFat,
-    Ntfs,
-    Fat32,
-}
-
-impl From<OfficialFilesystemFormat> for crate::filesystem::FilesystemKind {
-    fn from(value: OfficialFilesystemFormat) -> Self {
-        match value {
-            OfficialFilesystemFormat::Fat16 => Self::Fat16,
-            OfficialFilesystemFormat::ExFat => Self::ExFat,
-            OfficialFilesystemFormat::Ntfs => Self::Ntfs,
-            OfficialFilesystemFormat::Fat32 => Self::Fat32,
-        }
-    }
-}
-
-impl TryFrom<crate::filesystem::FilesystemKind> for OfficialFilesystemFormat {
-    type Error = crate::filesystem::FilesystemError;
-
-    fn try_from(value: crate::filesystem::FilesystemKind) -> Result<Self, Self::Error> {
-        match value {
-            crate::filesystem::FilesystemKind::Fat16 => Ok(Self::Fat16),
-            crate::filesystem::FilesystemKind::ExFat => Ok(Self::ExFat),
-            crate::filesystem::FilesystemKind::Ntfs => Ok(Self::Ntfs),
-            crate::filesystem::FilesystemKind::Fat32 => Ok(Self::Fat32),
-            crate::filesystem::FilesystemKind::Fat12 => Err(
-                crate::filesystem::FilesystemError::format_unsupported(value),
-            ),
-        }
-    }
-}
-
-impl OfficialFilesystemFormat {
-    pub const fn first_party_default() -> Self {
-        Self::ExFat
-    }
-
-    pub fn from_first_party_config(value: Option<&str>) -> Self {
-        match value
-            .unwrap_or("exfat")
-            .trim()
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "ntfs" => Self::Ntfs,
-            "fat32" => Self::Fat32,
-            "exfat" => Self::ExFat,
-            _ => Self::ExFat,
-        }
-    }
-
-    pub const fn config_token(self) -> &'static str {
-        match self {
-            Self::Fat16 => "fat16",
-            Self::ExFat => "exfat",
-            Self::Ntfs => "ntfs",
-            Self::Fat32 => "fat32",
-        }
-    }
-
-    pub const fn windows_format_name(self) -> &'static str {
-        match self {
-            Self::Fat16 => "FAT16",
-            Self::ExFat => "exFat",
-            Self::Ntfs => "NTFS",
-            Self::Fat32 => "fat32",
-        }
-    }
-}
+/// 迁移期兼容别名。正式文件系统类型的唯一事实源是 `FilesystemKind`。
+use crate::filesystem::FilesystemKind;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SparseFilesystemImage {
@@ -133,12 +63,9 @@ impl SparseFilesystemImage {
     }
 }
 
-pub fn validate_volume_label(
-    filesystem: OfficialFilesystemFormat,
-    label: &str,
-) -> Result<(), String> {
+pub fn validate_volume_label(filesystem: FilesystemKind, label: &str) -> Result<(), String> {
     match filesystem {
-        OfficialFilesystemFormat::Fat16 => {
+        FilesystemKind::Fat16 => {
             let request = crate::filesystem::FormatRequest {
                 filesystem: crate::filesystem::FilesystemKind::Fat16,
                 volume_label: (!label.is_empty()).then(|| label.to_string()),
@@ -150,7 +77,7 @@ pub fn validate_volume_label(
             )
             .map_err(|error| error.to_string())
         }
-        OfficialFilesystemFormat::ExFat => {
+        FilesystemKind::ExFat => {
             let request = crate::filesystem::FormatRequest {
                 filesystem: crate::filesystem::FilesystemKind::ExFat,
                 volume_label: (!label.is_empty()).then(|| label.to_string()),
@@ -162,7 +89,7 @@ pub fn validate_volume_label(
             )
             .map_err(|error| error.to_string())
         }
-        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => Err(format!(
+        FilesystemKind::Fat12 | FilesystemKind::Fat32 | FilesystemKind::Ntfs => Err(format!(
             "portable filesystem writer does not yet implement {}",
             filesystem.config_token()
         )),
@@ -268,7 +195,7 @@ pub fn build_official_exfat_partition(
     volume_label: &str,
     volume_serial: u32,
 ) -> Result<PartitionFilesystemImage, String> {
-    if plan.filesystem_format != OfficialFilesystemFormat::ExFat {
+    if plan.filesystem_format != FilesystemKind::ExFat {
         return Err(format!(
             "portable filesystem writer does not yet implement {}",
             plan.filesystem_format.config_token()
@@ -280,7 +207,7 @@ pub fn build_official_exfat_partition(
         file_key,
         volume_label,
         volume_serial,
-        OfficialFilesystemFormat::ExFat,
+        FilesystemKind::ExFat,
     )
 }
 
@@ -310,7 +237,7 @@ fn build_official_partition_filesystem_with_format(
     file_key: &[u8; 16],
     volume_label: &str,
     volume_serial: u32,
-    format: OfficialFilesystemFormat,
+    format: FilesystemKind,
 ) -> Result<PartitionFilesystemImage, String> {
     let targets = plan.format_targets()?;
     let Some(index) = targets.iter().position(|candidate| candidate == target) else {
@@ -332,19 +259,19 @@ fn build_official_partition_filesystem_with_format(
         }
     }
     let plain = match format {
-        OfficialFilesystemFormat::Fat16 => build_empty_fat16(
+        FilesystemKind::Fat16 => build_empty_fat16(
             target.geometry.start_sector,
             target.geometry.sector_count(),
             volume_serial,
             volume_label,
         )?,
-        OfficialFilesystemFormat::ExFat => build_empty_exfat(
+        FilesystemKind::ExFat => build_empty_exfat(
             target.geometry.start_sector,
             target.geometry.sector_count(),
             volume_serial,
             volume_label,
         )?,
-        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => {
+        FilesystemKind::Fat12 | FilesystemKind::Fat32 | FilesystemKind::Ntfs => {
             return Err(format!(
                 "portable filesystem writer does not yet implement {}",
                 format.config_token()
@@ -377,7 +304,7 @@ pub fn build_official_exfat_partitions(
     volume_label: &str,
     volume_serials: &[u32],
 ) -> Result<Vec<PartitionFilesystemImage>, String> {
-    if plan.filesystem_format != OfficialFilesystemFormat::ExFat {
+    if plan.filesystem_format != FilesystemKind::ExFat {
         return Err(format!(
             "portable filesystem writer does not yet implement {}",
             plan.filesystem_format.config_token()

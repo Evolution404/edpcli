@@ -10,6 +10,7 @@ use crate::backup_metadata::{
 };
 use crate::common::{METADATA_LAST_LBA, SECTOR};
 use crate::crypto::a6b0_full_offset;
+use crate::filesystem::FilesystemKind;
 use crate::provision::{
     decrypt_mode2, default_file_key, default_file_key_checked, DefaultFileKeyError,
 };
@@ -72,55 +73,10 @@ impl SectorRegion {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FilesystemBootKind {
-    Fat12,
-    Fat16,
-    Fat32,
-    Exfat,
-    Ntfs,
-}
-
-impl FilesystemBootKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Fat12 => "FAT12",
-            Self::Fat16 => "FAT16",
-            Self::Fat32 => "FAT32",
-            Self::Exfat => "exFAT",
-            Self::Ntfs => "NTFS",
-        }
-    }
-}
-
-impl From<FilesystemBootKind> for crate::filesystem::FilesystemKind {
-    fn from(value: FilesystemBootKind) -> Self {
-        match value {
-            FilesystemBootKind::Fat12 => Self::Fat12,
-            FilesystemBootKind::Fat16 => Self::Fat16,
-            FilesystemBootKind::Fat32 => Self::Fat32,
-            FilesystemBootKind::Exfat => Self::ExFat,
-            FilesystemBootKind::Ntfs => Self::Ntfs,
-        }
-    }
-}
-
-impl From<crate::filesystem::FilesystemKind> for FilesystemBootKind {
-    fn from(value: crate::filesystem::FilesystemKind) -> Self {
-        match value {
-            crate::filesystem::FilesystemKind::Fat12 => Self::Fat12,
-            crate::filesystem::FilesystemKind::Fat16 => Self::Fat16,
-            crate::filesystem::FilesystemKind::Fat32 => Self::Fat32,
-            crate::filesystem::FilesystemKind::ExFat => Self::Exfat,
-            crate::filesystem::FilesystemKind::Ntfs => Self::Ntfs,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PhysicalDataState {
-    PlaintextFilesystem { filesystem: FilesystemBootKind },
-    EncryptedMode2 { filesystem: FilesystemBootKind },
+    PlaintextFilesystem { filesystem: FilesystemKind },
+    EncryptedMode2 { filesystem: FilesystemKind },
     Unknown { reason: String },
 }
 
@@ -151,7 +107,7 @@ impl PhysicalDataState {
         }
     }
 
-    pub fn filesystem(&self) -> Option<FilesystemBootKind> {
+    pub fn filesystem(&self) -> Option<FilesystemKind> {
         match self {
             Self::PlaintextFilesystem { filesystem } | Self::EncryptedMode2 { filesystem } => {
                 Some(*filesystem)
@@ -161,132 +117,24 @@ impl PhysicalDataState {
     }
 }
 
-// Only called after the boot sector's exact 512-byte length or MBR get(..512)
-// guard. Offsets are fixed format fields, not caller-supplied positions.
-fn u16le(raw: &[u8], offset: usize) -> u16 {
-    u16::from_le_bytes(raw[offset..offset + 2].try_into().unwrap())
-}
-
+// 仅用于 MBR 固定字段解析；文件系统 boot-sector 解析统一由 filesystem registry 负责。
 fn u32le(raw: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(raw[offset..offset + 4].try_into().unwrap())
 }
 
-fn u64le(raw: &[u8], offset: usize) -> u64 {
-    u64::from_le_bytes(raw[offset..offset + 8].try_into().unwrap())
-}
-
-fn valid_boot_jump(boot: &[u8]) -> bool {
-    (boot[0] == 0xeb && boot[2] == 0x90) || boot[0] == 0xe9
-}
-
-fn valid_spc(spc: u32) -> bool {
-    spc != 0 && spc.is_power_of_two() && spc <= 128
-}
-
-fn total_fits_partition(total: u64, partition: &PartitionGeometry) -> bool {
-    total != 0 && total <= partition.sector_count
-}
-
-fn detect_filesystem_boot(
-    partition: &PartitionGeometry,
-    boot: &[u8],
-) -> Option<FilesystemBootKind> {
-    if boot.len() != SECTOR || boot[510..512] != [0x55, 0xaa] || !valid_boot_jump(boot) {
+fn detect_filesystem_boot(partition: &PartitionGeometry, boot: &[u8]) -> Option<FilesystemKind> {
+    if boot.len() != SECTOR {
         return None;
     }
-
-    if boot.get(3..11) == Some(b"NTFS    ") {
-        let bps = u16le(boot, 11) as u32;
-        let spc = boot[13] as u32;
-        let total = u64le(boot, 40);
-        let clusters = total.checked_div(spc as u64)?;
-        let mft = u64le(boot, 48);
-        let mft_mirror = u64le(boot, 56);
-        if bps == SECTOR as u32
-            && valid_spc(spc)
-            && total_fits_partition(total, partition)
-            && boot[14..21].iter().all(|&byte| byte == 0)
-            && boot[21] >= 0xf0
-            && clusters > 0
-            && mft < clusters
-            && mft_mirror < clusters
-        {
-            return Some(FilesystemBootKind::Ntfs);
-        }
-        return None;
-    }
-
-    let mut exfat_reader = crate::filesystem::BootSectorReader::new(boot, partition.sector_count);
-    if crate::filesystem::FilesystemDriver::detect(
-        &crate::filesystem::EXFAT_DRIVER,
-        &mut exfat_reader,
-    )
-    .ok()
-    .is_some_and(|result| result.confidence == crate::filesystem::DetectionConfidence::Exact)
-    {
-        return Some(FilesystemBootKind::Exfat);
-    }
-
-    let mut fat16_reader = crate::filesystem::BootSectorReader::new(boot, partition.sector_count);
-    if crate::filesystem::FilesystemDriver::detect(
-        &crate::filesystem::FAT16_DRIVER,
-        &mut fat16_reader,
-    )
-    .ok()
-    .is_some_and(|result| result.confidence == crate::filesystem::DetectionConfidence::Exact)
-    {
-        return Some(FilesystemBootKind::Fat16);
-    }
-
-    let bps = u16le(boot, 11) as u32;
-    let spc = boot[13] as u32;
-    let reserved = u16le(boot, 14) as u64;
-    let fats = boot[16] as u64;
-    let root_entries = u16le(boot, 17) as u64;
-    let total16 = u16le(boot, 19) as u64;
-    let media = boot[21];
-    let fat16 = u16le(boot, 22) as u64;
-    let total32 = u32le(boot, 32) as u64;
-    let total = if total16 != 0 { total16 } else { total32 };
-    if bps != SECTOR as u32
-        || !valid_spc(spc)
-        || reserved == 0
-        || !matches!(fats, 1 | 2)
-        || media < 0xf0
-        || !total_fits_partition(total, partition)
-    {
-        return None;
-    }
-    let root_dir_sectors = root_entries.checked_mul(32)?.div_ceil(SECTOR as u64);
-    let fat_size = if fat16 != 0 {
-        fat16
-    } else {
-        u32le(boot, 36) as u64
-    };
-    if fat_size == 0 {
-        return None;
-    }
-    let metadata_sectors = reserved
-        .checked_add(fats.checked_mul(fat_size)?)?
-        .checked_add(root_dir_sectors)?;
-    let data_sectors = total.checked_sub(metadata_sectors)?;
-    let cluster_count = data_sectors / spc as u64;
-
-    if cluster_count >= 65_525 {
-        let root_cluster = u32le(boot, 44) as u64;
-        if fat16 == 0 && root_entries == 0 && root_cluster >= 2 && root_cluster < cluster_count + 2
-        {
-            return Some(FilesystemBootKind::Fat32);
-        }
-        return None;
-    }
-    if fat16 != 0 && root_entries != 0 && cluster_count < 4_085 {
-        return Some(FilesystemBootKind::Fat12);
-    }
-    None
+    let mut reader = crate::filesystem::BootSectorReader::new(boot, partition.sector_count);
+    crate::filesystem::default_registry()
+        .detect(&mut reader)
+        .ok()
+        .flatten()
+        .map(|detected| detected.kind())
 }
 
-pub fn detect_plain_filesystem(sector_count: u64, boot: &[u8]) -> Option<FilesystemBootKind> {
+pub fn detect_plain_filesystem(sector_count: u64, boot: &[u8]) -> Option<FilesystemKind> {
     let partition = PartitionGeometry {
         index: 0,
         partition_type: 0,

@@ -14,7 +14,7 @@ use super::format_operation::{failure, verify_current_target, KeyCheck, REOPEN_W
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EncryptedPartitionReinitializeResult {
     pub partition_index: u32,
-    pub filesystem: OfficialFilesystemFormat,
+    pub filesystem: FilesystemKind,
     pub result: Result<(), String>,
 }
 
@@ -27,7 +27,7 @@ pub fn reinitialize_encrypted_partition_on_disk(
     expected: &MediaIdentityResumePin,
     outcome: &MetadataRestoreOutcome,
     request: &EncryptedPartitionReinitializeRequest,
-    filesystem: OfficialFilesystemFormat,
+    filesystem: FilesystemKind,
     volume_label: &str,
     volume_serial: u32,
 ) -> EncryptedPartitionReinitializeResult {
@@ -201,7 +201,7 @@ pub fn reinitialize_encrypted_partition_after_restore_on_disk(
     prompt: &mut dyn Prompter,
     outcome: &MetadataRestoreOutcome,
     request: &EncryptedPartitionReinitializeRequest,
-    filesystem: OfficialFilesystemFormat,
+    filesystem: FilesystemKind,
     volume_label: &str,
 ) -> EncryptedPartitionReinitializeResult {
     let result = (|| -> EdpCliResult<Result<(), String>> {

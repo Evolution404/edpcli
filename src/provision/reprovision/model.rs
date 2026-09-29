@@ -118,7 +118,7 @@ pub struct ExistingPartition {
     pub start_lba: u64,
     pub sector_count: u64,
     pub physically_encrypted: bool,
-    pub filesystem: Option<OfficialFilesystemFormat>,
+    pub filesystem: Option<FilesystemKind>,
 }
 
 impl ExistingPartition {
@@ -153,7 +153,7 @@ pub struct TargetPartitionGeometry {
     pub start_lba: u64,
     pub sector_count: u64,
     pub physically_encrypted: bool,
-    pub filesystem: Option<OfficialFilesystemFormat>,
+    pub filesystem: Option<FilesystemKind>,
 }
 
 impl TargetPartitionGeometry {

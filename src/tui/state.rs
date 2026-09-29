@@ -86,7 +86,7 @@ pub struct PostRestoreReinitializeIntent {
     pub disk: u32,
     pub outcome: crate::application::post_restore::MetadataRestoreOutcome,
     pub request: crate::application::post_restore::EncryptedPartitionReinitializeRequest,
-    pub filesystem: crate::provision::OfficialFilesystemFormat,
+    pub filesystem: crate::provision::FilesystemKind,
     pub volume_label: String,
 }
 
@@ -527,7 +527,7 @@ impl AppState {
     fn selected_post_restore_format(
         wizard: &WizardState,
     ) -> Option<crate::application::post_restore::PartitionFormatRequest> {
-        use crate::provision::OfficialFilesystemFormat;
+        use crate::provision::FilesystemKind;
 
         let outcome = wizard.restore_outcome.as_ref()?;
         let partition = outcome
@@ -536,15 +536,15 @@ impl AppState {
             .get(wizard.post_restore_selected)?;
         let hint = partition.filesystem_hint.as_deref().unwrap_or_default();
         let filesystem = if hint.eq_ignore_ascii_case("fat16") {
-            OfficialFilesystemFormat::Fat16
+            FilesystemKind::Fat16
         } else if hint.eq_ignore_ascii_case("exfat") {
-            OfficialFilesystemFormat::ExFat
+            FilesystemKind::ExFat
         } else if hint.eq_ignore_ascii_case("ntfs") || hint.eq_ignore_ascii_case("fat32") {
             return None;
         } else if partition.role.as_deref() == Some("boot") {
-            OfficialFilesystemFormat::Fat16
+            FilesystemKind::Fat16
         } else {
-            OfficialFilesystemFormat::first_party_default()
+            FilesystemKind::first_party_default()
         };
         Some(crate::application::post_restore::PartitionFormatRequest {
             partition_index: partition.index,

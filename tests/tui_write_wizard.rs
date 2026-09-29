@@ -7,7 +7,7 @@ use edpcli::application::post_restore::{
     PostRestorePartitionState,
 };
 use edpcli::edpb::ManifestPartition;
-use edpcli::provision::{ExistingFileKeyError, OfficialFilesystemFormat};
+use edpcli::provision::{ExistingFileKeyError, FilesystemKind};
 use edpcli::tui::state::{AppState, NavCommand, StateEffect, WizardStage, WriteIntent, WriteKind};
 
 #[test]
@@ -177,7 +177,7 @@ fn restore_post_processing_requires_a_second_yes_before_plain_format() {
             .as_ref()
             .unwrap()
             .filesystem,
-        OfficialFilesystemFormat::ExFat
+        FilesystemKind::ExFat
     );
     assert!(
         state.submit_post_restore_format_confirmation().is_none(),
@@ -198,7 +198,7 @@ fn restore_post_processing_requires_a_second_yes_before_plain_format() {
 
     state.finish_post_restore_format(PostRestoreFormatResult {
         partition_index: 1,
-        filesystem: OfficialFilesystemFormat::ExFat,
+        filesystem: FilesystemKind::ExFat,
         result: Ok(()),
     });
     let wizard = state.wizard().unwrap();
@@ -288,7 +288,7 @@ fn password_required_flow_uses_secret_input_and_wrong_password_returns_without_l
 
     state.finish_post_restore_encrypted_format(EncryptedPostRestoreFormatResult {
         partition_index: 1,
-        filesystem: OfficialFilesystemFormat::ExFat,
+        filesystem: FilesystemKind::ExFat,
         result: Err(EncryptedPostRestoreError::FileKey(
             ExistingFileKeyError::PasswordMismatch,
         )),
@@ -387,7 +387,7 @@ fn crypto_invalid_reinitialize_requires_two_matching_passwords_and_independent_y
 
     state.finish_post_restore_reinitialize(EncryptedPartitionReinitializeResult {
         partition_index: 1,
-        filesystem: OfficialFilesystemFormat::ExFat,
+        filesystem: FilesystemKind::ExFat,
         result: Ok(()),
     });
     let wizard = state.wizard().unwrap();

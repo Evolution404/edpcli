@@ -4,11 +4,10 @@ use edpcli::protocol::{
 use edpcli::provision::{
     build_official_partition_layout, generate_official_image, official_mbr_partition_type,
     visible_mbr_partition_type, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
-    OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
-    OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionValidator, OnlyId,
-    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-    TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
-    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    FilesystemKind, OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, OfficialProvisionValidator, OnlyId, ProvisionEntropy, ProvisionImage,
+    ProvisionMetadata, ProvisionProfile, ProvisionSpec, TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS,
+    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use edpcli::{
     crypto::{a6b0_full, crc32_bare, xor_rolling},
@@ -65,13 +64,10 @@ fn visible_mbr_type_tracks_the_front_filesystem_without_changing_edp_roles() {
     ] {
         let plan = official_plan(mode);
         let default_front = plan.format_targets().unwrap().remove(0);
-        assert_eq!(
-            default_front.filesystem,
-            Some(OfficialFilesystemFormat::Fat16)
-        );
+        assert_eq!(default_front.filesystem, Some(FilesystemKind::Fat16));
         assert_eq!(plan.visible_mbr_partition_type().unwrap(), 0x0e);
         let mut filesystems = OfficialPartitionFilesystems::defaults();
-        filesystems.boot = OfficialFilesystemFormat::ExFat;
+        filesystems.boot = FilesystemKind::ExFat;
         let exfat = plan.with_filesystems(filesystems);
         assert_eq!(exfat.visible_mbr_partition_type().unwrap(), 0x07);
         assert_eq!(
@@ -82,7 +78,7 @@ fn visible_mbr_type_tracks_the_front_filesystem_without_changing_edp_roles() {
     let combined = official_plan(OfficialPartitionMode::BootShareCombined);
     assert_eq!(
         combined.format_targets().unwrap()[0].filesystem,
-        Some(OfficialFilesystemFormat::ExFat)
+        Some(FilesystemKind::ExFat)
     );
     assert_eq!(combined.visible_mbr_partition_type().unwrap(), 0x07);
     assert_eq!(
@@ -94,14 +90,14 @@ fn visible_mbr_type_tracks_the_front_filesystem_without_changing_edp_roles() {
     assert_eq!(
         visible_mbr_partition_type(
             OfficialPartitionMode::DefaultThreePartition,
-            OfficialFilesystemFormat::Fat32
+            FilesystemKind::Fat32
         ),
         0x0c
     );
     assert_eq!(
         visible_mbr_partition_type(
             OfficialPartitionMode::DefaultThreePartition,
-            OfficialFilesystemFormat::Ntfs
+            FilesystemKind::Ntfs
         ),
         0x07
     );
@@ -113,7 +109,7 @@ fn generated_mode0_exfat_front_uses_mbr_07_from_the_initial_protocol_image() {
     let entropy = ProvisionEntropy::new([0x5a; 252]);
     let fat16_plan = official_plan(OfficialPartitionMode::DefaultThreePartition);
     let mut filesystems = OfficialPartitionFilesystems::defaults();
-    filesystems.boot = OfficialFilesystemFormat::ExFat;
+    filesystems.boot = FilesystemKind::ExFat;
     let exfat_plan = fat16_plan.with_filesystems(filesystems);
     let fat16 = generate_official_image(&spec, &entropy, &fat16_plan).unwrap();
     let exfat = generate_official_image(&spec, &entropy, &exfat_plan).unwrap();
@@ -127,7 +123,7 @@ fn generated_mode0_exfat_front_uses_mbr_07_from_the_initial_protocol_image() {
 #[test]
 fn official_plan_defaults_to_current_writer_exfat_but_accepts_other_configured_formats() {
     let default = official_plan(OfficialPartitionMode::BootShareCombined);
-    assert_eq!(default.filesystem_format, OfficialFilesystemFormat::ExFat);
+    assert_eq!(default.filesystem_format, FilesystemKind::ExFat);
 
     let compat = locate_lba7_compatibility_extent_from_geometry(1024, 255, 63, 512).unwrap();
     let current = wrap_file_key(
@@ -138,10 +134,7 @@ fn official_plan_defaults_to_current_writer_exfat_but_accepts_other_configured_f
         ],
         FileKeyWrapMode::Sm4,
     );
-    for format in [
-        OfficialFilesystemFormat::Ntfs,
-        OfficialFilesystemFormat::Fat32,
-    ] {
+    for format in [FilesystemKind::Ntfs, FilesystemKind::Fat32] {
         let plan = OfficialProvisionPlan::new_with_filesystem(
             OfficialPartitionMode::BootShareCombined,
             OfficialPartitionSizes::new(32, 64, 128),

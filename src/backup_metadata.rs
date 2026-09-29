@@ -672,7 +672,7 @@ fn probe_filesystem_hints(
     };
     let filesystem = Some(kind.label().to_ascii_lowercase());
     let label = match kind {
-        crate::inspect_target::FilesystemBootKind::Fat16 => {
+        crate::filesystem::FilesystemKind::Fat16 => {
             let mut reader = PartitionFilesystemReader {
                 dev,
                 start_lba,
@@ -685,7 +685,7 @@ fn probe_filesystem_hints(
             .map_err(|error| error.to_string())?
             .volume_label
         }
-        crate::inspect_target::FilesystemBootKind::Exfat => {
+        crate::filesystem::FilesystemKind::ExFat => {
             let mut reader = PartitionFilesystemReader {
                 dev,
                 start_lba,
@@ -698,9 +698,9 @@ fn probe_filesystem_hints(
             .map_err(|error| error.to_string())?
             .volume_label
         }
-        crate::inspect_target::FilesystemBootKind::Fat12
-        | crate::inspect_target::FilesystemBootKind::Fat32
-        | crate::inspect_target::FilesystemBootKind::Ntfs => None,
+        crate::filesystem::FilesystemKind::Fat12
+        | crate::filesystem::FilesystemKind::Fat32
+        | crate::filesystem::FilesystemKind::Ntfs => None,
     };
     Ok((filesystem, label))
 }
@@ -824,15 +824,27 @@ pub fn acquire_plain_metadata(
 }
 
 fn manifest_partition_from_edp(
+    mode: Option<Lba7PartitionMode>,
     partition: &PartitionGeometry,
     filesystem_hint: Option<String>,
     volume_label_hint: Option<String>,
 ) -> ManifestPartition {
-    let role = match partition.partition_type {
-        1 => "boot",
-        2 => "share",
-        4 => "encrypt",
-        _ => "unknown",
+    let role = match (mode, EdpPartitionType::from_raw(partition.partition_type)) {
+        (Some(mode), Some(partition_type)) => {
+            match crate::provision::official_partition_role(mode, partition.index, partition_type) {
+                crate::provision::PartitionRole::Boot => "boot",
+                crate::provision::PartitionRole::Share => "share",
+                crate::provision::PartitionRole::Encrypt => "encrypt",
+                crate::provision::PartitionRole::BootShareCombined => "boot_share_combined",
+                crate::provision::PartitionRole::CompatibilityReserve => "compatibility_reserve",
+            }
+        }
+        _ => match partition.partition_type {
+            1 => "boot",
+            2 => "share",
+            4 => "encrypt",
+            _ => "unknown",
+        },
     };
     ManifestPartition {
         index: (partition.index + 1) as u32,
@@ -855,6 +867,11 @@ pub fn acquire_metadata(
         return Err("source disk is smaller than protocol region".into());
     }
     let partitions = parse_partition_geometry(lba0_12, device_id, total_sectors)?;
+    let partition_types = partitions
+        .iter()
+        .map(|partition| partition.partition_type)
+        .collect::<Vec<_>>();
+    let partition_mode = Lba7PartitionMode::from_partition_types(&partition_types);
     let (share_protocol_label, encrypt_protocol_label) = lba0_12
         .get(10 * SECTOR..11 * SECTOR)
         .map(|raw| crate::protocol::semantic::lba10_volume_labels(raw, device_id))
@@ -895,8 +912,12 @@ pub fn acquire_metadata(
             4 => encrypt_protocol_label.clone(),
             _ => None,
         };
-        out.partitions
-            .push(manifest_partition_from_edp(partition, None, protocol_label));
+        out.partitions.push(manifest_partition_from_edp(
+            partition_mode,
+            partition,
+            None,
+            protocol_label,
+        ));
     }
 
     match parse_lba7_compatibility_geometry(lba0_12, device_id, total_sectors) {
@@ -1076,4 +1097,66 @@ pub fn acquire_metadata(
         ));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod manifest_role_tests {
+    use super::{manifest_partition_from_edp, Lba7PartitionMode, PartitionGeometry};
+
+    fn partition(index: usize, partition_type: u32) -> PartitionGeometry {
+        PartitionGeometry {
+            index,
+            partition_type,
+            partition_count: 3,
+            need_disturb: 0,
+            need_encrypt: 0,
+            start_sector: 63 + index as u64 * 1024,
+            sector_size: 512,
+            partition_size: 1024 * 512,
+            sector_count: 1024,
+            user_key_crc: 0,
+            file_key_crc: 0,
+            encrypt_mode: 0,
+        }
+    }
+
+    fn role(mode: Lba7PartitionMode, index: usize, partition_type: u32) -> String {
+        manifest_partition_from_edp(Some(mode), &partition(index, partition_type), None, None)
+            .role
+            .expect("manifest role")
+    }
+
+    #[test]
+    fn all_official_modes_have_semantic_manifest_roles() {
+        assert_eq!(role(Lba7PartitionMode::DefaultThreePartition, 0, 1), "boot");
+        assert_eq!(
+            role(Lba7PartitionMode::DefaultThreePartition, 1, 2),
+            "share"
+        );
+        assert_eq!(
+            role(Lba7PartitionMode::DefaultThreePartition, 2, 4),
+            "encrypt"
+        );
+
+        assert_eq!(
+            role(Lba7PartitionMode::BootShareCombined, 0, 2),
+            "boot_share_combined"
+        );
+        assert_eq!(role(Lba7PartitionMode::BootShareCombined, 1, 4), "encrypt");
+
+        assert_eq!(
+            role(Lba7PartitionMode::WholeDiskEncrypted, 0, 1),
+            "compatibility_reserve"
+        );
+        assert_eq!(role(Lba7PartitionMode::WholeDiskEncrypted, 1, 4), "encrypt");
+
+        assert_eq!(
+            role(Lba7PartitionMode::IntranetExtranetDualPartition, 0, 1),
+            "boot"
+        );
+        assert_eq!(
+            role(Lba7PartitionMode::IntranetExtranetDualPartition, 1, 2),
+            "share"
+        );
+    }
 }

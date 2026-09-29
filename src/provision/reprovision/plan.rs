@@ -45,7 +45,7 @@ impl ParsedExistingProvision {
     pub fn confirm_filesystem(
         &mut self,
         role: PartitionRole,
-        format: OfficialFilesystemFormat,
+        format: FilesystemKind,
     ) -> Result<(), String> {
         let part = self
             .profile

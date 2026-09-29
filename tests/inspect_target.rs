@@ -1,9 +1,8 @@
 use edpcli::backup_metadata::parse_partition_geometry;
 use edpcli::common::SECTOR;
 use edpcli::crypto::{a6b0_full, a6b0_full_offset, a7f0_full, crc32_bare};
-use edpcli::inspect_target::{
-    FilesystemBootKind, InspectDiskContext, PhysicalDataState, SectorRegion,
-};
+use edpcli::filesystem::FilesystemKind;
+use edpcli::inspect_target::{InspectDiskContext, PhysicalDataState, SectorRegion};
 use edpcli::provision::{default_file_key, sm4_encrypt_block};
 
 const LEXAR_DEVICE_ID: &str = "disk&ven_lexar&prod_usb_flash_drive";
@@ -190,7 +189,7 @@ fn plaintext_type1_with_real_fat12_shape_decodes_without_transform() {
     assert_eq!(
         state,
         PhysicalDataState::PlaintextFilesystem {
-            filesystem: FilesystemBootKind::Fat12,
+            filesystem: FilesystemKind::Fat12,
         }
     );
     let (decoded, method) = context

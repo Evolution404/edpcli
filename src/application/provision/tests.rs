@@ -323,7 +323,7 @@ fn editor_preserve_assessment_reports_typed_geometry_reason() {
         start_lba: 20480,
         sector_count: 4096,
         physically_encrypted: true,
-        filesystem: Some(OfficialFilesystemFormat::ExFat),
+        filesystem: Some(FilesystemKind::ExFat),
     };
     let same = source.as_target();
     assert!(PreserveAssessment::for_partition(Some(&source), &same).candidate);
@@ -532,7 +532,7 @@ fn format_executor_uses_the_same_matrix_and_preserves_protocol_sectors() {
             if choice.target.physically_encrypted {
                 assert_ne!(raw.get(3..11), Some(&b"EXFAT   "[..]));
                 assert_ne!(raw.get(54..62), Some(&b"FAT16   "[..]));
-            } else if choice.filesystem == Some(OfficialFilesystemFormat::Fat16) {
+            } else if choice.filesystem == Some(FilesystemKind::Fat16) {
                 assert_eq!(raw.get(54..62), Some(&b"FAT16   "[..]));
             } else {
                 assert_eq!(raw.get(3..11), Some(&b"EXFAT   "[..]));
