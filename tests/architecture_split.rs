@@ -66,6 +66,7 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
     assert!(near_hard_limit(80, 100));
     for (path, hard_limit) in [
         ("src/tui/mod.rs", 400),
+        ("src/tui/table_state.rs", 650),
         ("src/tui/resume.rs", 180),
         ("src/tui/inspect/state.rs", 350),
         ("src/tui/inspect/field_navigation.rs", 220),
@@ -250,6 +251,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/dispatch.rs",
         "src/tui/controller.rs",
         "src/tui/controller/provision.rs",
+        "src/tui/table_state.rs",
         "src/inspect/model.rs",
         "src/inspect_adapter.rs",
         "src/application/inspect_text.rs",
@@ -266,7 +268,11 @@ fn large_modules_are_split_by_domain_boundary() {
 
     assert!(lines("src/application/provision.rs") < 1_000);
     assert!(lines("src/diskio.rs") < 500);
-    assert!(lines("src/tui/state.rs") < 3_500);
+    assert!(lines("src/tui/state.rs") < 3_000);
+    assert!(
+        lines("src/tui/table_state.rs") < 650,
+        "shared table interaction state must stay isolated from AppState orchestration"
+    );
     assert!(lines("src/tui/render.rs") < 1_500);
     assert!(lines("src/tui/task.rs") < 1_000);
     assert!(
@@ -1241,6 +1247,8 @@ fn app_state_owns_inspect_through_inspect_substate() {
     let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
     let inspect =
         fs::read_to_string(root.join("src/tui/inspect/state.rs")).expect("read inspect state");
+    let table_state =
+        fs::read_to_string(root.join("src/tui/table_state.rs")).expect("read table state");
 
     let app_state = state
         .split("pub struct AppState {")
@@ -1255,8 +1263,8 @@ fn app_state_owns_inspect_through_inspect_substate() {
     assert!(inspect.contains("pub struct InspectState"));
     assert!(inspect.contains("advanced: Option<AdvancedInspectState>"));
     assert!(
-        state.contains("self.inspect.advanced"),
-        "state facade must access Inspect workspace field through InspectState"
+        state.contains("self.inspect.advanced") || table_state.contains("self.inspect.advanced"),
+        "AppState facade modules must access Inspect workspace field through InspectState"
     );
     assert!(
         inspect.contains("self.inspect.advanced"),
