@@ -30,6 +30,27 @@ fn confirmed_filesystem(
     None
 }
 
+fn classify_live_source_identity(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    source_metadata: &[u8],
+    total_sectors: u64,
+    dev: &mut dyn SectorDev,
+) -> EdpCliResult<crate::media_identity::MediaIdentitySnapshot> {
+    let identity = media_identity_from_protocol_image(runner, disk, source_metadata)?;
+    Ok(crate::media_identity_observer::apply_runtime_plain_override(
+        identity,
+        source_metadata,
+        total_sectors,
+        |lba| {
+            let lba = u32::try_from(lba)
+                .map_err(|_| format!("Plain runtime evidence LBA{lba} exceeds u32"))?;
+            dev.read_sector(lba)
+                .map_err(|error| format!("read Plain runtime evidence LBA{lba}: {error}"))
+        },
+    ))
+}
+
 fn resolved_source_password<'a>(
     source: &ParsedExistingProvision,
     key_domains: &'a KeyDomainSecrets,
@@ -258,7 +279,8 @@ pub fn prepare_target_provision(
             )
         })?;
     let source_metadata = read_image(dev)?;
-    let source_identity = media_identity_from_protocol_image(runner, disk, &source_metadata)?;
+    let source_identity =
+        classify_live_source_identity(runner, disk, &source_metadata, total_sectors, dev)?;
     let source_kind = source_identity.protocol.provision_kind.ok_or_else(|| {
         err(
             EXIT_TARGET,
@@ -266,13 +288,17 @@ pub fn prepare_target_provision(
         )
     })?;
     let before_pin = MediaIdentityPin::new(source_identity, &source_metadata);
-    let source = inspect_source_profile(
-        dev,
-        &source_metadata,
-        &device_id,
-        total_sectors,
-        &request.key_domains,
-    )?;
+    let source = if source_kind == crate::provision::DiskProvisionKind::Plain {
+        None
+    } else {
+        inspect_source_profile(
+            dev,
+            &source_metadata,
+            &device_id,
+            total_sectors,
+            &request.key_domains,
+        )?
+    };
     let source_identity = if source.is_some() {
         let base = crate::protocol::semantic::SemanticContext {
             device_id: Some(device_id.clone()),
@@ -815,6 +841,21 @@ pub fn probe_provision_key_domains_on_disk(
     let device_id = target.device_id().to_string();
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     let source_metadata = read_image(&mut dev)?;
+    let source_identity =
+        classify_live_source_identity(runner, disk, &source_metadata, total_sectors, &mut dev)?;
+    let source_kind = source_identity
+        .protocol
+        .provision_kind
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 来源盘型未确认；拒绝继续探测密码域"))?;
+    if source_kind == crate::provision::DiskProvisionKind::Plain {
+        return Ok(ProvisionKeyProbe {
+            source_kind,
+            share: None,
+            share_opaque_profile: false,
+            encrypt: None,
+            encrypt_opaque_profile: false,
+        });
+    }
     let image = ProvisionImage::from_bytes(source_metadata.clone())
         .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
     let parsed =
@@ -824,11 +865,6 @@ pub fn probe_provision_key_domains_on_disk(
                 format!("错误: 来源盘注册结构无法可靠解析: {message}"),
             )
         })?;
-    let source_identity = media_identity_from_protocol_image(runner, disk, &source_metadata)?;
-    let source_kind = source_identity
-        .protocol
-        .provision_kind
-        .ok_or_else(|| err(EXIT_TARGET, "错误: 来源盘型未确认；拒绝继续探测密码域"))?;
     let domain_probe = |domain: KeyDomainRole| {
         parsed
             .as_ref()
@@ -878,6 +914,14 @@ pub fn verify_provision_source_password_on_disk(
         .map_err(|message| err(EXIT_TARGET, format!("错误: 目标硬件身份不完整: {message}")))?;
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     let source_metadata = read_image(&mut dev)?;
+    let source_identity =
+        classify_live_source_identity(runner, disk, &source_metadata, total_sectors, &mut dev)?;
+    if source_identity.protocol.provision_kind == Some(crate::provision::DiskProvisionKind::Plain) {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 当前来源盘已确认是 Plain；不存在可验证的 EDP key domain",
+        ));
+    }
     let image = ProvisionImage::from_bytes(source_metadata)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
     let source = parse_existing_provision(&image, target.device_id(), total_sectors)
@@ -965,7 +1009,8 @@ fn prepare_plain_provision_with_key_domains(
     let device_id = target.device_id().to_string();
 
     let source_metadata = read_image(dev)?;
-    let source_identity = media_identity_from_protocol_image(runner, disk, &source_metadata)?;
+    let source_identity =
+        classify_live_source_identity(runner, disk, &source_metadata, total_sectors, dev)?;
     let source_kind = source_identity.protocol.provision_kind.ok_or_else(|| {
         err(
             EXIT_TARGET,
