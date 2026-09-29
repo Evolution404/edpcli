@@ -1,16 +1,26 @@
 use std::collections::BTreeSet;
 
-use crate::filesystem::{
+use super::{
     build_empty_exfat, build_empty_fat16, exfat_boot_checksum, exfat_geometry, exfat_upcase_table,
-    fat_chain, put_stream, put_u16, put_u32, put_u64, upcase_mapping, SparseFilesystemImage,
+    fat_chain, put_stream, put_u16, put_u32, put_u64, upcase_mapping, FilesystemKind,
+    SparseFilesystemImage,
 };
 
 const SECTOR_SIZE: usize = 512;
-use crate::provision::{FilesystemKind, MigrationStagedEntry};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FilesystemMigrationEntry {
+    pub path: String,
+    pub is_directory: bool,
+    pub data: Vec<u8>,
+    pub attributes: u32,
+    pub mtime: Option<String>,
+    pub ctime: Option<String>,
+}
 
 #[derive(Clone, Debug)]
 struct TreeEntry<'a> {
-    staged: &'a MigrationStagedEntry,
+    staged: &'a FilesystemMigrationEntry,
     parent: String,
     name: String,
     first_cluster: u32,
@@ -44,7 +54,7 @@ fn split_path(path: &str, directory: bool) -> Result<(String, String), String> {
     Ok((parent, name.to_string()))
 }
 
-fn validate_tree(entries: &[MigrationStagedEntry]) -> Result<(), String> {
+fn validate_tree(entries: &[FilesystemMigrationEntry]) -> Result<(), String> {
     let dirs = entries
         .iter()
         .filter(|entry| entry.is_directory)
@@ -237,7 +247,7 @@ fn build_migrated_fat16(
     volume_sectors: u64,
     volume_serial: u32,
     volume_label: &str,
-    staged: &[MigrationStagedEntry],
+    staged: &[FilesystemMigrationEntry],
 ) -> Result<SparseFilesystemImage, String> {
     validate_tree(staged)?;
     let mut image = build_empty_fat16(
@@ -476,7 +486,7 @@ fn build_migrated_exfat(
     volume_sectors: u64,
     volume_serial: u32,
     volume_label: &str,
-    staged: &[MigrationStagedEntry],
+    staged: &[FilesystemMigrationEntry],
 ) -> Result<SparseFilesystemImage, String> {
     validate_tree(staged)?;
     let mut image = build_empty_exfat(
@@ -728,7 +738,7 @@ pub fn build_migrated_filesystem(
     volume_sectors: u64,
     volume_serial: u32,
     volume_label: &str,
-    staged: &[MigrationStagedEntry],
+    staged: &[FilesystemMigrationEntry],
 ) -> Result<SparseFilesystemImage, String> {
     match filesystem {
         FilesystemKind::Fat16 => build_migrated_fat16(

@@ -381,3 +381,38 @@ pub fn finalize_staged_entry(
         ctime: manifest.ctime.clone(),
     })
 }
+
+impl From<&MigrationStagedEntry> for crate::filesystem::FilesystemMigrationEntry {
+    fn from(entry: &MigrationStagedEntry) -> Self {
+        Self {
+            path: entry.path.clone(),
+            is_directory: entry.is_directory,
+            data: entry.data.clone(),
+            attributes: entry.attributes,
+            mtime: entry.mtime.clone(),
+            ctime: entry.ctime.clone(),
+        }
+    }
+}
+
+pub fn build_migrated_filesystem(
+    filesystem: crate::filesystem::FilesystemKind,
+    partition_offset: u64,
+    volume_sectors: u64,
+    volume_serial: u32,
+    volume_label: &str,
+    staged: &[MigrationStagedEntry],
+) -> Result<crate::filesystem::SparseFilesystemImage, String> {
+    let entries = staged
+        .iter()
+        .map(crate::filesystem::FilesystemMigrationEntry::from)
+        .collect::<Vec<_>>();
+    crate::filesystem::build_migrated_filesystem(
+        filesystem,
+        partition_offset,
+        volume_sectors,
+        volume_serial,
+        volume_label,
+        &entries,
+    )
+}

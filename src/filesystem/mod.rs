@@ -10,6 +10,7 @@ mod image;
 mod io;
 mod kind;
 mod metadata;
+mod migration;
 mod ntfs;
 pub mod registry;
 
@@ -34,5 +35,6 @@ pub use image::{
 pub use io::{BootSectorReader, FilesystemReader};
 pub use kind::FilesystemKind;
 pub use metadata::FilesystemMetadata;
+pub use migration::{build_migrated_filesystem, FilesystemMigrationEntry};
 pub use ntfs::{NtfsDriver, NTFS_DRIVER};
 pub use registry::{default_registry, detect_boot_sector, DetectedFilesystem, DriverRegistry};

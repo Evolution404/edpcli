@@ -4,7 +4,6 @@
 //! Hardware discovery belongs to the application/platform layers; builders consume only
 //! immutable, already-resolved inputs from this domain.
 
-mod filesystem;
 mod generate;
 mod key_domain;
 mod keys;
@@ -25,7 +24,6 @@ pub use crate::filesystem::FilesystemKind;
 pub use crate::filesystem::{
     build_empty_exfat, build_empty_fat16, validate_volume_label, SparseFilesystemImage,
 };
-pub use filesystem::build_migrated_filesystem;
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
 pub use key_domain::{
     KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, SecretBytes, SourcePasswordKnowledge,
@@ -46,9 +44,9 @@ pub use layout::{
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
 pub use migration::{
-    build_migration_manifest, finalize_staged_entry, MigrationBudgets, MigrationInventory,
-    MigrationManifest, MigrationManifestEntry, MigrationPreflightError, MigrationStagedEntry,
-    MAX_MIGRATION_ENTRIES,
+    build_migrated_filesystem, build_migration_manifest, finalize_staged_entry, MigrationBudgets,
+    MigrationInventory, MigrationManifest, MigrationManifestEntry, MigrationPreflightError,
+    MigrationStagedEntry, MAX_MIGRATION_ENTRIES,
 };
 pub use partition_format::{
     build_official_exfat_partition, build_official_exfat_partitions,
