@@ -3,7 +3,7 @@ use std::process::{Command, Stdio};
 use edpcli::common::EXIT_USAGE;
 use edpcli::tui::{
     render,
-    state::{AppState, NavCommand, ProvisionStage, Workspace},
+    state::{AppState, NavCommand, ProvisionStage, Workspace, WriteKind},
 };
 use ratatui::{backend::TestBackend, style::Modifier, Terminal};
 
@@ -793,4 +793,163 @@ fn background_workers_convert_panics_into_results_instead_of_hanging_ui() {
     let task = include_str!("../src/tui/task.rs");
     assert!(task.contains("catch_unwind"));
     assert!(task.contains("AssertUnwindSafe"));
+}
+
+#[test]
+fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
+    use edpcli::application::post_restore::{
+        MetadataRestoreOutcome, MetadataRestoreReport, PostRestoreAssessment, PostRestorePartition,
+        PostRestorePartitionState,
+    };
+    use edpcli::edpb::ManifestPartition;
+    use ratatui::style::Color;
+
+    fn rendered_text(state: &AppState) -> (String, Vec<Color>) {
+        let width = 180u16;
+        let mut terminal = Terminal::new(TestBackend::new(width, 36)).unwrap();
+        terminal.draw(|frame| render::draw(frame, state)).unwrap();
+        let cells = terminal.backend().buffer().content();
+        (
+            cells.iter().map(|cell| cell.symbol()).collect::<String>(),
+            cells
+                .iter()
+                .filter(|cell| !cell.symbol().trim().is_empty())
+                .map(|cell| cell.fg)
+                .collect(),
+        )
+    }
+
+    let mut state = AppState::new();
+    state.begin_write_wizard(
+        WriteKind::Restore,
+        4,
+        Some(
+            "/Users/test/.edpcli-backup/disk5_245760000_vid2bdf_pid0300_plain_20260929_073104.edpb"
+                .into(),
+        ),
+    );
+
+    let (review, review_colors) = rendered_text(&state);
+    let compact = review.replace(' ', "");
+    assert!(compact.contains("备份>恢复>确认"), "{review}");
+    assert!(compact.contains("恢复目标"), "{review}");
+    assert!(
+        compact.contains("当前系统设备节点；编号可随重新插拔变化，不参与物理身份判断"),
+        "{review}"
+    );
+    assert!(
+        compact.contains("文件名中的diskN仅记录备份时系统编号，不参与介质身份认证"),
+        "{review}"
+    );
+    assert!(compact.contains("⚠将执行元数据恢复"), "{review}");
+    assert!(compact.contains("安全检查"), "{review}");
+    assert!(!compact.contains("安全链："), "{review}");
+    assert!(
+        review_colors
+            .iter()
+            .copied()
+            .fold(Vec::new(), |mut unique, color| {
+                if !unique.contains(&color) {
+                    unique.push(color);
+                }
+                unique
+            })
+            .len()
+            >= 4,
+        "restore review must use semantic color hierarchy"
+    );
+
+    state.advance_restore_review();
+    for ch in ['Y', 'E', 'S'] {
+        state.push_wizard_confirmation(ch);
+    }
+    let _ = state.submit_wizard_confirmation();
+    state.finish_restore(Ok(MetadataRestoreOutcome {
+        report: MetadataRestoreReport {
+            metadata_restored: true,
+            readback_verified: true,
+            restored_artifact_ids: vec!["raw.partition_table.mbr".into()],
+        },
+        assessment: PostRestoreAssessment {
+            partitions: vec![PostRestorePartition {
+                index: 1,
+                role: Some("plain".into()),
+                start_lba: 2_048,
+                sector_count: 245_757_952,
+                filesystem_hint: Some("exfat".into()),
+                detected_filesystem: None,
+                requires_original_key: false,
+                state: PostRestorePartitionState::NeedsFormat,
+                detail: "文件系统引导区无效".into(),
+            }],
+            issues: Vec::new(),
+        },
+        partitions: vec![ManifestPartition {
+            index: 1,
+            role: Some("plain".into()),
+            partition_type: Some("mbr:0x07".into()),
+            start_lba: 2_048,
+            sector_count: 245_757_952,
+            filesystem_hint: Some("exfat".into()),
+            volume_label_hint: Some("普通卷".into()),
+        }],
+        device_state: "plain".into(),
+        device_id: String::new(),
+        total_sectors: 245_760_000,
+        format_target_pin: None,
+    }));
+
+    let (post_restore, colors) = rendered_text(&state);
+    let compact = post_restore.replace(' ', "");
+    assert!(compact.contains("元数据恢复成功✓"), "{post_restore}");
+    assert!(compact.contains("恢复后分区状态"), "{post_restore}");
+    assert!(compact.contains("需要格式化"), "{post_restore}");
+    assert!(compact.contains("Enter处理选中分区"), "{post_restore}");
+    assert!(!compact.contains("请使用CLI"), "{post_restore}");
+    assert!(
+        colors
+            .iter()
+            .copied()
+            .fold(Vec::new(), |mut unique, color| {
+                if !unique.contains(&color) {
+                    unique.push(color);
+                }
+                unique
+            })
+            .len()
+            >= 4,
+        "post-restore screen must retain semantic color hierarchy"
+    );
+
+    let mut password_state = AppState::new();
+    password_state.begin_write_wizard(WriteKind::Restore, 4, Some("edp.edpb".into()));
+    password_state.advance_restore_review();
+    for ch in ['Y', 'E', 'S'] {
+        password_state.push_wizard_confirmation(ch);
+    }
+    let _ = password_state.submit_wizard_confirmation();
+    let mut encrypted = state
+        .wizard()
+        .unwrap()
+        .restore_outcome
+        .as_ref()
+        .unwrap()
+        .clone();
+    encrypted.device_state = "edp".into();
+    encrypted.device_id = "disk&ven_test&prod_edp".into();
+    encrypted.partitions[0].role = Some("encrypt".into());
+    encrypted.assessment.partitions[0].role = Some("encrypt".into());
+    encrypted.assessment.partitions[0].requires_original_key = true;
+    encrypted.assessment.partitions[0].state = PostRestorePartitionState::PasswordRequired;
+    password_state.finish_restore(Ok(encrypted));
+    password_state.begin_selected_post_restore_action();
+    for ch in "visible-secret".chars() {
+        password_state.push_wizard_secret_char(ch);
+    }
+    let (password_view, _) = rendered_text(&password_state);
+    assert!(!password_view.contains("visible-secret"), "{password_view}");
+    assert!(
+        password_view.matches('•').count() >= "visible-secret".chars().count(),
+        "{password_view}"
+    );
 }

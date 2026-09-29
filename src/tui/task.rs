@@ -170,6 +170,22 @@ enum WorkerResult {
         operation_id: OperationId,
         result: Result<(), String>,
     },
+    Restore {
+        operation_id: OperationId,
+        result: Result<crate::application::post_restore::MetadataRestoreOutcome, String>,
+    },
+    PostRestoreFormat {
+        operation_id: OperationId,
+        result: crate::application::post_restore::PostRestoreFormatResult,
+    },
+    PostRestoreEncryptedFormat {
+        operation_id: OperationId,
+        result: crate::application::post_restore::EncryptedPostRestoreFormatResult,
+    },
+    PostRestoreReinitialize {
+        operation_id: OperationId,
+        result: crate::application::post_restore::EncryptedPartitionReinitializeResult,
+    },
     WriteProgress {
         operation_id: OperationId,
         event: crate::application::WriteEvent,
@@ -248,6 +264,22 @@ pub struct TaskUpdates {
     pub devices: Option<Vec<Row>>,
     pub backups: Option<Vec<BackupWorkspaceItem>>,
     pub write: Option<(OperationId, Result<(), String>)>,
+    pub restore: Option<(
+        OperationId,
+        Result<crate::application::post_restore::MetadataRestoreOutcome, String>,
+    )>,
+    pub post_restore_format: Option<(
+        OperationId,
+        crate::application::post_restore::PostRestoreFormatResult,
+    )>,
+    pub post_restore_encrypted_format: Option<(
+        OperationId,
+        crate::application::post_restore::EncryptedPostRestoreFormatResult,
+    )>,
+    pub post_restore_reinitialize: Option<(
+        OperationId,
+        crate::application::post_restore::EncryptedPartitionReinitializeResult,
+    )>,
     pub write_progress: Vec<(OperationId, crate::application::WriteEvent)>,
     pub advanced_inspect:
         Option<Result<crate::application::inspect::AdvancedInspectWorkspace, String>>,
@@ -283,6 +315,10 @@ impl TaskUpdates {
         self.devices.is_some()
             || self.backups.is_some()
             || self.write.is_some()
+            || self.restore.is_some()
+            || self.post_restore_format.is_some()
+            || self.post_restore_encrypted_format.is_some()
+            || self.post_restore_reinitialize.is_some()
             || !self.write_progress.is_empty()
             || self.advanced_inspect.is_some()
             || self.advanced_inspect_sector.is_some()
@@ -489,6 +525,38 @@ impl TaskHub {
                 } => {
                     if self.finish_operation(operation_id) {
                         updates.write = Some((operation_id, result));
+                    }
+                }
+                WorkerResult::Restore {
+                    operation_id,
+                    result,
+                } => {
+                    if self.finish_operation(operation_id) {
+                        updates.restore = Some((operation_id, result));
+                    }
+                }
+                WorkerResult::PostRestoreFormat {
+                    operation_id,
+                    result,
+                } => {
+                    if self.finish_operation(operation_id) {
+                        updates.post_restore_format = Some((operation_id, result));
+                    }
+                }
+                WorkerResult::PostRestoreEncryptedFormat {
+                    operation_id,
+                    result,
+                } => {
+                    if self.finish_operation(operation_id) {
+                        updates.post_restore_encrypted_format = Some((operation_id, result));
+                    }
+                }
+                WorkerResult::PostRestoreReinitialize {
+                    operation_id,
+                    result,
+                } => {
+                    if self.finish_operation(operation_id) {
+                        updates.post_restore_reinitialize = Some((operation_id, result));
                     }
                 }
                 WorkerResult::WriteProgress {

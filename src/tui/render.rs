@@ -310,99 +310,571 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     let Some(wizard) = state.wizard() else {
         return;
     };
-    let operation = match wizard.kind {
-        WriteKind::Restore => "Restore 备份还原",
-        WriteKind::BackupCreate => "Create Backup 只读备份",
+
+    let mut lines: Vec<Line> = Vec::new();
+    let title = if wizard.kind == WriteKind::Restore {
+        "恢复向导"
+    } else {
+        "备份向导"
     };
-    let mut lines = vec![
-        Line::from(Span::styled(
-            operation,
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::from(format!("目标: disk{}", wizard.disk)),
-    ];
-    if let Some(path) = &wizard.backup {
-        lines.push(Line::from(format!(
-            "备份: {}",
-            safe(&path.display().to_string())
-        )));
-    }
-    lines.push(Line::from(match wizard.kind {
-        WriteKind::BackupCreate => {
-            "只读链：系统盘/USB整盘检查 → selector pinning → 读取协议/分区元数据/盘尾证据 → 单文件 Metadata EDPB 内部校验 → fsync；不会卸载或写 U 盘"
-        }
-        WriteKind::Restore => {
-            "安全链：系统盘/USB整盘检查 → selector pinning → 写前保护 → 卸载/锁卷 → reopen复核 → atomic write → sync/readback/rollback"
-        }
-    }));
-    match wizard.stage {
+
+    let breadcrumb = match wizard.stage {
+        WizardStage::Review => "备份 > 恢复 > 确认",
         WizardStage::Confirm => {
-            lines.push(Line::from(if wizard.kind == WriteKind::Restore {
-                "确认后进入关键写盘阶段。请输入 YES："
+            if wizard.kind == WriteKind::Restore {
+                "备份 > 恢复 > 最终确认"
             } else {
-                "确认后开始只读备份。请输入 YES："
-            }));
-            lines.push(Line::from(format!("> {}", wizard.confirmation)));
-            if let Some(message) = &wizard.message {
-                lines.push(Line::from(safe(message)));
+                "备份 > 创建 > 确认"
             }
         }
         WizardStage::Running => {
-            lines.push(Line::from(if wizard.kind == WriteKind::Restore {
-                "关键写盘阶段进行中；q / Esc / Ctrl-C 不会中断当前事务。"
+            if wizard.kind == WriteKind::Restore {
+                "备份 > 恢复 > 执行"
             } else {
-                "只读备份进行中；q / Esc / Ctrl-C 不会中断当前事务。"
-            }));
-            // 类型化事件映射为单行；尚无事件时回退到进入 Running 的初始提示。
-            let progress_line = wizard.progress.as_ref().map(write_progress_text);
-            if let Some(text) = progress_line.or_else(|| wizard.message.clone()) {
-                lines.push(Line::from(safe(&text)));
-            }
-            for event in wizard.progress_log.iter().rev().take(6).rev() {
-                lines.push(Line::from(safe(&write_progress_text(event))));
+                "备份 > 创建 > 执行"
             }
         }
+        WizardStage::PostRestore => "备份 > 恢复 > 恢复后处理",
+        WizardStage::PasswordInput => "备份 > 恢复 > 恢复后处理 > 原密码",
+        WizardStage::EncryptedFormatConfirm => "备份 > 恢复 > 恢复后处理 > 加密格式化确认",
+        WizardStage::FormatConfirm => "备份 > 恢复 > 恢复后处理 > 格式化确认",
+        WizardStage::Formatting => "备份 > 恢复 > 恢复后处理 > 格式化",
+        WizardStage::ReinitializePassword => "备份 > 恢复 > 恢复后处理 > 设置新密码",
+        WizardStage::ReinitializePasswordConfirm => "备份 > 恢复 > 恢复后处理 > 确认新密码",
+        WizardStage::ReinitializeConfirm => "备份 > 恢复 > 恢复后处理 > 重建确认",
+        WizardStage::Reinitializing => "备份 > 恢复 > 恢复后处理 > 重建加密分区",
         WizardStage::Result => {
-            lines.push(Line::from("操作已到达安全结束点；Esc 返回。"));
+            if wizard.kind == WriteKind::Restore {
+                "备份 > 恢复 > 结果"
+            } else {
+                "备份 > 创建 > 结果"
+            }
+        }
+    };
+    lines.push(Line::from(Span::styled(
+        breadcrumb,
+        accent().add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
+
+    match wizard.stage {
+        WizardStage::Review => {
+            lines.push(Line::from(Span::styled(
+                "恢复目标",
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(vec![
+                Span::styled(format!("disk{}", wizard.disk), accent()),
+                Span::styled(
+                    "  当前系统设备节点；编号可随重新插拔变化，不参与物理身份判断",
+                    muted(),
+                ),
+            ]));
+            lines.push(Line::from(""));
+
+            lines.push(Line::from(Span::styled(
+                "恢复来源",
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+            if let Some(path) = &wizard.backup {
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("<无效文件名>");
+                lines.push(Line::from(Span::styled(safe(name), secondary())));
+                lines.push(Line::from(Span::styled(
+                    "文件名中的 diskN 仅记录备份时系统编号，不参与介质身份认证。",
+                    muted(),
+                )));
+                if wizard.detail_expanded {
+                    lines.push(Line::from(vec![
+                        Span::styled("路径  ", muted()),
+                        Span::styled(safe(&path.display().to_string()), muted()),
+                    ]));
+                }
+            }
+            lines.push(Line::from(""));
+
+            lines.push(Line::from(Span::styled(
+                "⚠ 将执行元数据恢复",
+                warning().add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(vec![
+                Span::styled("恢复  ", success()),
+                Span::raw("分区结构、磁盘身份相关元数据"),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("不恢复  ", muted()),
+                Span::styled("文件系统、目录、文件内容", muted()),
+            ]));
+            lines.push(Line::from(""));
+
+            let (identity_text, identity_style) = if wizard.expected_identity.is_some() {
+                ("目标身份已固定 ✓", success())
+            } else {
+                ("目标身份尚未固定", warning())
+            };
+            lines.push(Line::from(vec![
+                Span::styled("安全检查  ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(identity_text, identity_style),
+                Span::raw("  "),
+                Span::styled("备份/几何将在写前复核 ✓", success()),
+            ]));
+            if wizard.detail_expanded {
+                for item in [
+                    "系统盘 / USB 整盘检查",
+                    "selector pinning",
+                    "写前保护",
+                    "卸载 / 锁卷",
+                    "reopen 身份复核",
+                    "atomic write",
+                    "sync / readback / rollback",
+                ] {
+                    lines.push(Line::from(vec![
+                        Span::styled("  ✓ ", success()),
+                        Span::styled(item, muted()),
+                    ]));
+                }
+            } else {
+                lines.push(Line::from(Span::styled("o 展开安全链详情", muted())));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("Enter", accent().add_modifier(Modifier::BOLD)),
+                Span::raw(" 继续    "),
+                Span::styled("Esc", muted()),
+                Span::raw(" 返回"),
+            ]));
+        }
+        WizardStage::Confirm => {
+            let destructive = wizard.kind == WriteKind::Restore;
+            lines.push(Line::from(Span::styled(
+                if destructive {
+                    format!("⚠ 即将修改 disk{}", wizard.disk)
+                } else {
+                    format!("即将创建 disk{} 的元数据备份", wizard.disk)
+                },
+                if destructive {
+                    warning().add_modifier(Modifier::BOLD)
+                } else {
+                    accent().add_modifier(Modifier::BOLD)
+                },
+            )));
+            lines.push(Line::from(""));
+            lines.push(Line::from(if destructive {
+                "当前分区结构将被备份中的结构替换；该操作不会恢复文件内容。"
+            } else {
+                "仅读取设备元数据，不会卸载或写入 U 盘。"
+            }));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("输入 YES 继续", warning())));
+            lines.push(Line::from(Span::styled(
+                format!(" {} ", safe(&wizard.confirmation)),
+                super::theme::current().input_focused(),
+            )));
+            if let Some(message) = &wizard.message {
+                lines.push(Line::from(Span::styled(safe(message), danger())));
+            }
+        }
+        WizardStage::Running => {
+            lines.push(Line::from(Span::styled(
+                if wizard.kind == WriteKind::Restore {
+                    "元数据恢复进行中"
+                } else {
+                    "元数据备份进行中"
+                },
+                accent().add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(Span::styled(
+                if wizard.kind == WriteKind::Restore {
+                    "关键事务执行期间 q / Esc / Ctrl-C 不会中断写入、读回或回滚。"
+                } else {
+                    "只读备份任务执行期间可等待安全结束点。"
+                },
+                muted(),
+            )));
+            lines.push(Line::from(""));
+            if let Some(event) = wizard.progress.as_ref() {
+                lines.push(Line::from(vec![
+                    Span::styled("● ", accent()),
+                    Span::raw(safe(&write_progress_text(event))),
+                ]));
+            } else if let Some(message) = &wizard.message {
+                lines.push(Line::from(vec![
+                    Span::styled("● ", accent()),
+                    Span::raw(safe(message)),
+                ]));
+            }
+            if wizard.detail_expanded {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled("详细日志", muted())));
+                for event in wizard.progress_log.iter().rev().take(8).rev() {
+                    lines.push(Line::from(vec![
+                        Span::styled("  · ", muted()),
+                        Span::styled(safe(&write_progress_text(event)), muted()),
+                    ]));
+                }
+            } else {
+                lines.push(Line::from(Span::styled("o 展开详细日志", muted())));
+            }
+        }
+        WizardStage::PostRestore => {
+            lines.push(Line::from(Span::styled(
+                "元数据恢复成功 ✓",
+                success().add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(
+                "分区结构与元数据已完成写入并通过读回校验；文件系统内容没有恢复。",
+            ));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "恢复后分区状态",
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+            if let Some(outcome) = wizard.restore_outcome.as_ref() {
+                if outcome.assessment.partitions.is_empty() {
+                    lines.push(Line::from(Span::styled("  没有可显示的分区状态", muted())));
+                }
+                for (index, partition) in outcome.assessment.partitions.iter().enumerate() {
+                    use crate::application::post_restore::PostRestorePartitionState;
+                    let (state_text, state_style) = match partition.state {
+                        PostRestorePartitionState::Usable => ("可用 ✓", success()),
+                        PostRestorePartitionState::NeedsFormat => ("需要格式化", warning()),
+                        PostRestorePartitionState::PasswordRequired => ("需要原密码", warning()),
+                        PostRestorePartitionState::CryptoMetadataInvalid => {
+                            ("加密元数据异常", danger())
+                        }
+                        PostRestorePartitionState::Unsupported => ("暂不支持", muted()),
+                    };
+                    let marker = if index == wizard.post_restore_selected {
+                        ">"
+                    } else {
+                        " "
+                    };
+                    let capacity = crate::common::fmt_gb(
+                        partition
+                            .sector_count
+                            .saturating_mul(crate::common::SECTOR as u64),
+                    );
+                    let line_style = if index == wizard.post_restore_selected {
+                        selected()
+                    } else {
+                        Style::default()
+                    };
+                    lines.push(
+                        Line::from(vec![
+                            Span::styled(format!("{marker} "), selection_marker()),
+                            Span::styled(format!("分区 {}  ", partition.index), line_style),
+                            Span::styled(format!("{capacity:<10} "), line_style),
+                            Span::styled(state_text, state_style),
+                        ])
+                        .style(line_style),
+                    );
+                    if index == wizard.post_restore_selected {
+                        lines.push(Line::from(vec![
+                            Span::styled("    ", muted()),
+                            Span::styled(
+                                format!("LBA{} + {}", partition.start_lba, partition.sector_count),
+                                muted(),
+                            ),
+                        ]));
+                        if wizard.detail_expanded {
+                            lines.push(Line::from(vec![
+                                Span::styled("    ", muted()),
+                                Span::styled(safe(&partition.detail), muted()),
+                            ]));
+                        }
+                    }
+                }
+            }
+            lines.push(Line::from(""));
+            if let Some(message) = &wizard.message {
+                lines.push(Line::from(Span::styled(safe(message), secondary())));
+            }
+            lines.push(Line::from(vec![
+                Span::styled("Enter", accent().add_modifier(Modifier::BOLD)),
+                Span::raw(" 处理选中分区    "),
+                Span::styled("j/k", muted()),
+                Span::raw(" 选择    "),
+                Span::styled("o", muted()),
+                Span::raw(" 详情    "),
+                Span::styled("Esc", muted()),
+                Span::raw(" 完成"),
+            ]));
+        }
+        WizardStage::PasswordInput => {
+            lines.push(Line::from(Span::styled(
+                "验证原密码",
+                warning().add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(
+                "需要验证原密码后才能解包并校验原 FileKey；验证失败不会写盘。",
+            ));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("原密码", muted())));
+            lines.push(Line::from(Span::styled(
+                format!(" {} ", "•".repeat(state.wizard_secret_len())),
+                super::theme::current().input_focused(),
+            )));
+            if let Some(message) = &wizard.message {
+                lines.push(Line::from(Span::styled(safe(message), warning())));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("Enter", accent()),
+                Span::raw(" 验证并继续    "),
+                Span::styled("Esc", muted()),
+                Span::raw(" 返回"),
+            ]));
+        }
+        WizardStage::EncryptedFormatConfirm => {
+            let request = wizard.pending_format.as_ref();
+            let partition = wizard.restore_outcome.as_ref().and_then(|outcome| {
+                request.and_then(|request| {
+                    outcome
+                        .assessment
+                        .partitions
+                        .iter()
+                        .find(|partition| partition.index == request.partition_index)
+                })
+            });
+            lines.push(Line::from(Span::styled(
+                "使用原密钥域格式化",
+                warning().add_modifier(Modifier::BOLD),
+            )));
+            if let (Some(request), Some(partition)) = (request, partition) {
+                lines.push(Line::from(format!(
+                    "分区 {}  ·  LBA{} + {}  ·  {}",
+                    partition.index,
+                    partition.start_lba,
+                    partition.sector_count,
+                    request.filesystem.config_token()
+                )));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "✓ 不生成新 FileKey，不修改原密码或密钥记录",
+                success(),
+            )));
+            lines.push(Line::from(
+                "将使用验证后的原 FileKey 创建新的空加密文件系统；原文件内容不会恢复。",
+            ));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "输入 YES 独立确认加密格式化",
+                warning(),
+            )));
+            lines.push(Line::from(Span::styled(
+                format!(" {} ", safe(&wizard.confirmation)),
+                super::theme::current().input_focused(),
+            )));
+            if let Some(message) = &wizard.message {
+                lines.push(Line::from(Span::styled(safe(message), secondary())));
+            }
+        }
+        WizardStage::ReinitializePassword | WizardStage::ReinitializePasswordConfirm => {
+            let confirm = wizard.stage == WizardStage::ReinitializePasswordConfirm;
+            lines.push(Line::from(Span::styled(
+                if confirm {
+                    "再次输入新密码"
+                } else {
+                    "设置新的加密分区密码"
+                },
+                danger().add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(Span::styled(
+                "⚠ 这是密钥域重建流程：旧 FileKey 与旧密码将永久失效。",
+                danger(),
+            )));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                if confirm {
+                    "确认新密码"
+                } else {
+                    "新密码"
+                },
+                muted(),
+            )));
+            lines.push(Line::from(Span::styled(
+                format!(" {} ", "•".repeat(state.wizard_secret_len())),
+                super::theme::current().input_focused(),
+            )));
+            if let Some(message) = &wizard.message {
+                lines.push(Line::from(Span::styled(safe(message), warning())));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("Enter", accent()),
+                Span::raw(if confirm {
+                    " 校验两次密码    "
+                } else {
+                    " 下一步    "
+                }),
+                Span::styled("Esc", muted()),
+                Span::raw(" 返回"),
+            ]));
+        }
+        WizardStage::ReinitializeConfirm => {
+            let request = wizard.pending_format.as_ref();
+            lines.push(Line::from(Span::styled(
+                "清空并重建加密分区",
+                danger().add_modifier(Modifier::BOLD),
+            )));
+            if let Some(request) = request {
+                lines.push(Line::from(format!(
+                    "分区 {}  ·  新文件系统 {}",
+                    request.partition_index,
+                    request.filesystem.config_token()
+                )));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "⚠ 将生成新的 FileKey，更新 LBA7/LBA12 密钥域，并创建新的空加密文件系统。",
+                danger(),
+            )));
+            lines.push(Line::from(
+                "该动作不可恢复旧密钥域；元数据恢复本身的成功结果不会因此改变。",
+            ));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("输入 YES 最终确认重建", danger())));
+            lines.push(Line::from(Span::styled(
+                format!(" {} ", safe(&wizard.confirmation)),
+                super::theme::current().input_focused(),
+            )));
+            if let Some(message) = &wizard.message {
+                lines.push(Line::from(Span::styled(safe(message), danger())));
+            }
+        }
+        WizardStage::Reinitializing => {
+            lines.push(Line::from(Span::styled(
+                "正在重建加密分区",
+                danger().add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(
+                "生成新 FileKey → 更新密钥记录 → 创建空加密文件系统 → 读回 → 使用新密码重新评估。",
+            ));
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("● ", danger()),
+                Span::raw(wizard.message.as_deref().unwrap_or("正在执行密钥域重建…")),
+            ]));
+            lines.push(Line::from(Span::styled(
+                "q / Esc / Ctrl-C 将延迟到安全结束点。",
+                muted(),
+            )));
+        }
+        WizardStage::FormatConfirm => {
+            let request = wizard.pending_format.as_ref();
+            let partition = wizard.restore_outcome.as_ref().and_then(|outcome| {
+                request.and_then(|request| {
+                    outcome
+                        .assessment
+                        .partitions
+                        .iter()
+                        .find(|partition| partition.index == request.partition_index)
+                })
+            });
+            lines.push(Line::from(Span::styled(
+                "格式化分区",
+                warning().add_modifier(Modifier::BOLD),
+            )));
+            if let (Some(request), Some(partition)) = (request, partition) {
+                lines.push(Line::from(vec![
+                    Span::styled("分区  ", muted()),
+                    Span::raw(partition.index.to_string()),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled("范围  ", muted()),
+                    Span::raw(format!(
+                        "LBA{} + {}",
+                        partition.start_lba, partition.sector_count
+                    )),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled("文件系统  ", muted()),
+                    Span::styled(request.filesystem.config_token(), accent()),
+                ]));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "⚠ 将创建新的空文件系统，不会恢复原文件或目录。",
+                warning(),
+            )));
+            lines.push(Line::from(
+                "这是独立于元数据恢复的第二次破坏性操作，必须再次确认。",
+            ));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("输入 YES 确认格式化", warning())));
+            lines.push(Line::from(Span::styled(
+                format!(" {} ", safe(&wizard.confirmation)),
+                super::theme::current().input_focused(),
+            )));
+            if let Some(message) = &wizard.message {
+                lines.push(Line::from(Span::styled(safe(message), danger())));
+            }
+        }
+        WizardStage::Formatting => {
+            lines.push(Line::from(Span::styled(
+                "正在格式化选中分区",
+                warning().add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(
+                "格式化使用独立安全链：身份复核 → 状态复核 → 卸载/锁卷 → reopen → 写入 → 读回 → 重新评估。",
+            ));
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("● ", accent()),
+                Span::raw(
+                    wizard
+                        .message
+                        .as_deref()
+                        .unwrap_or("正在创建新的空文件系统…"),
+                ),
+            ]));
+            lines.push(Line::from(Span::styled(
+                "q / Esc / Ctrl-C 将延迟到安全结束点。",
+                muted(),
+            )));
+        }
+        WizardStage::Result => {
+            let ok = wizard
+                .message
+                .as_deref()
+                .is_some_and(|message| !message.starts_with("错误"));
+            lines.push(Line::from(Span::styled(
+                if ok { "操作完成" } else { "操作结束" },
+                if ok { success() } else { danger() }.add_modifier(Modifier::BOLD),
+            )));
             if let Some(message) = &wizard.message {
                 lines.push(Line::from(safe(message)));
             }
-            if wizard.kind == WriteKind::Restore {
-                if let Some(crate::application::WriteEvent::PostRestoreAssessment { assessment }) =
-                    wizard.progress_log.iter().rev().find(|event| {
-                        matches!(
-                            event,
-                            crate::application::WriteEvent::PostRestoreAssessment { .. }
-                        )
-                    })
-                {
-                    lines.push(Line::from("该备份不包含文件系统和用户数据。"));
-                    lines.push(Line::from("恢复后分区状态"));
-                    for partition in &assessment.partitions {
-                        let state = match partition.state {
-                            crate::application::post_restore::PostRestorePartitionState::Usable => "可用",
-                            crate::application::post_restore::PostRestorePartitionState::NeedsFormat => "需要格式化",
-                            crate::application::post_restore::PostRestorePartitionState::PasswordRequired => "需要原密码",
-                            crate::application::post_restore::PostRestorePartitionState::CryptoMetadataInvalid => "加密元数据异常",
-                            crate::application::post_restore::PostRestorePartitionState::Unsupported => "暂不支持评估",
-                        };
-                        lines.push(Line::from(format!(
-                            "  分区 {}  LBA{} + {}  {}",
-                            partition.index, partition.start_lba, partition.sector_count, state
-                        )));
-                    }
-                    lines.push(Line::from("后续格式化或重建请使用 CLI 独立确认。"));
-                }
-            }
-            for event in wizard.progress_log.iter().rev().take(6).rev() {
-                lines.push(Line::from(safe(&write_progress_text(event))));
-            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("Enter / Esc 返回", muted())));
         }
     }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(
+            if matches!(
+                wizard.stage,
+                WizardStage::Confirm
+                    | WizardStage::EncryptedFormatConfirm
+                    | WizardStage::FormatConfirm
+                    | WizardStage::Formatting
+                    | WizardStage::ReinitializePassword
+                    | WizardStage::ReinitializePasswordConfirm
+                    | WizardStage::ReinitializeConfirm
+                    | WizardStage::Reinitializing
+            ) {
+                warning()
+            } else {
+                super::theme::current().focused_panel()
+            },
+        )
+        .title(title);
     frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("安全向导"))
-            .wrap(Wrap { trim: true }),
+        Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         area,
     );
 }
@@ -545,10 +1017,26 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         "Esc 返回  ·  q 退出".to_string()
     } else if state.wizard().is_some() {
         match state.wizard().unwrap().stage {
-            WizardStage::Confirm => {
-                "输入 YES  ·  Backspace 删除  ·  Enter 执行  ·  Esc 返回".to_string()
-            }
+            WizardStage::Review => "Enter 继续 · o 详情 · Esc 返回".to_string(),
+            WizardStage::Confirm => "输入 YES · Backspace 删除 · Enter 执行 · Esc 返回".to_string(),
             WizardStage::Running => "q / Ctrl-C 延迟退出".to_string(),
+            WizardStage::PostRestore => "j/k 选择 · Enter 处理 · o 详情 · Esc 完成".to_string(),
+            WizardStage::PasswordInput => "输入原密码 · Enter 继续 · Esc 返回".to_string(),
+            WizardStage::EncryptedFormatConfirm => {
+                "输入 YES · Enter 加密格式化 · Esc 返回".to_string()
+            }
+            WizardStage::FormatConfirm => {
+                "输入 YES · Backspace 删除 · Enter 格式化 · Esc 返回".to_string()
+            }
+            WizardStage::Formatting => "q / Ctrl-C 延迟退出".to_string(),
+            WizardStage::ReinitializePassword => "输入新密码 · Enter 下一步 · Esc 返回".to_string(),
+            WizardStage::ReinitializePasswordConfirm => {
+                "再次输入新密码 · Enter 校验 · Esc 返回".to_string()
+            }
+            WizardStage::ReinitializeConfirm => {
+                "输入 YES · Enter 重建密钥域 · Esc 返回".to_string()
+            }
+            WizardStage::Reinitializing => "q / Ctrl-C 延迟退出".to_string(),
             WizardStage::Result => "Enter / Esc 关闭".to_string(),
         }
     } else if let Some(delete) = state.backup_delete() {
@@ -556,6 +1044,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
             WizardStage::Confirm => "输入 YES · Backspace 删除 · Enter 删除 · Esc 取消".to_string(),
             WizardStage::Running => "q / Ctrl-C 延迟退出".to_string(),
             WizardStage::Result => "Enter / Esc 关闭".to_string(),
+            _ => "Esc 返回".to_string(),
         }
     } else if let Some(batch) = state.backup_batch_delete() {
         use super::state::BackupBatchDeleteStage;

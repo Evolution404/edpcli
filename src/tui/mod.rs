@@ -242,7 +242,12 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
     let mut notice_was_visible = false;
     let mut last_render_at: Option<Instant> = None;
     if let Some(intent) = resume {
-        state.begin_write_wizard(intent.kind, intent.disk, intent.backup);
+        state.begin_write_wizard_for_identity(
+            intent.kind,
+            intent.disk,
+            intent.backup,
+            intent.expected_identity,
+        );
     }
     let mut keys = KeyMapper::new();
     let mut tasks = TaskHub::new();

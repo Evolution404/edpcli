@@ -575,6 +575,7 @@ pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect,
         WizardStage::Result => {
             lines.push(Line::from("操作已结束；Esc 返回备份列表。"));
         }
+        _ => {}
     }
     if let Some(message) = &delete.message {
         lines.push(Line::from(safe(message)));

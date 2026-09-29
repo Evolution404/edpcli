@@ -1045,6 +1045,25 @@ pub fn restore_on_disk(
     .map(|_| EXIT_OK)
 }
 
+pub fn restore_on_disk_typed_with_pin(
+    runner: &dyn CmdRunner,
+    bin: Option<String>,
+    disk: u32,
+    backup_dir: PathBuf,
+    prompt: &mut dyn Prompter,
+    expected: &MediaIdentityResumePin,
+) -> EdpCliResult<super::post_restore::MetadataRestoreOutcome> {
+    let mut dev = open_readonly_usb_disk(runner, disk)?;
+    verify_resume_identity_pin(runner, disk, expected, &mut dev)?;
+    let mut ctx = Ctx {
+        runner,
+        clock: &SystemClock,
+        prompt,
+        backup_dir,
+    };
+    restore_flow_typed(bin, disk, &mut ctx, &mut dev)
+}
+
 pub fn restore_on_disk_with_pin(
     runner: &dyn CmdRunner,
     bin: Option<String>,

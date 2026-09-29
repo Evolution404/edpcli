@@ -35,6 +35,35 @@ pub(super) fn apply_task_updates(
             state.set_backup_scan_pending(true);
         }
     }
+    if let Some((_operation_id, result)) = updates.restore {
+        state.finish_restore(result);
+        tasks.request_device_scan(backup_dir.to_path_buf());
+        state.set_device_scan_pending(true);
+    }
+    if let Some((_operation_id, result)) = updates.post_restore_format {
+        let success = result.result.is_ok();
+        state.finish_post_restore_format(result);
+        if success {
+            tasks.request_device_scan(backup_dir.to_path_buf());
+            state.set_device_scan_pending(true);
+        }
+    }
+    if let Some((_operation_id, result)) = updates.post_restore_encrypted_format {
+        let success = result.result.is_ok();
+        state.finish_post_restore_encrypted_format(result);
+        if success {
+            tasks.request_device_scan(backup_dir.to_path_buf());
+            state.set_device_scan_pending(true);
+        }
+    }
+    if let Some((_operation_id, result)) = updates.post_restore_reinitialize {
+        let success = result.result.is_ok();
+        state.finish_post_restore_reinitialize(result);
+        if success {
+            tasks.request_device_scan(backup_dir.to_path_buf());
+            state.set_device_scan_pending(true);
+        }
+    }
     if let Some((path, result)) = updates.backup_verify {
         state.set_backup_verify_run(None);
         match result {
