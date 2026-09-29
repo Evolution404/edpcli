@@ -1,6 +1,6 @@
 # 深度文件系统分析 v1
 
-> 历史兼容与只读分析文档。新建备份的正式产品入口仅创建 `metadata_only` EDPB；TUI 不再提供深度备份。CLI `--deep` 已弃用，仅保留历史分析兼容。这里的目录清单能力不表示元数据备份包含文件系统或用户文件。
+> 历史兼容与只读分析文档。新建备份的正式产品入口仅创建 `metadata_only` EDPB；TUI 不再提供深度备份。CLI `--deep` 已弃用且不再创建 Deep，参数仅保留用于返回明确弃用错误；历史 Deep EDPB 继续只读分析兼容。这里的目录清单能力不表示元数据备份包含文件系统或用户文件。
 
 深度是元数据的只读超集，不读取普通文件的数据负载簇。原始元数据证据保持为 `evidence_only`；摘要、文件列表和解码扇区等派生结果标记为 `derived_only`。默认密码的 LBA12 v0x0206 模式2 条目只有在文件密钥通过 `FileKeyCRC` 校验后才允许解码。其他加密配置类型保持锁定状态。
 
@@ -28,7 +28,7 @@ exFAT 引导区、分配位图、FAT 链和目录条目集：
 
 ## 采集与重放
 
-`edpcli backup create --disk N --deep` 使用与元数据相同的 `O_RDONLY` 设备打开路径。不使用 `--deep` 时，手工备份和自动备份仍保持元数据级别。深度首先获取元数据（包括 LCE），然后把额外原始读取范围以及 `derived.partition.<index>.filesystem_summary`、`derived.partition.<index>.file_list` 存入同一个 EDPB。使用数字索引是为了在分区表存在多个同类型条目时避免冲突。每份 JSON 同时记录 `partition_type`。分析未完成时，文件列表中对应项必须为 null。不会创建旁挂文件。解析失败不能阻止已经成功读取的原始证据或既有元数据产物被保存。
+历史版本曾通过 `edpcli backup create --disk N --deep` 使用 `O_RDONLY` 路径采集 Deep；**当前版本执行该命令会直接返回弃用错误，不再产生新 Deep 容器**。以下内容仅描述已经存在的历史 Deep EDPB：它们在元数据（包括 LCE）之外保存额外原始读取范围，以及 `derived.partition.<index>.filesystem_summary`、`derived.partition.<index>.file_list`。使用数字索引是为了在分区表存在多个同类型条目时避免冲突。每份 JSON 同时记录 `partition_type`。分析未完成时，文件列表中对应项必须为 null。不会创建旁挂文件。解析失败不能阻止已经成功读取的原始证据或既有元数据产物被读取。
 
 原始读取会缓存并合并为连续证据范围。已经采集的元数据字节优先于后续对同一扇区的读取。这不是文件系统冻结：如果源设备正在并发变化，可能得到失败或不一致快照，因此禁止描述为原子文件系统快照。深度不会卸载或改变源卷状态。
 
