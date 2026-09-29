@@ -1,9 +1,12 @@
 use std::collections::BTreeMap;
 
 use crate::common::{METADATA_LAST_LBA, SECTOR};
-use crate::filesystem::{build_empty_filesystem, FilesystemKind, SparseFilesystemImage};
+use crate::filesystem::{
+    build_empty_filesystem, build_migrated_filesystem, FilesystemKind, FilesystemMigrationEntry,
+    SparseFilesystemImage,
+};
 
-use super::{build_migrated_filesystem, MigrationStagedEntry};
+use super::MigrationStagedEntry;
 
 pub const DEFAULT_PLAIN_START_LBA: u64 = 2048;
 pub const MAX_PLAIN_PARTITIONS: usize = 4;
@@ -426,14 +429,20 @@ fn build_plain_provision_write_plan_inner(
         .enumerate()
     {
         let image = match migrations.and_then(|all| all.get(index)) {
-            Some(entries) if !entries.is_empty() => build_migrated_filesystem(
-                partition.filesystem,
-                partition.start_lba,
-                partition.sector_count,
-                volume_serial,
-                &partition.volume_label,
-                entries,
-            )?,
+            Some(entries) if !entries.is_empty() => {
+                let filesystem_entries = entries
+                    .iter()
+                    .map(FilesystemMigrationEntry::from)
+                    .collect::<Vec<_>>();
+                build_migrated_filesystem(
+                    partition.filesystem,
+                    partition.start_lba,
+                    partition.sector_count,
+                    volume_serial,
+                    &partition.volume_label,
+                    &filesystem_entries,
+                )?
+            }
             _ => plain_filesystem_image(partition, volume_serial)?,
         };
         for (&relative_lba, sector) in image.sectors() {

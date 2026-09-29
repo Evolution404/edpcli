@@ -4,13 +4,12 @@ use edpcli::{
         analyze_partition, stream_file_payload, AnalysisStatus, FileEntry, FilePayloadExtent,
         FilePayloadLocator, PartitionReader,
     },
-    filesystem::FilesystemKind,
+    filesystem::{build_migrated_filesystem, FilesystemKind, FilesystemMigrationEntry},
     protocol::edpf::EdpPartitionType,
     provision::{
-        build_migrated_filesystem, build_migration_manifest, Extent, FilesystemProfile,
-        MigrationBudgets, MigrationInventory, MigrationPreflightError, MigrationSource,
-        MigrationStagedEntry, MigrationTransform, PartitionRole, PhysicalCryptoProfile,
-        SourceRegion, TargetPartitionGeometry,
+        build_migration_manifest, Extent, FilesystemProfile, MigrationBudgets, MigrationInventory,
+        MigrationPreflightError, MigrationSource, MigrationStagedEntry, MigrationTransform,
+        PartitionRole, PhysicalCryptoProfile, SourceRegion, TargetPartitionGeometry,
     },
 };
 
@@ -241,13 +240,17 @@ fn roundtrip_migrated_filesystem(filesystem: FilesystemKind, volume_sectors: u64
             ctime: None,
         },
     ];
+    let filesystem_entries = staged
+        .iter()
+        .map(FilesystemMigrationEntry::from)
+        .collect::<Vec<_>>();
     let image = build_migrated_filesystem(
         filesystem,
         2_048,
         volume_sectors,
         0x1234_5678,
         "K6",
-        &staged,
+        &filesystem_entries,
     )
     .unwrap();
 
