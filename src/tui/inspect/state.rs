@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "detail_state.rs"]
 mod detail_state;
+#[path = "jump_state.rs"]
+mod jump_state;
 #[path = "preview_state.rs"]
 mod preview_state;
 #[path = "search_state.rs"]

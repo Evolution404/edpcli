@@ -68,7 +68,8 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
         ("src/tui/mod.rs", 500),
         ("src/tui/inspect/state.rs", 600),
         ("src/tui/inspect/preview_state.rs", 200),
-        ("src/tui/inspect/search_state.rs", 550),
+        ("src/tui/inspect/search_state.rs", 450),
+        ("src/tui/inspect/jump_state.rs", 200),
         ("src/tui/inspect/detail_render.rs", 500),
         ("src/tui/provision/state.rs", 470),
         ("src/tui/provision/field_presentation.rs", 420),
@@ -217,6 +218,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
         "src/tui/inspect/search_state.rs",
+        "src/tui/inspect/jump_state.rs",
         "src/tui/inspect/detail_state.rs",
         "src/tui/inspect/tree_state.rs",
         "src/tui/inspect/sector_state.rs",
@@ -292,8 +294,12 @@ fn large_modules_are_split_by_domain_boundary() {
         "Inspect preview loading must stay isolated from workspace orchestration"
     );
     assert!(
-        lines("src/tui/inspect/search_state.rs") < 550,
-        "Inspect search/jump state must stay responsibility-bounded"
+        lines("src/tui/inspect/search_state.rs") < 450,
+        "Inspect search/prompt state must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/inspect/jump_state.rs") < 200,
+        "Inspect jump state must stay isolated from structured search"
     );
     assert!(
         lines("src/tui/inspect/detail_state.rs") < 500,
@@ -1156,11 +1162,12 @@ fn inspect_search_and_jump_state_is_split_from_workspace_root() {
         fs::read_to_string(root.join("src/tui/inspect/state.rs")).expect("read inspect state");
     let search = fs::read_to_string(root.join("src/tui/inspect/search_state.rs"))
         .expect("read inspect search state");
+    let jump = fs::read_to_string(root.join("src/tui/inspect/jump_state.rs"))
+        .expect("read inspect jump state");
 
     for marker in [
         "pub fn advanced_inspect_begin_jump",
         "pub fn advanced_inspect_begin_search",
-        "pub fn advanced_inspect_jump_lba",
         "pub fn advanced_inspect_search_next",
     ] {
         assert!(
@@ -1172,6 +1179,15 @@ fn inspect_search_and_jump_state_is_split_from_workspace_root() {
             "{marker} missing from inspect/search_state.rs"
         );
     }
+    let jump_marker = "pub fn advanced_inspect_jump_lba";
+    assert!(
+        !state.contains(jump_marker) && !search.contains(jump_marker),
+        "{jump_marker} must stay isolated from workspace/search state"
+    );
+    assert!(
+        jump.contains(jump_marker),
+        "{jump_marker} missing from inspect/jump_state.rs"
+    );
 }
 
 #[test]

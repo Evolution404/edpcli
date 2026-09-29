@@ -43,6 +43,21 @@ pub(super) fn reset_inspect_selected_context(state: &mut AdvancedInspectState) {
     }
 }
 
+pub(super) fn inspect_row_path(node_path: &[String]) -> Vec<String> {
+    let mut rows = Vec::with_capacity(node_path.len());
+    let mut current = String::new();
+    for node_id in node_path {
+        if current.is_empty() {
+            current.push_str(node_id);
+        } else {
+            current.push('/');
+            current.push_str(node_id);
+        }
+        rows.push(current.clone());
+    }
+    rows
+}
+
 impl AppState {
     pub fn advanced_inspect_tree_rows(&self) -> std::sync::Arc<Vec<AdvancedInspectTreeRow>> {
         const SECTOR_PAGE: usize = 64;
