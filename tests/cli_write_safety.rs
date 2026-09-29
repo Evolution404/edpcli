@@ -1692,32 +1692,30 @@ fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
 }
 
 #[test]
-fn deep_backup_create_never_unmounts_reopens_or_writes() {
+fn deep_backup_creation_is_removed_at_application_boundary() {
     let orig = load_disk_image("netac").expect("committed netac fixture");
     let mut runner = netac_runner(6);
     runner.canned.remove("diskutil unmountDisk force disk6");
-    let tmp = TmpDir::new("deep_readonly_flow");
+    let tmp = TmpDir::new("deep_removed_flow");
     let mut prompt = ScriptPrompter {
         inputs: vec![],
         idx: 0,
     };
-    let mut dev = SwapOnReopenDev::new(orig.clone(), orig.clone());
-    let report = edpcli::application::write::backup_create_level_flow(
+    let mut dev = SwapOnReopenDev::new(orig.clone(), orig);
+    let error = edpcli::application::write::backup_create_level_flow(
         6,
         &mut ctx(&runner, &mut prompt, &tmp.0),
         &mut dev,
         true,
     )
-    .unwrap();
+    .unwrap_err();
+    assert_eq!(error.code, EXIT_USAGE);
+    assert!(error.msg.contains("metadata-only EDPB v3"));
     assert!(!dev.switched);
     assert_eq!(dev.writes, 0);
     assert_eq!(prompt.idx, 0);
-    let v = edpb::verify_file(&report.path).unwrap();
-    assert_eq!(v.manifest.snapshot.capture_level, edpb::CaptureLevel::Deep);
-    assert!(v
-        .manifest
-        .artifacts
-        .iter()
-        .any(|a| a.kind == "filesystem_summary"));
-    assert_eq!(edpb::read_raw_protocol(&report.path).unwrap(), orig);
+    assert!(
+        !tmp.0.exists() || std::fs::read_dir(&tmp.0).unwrap().next().is_none(),
+        "removed Deep path must create no files"
+    );
 }
