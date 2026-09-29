@@ -93,6 +93,30 @@ impl FilesystemBootKind {
     }
 }
 
+impl From<FilesystemBootKind> for crate::filesystem::FilesystemKind {
+    fn from(value: FilesystemBootKind) -> Self {
+        match value {
+            FilesystemBootKind::Fat12 => Self::Fat12,
+            FilesystemBootKind::Fat16 => Self::Fat16,
+            FilesystemBootKind::Fat32 => Self::Fat32,
+            FilesystemBootKind::Exfat => Self::ExFat,
+            FilesystemBootKind::Ntfs => Self::Ntfs,
+        }
+    }
+}
+
+impl From<crate::filesystem::FilesystemKind> for FilesystemBootKind {
+    fn from(value: crate::filesystem::FilesystemKind) -> Self {
+        match value {
+            crate::filesystem::FilesystemKind::Fat12 => Self::Fat12,
+            crate::filesystem::FilesystemKind::Fat16 => Self::Fat16,
+            crate::filesystem::FilesystemKind::Fat32 => Self::Fat32,
+            crate::filesystem::FilesystemKind::ExFat => Self::Exfat,
+            crate::filesystem::FilesystemKind::Ntfs => Self::Ntfs,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PhysicalDataState {
     PlaintextFilesystem { filesystem: FilesystemBootKind },

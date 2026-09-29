@@ -320,7 +320,7 @@ EDP 备份继续以协议为事实源：原始 LBA0-12、验证后的 LBA7 兼�
 
 ### F1 — 建立文件系统领域骨架
 
-状态：`IN_PROGRESS`
+状态：`COMPLETE`
 
 创建 `mod.rs`、`kind.rs`、`error.rs`、`io.rs`、`metadata.rs`、`format.rs`、`driver.rs`、`registry.rs`。先使用适配层/转换连接现有实现，不改变行为。
 
@@ -328,7 +328,7 @@ EDP 备份继续以协议为事实源：原始 LBA0-12、验证后的 LBA7 兼�
 
 ### F2 — 迁移 FAT16
 
-状态：`PENDING`
+状态：`IN_PROGRESS`
 
 把 FAT16 识别、BPB 校验、卷标编解码、无卷标语义、空文件系统构建、格式化请求校验和读回校验迁入 `filesystem/fat16.rs`。备份/检查/制盘/恢复改走驱动，再删除其他位置的 FAT16 重复知识。
 

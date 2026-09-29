@@ -32,6 +32,33 @@ pub enum OfficialFilesystemFormat {
     Fat32,
 }
 
+impl From<OfficialFilesystemFormat> for crate::filesystem::FilesystemKind {
+    fn from(value: OfficialFilesystemFormat) -> Self {
+        match value {
+            OfficialFilesystemFormat::Fat16 => Self::Fat16,
+            OfficialFilesystemFormat::ExFat => Self::ExFat,
+            OfficialFilesystemFormat::Ntfs => Self::Ntfs,
+            OfficialFilesystemFormat::Fat32 => Self::Fat32,
+        }
+    }
+}
+
+impl TryFrom<crate::filesystem::FilesystemKind> for OfficialFilesystemFormat {
+    type Error = crate::filesystem::FilesystemError;
+
+    fn try_from(value: crate::filesystem::FilesystemKind) -> Result<Self, Self::Error> {
+        match value {
+            crate::filesystem::FilesystemKind::Fat16 => Ok(Self::Fat16),
+            crate::filesystem::FilesystemKind::ExFat => Ok(Self::ExFat),
+            crate::filesystem::FilesystemKind::Ntfs => Ok(Self::Ntfs),
+            crate::filesystem::FilesystemKind::Fat32 => Ok(Self::Fat32),
+            crate::filesystem::FilesystemKind::Fat12 => Err(
+                crate::filesystem::FilesystemError::format_unsupported(value),
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FilesystemPlanError {
     UnsupportedGeometry {
