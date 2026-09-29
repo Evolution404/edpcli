@@ -301,7 +301,7 @@ Plain MBR 盘保存原始 LBA0 与分区几何；Plain GPT 盘保存 protective 
 
 v3 容器在可用时保存 USB 硬件序列号原文，并保存 VID/PID、总扇区数和逻辑扇区大小；旧 v1/v2 的序列号摘要仍可读取。备份在容器内校验每个工件和清单，使用仅新建方式避免覆盖，并同步文件和目录。独立备份不卸载、不锁定、不以读写方式重开，也不修改 U 盘。
 
-`--deep` 已弃用并且不再创建新的 Deep 备份；CLI 仅保留该参数的识别以返回明确错误。历史 Deep/v1/v2 EDPB 仍可 `list / verify / info / inspect / read`，新产品默认备份及 TUI 均只提供元数据备份。
+`--deep` 已弃用并且不再创建新的深度备份；CLI 仅保留该参数的识别以返回明确错误。历史深度/v1/v2 EDPB 仍可 `list / verify / info / inspect / read`，新产品默认备份及 TUI 均只提供元数据备份。
 
 ## 4. 备份列表和全局编号
 
