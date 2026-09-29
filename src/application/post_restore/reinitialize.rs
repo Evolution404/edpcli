@@ -128,7 +128,7 @@ pub fn reinitialize_encrypted_partition_on_disk(
         {
             return Err(failure("格式化镜像写入范围超出所选分区"));
         }
-        let encrypted_image = encrypt_sparse_mode2(&plain_image, &file_key);
+        let encrypted_image = plain_image.transformed(&EdpSm4Transform::new(file_key));
         let mut transaction = WriteTransactionPlan::new(outcome.total_sectors);
         for (&relative, sector) in encrypted_image.sectors() {
             let absolute = partition

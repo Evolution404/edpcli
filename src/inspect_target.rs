@@ -11,9 +11,8 @@ use crate::backup_metadata::{
 use crate::common::{METADATA_LAST_LBA, SECTOR};
 use crate::crypto::a6b0_full_offset;
 use crate::filesystem::FilesystemKind;
-use crate::provision::{
-    decrypt_mode2, default_file_key, default_file_key_checked, DefaultFileKeyError,
-};
+use crate::partition_transform::decrypt_mode2;
+use crate::provision::{default_file_key, default_file_key_checked, DefaultFileKeyError};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SectorRegion {

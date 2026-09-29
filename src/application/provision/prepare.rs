@@ -111,7 +111,7 @@ fn inspect_source_profile(
                 let Ok(key) = source.records[index].verified_sm4_file_key(password) else {
                     continue;
                 };
-                let Ok(value) = crate::provision::decrypt_mode2(&raw, &key) else {
+                let Ok(value) = crate::partition_transform::decrypt_mode2(&raw, &key) else {
                     continue;
                 };
                 value
@@ -780,7 +780,7 @@ pub fn prepare_target_provision(
         })?;
         verify_migration_image(&plain, &part.geometry, migration)?;
         let physical = if choice.target.physically_encrypted {
-            encrypt_sparse_mode2(&plain, &file_keys[migration.target_index])
+            plain.transformed(&EdpSm4Transform::new(file_keys[migration.target_index]))
         } else {
             plain
         };

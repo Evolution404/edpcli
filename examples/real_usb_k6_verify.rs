@@ -83,7 +83,9 @@ mod macos {
                 ));
             }
             match self.file_key {
-                Some(key) => edpcli::provision::decrypt_mode2(&raw, &key).map_err(io::Error::other),
+                Some(key) => {
+                    edpcli::partition_transform::decrypt_mode2(&raw, &key).map_err(io::Error::other)
+                }
                 None => Ok(raw),
             }
         }

@@ -55,7 +55,9 @@ impl PartitionReader for MigrationPartitionReader<'_> {
             ));
         }
         match self.file_key {
-            Some(key) => crate::provision::decrypt_mode2(&raw, &key).map_err(std::io::Error::other),
+            Some(key) => {
+                crate::partition_transform::decrypt_mode2(&raw, &key).map_err(std::io::Error::other)
+            }
             None => Ok(raw),
         }
     }

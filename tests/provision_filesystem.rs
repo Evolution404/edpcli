@@ -4,14 +4,13 @@ use edpcli::{
     application::provision::{plan_format_targets, FormatOptions},
     backup_metadata::PartitionGeometry,
     filesystem_analysis::{analyze_partition, AnalysisStatus, PartitionReader},
+    partition_transform::{decrypt_mode2, EdpSm4Transform},
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
-    provision::decrypt_mode2,
     provision::{
         build_empty_exfat, build_empty_fat16, build_official_exfat_partitions,
-        build_official_partition_filesystem, encrypt_sparse_mode2, wrap_file_key,
-        wrap_legacy_lba7_file_key, FileKeyWrapMode, FilesystemKind, OfficialPartitionFilesystems,
-        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, PartitionRole,
-        SparseFilesystemImage,
+        build_official_partition_filesystem, wrap_file_key, wrap_legacy_lba7_file_key,
+        FileKeyWrapMode, FilesystemKind, OfficialPartitionFilesystems, OfficialPartitionMode,
+        OfficialPartitionSizes, OfficialProvisionPlan, PartitionRole, SparseFilesystemImage,
     },
 };
 
@@ -232,7 +231,7 @@ fn mode2_sparse_encryption_round_trips_to_the_same_valid_exfat() {
         0x14, 0x71, 0x96, 0xf5, 0xa2, 0xec, 0x79, 0x12, 0xed, 0xf1, 0x3f, 0x75, 0xd7, 0x66, 0xcb,
         0x42,
     ];
-    let encrypted = encrypt_sparse_mode2(&plain, &key);
+    let encrypted = plain.transformed(&EdpSm4Transform::new(key));
     assert_eq!(encrypted.volume_sectors(), plain.volume_sectors());
     assert_ne!(
         encrypted.sectors().get(&0).unwrap(),
