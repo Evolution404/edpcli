@@ -218,7 +218,7 @@ fn roundtrip_migrated_filesystem(filesystem: FilesystemKind, volume_sectors: u64
     let payload = (0..1_537)
         .map(|index| (index % 251) as u8)
         .collect::<Vec<_>>();
-    let staged = vec![
+    let staged = [
         MigrationStagedEntry {
             source_index: 0,
             transform: MigrationTransform::ShareToBootShareCombined,
