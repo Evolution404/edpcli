@@ -14,6 +14,7 @@ pub mod event;
 pub mod execution;
 mod help_overlay;
 pub mod keymap;
+mod overview;
 pub mod pane;
 pub mod render;
 mod resume;

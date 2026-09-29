@@ -88,6 +88,31 @@ fn confirm_kind(row: &mut edpcli::disk_scan::Row, kind: edpcli::provision::DiskP
     ));
 }
 
+fn backup(
+    index: usize,
+    kind: Option<edpcli::provision::DiskProvisionKind>,
+) -> edpcli::application::BackupWorkspaceItem {
+    edpcli::application::BackupWorkspaceItem {
+        index,
+        path: format!("backup-{index}.edpb").into(),
+        file_name: format!("backup-{index}.edpb"),
+        display_time: "2026-09-29 10:00".into(),
+        size_bytes: Some(64_000_000_000),
+        vid: Some("1234".into()),
+        pid: Some("5678".into()),
+        device_id: Some("disk&ven_test&prod_test".into()),
+        onlyid: Some(format!("700{index}")),
+        identity: None,
+        user: Some("测试用户".into()),
+        dept: Some("输电运检中心".into()),
+        provision_kind: kind,
+        integrity_status: edpcli::application::BackupIntegrityStatus::Verified,
+        size_ok: true,
+        content_sha256: Some("a".repeat(64)),
+        coverage: None,
+    }
+}
+
 fn edp_device_with_layout() -> edpcli::disk_scan::Row {
     use edpcli::sectors::EdpfPartition;
 
@@ -201,6 +226,58 @@ fn top_navigation_is_the_only_persistent_help_prompt() {
     let picker = render_text(&state, 120, 32);
     assert_eq!(picker.matches("?帮助").count(), 1, "{picker}");
     assert!(!picker.contains("制盘方案："), "{picker}");
+}
+
+#[test]
+fn devices_and_backups_share_overview_layout_and_hide_zero_kind_counts() {
+    let mut plain = device();
+    plain.disk = 4;
+    let mut mode1 = device();
+    mode1.disk = 5;
+    mode1.provision_kind = edpcli::provision::DiskProvisionKind::Mode1;
+    confirm_kind(&mut mode1, edpcli::provision::DiskProvisionKind::Mode1);
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![plain, mode1]);
+    let devices = render_text(&state, 160, 45);
+    assert!(devices.contains("设备概览"), "{devices}");
+    assert!(devices.contains("总计2·普通盘1·mode11"), "{devices}");
+    assert!(
+        devices.contains("/搜索设备、部门、姓名、型号、盘型"),
+        "{devices}"
+    );
+    for zero_kind in ["mode00", "mode20", "mode30", "未知0"] {
+        assert!(!devices.contains(zero_kind), "{devices}");
+    }
+
+    state.replace_backups(vec![
+        backup(1, Some(edpcli::provision::DiskProvisionKind::Plain)),
+        backup(2, Some(edpcli::provision::DiskProvisionKind::Mode2)),
+        backup(3, Some(edpcli::provision::DiskProvisionKind::Mode2)),
+    ]);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    state.toggle_selected_backup();
+    let backups = render_text(&state, 160, 45);
+    assert!(backups.contains("备份概览"), "{backups}");
+    assert!(backups.contains("总计3·普通盘1·mode22"), "{backups}");
+    assert!(
+        backups.contains("/搜索身份、容量、型号、文件名"),
+        "{backups}"
+    );
+    assert!(backups.contains("备份列表(3)·已选1·当前列"), "{backups}");
+    for zero_kind in ["mode00", "mode10", "mode30", "未知0"] {
+        assert!(!backups.contains(zero_kind), "{backups}");
+    }
+    for old_hint in [
+        "h/l激活",
+        "</>移列",
+        "0/$首尾列",
+        "H/L视口",
+        "s排序",
+        "S默认",
+    ] {
+        assert!(!backups.contains(old_hint), "{backups}");
+    }
 }
 
 #[test]

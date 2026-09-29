@@ -71,7 +71,9 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
         ("src/tui/keymap/help.rs", 320),
         ("src/tui/help_overlay.rs", 150),
         ("src/tui/status.rs", 140),
+        ("src/tui/overview.rs", 180),
         ("src/tui/ui/modal.rs", 100),
+        ("src/tui/ui/workspace_overview.rs", 160),
         ("src/tui/devices/state.rs", 400),
         ("src/tui/disk_layout_state.rs", 120),
         ("src/tui/navigation_state.rs", 300),
@@ -1264,6 +1266,39 @@ fn help_and_status_information_architecture_has_single_owners() {
         global_help < picker,
         "global ? help must be dispatched before business overlays can swallow it"
     );
+}
+
+#[test]
+fn device_and_backup_overviews_share_one_layout_and_one_kind_counter() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let devices = fs::read_to_string(root.join("src/tui/devices/list_render.rs"))
+        .expect("read device list renderer");
+    let backups =
+        fs::read_to_string(root.join("src/tui/backups/render.rs")).expect("read backup renderer");
+    let overview =
+        fs::read_to_string(root.join("src/tui/overview.rs")).expect("read overview model");
+    let component = fs::read_to_string(root.join("src/tui/ui/workspace_overview.rs"))
+        .expect("read overview component");
+
+    assert!(devices.contains("ui::workspace_overview"));
+    assert!(backups.contains("ui::workspace_overview"));
+    assert!(devices.contains("ProvisionKindCounts::from_kinds"));
+    assert!(backups.contains("ProvisionKindCounts::from_kinds"));
+    assert!(overview.contains("if count > 0"));
+    assert!(component.contains("搜索 · 实时过滤"));
+    for stale in [
+        "h/l 激活",
+        "</> 移列",
+        "0/$ 首尾列",
+        "H/L 视口",
+        "s 排序",
+        "S 默认",
+    ] {
+        assert!(
+            !backups.contains(stale),
+            "backup table title must not advertise shortcuts: {stale}"
+        );
+    }
 }
 
 #[test]

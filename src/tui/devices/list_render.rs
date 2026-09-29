@@ -1,10 +1,22 @@
 use super::*;
 
-pub(super) fn draw_device_list(
-    frame: &mut Frame,
-    list_area: ratatui::layout::Rect,
-    state: &AppState,
-) {
+pub(super) fn draw_device_list(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(4)])
+        .split(area);
+    let overview_area = sections[0];
+    let list_area = sections[1];
+
+    let counts = crate::tui::overview::ProvisionKindCounts::from_kinds(
+        state
+            .devices()
+            .iter()
+            .map(|row| row.confirmed_provision_kind()),
+    );
+    let metrics = crate::tui::overview::overview_metrics(counts);
+    let search = crate::tui::overview::overview_search(state, "/ 搜索设备、部门、姓名、型号、盘型");
+    crate::tui::ui::workspace_overview(frame, overview_area, "设备概览", &metrics, &search);
     let visible_count = state.visible_device_count();
     let total_count = state.devices().len();
     let count_label = if state.workspace_filter_active() {

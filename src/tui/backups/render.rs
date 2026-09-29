@@ -143,56 +143,23 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             .constraints([Constraint::Length(3), Constraint::Min(4)])
             .split(list_area);
 
-        let summary_parts = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(40), Constraint::Length(38)])
-            .split(backup_parts[0]);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled("总计 ", muted()),
-                Span::styled(state.backups().len().to_string(), accent()),
-                Span::styled("  ·  已选 ", muted()),
-                Span::styled(state.backup_selection_count().to_string(), warning()),
-            ]))
-            .block(Block::default().borders(Borders::ALL).title("备份概览")),
-            summary_parts[0],
+        let counts = crate::tui::overview::ProvisionKindCounts::from_kinds(
+            state.backups().iter().map(|backup| backup.provision_kind),
         );
-        let search_active = state.input_mode() == InputMode::Search;
-        let search_filtered = state.workspace_filter_active();
-        let search_text = if search_active {
-            format!("/{}▌", safe(state.input_buffer()))
-        } else if let Some(status) = state.search_status() {
-            status
-        } else {
-            "/ 搜索身份、容量、型号、文件名".to_string()
-        };
-        let search_style = if search_active {
-            accent()
-        } else if search_filtered {
-            secondary()
-        } else {
-            muted()
-        };
-        frame.render_widget(
-            Paragraph::new(search_text)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(search_style)
-                        .title(if search_active {
-                            "搜索 · 实时过滤"
-                        } else {
-                            "搜索"
-                        }),
-                )
-                .style(search_style),
-            summary_parts[1],
-        );
+        let metrics = crate::tui::overview::overview_metrics(counts);
+        let search = crate::tui::overview::overview_search(state, "/ 搜索身份、容量、型号、文件名");
+        crate::tui::ui::workspace_overview(frame, backup_parts[0], "备份概览", &metrics, &search);
 
         let title = if state.backup_scan_pending() {
-            format!("备份列表 ({count_label}) · 扫描中…")
+            format!(
+                "备份列表 ({count_label}) · 已选 {} · 扫描中…",
+                state.backup_selection_count()
+            )
         } else {
-            format!("备份列表 ({count_label})")
+            format!(
+                "备份列表 ({count_label}) · 已选 {}",
+                state.backup_selection_count()
+            )
         };
 
         if visible_count == 0 {
@@ -307,7 +274,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                     .collect::<Vec<_>>(),
             );
             let table_title = format!(
-                "{title} · h/l 激活 · </> 移列 · 0/$ 首尾列 · H/L 视口 · s 排序 · S 默认 · {}",
+                "{title} · {}",
                 table_position_label(&layout, interaction, &viewport)
             );
             let table = crate::tui::ui::data_table(
