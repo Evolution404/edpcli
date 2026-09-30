@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use edpcli::tui::{
     keymap::{
-        KeyMapper, TuiAction, WidgetRole, DEVICES_HELP, GLOBAL_HELP, INSPECT_HELP, TABLE_HELP,
+        KeyMapper, TuiAction, WidgetRole, DEVICES_HELP, GLOBAL_HELP, INSPECT_HELP, PROVISION_HELP,
+        TABLE_HELP,
     },
     state::InputMode,
 };
@@ -297,7 +298,7 @@ fn tab_focus_actions_remain_available_in_nested_workspaces() {
 #[test]
 fn result_workbenches_keep_content_navigation_separate_from_panel_navigation() {
     let provision = include_str!("../src/tui/runtime_input/provision.rs");
-    let restore = include_str!("../src/tui/runtime_input/backup_wizard.rs");
+    let restore = include_str!("../src/tui/runtime_input/post_restore_wizard.rs");
 
     for source in [provision, restore] {
         assert!(source.contains("PanelLeft"));
@@ -761,6 +762,17 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
     assert!(TABLE_HELP
         .iter()
         .any(|binding| binding.keys == "y / Y" && binding.action == TuiAction::TableCopyCell));
+    for required in ["h / l", "H / L", "< / >", "0 / $", "s / S", "y / Y"] {
+        assert!(
+            TABLE_HELP.iter().any(|binding| binding.keys == required),
+            "shared table help missing {required}"
+        );
+    }
+    assert!(PROVISION_HELP.iter().any(|binding| {
+        binding.keys == "h / l"
+            && binding.label == "当前选项上一个 / 下一个"
+            && binding.action == TuiAction::MoveRight
+    }));
     assert!(INSPECT_HELP.iter().any(|binding| {
         binding.keys == "Tab/Shift-Tab"
             && binding.label == "切换当前页 Pane"
@@ -775,6 +787,58 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
     assert!(INSPECT_HELP
         .iter()
         .any(|binding| binding.keys == "o" && binding.action == TuiAction::Open));
+
+    let inspect_help_text = INSPECT_HELP
+        .iter()
+        .flat_map(|binding| [binding.keys, binding.label])
+        .collect::<Vec<_>>()
+        .join(" ");
+    for stale in ["1/2/3/4", "byte offset"] {
+        assert!(
+            !inspect_help_text.contains(stale),
+            "Inspect help must not advertise removed semantic {stale}"
+        );
+    }
+    for stale_key in ["gt", "gT", "gl"] {
+        assert!(
+            !INSPECT_HELP.iter().any(|binding| binding.keys == stale_key),
+            "Inspect help must not advertise removed shortcut {stale_key}"
+        );
+    }
+}
+
+#[test]
+fn help_critical_shortcuts_match_live_keymap_actions() {
+    let mut mapper = KeyMapper::new();
+    for (code, action) in [
+        (KeyCode::Char('1'), TuiAction::InspectBusiness),
+        (KeyCode::Char('2'), TuiAction::InspectRawFields),
+        (KeyCode::Char('3'), TuiAction::InspectHex),
+        (KeyCode::Char('J'), TuiAction::InspectJump),
+    ] {
+        assert_eq!(mapper.map(InputMode::Normal, key(code)), Some(action));
+    }
+
+    for (code, action) in [
+        (KeyCode::Char('h'), TuiAction::TableColumnLeft),
+        (KeyCode::Char('l'), TuiAction::TableColumnRight),
+        (KeyCode::Char('H'), TuiAction::TableScrollLeft),
+        (KeyCode::Char('L'), TuiAction::TableScrollRight),
+        (KeyCode::Char('<'), TuiAction::TableMoveColumnLeft),
+        (KeyCode::Char('>'), TuiAction::TableMoveColumnRight),
+        (KeyCode::Char('0'), TuiAction::TableColumnFirst),
+        (KeyCode::Char('$'), TuiAction::TableColumnLast),
+        (KeyCode::Char('s'), TuiAction::TableSortToggle),
+        (KeyCode::Char('S'), TuiAction::TableSortClear),
+        (KeyCode::Char('y'), TuiAction::TableCopyCell),
+        (KeyCode::Char('Y'), TuiAction::TableCopyRow),
+    ] {
+        assert_eq!(
+            mapper.map_for_role(InputMode::Normal, WidgetRole::Table, key(code)),
+            Some(action),
+            "Help-declared table shortcut {code:?} must resolve to {action:?}"
+        );
+    }
 }
 
 #[test]

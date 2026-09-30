@@ -281,7 +281,7 @@ fn restore_post_result_uses_shared_workbench_and_typed_layout() {
     let partition_layout = include_str!("../src/tui/restore_result_partition_layout.rs");
     let verification = include_str!("../src/tui/restore_result_verification.rs");
     let state = include_str!("../src/tui/restore_result_state.rs");
-    let input = include_str!("../src/tui/runtime_input/backup_wizard.rs");
+    let input = include_str!("../src/tui/runtime_input/post_restore_wizard.rs");
     let root = include_str!("../src/tui/render.rs");
     let state_prod = state.split("#[cfg(test)]").next().unwrap_or(state);
     let render_sources = format!("{render}\n{partition_layout}\n{verification}");
