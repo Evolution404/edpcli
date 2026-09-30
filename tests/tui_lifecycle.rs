@@ -848,9 +848,12 @@ fn background_workers_convert_panics_into_results_instead_of_hanging_ui() {
 
 #[test]
 fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
-    use edpcli::application::post_restore::{
-        MetadataRestoreOutcome, MetadataRestoreReport, PostRestoreAssessment, PostRestorePartition,
-        PostRestorePartitionState,
+    use edpcli::application::{
+        disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind},
+        post_restore::{
+            MetadataRestoreOutcome, MetadataRestoreReport, PostRestoreAssessment,
+            PostRestorePartition, PostRestorePartitionState,
+        },
     };
     use edpcli::edpb::ManifestPartition;
     use ratatui::style::Color;
@@ -943,16 +946,28 @@ fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
         device_state: "plain".into(),
         device_id: String::new(),
         total_sectors: 245_760_000,
-        layout: Err("fixture layout not projected".into()),
+        layout: DiskLayoutModel::canonical_plain_plan(
+            245_760_000,
+            vec![DiskLayoutSegment {
+                label: "普通分区".into(),
+                start_lba: 2_048,
+                sector_count: 245_757_952,
+                kind: DiskRegionKind::Plain,
+            }],
+        ),
         format_target_pin: None,
     }));
 
     let (post_restore, colors) = rendered_text(&state);
     let compact = post_restore.replace(' ', "");
-    assert!(compact.contains("元数据恢复成功✓"), "{post_restore}");
-    assert!(compact.contains("恢复后分区状态"), "{post_restore}");
+    assert!(compact.contains("恢复结果"), "{post_restore}");
+    assert!(compact.contains("元数据恢复成功"), "{post_restore}");
+    assert!(compact.contains("分区结果"), "{post_restore}");
+    assert!(compact.contains("全盘布局"), "{post_restore}");
+    assert!(compact.contains("验收与执行"), "{post_restore}");
     assert!(compact.contains("需要格式化"), "{post_restore}");
-    assert!(compact.contains("Enter处理选中分区"), "{post_restore}");
+    assert!(compact.contains("Enter处理分区"), "{post_restore}");
+    assert!(post_restore.contains('▲'), "{post_restore}");
     assert!(!compact.contains("请使用CLI"), "{post_restore}");
     assert!(
         colors
