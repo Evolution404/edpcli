@@ -108,16 +108,14 @@ pub(super) fn handle_backup_wizard_key(
                         keymap::TuiAction::MoveUp => {
                             state.move_post_restore_result_selection(-1, visible_rows)
                         }
-                        keymap::TuiAction::PageUp => state
-                            .move_post_restore_result_selection(
-                                -(visible_rows as isize),
-                                visible_rows,
-                            ),
-                        keymap::TuiAction::PageDown => state
-                            .move_post_restore_result_selection(
-                                visible_rows as isize,
-                                visible_rows,
-                            ),
+                        keymap::TuiAction::PageUp => state.move_post_restore_result_selection(
+                            -(visible_rows as isize),
+                            visible_rows,
+                        ),
+                        keymap::TuiAction::PageDown => state.move_post_restore_result_selection(
+                            visible_rows as isize,
+                            visible_rows,
+                        ),
                         keymap::TuiAction::Top => state.post_restore_result_top(visible_rows),
                         keymap::TuiAction::Bottom => state.post_restore_result_bottom(visible_rows),
                         keymap::TuiAction::MoveLeft => {
@@ -133,9 +131,7 @@ pub(super) fn handle_backup_wizard_key(
                         keymap::TuiAction::PanelPrevious => {
                             state.post_restore_result_shift_pane(true)
                         }
-                        keymap::TuiAction::PanelNext => {
-                            state.post_restore_result_shift_pane(false)
-                        }
+                        keymap::TuiAction::PanelNext => state.post_restore_result_shift_pane(false),
                         keymap::TuiAction::Activate => {
                             if state.post_restore_result_focused_pane()
                                 == crate::tui::pane::PaneId::ResultPartitions
