@@ -305,13 +305,12 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     };
 
     if wizard.kind == WriteKind::Restore && wizard.stage == WizardStage::Confirm {
-        draw_restore_write_confirmation(frame, area, state);
+        draw_restore_write_confirmation(frame, state);
         return;
     }
     if wizard.kind == WriteKind::BackupCreate && wizard.stage == WizardStage::Confirm {
         super::ui::render_action_confirmation_modal(
             frame,
-            area,
             super::ui::ActionConfirmationSpec {
                 title: "创建元数据备份",
                 headline: "开始只读元数据备份？",
@@ -353,7 +352,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         );
     let content_area = if post_restore_overlay {
         draw_post_restore_result(frame, area, state);
-        super::ui::centered_modal_rect(area, 92, 24)
+        super::ui::centered_modal_rect(frame.area(), 92, 24)
     } else {
         area
     };
@@ -761,7 +760,6 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 .unwrap_or_else(|| format!("disk{}", wizard.disk));
             super::ui::render_write_confirmation_modal(
                 frame,
-                area,
                 super::ui::WriteConfirmationSpec {
                     kind: super::ui::MediaWriteConfirmationKind::Format,
                     title: "格式化写入确认",
@@ -789,7 +787,6 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 .unwrap_or_else(|| format!("disk{}", wizard.disk));
             super::ui::render_write_confirmation_modal(
                 frame,
-                area,
                 super::ui::WriteConfirmationSpec {
                     kind: super::ui::MediaWriteConfirmationKind::EncryptedFormat,
                     title: "加密格式化写入确认",
@@ -818,7 +815,6 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 .unwrap_or_else(|| format!("disk{}", wizard.disk));
             super::ui::render_write_confirmation_modal(
                 frame,
-                area,
                 super::ui::WriteConfirmationSpec {
                     kind: super::ui::MediaWriteConfirmationKind::Reinitialize,
                     title: "加密分区重建写入确认",
@@ -906,17 +902,17 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     }
 
     if state.provision_scheme_picker_open() {
-        draw_scheme_picker(frame, content_area, state);
+        draw_scheme_picker(frame, state);
     }
     if state.backup_delete().is_some() {
-        draw_backup_delete(frame, content_area, state);
+        draw_backup_delete(frame, state);
     } else if state.backup_batch_delete().is_some() {
-        draw_backup_batch_delete(frame, content_area, state);
+        draw_backup_batch_delete(frame, state);
     } else if state.backup_prune().is_some() {
-        draw_backup_prune(frame, content_area, state);
+        draw_backup_prune(frame, state);
     }
     if state.help_open() {
-        super::help_overlay::draw_help_overlay(frame, content_area, state);
+        super::help_overlay::draw_help_overlay(frame, state);
     }
     if write_confirmation_open {
         draw_wizard(frame, content_area, state);

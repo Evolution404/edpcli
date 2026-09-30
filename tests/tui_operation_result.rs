@@ -327,7 +327,7 @@ fn restore_post_result_uses_shared_workbench_and_typed_layout() {
         "post-restore actions must only activate from the partition pane"
     );
     assert!(root.contains("let post_restore_overlay ="));
-    assert!(root.contains("super::ui::centered_modal_rect(area, 92, 24)"));
+    assert!(root.contains("super::ui::centered_modal_rect(frame.area(), 92, 24)"));
     assert!(
         root.matches("draw_post_restore_result(frame, area, state)")
             .count()

@@ -61,6 +61,23 @@ fn near_hard_limit(actual: usize, hard_limit: usize) -> bool {
 }
 
 #[test]
+fn tui_modals_must_not_center_against_local_content_rects() {
+    for path in rust_sources_under("src/tui") {
+        if path.ends_with("ui/modal.rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !source.contains("centered_modal_rect(area")
+                && !source.contains("centered_modal_rect(parent"),
+            "{} centers a modal against a local rect instead of frame.area()",
+            path.display()
+        );
+    }
+}
+
+#[test]
 fn soft_size_budget_warns_before_existing_hard_limits() {
     assert!(!near_hard_limit(79, 100));
     assert!(near_hard_limit(80, 100));

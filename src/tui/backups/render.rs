@@ -490,14 +490,13 @@ fn draw_backup_status_modal(frame: &mut Frame, title: &str, lines: Vec<Line<'sta
     });
 }
 
-pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+pub(super) fn draw_backup_delete(frame: &mut Frame, state: &AppState) {
     let Some(delete) = state.backup_delete() else {
         return;
     };
     if delete.stage == WizardStage::Confirm {
         crate::tui::ui::render_action_confirmation_modal(
             frame,
-            area,
             crate::tui::ui::ActionConfirmationSpec {
                 title: "删除备份",
                 headline: "永久删除当前备份？",
@@ -542,11 +541,7 @@ pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect,
     }
 }
 
-pub(super) fn draw_backup_batch_delete(
-    frame: &mut Frame,
-    area: ratatui::layout::Rect,
-    state: &AppState,
-) {
+pub(super) fn draw_backup_batch_delete(frame: &mut Frame, state: &AppState) {
     let Some(batch) = state.backup_batch_delete() else {
         return;
     };
@@ -572,7 +567,6 @@ pub(super) fn draw_backup_batch_delete(
         BackupBatchDeleteStage::Confirm => {
             crate::tui::ui::render_action_confirmation_modal(
                 frame,
-                area,
                 crate::tui::ui::ActionConfirmationSpec {
                     title: "批量删除备份",
                     headline: "确认执行批量删除？",
@@ -608,7 +602,7 @@ pub(super) fn draw_backup_batch_delete(
     }
 }
 
-pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+pub(super) fn draw_backup_prune(frame: &mut Frame, state: &AppState) {
     let Some(prune) = state.backup_prune() else {
         return;
     };
@@ -648,7 +642,6 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
                 .unwrap_or(0);
             crate::tui::ui::render_action_confirmation_modal(
                 frame,
-                area,
                 crate::tui::ui::ActionConfirmationSpec {
                     title: "备份清理确认",
                     headline: "确认执行 keep-N 清理？",

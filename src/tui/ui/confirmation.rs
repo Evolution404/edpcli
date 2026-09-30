@@ -1,5 +1,4 @@
 use ratatui::{
-    layout::Rect,
     style::Modifier,
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
@@ -42,13 +41,9 @@ pub struct ActionConfirmationSpec<'a> {
     pub tone: ConfirmationTone,
 }
 
-pub fn render_write_confirmation_modal(
-    frame: &mut Frame,
-    parent: Rect,
-    spec: WriteConfirmationSpec<'_>,
-) {
+pub fn render_write_confirmation_modal(frame: &mut Frame, spec: WriteConfirmationSpec<'_>) {
     let height = (10 + spec.details.len() as u16 + u16::from(spec.message.is_some())).min(28);
-    let area = centered_modal_rect(parent, 82, height);
+    let area = centered_modal_rect(frame.area(), 82, height);
     render_modal(frame, area, spec.title, |frame, inner| {
         let theme = theme::current();
         let action_label = match spec.kind {
@@ -88,12 +83,8 @@ pub fn render_write_confirmation_modal(
     });
 }
 
-pub fn render_action_confirmation_modal(
-    frame: &mut Frame,
-    parent: Rect,
-    spec: ActionConfirmationSpec<'_>,
-) {
-    let area = centered_modal_rect(parent, 76, (8 + spec.details.len() as u16).min(22));
+pub fn render_action_confirmation_modal(frame: &mut Frame, spec: ActionConfirmationSpec<'_>) {
+    let area = centered_modal_rect(frame.area(), 76, (8 + spec.details.len() as u16).min(22));
     render_modal(frame, area, spec.title, |frame, inner| {
         let theme = theme::current();
         let headline_style = match spec.tone {

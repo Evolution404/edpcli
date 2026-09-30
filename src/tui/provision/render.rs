@@ -2,8 +2,8 @@ use super::*;
 #[path = "scheme_picker_render.rs"]
 mod scheme_picker_render;
 
-pub(super) fn draw_scheme_picker(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
-    scheme_picker_render::draw_scheme_picker(frame, area, state);
+pub(super) fn draw_scheme_picker(frame: &mut Frame, state: &AppState) {
+    scheme_picker_render::draw_scheme_picker(frame, state);
 }
 
 #[path = "form_render.rs"]
@@ -251,7 +251,6 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                 .unwrap_or_else(|| "未选择目标".into());
             crate::tui::ui::render_write_confirmation_modal(
                 frame,
-                main_area,
                 crate::tui::ui::WriteConfirmationSpec {
                     kind: crate::tui::ui::MediaWriteConfirmationKind::Provision,
                     title: "制盘写入确认",
