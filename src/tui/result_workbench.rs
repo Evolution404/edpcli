@@ -14,6 +14,7 @@ use super::disk_region_list::{DiskRegionListMode, DiskRegionListState};
 use super::pane::{PaneFocus, PaneId};
 use super::ui::{ResultTone, ViewportClass};
 
+/// Shared partition-result column contract for both Provision and Restore workbenches.
 pub const RESULT_PARTITION_COLUMN_COUNT: usize = 7;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
