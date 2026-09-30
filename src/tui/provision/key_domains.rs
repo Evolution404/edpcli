@@ -5,8 +5,8 @@ impl AppState {
         self.provision.source_password_edit_dirty = false;
         self.provision.share_source_password_revision = 0;
         self.provision.encrypt_source_password_revision = 0;
-        self.provision.target_password_edits =
-            password_verification::TargetPasswordEditState::default();
+        self.provision.target_password_modes =
+            password_verification::TargetPasswordModeState::default();
         let mode = kind.mode();
         let password =
             String::from_utf8_lossy(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD).into_owned();

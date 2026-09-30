@@ -332,6 +332,88 @@ pub(super) fn validate_key_disposition_plan(
             .iter()
             .find(|choice| choice.target.role == part.geometry.role)
             .is_some_and(|choice| choice.selected && choice.prepared_image.is_some());
+        let key_domain = KeyDomainRole::from_partition_role(part.geometry.role);
+        match (key_domain, part.password_disposition) {
+            (None, None) => {}
+            (None, Some(_)) => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}不是密码域，却携带密码动作",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            (Some(_), None) => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!("错误: {}缺少统一密码动作", part.geometry.role.label()),
+                ));
+            }
+            (Some(_), Some(crate::provision::PasswordDisposition::Blocked)) => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}密码域仍为“需重建”，拒绝进入写盘阶段",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            (
+                Some(_),
+                Some(crate::provision::PasswordDisposition::Passthrough(
+                    crate::provision::PassthroughBasis::OpaqueCompatible,
+                )),
+            ) if part.disposition != RegionDisposition::PreserveOpaque => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}透传依据为 OpaqueCompatible，但区域动作不是 PreserveOpaque",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            (
+                Some(_),
+                Some(crate::provision::PasswordDisposition::Passthrough(
+                    crate::provision::PassthroughBasis::Verified,
+                )),
+            ) if part.disposition != RegionDisposition::PreserveVerified => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}透传依据为 Verified，但区域动作不是 PreserveVerified",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            (Some(_), Some(crate::provision::PasswordDisposition::Rewrap))
+                if part.disposition != RegionDisposition::RewrapVerified =>
+            {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}密码动作为 Rewrap，但区域动作不是 RewrapVerified",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            (Some(_), Some(crate::provision::PasswordDisposition::Rebuild))
+                if !matches!(
+                    part.disposition,
+                    RegionDisposition::Rebuild | RegionDisposition::Migrate
+                ) =>
+            {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}密码动作为 Rebuild，但区域动作不允许重建密钥域",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            _ => {}
+        }
         match part.disposition {
             RegionDisposition::PreserveOpaque => {
                 if part.source_password_knowledge != Some(SourcePasswordKnowledge::Unknown)

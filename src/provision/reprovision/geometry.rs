@@ -14,6 +14,18 @@ pub struct TargetGeometryOverrides {
 /// user did not edit. Plain/unanchored targets remain compact; registered
 /// targets are allowed to leave gaps and fail closed on overlap.
 pub fn apply_target_geometry_overrides(
+    prefill: ProvisionPrefill,
+    source: Option<&ExistingProvisionProfile>,
+    overrides: TargetGeometryOverrides,
+) -> Result<ProvisionPrefill, String> {
+    let prefill = apply_target_geometry_overrides_draft(prefill, source, overrides)?;
+    prefill.target_partitions(512)?;
+    Ok(prefill)
+}
+
+/// Apply user geometry edits while retaining an invalid draft for interactive
+/// diagnostics. Execution callers must use the validated public entry point.
+pub fn apply_target_geometry_overrides_draft(
     mut prefill: ProvisionPrefill,
     source: Option<&ExistingProvisionProfile>,
     overrides: TargetGeometryOverrides,
@@ -80,7 +92,6 @@ pub fn apply_target_geometry_overrides(
         };
     }
 
-    prefill.target_partitions(512)?;
     Ok(prefill)
 }
 

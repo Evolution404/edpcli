@@ -69,6 +69,20 @@ pub enum SourcePasswordKnowledge {
     Unknown,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PassthroughBasis {
+    Verified,
+    OpaqueCompatible,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PasswordDisposition {
+    Passthrough(PassthroughBasis),
+    Rewrap,
+    Rebuild,
+    Blocked,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum TargetPasswordPolicy {
     #[default]

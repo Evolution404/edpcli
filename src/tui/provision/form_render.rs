@@ -139,6 +139,11 @@ pub(super) fn draw_provision_form(
             } else {
                 content_width
             };
+            let cell_width = if section == ProvisionFieldSection::AdvancedIdentity {
+                cell_width.saturating_sub(2)
+            } else {
+                cell_width
+            };
             let label_width = if position == 0 { metrics.0 } else { metrics.1 };
             let label_width = label_width.min(cell_width.saturating_sub(4));
             let value_width = cell_width

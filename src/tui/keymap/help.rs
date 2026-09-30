@@ -164,12 +164,12 @@ pub const PROVISION_HELP: &[HelpBinding] = &[
     },
     HelpBinding {
         keys: "Space",
-        label: "切换当前选项 / 容量单位",
+        label: "切换当前选项 / 容量单位 / 新密码透传",
         action: TuiAction::Toggle,
     },
     HelpBinding {
         keys: "f",
-        label: "容量字段填满可用空间",
+        label: "起点/容量自动求解可用空间",
         action: TuiAction::Fill,
     },
     HelpBinding {

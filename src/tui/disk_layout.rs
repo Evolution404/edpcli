@@ -2,6 +2,7 @@
 
 use ratatui::{
     layout::Rect,
+    style::Style,
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
     Frame,
@@ -644,7 +645,7 @@ impl DiskRegionKind {
             | Self::RestoreNode
             | Self::Tail => ProvisionBarKind::Compatibility,
             Self::Plain => ProvisionBarKind::Plain,
-            Self::Free | Self::Unknown => ProvisionBarKind::Free,
+            Self::Free | Self::Unknown | Self::Conflict => ProvisionBarKind::Free,
         }
     }
 }
@@ -814,6 +815,7 @@ impl DiskLayoutModel {
         if !pane.details.is_empty() {
             lines.push(Line::from(""));
         }
+        let detail_width = area.width.saturating_sub(2) as usize;
         for detail in pane.details {
             let style = match detail.tone {
                 DiskLayoutDetailTone::Muted => theme.muted(),
@@ -827,30 +829,64 @@ impl DiskLayoutModel {
                     detail.selected && (pane.focused || pane.show_linked_selection);
                 let region_style = detail
                     .region_kind
-                    .map(|kind| theme.disk_region_tree(kind, selected_visible));
+                    .map(|kind| theme.disk_region_tree(kind, false));
                 let name_style = region_style.unwrap_or_else(|| theme.muted());
                 let marker_style = region_style.unwrap_or_else(|| theme.accent());
                 let marker = if selected_visible { "▌" } else { " " };
-                if compact {
-                    lines.push(Line::from(vec![
-                        Span::styled(marker, marker_style),
-                        Span::styled(crate::ui::pad_to(name, 17), name_style),
-                        Span::styled(status.clone(), style),
-                    ]));
-                    lines.push(Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(capacity.clone(), theme.secondary_text()),
-                        Span::raw("  "),
-                        Span::styled(range.clone(), theme.muted()),
-                    ]));
+                let row_style = if selected_visible {
+                    theme.selection_overlay(pane.focused)
                 } else {
-                    lines.push(Line::from(vec![
-                        Span::styled(marker, marker_style),
-                        Span::styled(crate::ui::pad_to(name, 17), name_style),
-                        Span::styled(crate::ui::pad_to(capacity, 14), theme.secondary_text()),
-                        Span::styled(crate::ui::pad_to(range, 24), theme.muted()),
-                        Span::styled(status.clone(), style),
-                    ]));
+                    Style::default()
+                };
+                let finish_row = |mut spans: Vec<Span<'static>>, used_width: usize| {
+                    if selected_visible {
+                        let padding = detail_width.saturating_sub(used_width);
+                        if padding > 0 {
+                            spans.push(Span::styled(" ".repeat(padding), row_style));
+                        }
+                    }
+                    Line::from(spans).style(row_style)
+                };
+                if compact {
+                    let name = crate::ui::pad_to(name, 17);
+                    let used = 1 + crate::ui::disp_width(&name) + crate::ui::disp_width(status);
+                    lines.push(finish_row(
+                        vec![
+                            Span::styled(marker, marker_style),
+                            Span::styled(name, name_style),
+                            Span::styled(status.clone(), style),
+                        ],
+                        used,
+                    ));
+                    let used = 4 + crate::ui::disp_width(capacity) + crate::ui::disp_width(range);
+                    lines.push(finish_row(
+                        vec![
+                            Span::raw("  "),
+                            Span::styled(capacity.clone(), theme.secondary_text()),
+                            Span::raw("  "),
+                            Span::styled(range.clone(), theme.muted()),
+                        ],
+                        used,
+                    ));
+                } else {
+                    let name = crate::ui::pad_to(name, 17);
+                    let capacity = crate::ui::pad_to(capacity, 14);
+                    let range = crate::ui::pad_to(range, 24);
+                    let used = 1
+                        + crate::ui::disp_width(&name)
+                        + crate::ui::disp_width(&capacity)
+                        + crate::ui::disp_width(&range)
+                        + crate::ui::disp_width(status);
+                    lines.push(finish_row(
+                        vec![
+                            Span::styled(marker, marker_style),
+                            Span::styled(name, name_style),
+                            Span::styled(capacity, theme.secondary_text()),
+                            Span::styled(range, theme.muted()),
+                            Span::styled(status.clone(), style),
+                        ],
+                        used,
+                    ));
                 }
             } else {
                 lines.push(Line::from(Span::styled(detail.text.clone(), style)));
@@ -1006,6 +1042,82 @@ mod tests {
                 "width={width} screen={screen:?}"
             );
         }
+    }
+
+    #[test]
+    fn linked_region_selection_uses_full_row_background_without_brightening_name() {
+        let model = DiskLayoutModel::new(
+            100_000,
+            vec![DiskLayoutSegment {
+                label: "保密区".into(),
+                start_lba: 0,
+                sector_count: 100_000,
+                kind: DiskRegionKind::Encrypt,
+            }],
+        );
+        let details = [DiskLayoutDetail::region_columns(
+            DiskRegionKind::Encrypt,
+            true,
+            "保密区",
+            "48.8 MiB",
+            "LBA 0–99999",
+            "⚠ 需重建",
+            DiskLayoutDetailTone::Warning,
+        )];
+        let width = 100u16;
+        let mut terminal = Terminal::new(TestBackend::new(width, 16)).unwrap();
+        terminal
+            .draw(|frame| {
+                model.render_pane(
+                    frame,
+                    frame.area(),
+                    DiskLayoutPane {
+                        title: "布局",
+                        summary: "",
+                        details: &details,
+                        focused: false,
+                        scroll_y: 0,
+                        profile: DiskLayoutProfile::DetailedExact,
+                        tail: TailExpansion::Collapsed,
+                        selected_segment: 0,
+                        map_selection: None,
+                        show_map_marker: false,
+                        show_linked_selection: true,
+                    },
+                );
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let selected_y = (0..16u16)
+            .find(|&y| {
+                let text = (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>();
+                text.chars()
+                    .filter(|ch| !ch.is_whitespace())
+                    .collect::<String>()
+                    .contains("⚠需重建")
+            })
+            .expect("selected region row");
+        let theme = super::super::theme::current();
+        let selected_bg = theme
+            .selection_overlay(false)
+            .bg
+            .expect("selection overlay background");
+        assert_eq!(buffer[(1, selected_y)].bg, selected_bg);
+        assert_eq!(
+            buffer[(width - 2, selected_y)].bg,
+            selected_bg,
+            "selection background must fill the complete inner row"
+        );
+        assert_eq!(
+            buffer[(2, selected_y)].fg,
+            theme
+                .disk_region_tree(DiskRegionKind::Encrypt, false)
+                .fg
+                .expect("base region foreground"),
+            "selection must keep the normal region foreground instead of brightening it"
+        );
     }
 
     #[test]

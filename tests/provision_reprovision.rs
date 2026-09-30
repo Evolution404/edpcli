@@ -11,10 +11,10 @@ use edpcli::{
         DiskProvisionKind, ExistingFileKeyError, ExistingPartition, ExistingProvisionProfile,
         FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, MigrationTransform,
         OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId,
-        PartitionAction, PartitionRole, PassInfoPolicy, ProvisionEntropy, ProvisionMetadata,
-        ProvisionProfile, ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
-        SourcePasswordKnowledge, TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
-        OFFICIAL_PARTITION_START_SECTOR,
+        PartitionAction, PartitionRole, PassInfoPolicy, PassthroughBasis, PasswordDisposition,
+        ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget,
+        QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge, TargetGeometryOverrides,
+        TargetIdentity, TargetProvisionPlan, OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
@@ -1186,6 +1186,10 @@ fn target_plan_surfaces_migration_sources_for_k6_execution() {
         combined.target_password_policy,
         Some(edpcli::provision::TargetPasswordPolicy::InitializeNew)
     );
+    assert_eq!(
+        combined.password_disposition,
+        Some(PasswordDisposition::Rebuild)
+    );
     assert!(combined.reason.contains("显式转为 Rebuild"));
 }
 
@@ -1226,6 +1230,10 @@ fn target_plan_preserves_only_verified_matching_data() {
     .unwrap();
     assert_eq!(plan.partitions[0].action, PartitionAction::Rebuild);
     assert_eq!(plan.partitions[1].action, PartitionAction::PreserveExact);
+    assert_eq!(
+        plan.partitions[1].password_disposition,
+        Some(PasswordDisposition::Passthrough(PassthroughBasis::Verified))
+    );
     assert_eq!(
         plan.preserved_extents().collect::<Vec<_>>(),
         vec![(targets[1].start_lba, targets[1].sector_count)]
@@ -1289,7 +1297,7 @@ fn unknown_password_can_opaque_preserve_without_decrypting_filesystem() {
         OfficialPartitionMode::BootShareCombined,
         &targets,
         16_000_000,
-        &KeyDomainSecrets::default_targets(),
+        &KeyDomainSecrets::default(),
     )
     .unwrap();
     let encrypt = plan
@@ -1299,6 +1307,12 @@ fn unknown_password_can_opaque_preserve_without_decrypting_filesystem() {
         .unwrap();
 
     assert_eq!(encrypt.disposition, RegionDisposition::PreserveOpaque);
+    assert_eq!(
+        encrypt.password_disposition,
+        Some(PasswordDisposition::Passthrough(
+            PassthroughBasis::OpaqueCompatible
+        ))
+    );
     assert_eq!(
         encrypt.source_password_knowledge,
         Some(SourcePasswordKnowledge::Unknown)
@@ -1350,6 +1364,11 @@ fn exact_encrypted_extent_with_unknown_password_stays_a_preserve_candidate() {
     assert_eq!(encrypt.action, PartitionAction::PreserveExact);
     assert_eq!(encrypt.disposition, RegionDisposition::PreserveOpaque);
     assert_eq!(
+        encrypt.password_disposition,
+        Some(PasswordDisposition::Blocked),
+        "unknown source plus an explicit target password must require explicit rebuild authorization"
+    );
+    assert_eq!(
         encrypt.preserved_record,
         source.record(PartitionRole::Encrypt).copied(),
         "opaque preserve must retain the exact source key record without unwrap"
@@ -1388,6 +1407,10 @@ fn verified_source_with_different_target_password_plans_rewrap_without_rebuild()
         .unwrap();
     assert_eq!(encrypt.action, PartitionAction::PreserveExact);
     assert_eq!(encrypt.disposition, RegionDisposition::RewrapVerified);
+    assert_eq!(
+        encrypt.password_disposition,
+        Some(PasswordDisposition::Rewrap)
+    );
     assert_eq!(
         encrypt.preserved_record,
         source.record(PartitionRole::Encrypt).copied()

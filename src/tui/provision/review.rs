@@ -103,31 +103,47 @@ impl AppState {
                 }
                 if let Some(plan) = &prepared.target_plan {
                     for part in &plan.partitions {
-                        let (action, tone, badge) = match part.disposition {
-                            RegionDisposition::PreserveOpaque => (
-                                "保留（Opaque，原 key material）",
+                        let (action, tone, badge) = match part.password_disposition {
+                            Some(crate::provision::PasswordDisposition::Passthrough(_)) => (
+                                "密码域透传；FileKey 与数据保持",
                                 ProvisionReviewTone::Success,
-                                "保留",
+                                "透传",
                             ),
-                            RegionDisposition::PreserveVerified => {
-                                ("保留（已验证）", ProvisionReviewTone::Success, "保留")
-                            }
-                            RegionDisposition::RewrapVerified => (
-                                "仅重包 wrapper；数据保持",
+                            Some(crate::provision::PasswordDisposition::Rewrap) => (
+                                "仅改密；FileKey 与数据保持",
                                 ProvisionReviewTone::Success,
-                                "重新封装",
+                                "改密",
                             ),
-                            RegionDisposition::Migrate => (
-                                "文件级 staging 后迁移到目标文件系统",
-                                ProvisionReviewTone::Success,
-                                "迁移",
+                            Some(crate::provision::PasswordDisposition::Rebuild) => (
+                                "密码域重建并初始化文件系统",
+                                ProvisionReviewTone::Warning,
+                                "重建",
                             ),
-                            RegionDisposition::Rebuild => {
-                                ("重建并初始化文件系统", ProvisionReviewTone::Warning, "重建")
-                            }
-                            RegionDisposition::Drop => {
-                                ("丢弃来源区域", ProvisionReviewTone::Warning, "删除")
-                            }
+                            Some(crate::provision::PasswordDisposition::Blocked) => (
+                                "密码域需重建，但尚未获得格式化授权",
+                                ProvisionReviewTone::Warning,
+                                "需重建",
+                            ),
+                            None => match part.disposition {
+                                RegionDisposition::PreserveOpaque
+                                | RegionDisposition::PreserveVerified => {
+                                    ("区域原样保留", ProvisionReviewTone::Success, "保留")
+                                }
+                                RegionDisposition::RewrapVerified => {
+                                    ("区域保持", ProvisionReviewTone::Success, "保留")
+                                }
+                                RegionDisposition::Migrate => (
+                                    "文件级 staging 后迁移到目标文件系统",
+                                    ProvisionReviewTone::Success,
+                                    "迁移",
+                                ),
+                                RegionDisposition::Rebuild => {
+                                    ("重建并初始化文件系统", ProvisionReviewTone::Warning, "重建")
+                                }
+                                RegionDisposition::Drop => {
+                                    ("丢弃来源区域", ProvisionReviewTone::Warning, "删除")
+                                }
+                            },
                         };
                         rows.push(
                             ProvisionReviewRow::new(
@@ -142,18 +158,30 @@ impl AppState {
                             )
                             .with_badge(badge),
                         );
-                        rows.push(ProvisionReviewRow::new(
-                            ProvisionReviewRowKind::KeyValue,
-                            ProvisionReviewTone::Muted,
-                            format!(
-                                "  密码域: {:?}  来源状态: {:?}  目标策略: {:?}",
-                                crate::provision::KeyDomainRole::from_partition_role(
-                                    part.geometry.role
-                                ),
-                                part.source_password_knowledge,
-                                part.target_password_policy,
-                            ),
-                        ));
+                        if let Some(password_action) = part.password_disposition {
+                            let (action, basis) = match password_action {
+                                crate::provision::PasswordDisposition::Passthrough(
+                                    crate::provision::PassthroughBasis::Verified,
+                                ) => ("透传", "原密码已验证"),
+                                crate::provision::PasswordDisposition::Passthrough(
+                                    crate::provision::PassthroughBasis::OpaqueCompatible,
+                                ) => ("透传", "原密码未知，布局满足黑盒透传条件"),
+                                crate::provision::PasswordDisposition::Rewrap => {
+                                    ("改密", "原 FileKey 已验证")
+                                }
+                                crate::provision::PasswordDisposition::Rebuild => {
+                                    ("重建", "用户已明确授权格式化")
+                                }
+                                crate::provision::PasswordDisposition::Blocked => {
+                                    ("需重建", "尚未获得格式化授权")
+                                }
+                            };
+                            rows.push(ProvisionReviewRow::new(
+                                ProvisionReviewRowKind::KeyValue,
+                                ProvisionReviewTone::Muted,
+                                format!("  密码动作: {action}  依据: {basis}"),
+                            ));
+                        }
                         rows.push(ProvisionReviewRow::new(
                             ProvisionReviewRowKind::Notice,
                             tone,
@@ -358,25 +386,34 @@ impl AppState {
                         target_plan.unallocated_sectors
                     ));
                     for part in &target_plan.partitions {
-                        let disposition = match part.disposition {
-                            crate::provision::RegionDisposition::PreserveOpaque => {
-                                "PreserveOpaque · 原 key material 原样透传 · data extent 0 写入"
+                        let disposition = match part.password_disposition {
+                            Some(crate::provision::PasswordDisposition::Passthrough(
+                                crate::provision::PassthroughBasis::Verified,
+                            )) => "透传 · 原密码已验证 · FileKey/wrapper/data extent 保持",
+                            Some(crate::provision::PasswordDisposition::Passthrough(
+                                crate::provision::PassthroughBasis::OpaqueCompatible,
+                            )) => "透传 · 原密码未知但黑盒兼容 · 原 key material/data extent 保持",
+                            Some(crate::provision::PasswordDisposition::Rewrap) => {
+                                "改密 · K_old 保持 · 仅重包 wrapper · data extent 0 写入"
                             }
-                            crate::provision::RegionDisposition::PreserveVerified => {
-                                "PreserveVerified · K_old 保持 · wrapper 保持 · data extent 0 写入"
+                            Some(crate::provision::PasswordDisposition::Rebuild) => {
+                                "重建 · K_new · 完整初始化文件系统"
                             }
-                            crate::provision::RegionDisposition::RewrapVerified => {
-                                "RewrapVerified · K_old 保持 · 仅重包 wrapper · data extent 0 写入"
+                            Some(crate::provision::PasswordDisposition::Blocked) => {
+                                "需重建 · 尚未获得格式化授权"
                             }
-                            crate::provision::RegionDisposition::Migrate => {
-                                "Migrate · staging 完整源文件 · K_new · 原子写入/读回/回滚"
-                            }
-                            crate::provision::RegionDisposition::Rebuild => {
-                                "Rebuild · K_new · 必须完整初始化文件系统"
-                            }
-                            crate::provision::RegionDisposition::Drop => {
-                                "Drop · 来源区域不进入目标"
-                            }
+                            None => match part.disposition {
+                                crate::provision::RegionDisposition::Migrate => {
+                                    "迁移 · staging 完整源文件 · 原子写入/读回/回滚"
+                                }
+                                crate::provision::RegionDisposition::Rebuild => {
+                                    "重建 · 完整初始化文件系统"
+                                }
+                                crate::provision::RegionDisposition::Drop => {
+                                    "删除 · 来源区域不进入目标"
+                                }
+                                _ => "保留 · 来源区域保持",
+                            },
                         };
                         let password_knowledge = match part.source_password_knowledge {
                             Some(crate::provision::SourcePasswordKnowledge::DefaultVerified) => {
@@ -390,20 +427,12 @@ impl AppState {
                             }
                             None => "无用户密码域",
                         };
-                        let target_policy = match part.target_password_policy {
-                            Some(crate::provision::TargetPasswordPolicy::PreserveOpaque) => {
-                                "目标密码禁用（Opaque）"
-                            }
-                            Some(crate::provision::TargetPasswordPolicy::ReuseVerified) => {
-                                "目标密码沿用已验证值"
-                            }
-                            Some(crate::provision::TargetPasswordPolicy::ReplaceVerified) => {
-                                "目标密码变更，仅允许 Rewrap"
-                            }
-                            Some(crate::provision::TargetPasswordPolicy::InitializeNew) => {
-                                "目标密码用于新 key material"
-                            }
-                            None => "无目标密码策略",
+                        let password_action = match part.password_disposition {
+                            Some(crate::provision::PasswordDisposition::Passthrough(_)) => "透传",
+                            Some(crate::provision::PasswordDisposition::Rewrap) => "改密",
+                            Some(crate::provision::PasswordDisposition::Rebuild) => "重建",
+                            Some(crate::provision::PasswordDisposition::Blocked) => "需重建",
+                            None => "无密码域",
                         };
                         lines.push(format!(
                             "{} {} ({} sectors): {}",
@@ -422,8 +451,8 @@ impl AppState {
                             disposition
                         ));
                         lines.push(format!(
-                            "  密码状态: {} · {}",
-                            password_knowledge, target_policy
+                            "  密码状态: {} · 动作={}",
+                            password_knowledge, password_action
                         ));
                         lines.push(format!("  {}", part.reason));
                     }

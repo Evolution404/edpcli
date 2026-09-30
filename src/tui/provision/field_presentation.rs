@@ -81,8 +81,15 @@ impl AppState {
             ));
             out.push((
                 "新密码".into(),
-                self.provision.form.share_target_password.as_str(),
-                true,
+                if self.provision_target_password_mode(crate::provision::KeyDomainRole::Share)
+                    == password_verification::TargetPasswordMode::Passthrough
+                {
+                    "透传"
+                } else {
+                    self.provision.form.share_target_password.as_str()
+                },
+                self.provision_target_password_mode(crate::provision::KeyDomainRole::Share)
+                    == password_verification::TargetPasswordMode::Explicit,
             ));
         }
         if matches!(mode, 0..=2) {
@@ -93,13 +100,25 @@ impl AppState {
             ));
             out.push((
                 "新密码".into(),
-                self.provision.form.encrypt_target_password.as_str(),
-                true,
+                if self.provision_target_password_mode(crate::provision::KeyDomainRole::Encrypt)
+                    == password_verification::TargetPasswordMode::Passthrough
+                {
+                    "透传"
+                } else {
+                    self.provision.form.encrypt_target_password.as_str()
+                },
+                self.provision_target_password_mode(crate::provision::KeyDomainRole::Encrypt)
+                    == password_verification::TargetPasswordMode::Explicit,
             ));
         }
         if matches!(mode, 0 | 3) {
             let exact =
                 self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact;
+            out.push((
+                "启动区起点 LBA".into(),
+                self.provision.form.boot_start_lba.as_str(),
+                false,
+            ));
             out.push((
                 (if exact {
                     "启动区容量 (sector)"
@@ -117,15 +136,15 @@ impl AppState {
                 },
                 false,
             ));
-            out.push((
-                "启动区起点 LBA".into(),
-                self.provision.form.boot_start_lba.as_str(),
-                false,
-            ));
         }
         if matches!(mode, 0 | 1 | 3) {
             let exact =
                 self.provision.form.share_input_mode == crate::provision::CapacityInputMode::Exact;
+            out.push((
+                "交换区起点 LBA".into(),
+                self.provision.form.share_start_lba.as_str(),
+                false,
+            ));
             out.push((
                 (if exact {
                     "交换区容量 (sector)"
@@ -143,15 +162,15 @@ impl AppState {
                 },
                 false,
             ));
-            out.push((
-                "交换区起点 LBA".into(),
-                self.provision.form.share_start_lba.as_str(),
-                false,
-            ));
         }
         if matches!(mode, 0..=2) {
             let exact = self.provision.form.encrypt_input_mode
                 == crate::provision::CapacityInputMode::Exact;
+            out.push((
+                "保密区起点 LBA".into(),
+                self.provision.form.encrypt_start_lba.as_str(),
+                false,
+            ));
             out.push((
                 (if exact {
                     "保密区容量 (sector)"
@@ -167,11 +186,6 @@ impl AppState {
                 } else {
                     self.provision.form.encrypt_mib.as_str()
                 },
-                false,
-            ));
-            out.push((
-                "保密区起点 LBA".into(),
-                self.provision.form.encrypt_start_lba.as_str(),
                 false,
             ));
         }

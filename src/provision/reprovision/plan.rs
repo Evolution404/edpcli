@@ -70,6 +70,7 @@ pub struct TargetPartitionPlan {
     pub geometry: TargetPartitionGeometry,
     pub action: PartitionAction,
     pub disposition: RegionDisposition,
+    pub password_disposition: Option<super::super::PasswordDisposition>,
     pub source_password_knowledge: Option<super::super::SourcePasswordKnowledge>,
     pub target_password_policy: Option<super::super::TargetPasswordPolicy>,
     pub reason: String,
@@ -130,6 +131,9 @@ impl TargetProvisionPlan {
                 ));
             }
             let mut disposition = RegionDisposition::Rebuild;
+            let mut password_disposition =
+                super::super::KeyDomainRole::from_partition_role(target.role)
+                    .map(|_| super::super::PasswordDisposition::Blocked);
             let mut source_password_knowledge = None;
             let mut target_password_policy =
                 super::super::KeyDomainRole::from_partition_role(target.role)
@@ -194,8 +198,21 @@ impl TargetProvisionPlan {
                         disposition = if opaque_compatible && !strict_compatible {
                             target_password_policy =
                                 Some(super::super::TargetPasswordPolicy::PreserveOpaque);
+                            password_disposition =
+                                if key_domains.target_password(target.role).is_some() {
+                                    Some(super::super::PasswordDisposition::Blocked)
+                                } else {
+                                    Some(super::super::PasswordDisposition::Passthrough(
+                                        super::super::PassthroughBasis::OpaqueCompatible,
+                                    ))
+                                };
                             RegionDisposition::PreserveOpaque
                         } else if record.lba12.need_encrypt == 0 {
+                            password_disposition = domain.map(|_| {
+                                super::super::PasswordDisposition::Passthrough(
+                                    super::super::PassthroughBasis::Verified,
+                                )
+                            });
                             RegionDisposition::PreserveVerified
                         } else {
                             match source_password_knowledge
@@ -204,31 +221,54 @@ impl TargetProvisionPlan {
                                 super::super::SourcePasswordKnowledge::Unknown => {
                                     target_password_policy =
                                         Some(super::super::TargetPasswordPolicy::PreserveOpaque);
+                                    password_disposition =
+                                        if key_domains.target_password(target.role).is_some() {
+                                            Some(super::super::PasswordDisposition::Blocked)
+                                        } else {
+                                            Some(super::super::PasswordDisposition::Passthrough(
+                                                super::super::PassthroughBasis::OpaqueCompatible,
+                                            ))
+                                        };
                                     RegionDisposition::PreserveOpaque
                                 }
                                 super::super::SourcePasswordKnowledge::DefaultVerified => {
-                                    if key_domains.target_password(target.role)
-                                        == Some(super::super::DEFAULT_KEY_DOMAIN_PASSWORD)
+                                    if key_domains.target_password(target.role).is_none()
+                                        || key_domains.target_password(target.role)
+                                            == Some(super::super::DEFAULT_KEY_DOMAIN_PASSWORD)
                                     {
                                         target_password_policy =
                                             Some(super::super::TargetPasswordPolicy::ReuseVerified);
+                                        password_disposition =
+                                            Some(super::super::PasswordDisposition::Passthrough(
+                                                super::super::PassthroughBasis::Verified,
+                                            ));
                                         RegionDisposition::PreserveVerified
                                     } else {
                                         target_password_policy = Some(
                                             super::super::TargetPasswordPolicy::ReplaceVerified,
                                         );
+                                        password_disposition =
+                                            Some(super::super::PasswordDisposition::Rewrap);
                                         RegionDisposition::RewrapVerified
                                     }
                                 }
                                 super::super::SourcePasswordKnowledge::UserVerified => {
-                                    if key_domains.target_password(target.role) == user_password {
+                                    if key_domains.target_password(target.role).is_none()
+                                        || key_domains.target_password(target.role) == user_password
+                                    {
                                         target_password_policy =
                                             Some(super::super::TargetPasswordPolicy::ReuseVerified);
+                                        password_disposition =
+                                            Some(super::super::PasswordDisposition::Passthrough(
+                                                super::super::PassthroughBasis::Verified,
+                                            ));
                                         RegionDisposition::PreserveVerified
                                     } else {
                                         target_password_policy = Some(
                                             super::super::TargetPasswordPolicy::ReplaceVerified,
                                         );
+                                        password_disposition =
+                                            Some(super::super::PasswordDisposition::Rewrap);
                                         RegionDisposition::RewrapVerified
                                     }
                                 }
@@ -237,7 +277,13 @@ impl TargetProvisionPlan {
                         if disposition.preserves_extent() {
                             reason = match disposition {
                                 RegionDisposition::PreserveOpaque => {
-                                    "role/type/extent/physical crypto/key profile 精确兼容；来源密码未知，文件系统不解读，原 key material 与密文区域逐字节透传"
+                                    if password_disposition
+                                        == Some(super::super::PasswordDisposition::Blocked)
+                                    {
+                                        "来源密码未知且请求了新密码；无法 Rewrap，必须由用户明确授权重建"
+                                    } else {
+                                        "role/type/extent/physical crypto/key profile 精确兼容；来源密码未知，文件系统不解读，原 key material 与密文区域逐字节透传"
+                                    }
                                 }
                                 RegionDisposition::PreserveVerified => {
                                     "物理/语义/几何/filesystem 与来源密钥均已验证；原 FileKey 与 data extent 保持不变"
@@ -264,6 +310,9 @@ impl TargetProvisionPlan {
                     .collect::<Vec<_>>()
                     .join(" + ");
                 disposition = RegionDisposition::Migrate;
+                password_disposition =
+                    super::super::KeyDomainRole::from_partition_role(target.role)
+                        .map(|_| super::super::PasswordDisposition::Rebuild);
                 source_password_knowledge = None;
                 target_password_policy =
                     super::super::KeyDomainRole::from_partition_role(target.role)
@@ -279,6 +328,7 @@ impl TargetProvisionPlan {
                 geometry: *target,
                 action,
                 disposition,
+                password_disposition,
                 source_password_knowledge,
                 target_password_policy,
                 reason,
@@ -301,12 +351,22 @@ impl TargetProvisionPlan {
         else {
             return false;
         };
+        if part.disposition == RegionDisposition::Rebuild {
+            part.password_disposition = super::super::KeyDomainRole::from_partition_role(role)
+                .map(|_| super::super::PasswordDisposition::Rebuild);
+            part.target_password_policy = super::super::KeyDomainRole::from_partition_role(role)
+                .map(|_| super::super::TargetPasswordPolicy::InitializeNew);
+            part.reason = "用户明确选择重新格式化；目标区域执行 Rebuild".into();
+            return true;
+        }
         if !part.disposition.preserves_extent() && part.disposition != RegionDisposition::Migrate {
             return false;
         }
         let previous = part.disposition;
         part.action = PartitionAction::Rebuild;
         part.disposition = RegionDisposition::Rebuild;
+        part.password_disposition = super::super::KeyDomainRole::from_partition_role(role)
+            .map(|_| super::super::PasswordDisposition::Rebuild);
         part.target_password_policy = super::super::KeyDomainRole::from_partition_role(role)
             .map(|_| super::super::TargetPasswordPolicy::InitializeNew);
         part.preserved_record = None;

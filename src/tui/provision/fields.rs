@@ -67,7 +67,7 @@ impl AppState {
                         true,
                         false,
                         false,
-                        false,
+                        true,
                         false,
                     ),
                     descriptor(
@@ -168,7 +168,7 @@ impl AppState {
                 ProvisionFieldSection::PasswordDomain,
                 true,
                 true,
-                false,
+                true,
                 false,
                 false,
             ));
@@ -189,15 +189,15 @@ impl AppState {
                 ProvisionFieldSection::PasswordDomain,
                 true,
                 true,
-                false,
+                true,
                 false,
                 false,
             ));
         }
         if matches!(mode, 0 | 3) {
             for id in [
-                ProvisionFieldId::Capacity(crate::provision::PartitionRole::Boot),
                 ProvisionFieldId::StartLba(crate::provision::PartitionRole::Boot),
+                ProvisionFieldId::Capacity(crate::provision::PartitionRole::Boot),
             ] {
                 fields.push(descriptor(
                     id,
@@ -205,7 +205,10 @@ impl AppState {
                     true,
                     false,
                     matches!(id, ProvisionFieldId::Capacity(_)),
-                    matches!(id, ProvisionFieldId::Capacity(_)),
+                    matches!(
+                        id,
+                        ProvisionFieldId::Capacity(_) | ProvisionFieldId::StartLba(_)
+                    ),
                     false,
                 ));
             }
@@ -217,8 +220,8 @@ impl AppState {
                 crate::provision::PartitionRole::Share
             };
             for id in [
-                ProvisionFieldId::Capacity(role),
                 ProvisionFieldId::StartLba(role),
+                ProvisionFieldId::Capacity(role),
             ] {
                 fields.push(descriptor(
                     id,
@@ -226,15 +229,18 @@ impl AppState {
                     true,
                     false,
                     matches!(id, ProvisionFieldId::Capacity(_)),
-                    matches!(id, ProvisionFieldId::Capacity(_)),
+                    matches!(
+                        id,
+                        ProvisionFieldId::Capacity(_) | ProvisionFieldId::StartLba(_)
+                    ),
                     false,
                 ));
             }
         }
         if matches!(mode, 0..=2) {
             for id in [
-                ProvisionFieldId::Capacity(crate::provision::PartitionRole::Encrypt),
                 ProvisionFieldId::StartLba(crate::provision::PartitionRole::Encrypt),
+                ProvisionFieldId::Capacity(crate::provision::PartitionRole::Encrypt),
             ] {
                 fields.push(descriptor(
                     id,
@@ -242,7 +248,10 @@ impl AppState {
                     true,
                     false,
                     matches!(id, ProvisionFieldId::Capacity(_)),
-                    matches!(id, ProvisionFieldId::Capacity(_)),
+                    matches!(
+                        id,
+                        ProvisionFieldId::Capacity(_) | ProvisionFieldId::StartLba(_)
+                    ),
                     false,
                 ));
             }

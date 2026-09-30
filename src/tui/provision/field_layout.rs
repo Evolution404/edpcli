@@ -29,7 +29,7 @@ impl AppState {
                 (ProvisionFieldSection::Identity, ProvisionFieldId::AdvancedSection) => 1,
                 (ProvisionFieldSection::Identity, _) => 2,
                 (ProvisionFieldSection::AdvancedIdentity, _) => 1,
-                (ProvisionFieldSection::PartitionLayout, ProvisionFieldId::Capacity(_)) => 2,
+                (ProvisionFieldSection::PartitionLayout, ProvisionFieldId::StartLba(_)) => 2,
                 (ProvisionFieldSection::PartitionLayout, _) => 1,
                 (
                     ProvisionFieldSection::PasswordPolicy | ProvisionFieldSection::PasswordDomain,
@@ -80,23 +80,25 @@ impl AppState {
         match id {
             ProvisionFieldId::AdvancedSection => None,
             ProvisionFieldId::Lba8Identity(_) => Some("高级身份字段".into()),
-            ProvisionFieldId::Capacity(_) => Some("Space 切换 MiB / GiB / sector · f 填满".into()),
+            ProvisionFieldId::Capacity(_) => {
+                Some("Space 切换 MiB / GiB / sector · f 最大可用容量".into())
+            }
             ProvisionFieldId::SourcePassword(_) => {
                 Some("修改原密码后，Enter / Esc 结束输入会自动只读验证".into())
             }
             ProvisionFieldId::TargetPassword(domain) => Some(match domain {
                 crate::provision::KeyDomainRole::Share => {
-                    "新密码只作用于交换密钥域；原密码未验证时修改不会自动格式化，需用户主动勾选交换区格式化".into()
+                    "Space 切换透传/设置密码；透传时按 i 直接编辑。原密码已验证且新密码相同会自动归一化为透传；原密码未验证时改密需用户主动勾选交换区格式化".into()
                 }
                 crate::provision::KeyDomainRole::Encrypt => {
-                    "新密码只作用于保密密钥域；原密码未验证时修改不会自动格式化，需用户主动勾选保密区格式化".into()
+                    "Space 切换透传/设置密码；透传时按 i 直接编辑。原密码已验证且新密码相同会自动归一化为透传；原密码未验证时改密需用户主动勾选保密区格式化".into()
                 }
             }),
             ProvisionFieldId::ForceChangePassword
             | ProvisionFieldId::CancelPasswordComplexityCheck
             | ProvisionFieldId::FormatEnabled(_)
             | ProvisionFieldId::Filesystem(_) => Some("Space 切换".into()),
-            ProvisionFieldId::StartLba(_) => Some("通常无需修改；固定分区边界时再调整".into()),
+            ProvisionFieldId::StartLba(_) => Some("f 自动寻找最小可用起点".into()),
             ProvisionFieldId::MaxPasswordErrors(_) => Some("范围 0–255".into()),
             _ => None,
         }

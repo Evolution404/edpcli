@@ -105,21 +105,25 @@ impl AppState {
                     Detail::danger("目标布局尚未通过校验"),
                 ];
             };
-            let Ok(mut parts) = resolved.target_partitions(crate::common::SECTOR as u64) else {
+            let Ok(mut parts) = resolved.draft_partitions(crate::common::SECTOR as u64) else {
                 return vec![
                     Detail::muted(usable_summary),
                     Detail::danger("目标分区几何无效"),
                 ];
             };
             parts.sort_by_key(|part| part.start_lba);
-            let unallocated =
-                crate::provision::validate_target_geometry(&parts, resolved.usable_end_lba)
-                    .unwrap_or_default();
+            let geometry_validation =
+                crate::provision::validate_target_geometry(&parts, resolved.usable_end_lba);
+            let unallocated = geometry_validation.as_ref().copied().unwrap_or_default();
             usable_summary = format!(
-                "可分区 LBA {}–{} · 剩余 {}",
+                "可分区 LBA {}–{} · {}",
                 crate::provision::OFFICIAL_PARTITION_START_SECTOR,
                 resolved.usable_end_lba.saturating_sub(1),
-                Self::format_sector_size(unallocated)
+                if geometry_validation.is_ok() {
+                    format!("剩余 {}", Self::format_sector_size(unallocated))
+                } else {
+                    "当前草稿有冲突".to_string()
+                }
             );
             for part in &parts {
                 let assessment = crate::application::provision::PreserveAssessment::for_partition(
@@ -138,79 +142,79 @@ impl AppState {
                     crate::provision::PartitionRole::CompatibilityReserve => false,
                 };
                 let key_domain = crate::provision::KeyDomainRole::from_partition_role(part.role);
-                let (source_knowledge, target_edited, source_password, target_password) =
-                    match key_domain {
-                        Some(crate::provision::KeyDomainRole::Share) => (
-                            self.provision.form.share_source_knowledge,
-                            self.provision.target_password_edits.share,
-                            self.provision.form.share_source_password.as_str(),
-                            self.provision.form.share_target_password.as_str(),
+                let (status, tone, reason) = if let Some(domain) = key_domain {
+                    use password_verification::{PasswordIntent, SourcePasswordState};
+                    let intent = self.provision_password_intent(domain, format_selected);
+                    let source_state = self.provision_source_password_state(domain);
+                    let opaque_candidate = self.provision_domain_opaque_candidate(domain);
+                    match intent {
+                        PasswordIntent::Waiting => (
+                            format!(
+                                "{} 验证中",
+                                crate::tui::animation::spinner_glyph(self.animation_frame())
+                            ),
+                            Tone::Accent,
+                            "正在只读验证原密码；验证完成前不生成密码域计划".to_string(),
                         ),
-                        Some(crate::provision::KeyDomainRole::Encrypt) => (
-                            self.provision.form.encrypt_source_knowledge,
-                            self.provision.target_password_edits.encrypt,
-                            self.provision.form.encrypt_source_password.as_str(),
-                            self.provision.form.encrypt_target_password.as_str(),
+                        PasswordIntent::BlockedNeedsExplicitPassword => (
+                            "⚠ 需重建".to_string(),
+                            Tone::Warning,
+                            "已选择格式化，但原密码未验证且新密码仍为透传；请设置新密码后再重建"
+                                .to_string(),
                         ),
-                        None => (
-                            crate::provision::SourcePasswordKnowledge::Unknown,
-                            false,
-                            "",
-                            "",
+                        PasswordIntent::BlockedNeedsFormat => (
+                            "⚠ 改密需重建".to_string(),
+                            Tone::Warning,
+                            "原密码未验证，无法 Rewrap；未自动勾选格式化，请主动确认格式化后再生成新密钥"
+                                .to_string(),
                         ),
-                    };
-                let opaque_candidate =
-                    key_domain.is_some_and(|domain| self.provision_domain_opaque_candidate(domain));
-                let target_changed = target_edited && target_password != source_password;
-                let (status, tone, reason) = if format_selected {
+                        PasswordIntent::Rebuild => (
+                            "⚠ 重建".to_string(),
+                            Tone::Warning,
+                            "已选择重新格式化；目标区域将重建并生成新密钥".to_string(),
+                        ),
+                        PasswordIntent::Rewrap if assessment.candidate => (
+                            "✓ 改密".to_string(),
+                            Tone::Success,
+                            "来源 FileKey 已验证；仅 Rewrap 到新密码，数据区保持不变".to_string(),
+                        ),
+                        PasswordIntent::Rewrap => (
+                            "⚠ 需重建".to_string(),
+                            Tone::Warning,
+                            "当前布局不允许原位 Rewrap；需要用户明确选择重建/格式化".to_string(),
+                        ),
+                        PasswordIntent::Passthrough
+                            if source_state.is_verified() && assessment.candidate =>
+                        {
+                            (
+                                "✓ 透传".to_string(),
+                                Tone::Success,
+                                "来源密码与布局均已验证；原密码域、FileKey 与数据区透传"
+                                    .to_string(),
+                            )
+                        }
+                        PasswordIntent::Passthrough
+                            if matches!(source_state, SourcePasswordState::Failed | SourcePasswordState::Unknown)
+                                && opaque_candidate =>
+                        {
+                            (
+                                "✓ 透传".to_string(),
+                                Tone::Success,
+                                "来源密码未知但布局与 key profile 精确兼容；原 key material 与密文区域逐字节透传"
+                                    .to_string(),
+                            )
+                        }
+                        PasswordIntent::Passthrough => (
+                            "⚠ 需重建".to_string(),
+                            Tone::Warning,
+                            "当前密码域不满足透传条件；需要用户明确选择重建/格式化".to_string(),
+                        ),
+                    }
+                } else if format_selected {
                     (
                         "⚠ 重建".to_string(),
                         Tone::Warning,
-                        if key_domain.is_some() {
-                            "已选择重新格式化；目标区域将重建并生成新密钥".to_string()
-                        } else {
-                            "已选择重新格式化；目标区域将重建".to_string()
-                        },
-                    )
-                } else if key_domain.is_some()
-                    && source_knowledge == crate::provision::SourcePasswordKnowledge::Unknown
-                    && target_edited
-                {
-                    (
-                        "⚠ 改密需重建".to_string(),
-                        Tone::Warning,
-                        "原密码未验证，无法 Rewrap；未自动勾选格式化，请主动确认格式化后再生成新密钥"
-                            .to_string(),
-                    )
-                } else if key_domain.is_some()
-                    && source_knowledge == crate::provision::SourcePasswordKnowledge::Unknown
-                    && opaque_candidate
-                {
-                    (
-                        "✓ 透传".to_string(),
-                        Tone::Success,
-                        "来源密码未知但布局与 key profile 精确兼容；原 key material 与密文区域逐字节透传"
-                            .to_string(),
-                    )
-                } else if key_domain.is_some()
-                    && source_knowledge == crate::provision::SourcePasswordKnowledge::Unknown
-                {
-                    (
-                        "⚠ 需重建".to_string(),
-                        Tone::Warning,
-                        "来源密码未知且不满足透传条件；需要用户明确选择重建/格式化".to_string(),
-                    )
-                } else if key_domain.is_some() && assessment.candidate && target_changed {
-                    (
-                        "✓ 改密".to_string(),
-                        Tone::Success,
-                        "来源 FileKey 已验证；仅 Rewrap 到新密码，数据区保持不变".to_string(),
-                    )
-                } else if key_domain.is_some() && assessment.candidate {
-                    (
-                        "✓ 保留".to_string(),
-                        Tone::Success,
-                        "来源密码与布局均已验证；保留原 FileKey 与数据区".to_string(),
+                        "已选择重新格式化；目标区域将重建".to_string(),
                     )
                 } else {
                     (
@@ -240,10 +244,37 @@ impl AppState {
         ));
 
         for (index, segment) in visible.segments.iter().enumerate() {
+            let role_for_kind = match segment.kind {
+                DiskRegionKind::Boot => Some(crate::provision::PartitionRole::Boot),
+                DiskRegionKind::Share => Some(crate::provision::PartitionRole::Share),
+                DiskRegionKind::Combined => {
+                    Some(crate::provision::PartitionRole::BootShareCombined)
+                }
+                DiskRegionKind::Encrypt => Some(crate::provision::PartitionRole::Encrypt),
+                DiskRegionKind::Compatibility => {
+                    Some(crate::provision::PartitionRole::CompatibilityReserve)
+                }
+                _ => None,
+            };
+            let fallback_role_status = || {
+                role_for_kind.and_then(|role| {
+                    partition_status
+                        .values()
+                        .find(|(_, _, candidate, _)| *candidate == Some(role))
+                        .cloned()
+                })
+            };
             let (status, tone, _, _) = partition_status
                 .get(&(segment.start_lba, segment.sector_count))
                 .cloned()
+                .or_else(fallback_role_status)
                 .unwrap_or_else(|| match segment.kind {
+                    DiskRegionKind::Conflict => (
+                        "⚠ 冲突".into(),
+                        Tone::Danger,
+                        None,
+                        "当前草稿有多个区域覆盖同一 LBA 范围".into(),
+                    ),
                     DiskRegionKind::Free => ("空闲".into(), Tone::Muted, None, String::new()),
                     DiskRegionKind::Unknown => {
                         ("待确认".into(), Tone::Warning, None, String::new())
@@ -311,7 +342,23 @@ impl AppState {
             }
         }
 
-        rows.push(Detail::success("✓ 当前布局无重叠、未越界"));
+        if self.provision.kind != ProvisionKind::Plain {
+            if let Ok((resolved, _)) = self.provision_resolved_prefill() {
+                if let Ok(parts) = resolved.draft_partitions(crate::common::SECTOR as u64) {
+                    match crate::provision::validate_target_geometry(
+                        &parts,
+                        resolved.usable_end_lba,
+                    ) {
+                        Ok(_) => rows.push(Detail::success("✓ 当前布局无重叠、未越界")),
+                        Err(message) => {
+                            rows.push(Detail::danger(format!("✗ 当前草稿布局无效: {message}")))
+                        }
+                    }
+                }
+            }
+        } else {
+            rows.push(Detail::success("✓ 当前布局无重叠、未越界"));
+        }
         rows
     }
 }

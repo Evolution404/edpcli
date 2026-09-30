@@ -126,6 +126,8 @@ mod fields;
 mod fields_access;
 #[path = "form.rs"]
 mod form;
+#[path = "insert_mode.rs"]
+mod insert_mode;
 #[path = "key_domains.rs"]
 mod key_domains;
 #[path = "option_editor.rs"]
@@ -142,6 +144,10 @@ mod navigation_model;
 pub use navigation_model::ProvisionSurface;
 #[path = "pane.rs"]
 mod pane;
+#[path = "password_model.rs"]
+mod password_model;
+#[path = "password_target_state.rs"]
+mod password_target_state;
 #[path = "password_verification.rs"]
 mod password_verification;
 #[path = "plain_editor.rs"]
@@ -152,6 +158,8 @@ mod review;
 mod run;
 #[path = "scheme_picker_state.rs"]
 mod scheme_picker_state;
+#[path = "source_password_state.rs"]
+mod source_password_state;
 pub(crate) use review::{ProvisionReviewRowKind, ProvisionReviewTone};
 #[path = "validation.rs"]
 mod validation;
@@ -173,7 +181,7 @@ pub struct ProvisionState {
     pub(crate) encrypt_source_password_revision: u64,
     pub(crate) share_source_verification: ProvisionPasswordVerificationState,
     pub(crate) encrypt_source_verification: ProvisionPasswordVerificationState,
-    pub(super) target_password_edits: password_verification::TargetPasswordEditState,
+    pub(super) target_password_modes: password_verification::TargetPasswordModeState,
     pub form: ProvisionForm,
     pub plain_form: PlainProvisionForm,
     pub prepared: Option<ProvisionPrepared>,
@@ -207,7 +215,7 @@ impl Default for ProvisionState {
             encrypt_source_password_revision: 0,
             share_source_verification: ProvisionPasswordVerificationState::Idle,
             encrypt_source_verification: ProvisionPasswordVerificationState::Idle,
-            target_password_edits: password_verification::TargetPasswordEditState::default(),
+            target_password_modes: password_verification::TargetPasswordModeState::default(),
             form: ProvisionForm::default(),
             plain_form: PlainProvisionForm::default(),
             prepared: None,
@@ -235,33 +243,6 @@ impl AppState {
 
     pub const fn provision_target_disk(&self) -> Option<u32> {
         self.provision.target_disk
-    }
-
-    pub fn provision_begin_insert(&mut self) -> bool {
-        if self.shell.workspace != Workspace::Provision
-            || self.provision.stage != ProvisionStage::Form
-            || !self.provision_selected_field_is_editable()
-        {
-            return false;
-        }
-        self.shell.input_mode = InputMode::Insert;
-        self.provision.source_password_edit_dirty = false;
-        self.provision_sync_cursor_to_end();
-        true
-    }
-
-    pub fn provision_end_insert(&mut self) -> bool {
-        if self.shell.input_mode != InputMode::Insert {
-            return false;
-        }
-        let source_password_dirty = self.provision.source_password_edit_dirty
-            && matches!(
-                self.provision_field_id(self.provision.field_selected),
-                Some(ProvisionFieldId::SourcePassword(_))
-            );
-        self.shell.input_mode = InputMode::Normal;
-        self.provision.source_password_edit_dirty = false;
-        source_password_dirty
     }
 
     pub fn provision_reset(&mut self) {

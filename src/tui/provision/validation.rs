@@ -43,8 +43,8 @@ impl AppState {
         String,
     > {
         use crate::provision::{
-            apply_target_geometry_overrides, CapacityInput, CapacityInputMode, CapacitySource,
-            QuickCapacityUnit, TargetGeometryOverrides,
+            apply_target_geometry_overrides_draft, CapacityInput, CapacityInputMode,
+            CapacitySource, QuickCapacityUnit, TargetGeometryOverrides,
         };
 
         let row = self
@@ -180,7 +180,7 @@ impl AppState {
                 "保密区",
             )?,
         };
-        let resolved = apply_target_geometry_overrides(base, source.as_ref(), overrides)?;
+        let resolved = apply_target_geometry_overrides_draft(base, source.as_ref(), overrides)?;
         Ok((resolved, source))
     }
 
@@ -324,14 +324,26 @@ impl AppState {
                 .filter(|value| *value > 0)
                 .ok_or_else(|| format!("{label} 必须为正整数扇区"))
         };
-        let share_opaque = self
-            .provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share)
-            && !self.provision.form.format_share;
-        let encrypt_opaque = self
-            .provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt)
-            && !self.provision.form.format_encrypt;
         let (share_target_requested, encrypt_target_requested) =
             self.provision_password_plan_intent(mode)?;
+        let share_target = share_target_requested.then(|| {
+            if self.provision_target_password_mode(crate::provision::KeyDomainRole::Share)
+                == password_verification::TargetPasswordMode::Explicit
+            {
+                self.provision.form.share_target_password.as_str()
+            } else {
+                self.provision.form.share_source_password.as_str()
+            }
+        });
+        let encrypt_target = encrypt_target_requested.then(|| {
+            if self.provision_target_password_mode(crate::provision::KeyDomainRole::Encrypt)
+                == password_verification::TargetPasswordMode::Explicit
+            {
+                self.provision.form.encrypt_target_password.as_str()
+            } else {
+                self.provision.form.encrypt_source_password.as_str()
+            }
+        });
         let form = &self.provision.form;
         let exact = crate::provision::CapacityInputMode::Exact;
         let capacity_sectors = |active: bool,
@@ -383,6 +395,7 @@ impl AppState {
         let share_mib = None;
         let encrypt_mib = None;
         let (resolved, _) = self.provision_resolved_prefill()?;
+        resolved.target_partitions(crate::common::SECTOR as u64)?;
         if self.provision.form.label_id.trim().is_empty()
             || self.provision.form.user.trim().is_empty()
             || self.provision.form.dept.trim().is_empty()
@@ -390,16 +403,10 @@ impl AppState {
         {
             return Err("标签标识、用户、部门和标签均不能为空".into());
         }
-        if matches!(mode, 0 | 1 | 3)
-            && !share_opaque
-            && self.provision.form.share_target_password.is_empty()
-        {
+        if matches!(mode, 0 | 1 | 3) && share_target.is_some_and(str::is_empty) {
             return Err("交换密钥域目标密码不能为空".into());
         }
-        if matches!(mode, 0..=2)
-            && !encrypt_opaque
-            && self.provision.form.encrypt_target_password.is_empty()
-        {
+        if matches!(mode, 0..=2) && encrypt_target.is_some_and(str::is_empty) {
             return Err("保密密钥域目标密码不能为空".into());
         }
         let max_share_password_errors = self
@@ -442,14 +449,12 @@ impl AppState {
                 crate::provision::KeyDomainSecretPair::new(
                     (!self.provision.form.share_source_password.is_empty())
                         .then_some(self.provision.form.share_source_password.as_bytes()),
-                    (share_target_requested && !share_opaque)
-                        .then_some(self.provision.form.share_target_password.as_bytes()),
+                    share_target.map(str::as_bytes),
                 ),
                 crate::provision::KeyDomainSecretPair::new(
                     (!self.provision.form.encrypt_source_password.is_empty())
                         .then_some(self.provision.form.encrypt_source_password.as_bytes()),
-                    (encrypt_target_requested && !encrypt_opaque)
-                        .then_some(self.provision.form.encrypt_target_password.as_bytes()),
+                    encrypt_target.map(str::as_bytes),
                 ),
             ),
             volume_label: self.provision.form.volume_label.trim().to_string(),

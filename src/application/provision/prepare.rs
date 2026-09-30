@@ -421,6 +421,15 @@ pub fn prepare_target_provision(
         target_plan.force_rebuild_for_format(role);
     }
     for part in &target_plan.partitions {
+        if part.password_disposition == Some(crate::provision::PasswordDisposition::Blocked) {
+            return Err(err(
+                EXIT_TARGET,
+                format!(
+                    "错误: {}密码域当前为“需重建”，但尚未获得用户的格式化授权",
+                    part.geometry.role.label()
+                ),
+            ));
+        }
         match part.disposition {
             RegionDisposition::Migrate => {
                 if part.migration_sources.is_empty() {

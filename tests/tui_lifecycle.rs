@@ -508,7 +508,7 @@ fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor(
 }
 
 #[test]
-fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
+fn passthrough_target_password_renders_explicit_state_instead_of_empty_secret_placeholder() {
     let mut state = AppState::new();
     state.replace_devices(vec![usb_device()]);
     assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
@@ -527,7 +527,7 @@ fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
         .map(|cell| cell.symbol())
         .collect::<String>();
     let compact = text.replace(' ', "");
-    assert!(compact.contains("新密码〈空〉"), "{text}");
+    assert!(compact.contains("新密码透传"), "{text}");
 }
 
 #[test]

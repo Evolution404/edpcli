@@ -21,8 +21,8 @@ mod write_plan;
 
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
 pub use key_domain::{
-    KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, SecretBytes, SourcePasswordKnowledge,
-    TargetPasswordPolicy, DEFAULT_KEY_DOMAIN_PASSWORD,
+    KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, PassthroughBasis, PasswordDisposition,
+    SecretBytes, SourcePasswordKnowledge, TargetPasswordPolicy, DEFAULT_KEY_DOMAIN_PASSWORD,
 };
 pub use keys::{
     default_file_key, default_file_key_checked, unwrap_file_key, unwrap_legacy_lba7_file_key,
@@ -58,13 +58,13 @@ pub use region_mapping::{
     RegionMappingPlanner, SourceRegion, TargetRegion,
 };
 pub use reprovision::{
-    apply_target_geometry_overrides, decide_partition_action, parse_existing_provision,
-    pass_info_policy_from_sectors, prefill_for_target_mode, rekey_existing_partition_image,
-    validate_target_geometry, CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind,
-    ExistingPartition, ExistingPartitionRecord, ExistingProvisionProfile, MigrationSource,
-    ParsedExistingProvision, PartitionAction, ProvisionPrefill, ProvisionTarget, QuickCapacityUnit,
-    RegionDisposition, TargetGeometryOverrides, TargetPartitionGeometry, TargetPartitionPlan,
-    TargetProvisionPlan,
+    apply_target_geometry_overrides, apply_target_geometry_overrides_draft,
+    decide_partition_action, parse_existing_provision, pass_info_policy_from_sectors,
+    prefill_for_target_mode, rekey_existing_partition_image, validate_target_geometry,
+    CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind, ExistingPartition,
+    ExistingPartitionRecord, ExistingProvisionProfile, MigrationSource, ParsedExistingProvision,
+    PartitionAction, ProvisionPrefill, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
+    TargetGeometryOverrides, TargetPartitionGeometry, TargetPartitionPlan, TargetProvisionPlan,
 };
 pub use spec::{Lba8Identity, OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
 pub use validate::{

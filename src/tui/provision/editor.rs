@@ -10,6 +10,77 @@ impl AppState {
             return false;
         }
         let id = descriptor.id;
+        if let ProvisionFieldId::StartLba(role) = id {
+            let (resolved, _) = match self.provision_resolved_prefill() {
+                Ok(value) => value,
+                Err(message) => {
+                    self.provision.message = Some(message);
+                    return true;
+                }
+            };
+            let parts = match resolved.draft_partitions(crate::common::SECTOR as u64) {
+                Ok(parts) => parts,
+                Err(message) => {
+                    self.provision.message = Some(message);
+                    return true;
+                }
+            };
+            let Some(current) = parts.iter().find(|part| part.role == role) else {
+                return false;
+            };
+            let required = current.sector_count;
+            let mut occupied = parts
+                .iter()
+                .filter(|part| part.role != role)
+                .copied()
+                .collect::<Vec<_>>();
+            occupied.sort_by_key(|part| part.start_lba);
+            let mut cursor = crate::provision::OFFICIAL_PARTITION_START_SECTOR;
+            let mut found = None;
+            for part in occupied {
+                if part.start_lba >= cursor && part.start_lba.saturating_sub(cursor) >= required {
+                    found = Some(cursor);
+                    break;
+                }
+                match part.end_lba() {
+                    Ok(end) => cursor = cursor.max(end),
+                    Err(message) => {
+                        self.provision.message = Some(message);
+                        return true;
+                    }
+                }
+            }
+            if found.is_none() && resolved.usable_end_lba.saturating_sub(cursor) >= required {
+                found = Some(cursor);
+            }
+            let Some(start) = found else {
+                self.provision.message = Some(format!(
+                    "无法为{}找到可容纳当前容量的最小可用起点",
+                    role.label()
+                ));
+                return true;
+            };
+            match role {
+                crate::provision::PartitionRole::Boot => {
+                    self.provision.form.boot_start_lba = start.to_string()
+                }
+                crate::provision::PartitionRole::Share
+                | crate::provision::PartitionRole::BootShareCombined => {
+                    self.provision.form.share_start_lba = start.to_string()
+                }
+                crate::provision::PartitionRole::Encrypt => {
+                    self.provision.form.encrypt_start_lba = start.to_string()
+                }
+                crate::provision::PartitionRole::CompatibilityReserve => return false,
+            }
+            self.provision.message = Some(format!(
+                "{}起点已自动填入最小可用位置 LBA {}",
+                role.label(),
+                start
+            ));
+            self.provision_sync_cursor_to_end();
+            return true;
+        }
         if let ProvisionFieldId::Plain {
             partition,
             kind: PlainProvisionFieldKind::Capacity,
@@ -32,13 +103,31 @@ impl AppState {
             }
             return true;
         }
+        if let ProvisionFieldId::Plain {
+            partition,
+            kind: PlainProvisionFieldKind::StartLba,
+        } = id
+        {
+            let Some(total_sectors) = self.provision_total_sectors() else {
+                self.provision.message = Some("目标 USB 已不存在".into());
+                return true;
+            };
+            match self
+                .provision
+                .plain_form
+                .fill_partition_start(total_sectors, partition)
+            {
+                Ok(()) => {
+                    self.provision.message = None;
+                    self.provision_sync_cursor_to_end();
+                }
+                Err(message) => self.provision.message = Some(message),
+            }
+            return true;
+        }
         let ProvisionFieldId::Capacity(role) = id else {
             return false;
         };
-        // The selected capacity itself does not determine its upper boundary. Use a
-        // one-sector placeholder so f can recover even after the user clears
-        // or partially edits the current capacity field. All other form values
-        // remain subject to normal strict geometry validation.
         let original_form = self.provision.form.clone();
         match role {
             crate::provision::PartitionRole::Boot => {
@@ -59,20 +148,48 @@ impl AppState {
             }
             crate::provision::PartitionRole::CompatibilityReserve => return false,
         }
-        let capacity_limit = self.provision_selected_capacity_limit();
+        let resolved_result = self.provision_resolved_prefill();
         self.provision.form = original_form;
-
-        let max_sectors = match capacity_limit {
-            Ok(Some((_, _, max_sectors, _, _))) if max_sectors > 0 => max_sectors,
-            Ok(_) => {
-                self.provision.message = Some("当前容量没有可填满的有效空间".into());
-                return true;
-            }
+        let (resolved, _) = match resolved_result {
+            Ok(value) => value,
             Err(message) => {
                 self.provision.message = Some(message);
                 return true;
             }
         };
+        let parts = match resolved.draft_partitions(crate::common::SECTOR as u64) {
+            Ok(parts) => parts,
+            Err(message) => {
+                self.provision.message = Some(message);
+                return true;
+            }
+        };
+        let Some(current) = parts.iter().find(|part| part.role == role) else {
+            return false;
+        };
+        let start = current.start_lba;
+        let mut boundary = resolved.usable_end_lba;
+        for other in parts.iter().filter(|part| part.role != role) {
+            let end = match other.end_lba() {
+                Ok(end) => end,
+                Err(message) => {
+                    self.provision.message = Some(message);
+                    return true;
+                }
+            };
+            if other.start_lba <= start && end > start {
+                boundary = start;
+                break;
+            }
+            if other.start_lba > start {
+                boundary = boundary.min(other.start_lba);
+            }
+        }
+        let max_sectors = boundary.saturating_sub(start);
+        if max_sectors == 0 {
+            self.provision.message = Some("当前起点没有可用连续空间".into());
+            return true;
+        }
 
         use crate::provision::{CapacitySource, QuickCapacityUnit};
         let (unit, quick, exact, edited, source) = match role {

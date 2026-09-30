@@ -820,16 +820,20 @@ fn mode0_to_mode1_unknown_encrypt_requires_explicit_format_for_password_change()
         .map(|(index, _)| index)
         .unwrap();
 
-    assert_eq!(fields[share_target].1, "0000aaaa");
-    assert!(fields[share_target].2);
-    assert_eq!(fields[encrypt_target].1, "0000aaaa");
-    assert!(fields[encrypt_target].2);
+    assert_eq!(fields[share_target].1, "透传");
+    assert_eq!(fields[encrypt_target].1, "透传");
 
     state.provision_mut().field_selected = encrypt_target;
     assert!(state.provision_selected_field_is_editable());
     assert!(!state.provision().form.format_encrypt);
+    assert!(state.provision_begin_insert());
+    assert_eq!(
+        state.provision_visible_fields()[encrypt_target].1,
+        "0000aaaa"
+    );
     state.provision_cursor_end();
     state.provision_push_char('x');
+    assert!(!state.provision_end_insert());
     assert!(
         !state.provision().form.format_encrypt,
         "editing a new password must never auto-enable destructive formatting"
@@ -851,6 +855,267 @@ fn mode0_to_mode1_unknown_encrypt_requires_explicit_format_for_password_change()
     );
     state.provision_mut().field_selected = share_target;
     assert!(state.provision_selected_field_is_editable());
+}
+
+#[test]
+fn target_password_space_and_insert_model_passthrough_explicit_without_format_side_effects() {
+    use edpcli::provision::{DiskProvisionKind, SourcePasswordKnowledge};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: DiskProvisionKind::Mode0,
+        share: Some(SourcePasswordKnowledge::Unknown),
+        share_opaque_profile: true,
+        encrypt: Some(SourcePasswordKnowledge::Unknown),
+        encrypt_opaque_profile: true,
+    }));
+    let targets = state
+        .provision_visible_fields()
+        .iter()
+        .enumerate()
+        .filter(|(_, (label, _, _))| label == "新密码")
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let share = targets[0];
+    let encrypt = targets[1];
+
+    assert_eq!(state.provision_visible_fields()[share].1, "透传");
+    assert_eq!(state.provision_visible_fields()[encrypt].1, "透传");
+    state.provision_mut().field_selected = share;
+    assert!(state.provision_toggle_selected_option());
+    assert_eq!(state.provision_visible_fields()[share].1, "0000aaaa");
+    assert_eq!(
+        state.provision_visible_fields()[encrypt].1,
+        "透传",
+        "share target mode must not leak into encrypt"
+    );
+    assert!(!state.provision().form.format_share);
+    assert!(!state.provision().form.format_encrypt);
+
+    assert!(state.provision_toggle_selected_option());
+    assert_eq!(state.provision_visible_fields()[share].1, "透传");
+    assert!(!state.provision().form.format_share);
+
+    assert!(state.provision_begin_insert());
+    assert_eq!(state.input_mode(), InputMode::Insert);
+    assert_eq!(state.provision_visible_fields()[share].1, "0000aaaa");
+    assert!(!state.provision().form.format_share);
+    assert!(!state.provision_end_insert());
+}
+
+#[test]
+fn failed_source_with_explicit_target_equal_to_failed_candidate_is_still_blocked() {
+    use edpcli::provision::{DiskProvisionKind, KeyDomainRole, SourcePasswordKnowledge};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: DiskProvisionKind::Mode0,
+        share: Some(SourcePasswordKnowledge::Unknown),
+        share_opaque_profile: true,
+        encrypt: Some(SourcePasswordKnowledge::Unknown),
+        encrypt_opaque_profile: true,
+    }));
+
+    let fields = state.provision_visible_fields();
+    let source_index = fields
+        .iter()
+        .position(|(label, _, _)| label == "原密码")
+        .expect("share source password");
+    let target_index = fields
+        .iter()
+        .position(|(label, _, _)| label == "新密码")
+        .expect("share target password");
+
+    state.provision_mut().field_selected = source_index;
+    assert!(state.provision_begin_insert());
+    state.provision_cursor_end();
+    state.provision_backspace();
+    assert!(state.provision_end_insert());
+    let (_, source_candidate, revision) = state
+        .provision_source_password_verify_request()
+        .expect("verification request")
+        .expect("source password request");
+    assert_eq!(source_candidate, "0000aaa");
+    state.provision_finish_source_password_verify(
+        KeyDomainRole::Share,
+        revision,
+        Err("来源密码验证失败".into()),
+    );
+
+    state.provision_mut().field_selected = target_index;
+    assert!(state.provision_begin_insert());
+    state.provision_cursor_end();
+    state.provision_backspace();
+    assert_eq!(state.provision().form.share_target_password, "0000aaa");
+    assert!(!state.provision_end_insert());
+    assert!(!state.provision().form.format_share);
+
+    let error = state.provision_request().expect_err(
+        "explicit new-password intent must be blocked whenever source verification failed",
+    );
+    assert!(error.contains("主动勾选交换区格式化"), "{error}");
+}
+
+#[test]
+fn user_target_password_draft_survives_source_reverification_and_passthrough_normalization() {
+    use edpcli::provision::{DiskProvisionKind, KeyDomainRole, SourcePasswordKnowledge};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: DiskProvisionKind::Mode0,
+        share: Some(SourcePasswordKnowledge::Unknown),
+        share_opaque_profile: true,
+        encrypt: Some(SourcePasswordKnowledge::Unknown),
+        encrypt_opaque_profile: true,
+    }));
+    let source_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "原密码")
+        .expect("share source password");
+    let target_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "新密码")
+        .expect("share target password");
+
+    state.provision_mut().field_selected = target_index;
+    assert!(state.provision_begin_insert());
+    state.provision_mut().form.share_target_password = "UserNew1!".into();
+    state.provision_cursor_end();
+    state.provision_push_char('x');
+    state.provision_backspace();
+    assert!(!state.provision_end_insert());
+    assert_eq!(state.provision().form.share_target_password, "UserNew1!");
+
+    state.provision_mut().field_selected = source_index;
+    assert!(state.provision_begin_insert());
+    state.provision_mut().form.share_source_password = "UserNew1!".into();
+    state.provision_cursor_end();
+    state.provision_push_char('x');
+    state.provision_backspace();
+    assert!(state.provision_end_insert());
+    let (_, _, revision) = state
+        .provision_source_password_verify_request()
+        .expect("verification request")
+        .expect("source password request");
+    state.provision_finish_source_password_verify(
+        KeyDomainRole::Share,
+        revision,
+        Ok(SourcePasswordKnowledge::UserVerified),
+    );
+    assert_eq!(
+        state.provision_visible_fields()[target_index].1,
+        "透传",
+        "equal verified source/target should normalize the action to passthrough"
+    );
+    assert_eq!(
+        state.provision().form.share_target_password,
+        "UserNew1!",
+        "normalization must not destroy the user's target draft"
+    );
+
+    state.provision_mut().field_selected = source_index;
+    assert!(state.provision_begin_insert());
+    state.provision_mut().form.share_source_password = "ActualOld1!".into();
+    state.provision_cursor_end();
+    state.provision_push_char('x');
+    state.provision_backspace();
+    assert!(state.provision_end_insert());
+    let (_, _, revision) = state
+        .provision_source_password_verify_request()
+        .expect("second verification request")
+        .expect("second source password request");
+    state.provision_finish_source_password_verify(
+        KeyDomainRole::Share,
+        revision,
+        Ok(SourcePasswordKnowledge::UserVerified),
+    );
+
+    state.provision_mut().field_selected = target_index;
+    assert!(state.provision_begin_insert());
+    assert_eq!(
+        state.provision().form.share_target_password,
+        "UserNew1!",
+        "re-entering target editing after source re-verification must preserve user-owned draft"
+    );
+}
+
+#[test]
+fn verified_equal_target_password_normalizes_back_to_passthrough() {
+    use edpcli::provision::{DiskProvisionKind, PartitionRole, SourcePasswordKnowledge};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: DiskProvisionKind::Mode0,
+        share: Some(SourcePasswordKnowledge::DefaultVerified),
+        share_opaque_profile: true,
+        encrypt: Some(SourcePasswordKnowledge::DefaultVerified),
+        encrypt_opaque_profile: true,
+    }));
+    let share_target = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "新密码")
+        .expect("share target password");
+    state.provision_mut().field_selected = share_target;
+
+    assert_eq!(state.provision_visible_fields()[share_target].1, "透传");
+    assert!(state.provision_begin_insert());
+    assert_eq!(state.provision_visible_fields()[share_target].1, "0000aaaa");
+    assert!(!state.provision_end_insert());
+    assert_eq!(
+        state.provision_visible_fields()[share_target].1,
+        "透传",
+        "explicit target equal to verified source must normalize to passthrough"
+    );
+    let request = state.provision_request().expect("passthrough request");
+    assert_eq!(
+        request.key_domains.target_password(PartitionRole::Share),
+        None
+    );
+    assert!(!request.format.share);
+}
+
+#[test]
+fn verified_different_target_password_requests_rewrap_without_formatting() {
+    use edpcli::provision::{DiskProvisionKind, PartitionRole, SourcePasswordKnowledge};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: DiskProvisionKind::Mode0,
+        share: Some(SourcePasswordKnowledge::DefaultVerified),
+        share_opaque_profile: true,
+        encrypt: Some(SourcePasswordKnowledge::DefaultVerified),
+        encrypt_opaque_profile: true,
+    }));
+    let share_target = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "新密码")
+        .expect("share target password");
+    state.provision_mut().field_selected = share_target;
+    assert!(state.provision_begin_insert());
+    state.provision_cursor_end();
+    state.provision_push_char('x');
+    assert!(!state.provision_end_insert());
+    assert_ne!(state.provision_visible_fields()[share_target].1, "透传");
+    let request = state.provision_request().expect("rewrap request");
+    assert_eq!(
+        request.key_domains.target_password(PartitionRole::Share),
+        Some(b"0000aaaax".as_slice())
+    );
+    assert!(!request.format.share);
 }
 
 #[test]
@@ -1213,7 +1478,7 @@ fn provision_capacity_hints_match_each_partition() {
     let boot = hint_for("启动区容量");
     let share = hint_for("交换区容量");
     let encrypt = hint_for("保密区容量");
-    assert_eq!(boot, "Space 切换 MiB / GiB / sector · f 填满");
+    assert_eq!(boot, "Space 切换 MiB / GiB / sector · f 最大可用容量");
     assert_eq!(share, boot);
     assert_eq!(encrypt, boot);
 }
@@ -1348,6 +1613,33 @@ fn plain_add_gap_fill_and_delete_never_move_other_partitions() {
 }
 
 #[test]
+fn plain_start_fill_finds_earliest_gap_without_moving_other_partitions() {
+    use edpcli::provision::CapacityInputMode;
+
+    let mut state = AppState::new();
+    enter_plain_form(&mut state);
+    {
+        let p1 = &mut state.provision_mut().plain_form.partitions[0];
+        p1.input_mode = CapacityInputMode::Exact;
+        p1.sector_count = "10000".into();
+    }
+    assert!(state.provision_plain_add_partition());
+    state.provision_mut().plain_form.partitions[1].start_lba = "30000".into();
+    state.provision_mut().plain_form.partitions[1].input_mode = CapacityInputMode::Exact;
+    state.provision_mut().plain_form.partitions[1].sector_count = "5000".into();
+    let p2_start_before = state.provision().plain_form.partitions[1].start_lba.clone();
+    state.provision_mut().plain_form.partitions[0].start_lba = "15000".into();
+    state.provision_mut().field_selected = 0;
+
+    assert!(state.provision_fill_selected_capacity());
+    assert_eq!(state.provision().plain_form.partitions[0].start_lba, "2048");
+    assert_eq!(
+        state.provision().plain_form.partitions[1].start_lba,
+        p2_start_before
+    );
+}
+
+#[test]
 fn plain_plan_rejects_overlap_and_fill_produces_valid_layout() {
     use edpcli::provision::CapacityInputMode;
 
@@ -1431,6 +1723,105 @@ fn provision_fill_selected_capacity_recovers_from_empty_capacity_input() {
         .provision_request()
         .expect("fill should repair empty capacity");
     assert!(request.encrypt_sectors.is_some_and(|sectors| sectors > 0));
+}
+
+#[test]
+fn provision_fill_start_finds_minimum_gap_without_mutating_other_form_fields() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+
+    let fields = state.provision_visible_fields();
+    let boot_start = fields
+        .iter()
+        .position(|(label, _, _)| label == "启动区起点 LBA")
+        .expect("boot start");
+    let share_start_before = state.provision().form.share_start_lba.clone();
+    let encrypt_start_before = state.provision().form.encrypt_start_lba.clone();
+    let boot_capacity_before = state.provision().form.boot_sectors.clone();
+    state.provision_mut().form.boot_start_lba = "100".into();
+    state.provision_mut().field_selected = boot_start;
+
+    assert!(state.provision_fill_selected_capacity());
+    assert_eq!(state.provision().form.boot_start_lba, "63");
+    assert_eq!(state.provision().form.share_start_lba, share_start_before);
+    assert_eq!(
+        state.provision().form.encrypt_start_lba,
+        encrypt_start_before
+    );
+    assert_eq!(state.provision().form.boot_sectors, boot_capacity_before);
+}
+
+#[test]
+fn provision_fill_capacity_uses_current_start_and_next_fixed_start_only() {
+    use edpcli::provision::CapacityInputMode;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_mut().form.share_start_lba = "20480".into();
+    state.provision_mut().form.encrypt_start_lba = "50000".into();
+    state.provision_mut().form.share_input_mode = CapacityInputMode::Exact;
+    state.provision_mut().form.share_sectors = "1000".into();
+    let boot_start_before = state.provision().form.boot_start_lba.clone();
+    let encrypt_start_before = state.provision().form.encrypt_start_lba.clone();
+    let share_capacity = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "交换区容量 (sector)")
+        .expect("share capacity");
+    state.provision_mut().field_selected = share_capacity;
+
+    assert!(state.provision_fill_selected_capacity());
+    assert_eq!(state.provision().form.share_sectors, "29520");
+    assert_eq!(state.provision().form.boot_start_lba, boot_start_before);
+    assert_eq!(
+        state.provision().form.encrypt_start_lba,
+        encrypt_start_before
+    );
+}
+
+#[test]
+fn invalid_partition_draft_remains_visible_with_red_conflict_segment_and_is_blocked() {
+    use edpcli::provision::CapacityInputMode;
+    use edpcli::tui::disk_layout::{DiskLayoutDetailTone, DiskRegionKind};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_mut().form.share_start_lba = "20480".into();
+    state.provision_mut().form.encrypt_start_lba = "50000".into();
+    state.provision_mut().form.share_input_mode = CapacityInputMode::Exact;
+    state.provision_mut().form.share_sectors = "30000".into();
+
+    let model = state.provision_layout_model();
+    let conflict = model
+        .segments
+        .iter()
+        .find(|segment| segment.kind == DiskRegionKind::Conflict)
+        .expect("current invalid draft must remain renderable with a conflict interval");
+    assert_eq!(conflict.start_lba, 50000);
+    assert_eq!(conflict.sector_count, 480);
+
+    let details = state.provision_layout_editor_details();
+    assert!(details.iter().any(|detail| {
+        detail.region_kind == Some(DiskRegionKind::Conflict)
+            && detail.tone == DiskLayoutDetailTone::Danger
+            && detail
+                .columns
+                .as_ref()
+                .is_some_and(|columns| columns[3].contains("冲突"))
+    }));
+    assert!(details.iter().any(|detail| {
+        detail.tone == DiskLayoutDetailTone::Danger && detail.text.contains("当前草稿布局无效")
+    }));
+    assert!(
+        !details
+            .iter()
+            .any(|detail| detail.text.contains("目标布局尚未通过校验")),
+        "invalid geometry must not replace the current draft map/list with a placeholder"
+    );
+    assert!(state.provision_request().is_err());
 }
 
 #[test]
@@ -1536,8 +1927,8 @@ fn provision_compact_rows_keep_partition_capacity_and_start_together() {
         .map(|index| fields[*index].0.as_str())
         .collect::<Vec<_>>();
     assert_eq!(labels.len(), 2);
-    assert!(labels[0].starts_with("交换区容量"));
-    assert_eq!(labels[1], "交换区起点 LBA");
+    assert_eq!(labels[0], "交换区起点 LBA");
+    assert!(labels[1].starts_with("交换区容量"));
 }
 
 #[test]

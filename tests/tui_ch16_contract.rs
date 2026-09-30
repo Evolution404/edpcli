@@ -186,6 +186,32 @@ fn provision_lba8_advanced_identity_expands_edits_and_collapses_with_o_contract(
     assert!(screen.contains("o收起"), "{screen}");
     assert!(!screen.contains("LBA8高级身份"), "{screen}");
     assert!(screen.contains("GLab"), "{screen}");
+    let lines = rendered_lines(&state, 160, 60)
+        .iter()
+        .map(|line| line.replace(' ', ""))
+        .collect::<Vec<_>>();
+    let advanced_y = lines
+        .iter()
+        .position(|line| line.contains("高级设置"))
+        .expect("advanced settings row must render");
+    let glab_y = lines
+        .iter()
+        .position(|line| line.contains("GLab"))
+        .expect("first advanced identity row must render");
+    let indus_y = lines
+        .iter()
+        .position(|line| line.contains("Indus"))
+        .expect("second advanced identity row must render");
+    assert_eq!(
+        glab_y,
+        advanced_y + 1,
+        "expanded advanced identity must start immediately below 高级设置 without a blank line"
+    );
+    assert_eq!(
+        indus_y,
+        glab_y + 1,
+        "advanced identity rows must be contiguous without wrapped blank lines"
+    );
 
     let glab_index = state
         .provision_visible_fields()

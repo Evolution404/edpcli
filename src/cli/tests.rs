@@ -33,9 +33,9 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
     use crate::filesystem::FilesystemKind;
     use crate::protocol::edpf::EdpPartitionType;
     use crate::provision::{
-        OfficialPartitionMode, PartitionAction, PartitionRole, RegionDisposition,
-        SourcePasswordKnowledge, TargetPartitionGeometry, TargetPartitionPlan,
-        TargetPasswordPolicy, TargetProvisionPlan,
+        OfficialPartitionMode, PartitionAction, PartitionRole, PassthroughBasis,
+        PasswordDisposition, RegionDisposition, SourcePasswordKnowledge, TargetPartitionGeometry,
+        TargetPartitionPlan, TargetPasswordPolicy, TargetProvisionPlan,
     };
 
     let plan = TargetProvisionPlan {
@@ -52,6 +52,7 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
                 },
                 action: PartitionAction::Rebuild,
                 disposition: RegionDisposition::Rebuild,
+                password_disposition: Some(PasswordDisposition::Rebuild),
                 source_password_knowledge: None,
                 target_password_policy: Some(TargetPasswordPolicy::InitializeNew),
                 reason: "geometry changed".into(),
@@ -69,6 +70,9 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
                 },
                 action: PartitionAction::PreserveExact,
                 disposition: RegionDisposition::PreserveOpaque,
+                password_disposition: Some(PasswordDisposition::Passthrough(
+                    PassthroughBasis::OpaqueCompatible,
+                )),
                 source_password_knowledge: Some(SourcePasswordKnowledge::Unknown),
                 target_password_policy: Some(TargetPasswordPolicy::PreserveOpaque),
                 reason: "exact source match".into(),
@@ -85,16 +89,16 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
         .any(|line| line.contains("start=63 end=162 sectors=100")));
     assert!(lines
         .iter()
-        .any(|line| line.contains("Rebuild") && line.contains("原数据不可原样保留")));
+        .any(|line| line.contains("Rebuild") && line.contains("K_new")));
     assert!(lines
         .iter()
         .any(|line| line.contains("start=1000 end=1199 sectors=200")));
-    assert!(lines.iter().any(|line| line.contains("PreserveOpaque")
-        && line.contains("原 key material")
-        && line.contains("0 写入")));
+    assert!(lines.iter().any(|line| line.contains("Passthrough")
+        && line.contains("opaque-compatible")
+        && line.contains("original key material")));
     assert!(lines
         .iter()
-        .any(|line| line.contains("source=Unknown") && line.contains("target=disabled(opaque)")));
+        .any(|line| line.contains("source=Unknown") && line.contains("password=passthrough")));
     assert!(lines
         .iter()
         .any(|line| line.contains("unallocated=737 sectors")));

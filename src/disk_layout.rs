@@ -15,6 +15,7 @@ pub enum DiskRegionKind {
     Metadata,
     Reserved,
     Unknown,
+    Conflict,
     Free,
     Plain,
     Boot,
@@ -35,6 +36,7 @@ impl DiskRegionKind {
             Self::Metadata => "元数据",
             Self::Reserved => "保留区域",
             Self::Unknown => "未知区域",
+            Self::Conflict => "冲突区域",
             Self::Free => "空闲区域",
             Self::Plain => "普通分区",
             Self::Boot => "启动区",
@@ -255,6 +257,98 @@ impl DiskLayoutModel {
             });
         }
         Self::canonical_from_known(total_sectors, known)
+    }
+
+    pub fn draft_edp(
+        total_sectors: u64,
+        mut partitions: Vec<DiskLayoutSegment>,
+        lce_start_lba: u64,
+        lce_sector_count: u64,
+    ) -> Self {
+        if total_sectors == 0 {
+            return Self::new(0, Vec::new());
+        }
+        let mut known = Vec::with_capacity(partitions.len().saturating_add(4));
+        known.push(DiskLayoutSegment {
+            label: "EDP 主协议区".into(),
+            start_lba: 0,
+            sector_count: 13.min(total_sectors),
+            kind: DiskRegionKind::Protocol,
+        });
+        known.append(&mut partitions);
+        known.push(DiskLayoutSegment {
+            label: "LCE".into(),
+            start_lba: lce_start_lba,
+            sector_count: lce_sector_count,
+            kind: DiskRegionKind::Lce,
+        });
+        if total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS + TAIL_METADATA_MIRROR_SECTORS {
+            known.push(DiskLayoutSegment {
+                label: "历史备份镜像".into(),
+                start_lba: total_sectors - TAIL_METADATA_MIRROR_OFFSET_SECTORS,
+                sector_count: TAIL_METADATA_MIRROR_SECTORS,
+                kind: DiskRegionKind::BackupMirror,
+            });
+        }
+        if total_sectors > TAIL_END4_MIRROR_OFFSET_SECTORS {
+            known.push(DiskLayoutSegment {
+                label: "盘尾恢复节点".into(),
+                start_lba: total_sectors - TAIL_END4_MIRROR_OFFSET_SECTORS,
+                sector_count: 1,
+                kind: DiskRegionKind::RestoreNode,
+            });
+        }
+
+        let mut boundaries = vec![0, total_sectors];
+        for segment in &known {
+            if segment.start_lba < total_sectors {
+                boundaries.push(segment.start_lba);
+            }
+            if let Ok(end) = segment.end_exclusive() {
+                boundaries.push(end.min(total_sectors));
+            }
+        }
+        boundaries.sort_unstable();
+        boundaries.dedup();
+
+        let mut segments = Vec::<DiskLayoutSegment>::new();
+        for pair in boundaries.windows(2) {
+            let start = pair[0];
+            let end = pair[1];
+            if end <= start {
+                continue;
+            }
+            let covering = known
+                .iter()
+                .filter(|segment| {
+                    segment.start_lba < end
+                        && segment
+                            .end_exclusive()
+                            .is_ok_and(|segment_end| segment_end > start)
+                })
+                .collect::<Vec<_>>();
+            let (label, kind) = match covering.as_slice() {
+                [] => ("空闲区域".to_string(), DiskRegionKind::Free),
+                [segment] => (segment.label.clone(), segment.kind),
+                _ => ("冲突区域".to_string(), DiskRegionKind::Conflict),
+            };
+            if let Some(previous) = segments.last_mut() {
+                if previous.kind == kind
+                    && previous.label == label
+                    && previous.end_exclusive().ok() == Some(start)
+                {
+                    previous.sector_count = previous.sector_count.saturating_add(end - start);
+                    continue;
+                }
+            }
+            segments.push(DiskLayoutSegment {
+                label,
+                start_lba: start,
+                sector_count: end - start,
+                kind,
+            });
+        }
+        Self::new(total_sectors, segments)
     }
 
     pub fn canonical_inspect_context(context: &InspectDiskContext) -> Result<Self, String> {

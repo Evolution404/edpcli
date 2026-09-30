@@ -287,20 +287,26 @@ fn chapter_12_tui_must_model_share_and_encrypt_passwords_independently() {
 fn chapter_12_review_must_expose_domain_disposition_and_password_state() {
     let review = include_str!("../src/tui/provision/review.rs");
     for token in [
-        "PreserveOpaque",
-        "PreserveVerified",
-        "RewrapVerified",
-        "Rebuild",
+        "密码域透传",
+        "仅改密",
+        "密码域重建",
+        "密码域需重建",
+        "密码动作:",
+        "原密码已验证",
+        "原密码未知，布局满足黑盒透传条件",
         "默认密码已验证",
         "用户旧密码已验证",
         "来源密码 Unknown",
-        "目标密码禁用（Opaque）",
     ] {
         assert!(
             review.contains(token),
             "missing Chapter 12 review token: {token}"
         );
     }
+    assert!(
+        !review.contains("目标密码禁用（Opaque）"),
+        "review must use the unified 透传/改密/重建/需重建 vocabulary"
+    );
 }
 
 #[test]

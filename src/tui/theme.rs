@@ -551,6 +551,7 @@ impl Theme {
                 self.palette.partition_compatibility
             }
             DiskRegionKind::Unknown => self.palette.text_muted,
+            DiskRegionKind::Conflict => self.palette.danger,
             DiskRegionKind::Free => self.palette.partition_free,
             DiskRegionKind::Plain => self.palette.partition_plain,
             DiskRegionKind::Boot => self.palette.partition_boot,
@@ -583,6 +584,7 @@ impl Theme {
                 | DiskRegionKind::Reserved
                 | DiskRegionKind::Compatibility => Color::Rgb(0xD8, 0xC9, 0xA6),
                 DiskRegionKind::Unknown => Color::Rgb(0xD2, 0xC5, 0xC0),
+                DiskRegionKind::Conflict => Color::Rgb(0xFF, 0x8E, 0x8E),
                 DiskRegionKind::Free => Color::Rgb(0xCB, 0xD2, 0xD8),
                 DiskRegionKind::Plain => Color::Rgb(0xB7, 0xD2, 0xE0),
                 DiskRegionKind::Boot => Color::Rgb(0xB7, 0xD8, 0xD3),
@@ -598,6 +600,7 @@ impl Theme {
                 | DiskRegionKind::Reserved
                 | DiskRegionKind::Compatibility => Color::Indexed(180),
                 DiskRegionKind::Unknown | DiskRegionKind::Free => Color::Indexed(250),
+                DiskRegionKind::Conflict => Color::Indexed(210),
                 DiskRegionKind::Plain => Color::Indexed(111),
                 DiskRegionKind::Boot => Color::Indexed(116),
                 DiskRegionKind::Share | DiskRegionKind::Combined => Color::Indexed(151),
@@ -612,6 +615,7 @@ impl Theme {
                 | DiskRegionKind::Reserved
                 | DiskRegionKind::Compatibility => Color::Yellow,
                 DiskRegionKind::Unknown | DiskRegionKind::Free => Color::Gray,
+                DiskRegionKind::Conflict => Color::Red,
                 DiskRegionKind::Plain | DiskRegionKind::RestoreNode | DiskRegionKind::Tail => {
                     Color::Blue
                 }
@@ -642,6 +646,8 @@ impl Theme {
                 ) => Color::Rgb(0x74, 0x66, 0x4A),
                 (DiskRegionKind::Unknown, false) => Color::Rgb(0x55, 0x4C, 0x49),
                 (DiskRegionKind::Unknown, true) => Color::Rgb(0x6B, 0x5D, 0x58),
+                (DiskRegionKind::Conflict, false) => Color::Rgb(0x7A, 0x2C, 0x2C),
+                (DiskRegionKind::Conflict, true) => Color::Rgb(0x94, 0x36, 0x36),
                 (DiskRegionKind::Free, false) => Color::Rgb(0x50, 0x58, 0x61),
                 (DiskRegionKind::Free, true) => Color::Rgb(0x68, 0x72, 0x7C),
                 (DiskRegionKind::Plain, false) => Color::Rgb(0x34, 0x5B, 0x72),
@@ -685,6 +691,8 @@ impl Theme {
                     ) => 94,
                     (DiskRegionKind::Unknown, false) => 95,
                     (DiskRegionKind::Unknown, true) => 131,
+                    (DiskRegionKind::Conflict, false) => 88,
+                    (DiskRegionKind::Conflict, true) => 124,
                     (DiskRegionKind::Free, false) => 240,
                     (DiskRegionKind::Free, true) => 244,
                     (DiskRegionKind::Plain, false) => 17,
@@ -748,6 +756,8 @@ impl Theme {
                 ) => Color::Rgb(0xF4, 0xEE, 0xDF),
                 (DiskRegionKind::Unknown, false) => Color::Rgb(0xE6, 0xE1, 0xDE),
                 (DiskRegionKind::Unknown, true) => Color::Rgb(0xF1, 0xEC, 0xE9),
+                (DiskRegionKind::Conflict, false) => Color::Rgb(0xFF, 0xD6, 0xD6),
+                (DiskRegionKind::Conflict, true) => Color::Rgb(0xFF, 0xE6, 0xE6),
                 (DiskRegionKind::Free, false) => Color::Rgb(0xE1, 0xE5, 0xE9),
                 (DiskRegionKind::Free, true) => Color::Rgb(0xF1, 0xF4, 0xF6),
                 (DiskRegionKind::Plain, false) => Color::Rgb(0xE0, 0xEA, 0xF0),

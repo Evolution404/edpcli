@@ -85,7 +85,7 @@ fn provision_resolve_disk(
 pub(in crate::cli) fn target_plan_summary_lines(
     plan: &crate::provision::TargetProvisionPlan,
 ) -> Vec<String> {
-    use crate::provision::{RegionDisposition, SourcePasswordKnowledge, TargetPasswordPolicy};
+    use crate::provision::{RegionDisposition, SourcePasswordKnowledge};
 
     let mut lines = Vec::with_capacity(plan.partitions.len() * 2 + 1);
     for partition in &plan.partitions {
@@ -95,23 +95,34 @@ pub(in crate::cli) fn target_plan_summary_lines(
             .checked_add(geometry.sector_count)
             .and_then(|end| end.checked_sub(1))
             .unwrap_or(u64::MAX);
-        let fate = match partition.disposition {
-            RegionDisposition::PreserveOpaque => {
-                "PreserveOpaque · 原 key material 逐字段透传 · data extent 0 写入"
+        let fate = match partition.password_disposition {
+            Some(crate::provision::PasswordDisposition::Passthrough(
+                crate::provision::PassthroughBasis::Verified,
+            )) => "Passthrough · verified · FileKey/wrapper/data extent unchanged",
+            Some(crate::provision::PasswordDisposition::Passthrough(
+                crate::provision::PassthroughBasis::OpaqueCompatible,
+            )) => "Passthrough · opaque-compatible · original key material/data extent unchanged",
+            Some(crate::provision::PasswordDisposition::Rewrap) => {
+                "Rewrap · K_old unchanged · wrapper only"
             }
-            RegionDisposition::PreserveVerified => {
-                "PreserveVerified · K_old/wrapper 保持 · data extent 0 写入"
+            Some(crate::provision::PasswordDisposition::Rebuild) => {
+                "Rebuild · K_new + full filesystem initialization"
             }
-            RegionDisposition::RewrapVerified => {
-                "RewrapVerified · K_old 保持 · 仅重包 wrapper · data extent 0 写入"
+            Some(crate::provision::PasswordDisposition::Blocked) => {
+                "Blocked · rebuild required but not authorized"
             }
-            RegionDisposition::Migrate => {
-                "Migrate · 文件级 staging + 目标文件系统重建 · 原子写入/readback/rollback"
-            }
-            RegionDisposition::Rebuild => {
-                "Rebuild · K_new + 完整 filesystem initialization · 原数据不可原样保留"
-            }
-            RegionDisposition::Drop => "Drop · 来源区域不进入目标",
+            None => match partition.disposition {
+                RegionDisposition::PreserveOpaque => "Preserve · original extent unchanged",
+                RegionDisposition::PreserveVerified => "Preserve · verified extent unchanged",
+                RegionDisposition::RewrapVerified => "Preserve · extent unchanged",
+                RegionDisposition::Migrate => {
+                    "Migrate · 文件级 staging + 目标文件系统重建 · 原子写入/readback/rollback"
+                }
+                RegionDisposition::Rebuild => {
+                    "Rebuild · K_new + 完整 filesystem initialization · 原数据不可原样保留"
+                }
+                RegionDisposition::Drop => "Drop · 来源区域不进入目标",
+            },
         };
         let password = match partition.source_password_knowledge {
             Some(SourcePasswordKnowledge::DefaultVerified) => "source=DefaultVerified",
@@ -119,12 +130,12 @@ pub(in crate::cli) fn target_plan_summary_lines(
             Some(SourcePasswordKnowledge::Unknown) => "source=Unknown",
             None => "source=no-key-domain",
         };
-        let target_policy = match partition.target_password_policy {
-            Some(TargetPasswordPolicy::PreserveOpaque) => "target=disabled(opaque)",
-            Some(TargetPasswordPolicy::ReuseVerified) => "target=reuse-verified",
-            Some(TargetPasswordPolicy::ReplaceVerified) => "target=replace/rewrap",
-            Some(TargetPasswordPolicy::InitializeNew) => "target=initialize-new",
-            None => "target=no-key-domain",
+        let password_action = match partition.password_disposition {
+            Some(crate::provision::PasswordDisposition::Passthrough(_)) => "password=passthrough",
+            Some(crate::provision::PasswordDisposition::Rewrap) => "password=rewrap",
+            Some(crate::provision::PasswordDisposition::Rebuild) => "password=rebuild",
+            Some(crate::provision::PasswordDisposition::Blocked) => "password=blocked",
+            None => "password=no-key-domain",
         };
         lines.push(format!(
             "  {} type{} start={} end={} sectors={} · {}",
@@ -137,7 +148,7 @@ pub(in crate::cli) fn target_plan_summary_lines(
         ));
         lines.push(format!(
             "    {} · {} · {}",
-            password, target_policy, partition.reason
+            password, password_action, partition.reason
         ));
     }
     lines.push(format!(

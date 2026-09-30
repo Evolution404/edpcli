@@ -1,13 +1,6 @@
 use super::*;
 
 impl AppState {
-    pub(super) fn provision_sync_cursor_to_end(&mut self) {
-        self.provision.field_cursor = self
-            .provision_selected_field()
-            .map(|value| value.chars().count())
-            .unwrap_or(0);
-    }
-
     pub fn provision_selected_field_is_editable(&self) -> bool {
         self.provision_field_descriptor(self.provision.field_selected)
             .is_some_and(|descriptor| descriptor.capabilities.editable)
@@ -129,43 +122,20 @@ impl AppState {
         let Some(ProvisionFieldId::TargetPassword(domain)) = id else {
             return;
         };
-        match domain {
-            crate::provision::KeyDomainRole::Share => {
-                self.provision.target_password_edits.share = true;
-            }
-            crate::provision::KeyDomainRole::Encrypt => {
-                self.provision.target_password_edits.encrypt = true;
-            }
-        }
+        self.provision_note_target_password_user_edit(domain);
     }
 
     pub(super) fn provision_password_plan_intent(&self, mode: u8) -> Result<(bool, bool), String> {
-        use crate::provision::{KeyDomainRole, SourcePasswordKnowledge};
+        use crate::provision::KeyDomainRole;
         let check = |active: bool, domain: KeyDomainRole, label: &str, format: bool| {
             if !active {
                 return Ok(false);
             }
-            let (verification, edited, knowledge) = match domain {
-                KeyDomainRole::Share => (
-                    self.provision.share_source_verification,
-                    self.provision.target_password_edits.share,
-                    self.provision.form.share_source_knowledge,
-                ),
-                KeyDomainRole::Encrypt => (
-                    self.provision.encrypt_source_verification,
-                    self.provision.target_password_edits.encrypt,
-                    self.provision.form.encrypt_source_knowledge,
-                ),
-            };
-            if verification == ProvisionPasswordVerificationState::Verifying {
-                return Err(format!("{label}原密码正在只读验证，请稍候再生成计划"));
+            let intent = self.provision_password_intent(domain, format);
+            if let Some(message) = intent.blocking_message(label) {
+                return Err(message);
             }
-            if edited && knowledge == SourcePasswordKnowledge::Unknown && !format {
-                return Err(format!(
-                    "{label}原密码未验证，不能无损改密；如需使用新密码，请主动勾选{label}格式化，否则保持新密码未修改以透传原密钥域"
-                ));
-            }
-            Ok(edited || format || knowledge != SourcePasswordKnowledge::Unknown)
+            Ok(intent.target_password_requested())
         };
         let form = &self.provision.form;
         Ok((

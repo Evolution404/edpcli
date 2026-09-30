@@ -134,7 +134,18 @@ pub(super) fn password_domain_row(
         && state.provision_selected_field_is_editable();
 
     let (_, source_value, source_secret) = &fields[source_index];
-    let (_, target_value, target_secret) = &fields[target_index];
+    let (target_value, target_secret) = if state.provision_target_password_is_passthrough(domain) {
+        ("透传", false)
+    } else {
+        match domain {
+            crate::provision::KeyDomainRole::Share => {
+                (provision.form.share_target_password.as_str(), true)
+            }
+            crate::provision::KeyDomainRole::Encrypt => {
+                (provision.form.encrypt_target_password.as_str(), true)
+            }
+        }
+    };
     let source_prefix_width = 2 + 8 + metrics.0 + 1;
     let source_status_width = 1 + crate::ui::disp_width(&status);
     let source_value_width = left_width
@@ -163,11 +174,11 @@ pub(super) fn password_domain_row(
             target_value,
             state.provision_field_cursor(),
             target_value_width.saturating_sub(2),
-            *target_secret,
+            target_secret,
         )
     } else {
         fit_display_width(
-            &masked_value(target_value, *target_secret),
+            &masked_value(target_value, target_secret),
             target_value_width,
         )
         .trim_end()

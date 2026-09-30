@@ -71,6 +71,11 @@ impl AppState {
                 }
                 true
             }
+            Some(ProvisionFieldId::TargetPassword(domain)) => {
+                self.provision_toggle_target_password_mode(domain);
+                self.provision.message = None;
+                true
+            }
             Some(ProvisionFieldId::Filesystem(role)) => {
                 match role {
                     crate::provision::PartitionRole::Boot => {
@@ -159,7 +164,8 @@ impl AppState {
             Some(
                 ProvisionFieldId::ForceChangePassword
                 | ProvisionFieldId::CancelPasswordComplexityCheck
-                | ProvisionFieldId::FormatEnabled(_),
+                | ProvisionFieldId::FormatEnabled(_)
+                | ProvisionFieldId::TargetPassword(_),
             ) => self.provision_toggle_selected_option(),
             _ => false,
         }
