@@ -482,6 +482,19 @@ fn draw_backup_coverage(frame: &mut Frame, area: ratatui::layout::Rect, state: &
     );
 }
 
+fn draw_backup_status_modal(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    title: &str,
+    lines: Vec<Line<'static>>,
+) {
+    let height = (lines.len() as u16).saturating_add(2).clamp(5, 12);
+    let modal = crate::tui::ui::centered_modal_rect(area, 78, height);
+    crate::tui::ui::render_modal(frame, modal, title, |frame, inner| {
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+    });
+}
+
 pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let Some(delete) = state.backup_delete() else {
         return;
@@ -509,34 +522,30 @@ pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect,
         );
         return;
     }
-    let mut lines = vec![
-        Line::from(Span::styled("删除备份", danger())),
-        Line::from(vec![
-            Span::styled("文件: ", accent()),
-            Span::raw(safe(&delete.path.display().to_string())),
-        ]),
-        Line::from("安全规则：固定选中时 SHA-256 → 删除前重新扫描 → 内容复核 → 至少保留该盘 1 份备份 → 删除单文件 .edpb"),
-    ];
     if delete.stage == WizardStage::Running {
-        lines.push(Line::from(
-            "正在复核并删除；q / Esc / Ctrl-C 将延迟到安全结束点。",
-        ));
+        draw_backup_status_modal(
+            frame,
+            area,
+            "删除备份 · 执行中",
+            vec![
+                Line::from(format!(
+                    "文件  {}",
+                    safe(&delete.path.display().to_string())
+                )),
+                Line::from(
+                    delete
+                        .message
+                        .as_deref()
+                        .map(safe)
+                        .unwrap_or_else(|| "正在复核并删除备份…".into()),
+                ),
+                Line::from(Span::styled(
+                    "q / Esc / Ctrl-C 将延迟到安全结束点。",
+                    warning(),
+                )),
+            ],
+        );
     }
-    if let Some(message) = &delete.message {
-        lines.push(Line::from(safe(message)));
-    }
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(danger())
-                    .title("危险操作 · 删除备份")
-                    .title_style(danger()),
-            )
-            .wrap(Wrap { trim: true }),
-        area,
-    );
 }
 
 pub(super) fn draw_backup_batch_delete(
@@ -554,18 +563,18 @@ pub(super) fn draw_backup_batch_delete(
         .as_ref()
         .map(|plan| plan.targets.len())
         .unwrap_or_else(|| state.backup_selection_count());
-    let mut lines = vec![
-        Line::from(Span::styled("批量删除备份", danger())),
-        Line::from(format!("当前勾选: {} 份", state.backup_selection_count())),
-        Line::from("安全规则：新鲜扫描逐项固定路径 + SHA-256 → 一次性保留底线检查 → 固定 DeletePlan → 执行时逐条复核。"),
-        Line::from(""),
-    ];
     match batch.stage {
         BackupBatchDeleteStage::Planning => {
-            lines.push(Line::from(Span::styled(
-                "正在生成固定批量删除计划…",
-                secondary(),
-            )));
+            draw_backup_status_modal(
+                frame,
+                area,
+                "批量删除 · 生成计划",
+                vec![
+                    Line::from(format!("已勾选  {} 份备份", state.backup_selection_count())),
+                    Line::from("正在新鲜扫描并逐项固定路径与 SHA-256…"),
+                    Line::from(Span::styled("计划生成期间不会删除任何文件。", muted())),
+                ],
+            );
         }
         BackupBatchDeleteStage::Confirm => {
             crate::tui::ui::render_action_confirmation_modal(
@@ -575,7 +584,7 @@ pub(super) fn draw_backup_batch_delete(
                     title: "批量删除备份",
                     headline: "确认执行批量删除？",
                     details: vec![
-                        Line::from(format!("将删除 {planned} 份已固定备份。")),
+                        Line::from(format!("固定计划将删除 {planned} 份备份。")),
                         Line::from("执行时逐条复核路径、SHA-256 与保留底线。"),
                         Line::from(Span::styled(
                             "此操作不可撤销，但不是目标介质写入。",
@@ -585,31 +594,26 @@ pub(super) fn draw_backup_batch_delete(
                     tone: crate::tui::ui::ConfirmationTone::Destructive,
                 },
             );
-            return;
         }
         BackupBatchDeleteStage::Running => {
-            lines.push(Line::from(Span::styled(
-                "正在按固定计划逐条复核并删除；退出请求延迟到安全结束点。",
-                warning(),
-            )));
+            draw_backup_status_modal(
+                frame,
+                area,
+                "批量删除 · 执行中",
+                vec![
+                    Line::from(format!("固定目标  {planned} 份")),
+                    Line::from(
+                        batch
+                            .message
+                            .as_deref()
+                            .map(safe)
+                            .unwrap_or_else(|| "正在按固定计划逐条复核并删除…".into()),
+                    ),
+                    Line::from(Span::styled("退出请求会延迟到安全结束点。", warning())),
+                ],
+            );
         }
     }
-    if let Some(message) = &batch.message {
-        lines.push(Line::from(Span::styled(safe(message), muted())));
-    }
-
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(danger())
-                    .title("危险操作 · 批量删除")
-                    .title_style(danger()),
-            )
-            .wrap(Wrap { trim: true }),
-        area,
-    );
 }
 
 pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
@@ -618,26 +622,33 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
     };
     use super::super::state::BackupPruneStage;
 
-    let mut lines = vec![
-        Line::from(Span::styled("备份保留策略清理", warning())),
-        Line::from("按同盘组执行 keep-N；原始盘备份与保留底线由 application 层统一保护。"),
-        Line::from(""),
-    ];
     match prune.stage {
         BackupPruneStage::Input => {
-            lines.extend([
-                Line::from(vec![
-                    Span::styled("每组保留最近 N 份快照: ", accent()),
-                    Span::styled(safe(&prune.keep_input), input_focused()),
-                ]),
-                Line::from("仅输入正整数；Enter 生成只读清理计划，Esc 取消。"),
-            ]);
+            draw_backup_status_modal(
+                frame,
+                area,
+                "备份清理 · keep-N",
+                vec![
+                    Line::from("按同盘组保留最近 N 份快照。"),
+                    Line::from(vec![
+                        Span::styled("每组保留  ", muted()),
+                        Span::styled(safe(&prune.keep_input), input_focused()),
+                    ]),
+                    Line::from("Enter 生成只读清理计划 · Esc 取消"),
+                ],
+            );
         }
         BackupPruneStage::Planning => {
-            lines.push(Line::from(Span::styled(
-                "正在扫描备份并生成固定候选快照…",
-                secondary(),
-            )));
+            draw_backup_status_modal(
+                frame,
+                area,
+                "备份清理 · 生成计划",
+                vec![
+                    Line::from(format!("keep-N  {}", safe(&prune.keep_input))),
+                    Line::from("正在扫描备份并生成固定候选快照…"),
+                    Line::from(Span::styled("计划生成期间不会删除任何文件。", muted())),
+                ],
+            );
         }
         BackupPruneStage::Confirm => {
             let count = prune
@@ -671,29 +682,29 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
                     tone: crate::tui::ui::ConfirmationTone::Destructive,
                 },
             );
-            return;
         }
         BackupPruneStage::Running => {
-            lines.push(Line::from(Span::styled(
-                "正在逐条摘要复核并删除；退出请求会延迟到安全结束点。",
-                warning(),
-            )));
+            let count = prune
+                .prepared
+                .as_ref()
+                .map(|prepared| prepared.plan.targets.len())
+                .unwrap_or(0);
+            draw_backup_status_modal(
+                frame,
+                area,
+                "备份清理 · 执行中",
+                vec![
+                    Line::from(format!("固定目标  {count} 份")),
+                    Line::from(
+                        prune
+                            .message
+                            .as_deref()
+                            .map(safe)
+                            .unwrap_or_else(|| "正在逐条复核摘要并清理固定候选…".into()),
+                    ),
+                    Line::from(Span::styled("退出请求会延迟到安全结束点。", warning())),
+                ],
+            );
         }
     }
-    if let Some(message) = &prune.message {
-        lines.push(Line::from(Span::styled(safe(message), danger())));
-    }
-
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(warning())
-                    .title("备份清理 · keep-N")
-                    .title_style(warning()),
-            )
-            .wrap(Wrap { trim: true }),
-        area,
-    );
 }

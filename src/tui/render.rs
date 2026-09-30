@@ -931,12 +931,6 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
     if state.workspace() == Workspace::Inspect && state.advanced_inspect().is_some() {
         draw_advanced_inspect(frame, content_area, state);
-    } else if state.backup_delete().is_some() {
-        draw_backup_delete(frame, content_area, state);
-    } else if state.backup_batch_delete().is_some() {
-        draw_backup_batch_delete(frame, content_area, state);
-    } else if state.backup_prune().is_some() {
-        draw_backup_prune(frame, content_area, state);
     } else if state.wizard().is_some() && !write_confirmation_open {
         draw_wizard(frame, content_area, state);
     } else if state.input_mode() == InputMode::Command {
@@ -956,6 +950,13 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
     if state.provision_scheme_picker_open() {
         draw_scheme_picker(frame, content_area, state);
+    }
+    if state.backup_delete().is_some() {
+        draw_backup_delete(frame, content_area, state);
+    } else if state.backup_batch_delete().is_some() {
+        draw_backup_batch_delete(frame, content_area, state);
+    } else if state.backup_prune().is_some() {
+        draw_backup_prune(frame, content_area, state);
     }
     if state.help_open() {
         super::help_overlay::draw_help_overlay(frame, content_area, state);

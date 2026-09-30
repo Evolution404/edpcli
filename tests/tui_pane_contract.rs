@@ -404,6 +404,60 @@ fn backup_confirm_is_overlay_and_escape_preserves_device_selection() {
 }
 
 #[test]
+fn backup_management_input_is_overlay_on_backups_workspace() {
+    let mut state = AppState::new();
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    assert_eq!(state.workspace(), Workspace::Backups);
+
+    let width = 120;
+    let height = 32;
+    let content_area = ratatui::layout::Rect::new(0, 2, width, height - 3);
+
+    let mut before_terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    before_terminal
+        .draw(|frame| render::draw(frame, &state))
+        .unwrap();
+    let before = before_terminal.backend().buffer().clone();
+
+    assert!(state.begin_backup_prune());
+    let popup = edpcli::tui::ui::centered_modal_rect(content_area, 78, 5);
+    let mut modal_terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    modal_terminal
+        .draw(|frame| render::draw(frame, &state))
+        .unwrap();
+    let modal = modal_terminal.backend().buffer();
+
+    for y in content_area.y..content_area.bottom() {
+        for x in content_area.x..content_area.right() {
+            if x >= popup.x && x < popup.right() && y >= popup.y && y < popup.bottom() {
+                continue;
+            }
+            assert_eq!(
+                modal[(x, y)].symbol(),
+                before[(x, y)].symbol(),
+                "backup management overlay must preserve workspace symbol at ({x},{y})"
+            );
+            assert_eq!(
+                modal[(x, y)].style(),
+                before[(x, y)].style(),
+                "backup management overlay must preserve workspace style at ({x},{y})"
+            );
+        }
+    }
+
+    let rendered = (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| modal[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.replace(' ', "").contains("备份清理·keep-N"));
+    assert!(rendered.replace(' ', "").contains("备份概览"));
+}
+
+#[test]
 fn inspect_tree_jk_changes_tree_selection_only() {
     let mut state = inspect_state();
     state.advanced_inspect_focus_pane(PaneId::InspectTree);
