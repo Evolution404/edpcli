@@ -1815,3 +1815,40 @@ fn passive_capacity_display_uses_one_global_unit_system() {
         }
     }
 }
+
+
+#[test]
+fn post_restore_layout_projection_is_application_owned_and_nonfatal() {
+    let projection = include_str!("../src/application/post_restore/layout_projection.rs");
+    let restore = include_str!("../src/application/write.rs");
+
+    assert!(projection.contains("parse_existing_provision"));
+    assert!(projection.contains("DiskRegionKind::from_partition_role"));
+    assert!(projection.contains("DiskLayoutModel::canonical_edp"));
+    assert!(projection.contains("DiskLayoutModel::canonical_plain_plan"));
+    assert!(
+        !projection.contains("crate::tui"),
+        "post-restore layout projection must stay UI-neutral"
+    );
+
+    let restore_tail = restore
+        .split("let layout = super::post_restore::project_restored_layout_readonly")
+        .nth(1)
+        .expect("restore flow must retain a typed layout projection result");
+    let outcome_section = restore_tail
+        .split("Ok(super::post_restore::MetadataRestoreOutcome")
+        .nth(1)
+        .expect("restore flow must still return MetadataRestoreOutcome");
+    assert!(
+        outcome_section.contains("layout,"),
+        "projection Result must be carried into the outcome"
+    );
+    assert!(
+        !restore_tail
+            .split("Ok(super::post_restore::MetadataRestoreOutcome")
+            .next()
+            .unwrap_or_default()
+            .contains("?;"),
+        "layout projection failure must not reclassify a verified restore as failed"
+    );
+}
