@@ -3,7 +3,9 @@ mod render;
 #[path = "disk_region_list/state.rs"]
 mod state;
 
-pub(crate) use render::{disk_region_list_lines, render_disk_region_list};
+pub(crate) use render::{
+    disk_region_list_lines, render_disk_region_list, render_disk_region_list_body,
+};
 pub(crate) use state::{DiskRegionListMode, DiskRegionListState};
 
 #[cfg(test)]
