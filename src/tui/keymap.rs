@@ -49,21 +49,32 @@ pub enum TuiAction {
     SectorNext,
     RowStart,
     RowEnd,
+    FocusNext,
+    FocusPrevious,
     WorkspaceNext,
     WorkspacePrevious,
     InspectJump,
     InspectBusiness,
     InspectRawFields,
     InspectHex,
-    InspectDiskLayout,
     PanelLeft,
     PanelDown,
     PanelUp,
     PanelRight,
     PanelNext,
     PanelPrevious,
+    TableColumnLeft,
+    TableColumnRight,
+    TableMoveColumnLeft,
+    TableMoveColumnRight,
+    TableColumnFirst,
+    TableColumnLast,
     TableScrollLeft,
     TableScrollRight,
+    TableSortToggle,
+    TableSortClear,
+    TableCopyCell,
+    TableCopyRow,
     Text(char),
     Backspace,
     DeleteChar,
@@ -89,116 +100,21 @@ struct Pending {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HelpBinding {
-    pub keys: &'static str,
-    pub label: &'static str,
-    pub action: TuiAction,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WidgetRole {
     Tree,
     Table,
     Input,
     SectorInspector,
+    Picker,
     Other,
 }
 
-pub const NORMAL_HELP: &[HelpBinding] = &[
-    HelpBinding {
-        keys: "j/k",
-        label: "Move",
-        action: TuiAction::MoveDown,
-    },
-    HelpBinding {
-        keys: "Enter",
-        label: "Open",
-        action: TuiAction::Activate,
-    },
-    HelpBinding {
-        keys: "/",
-        label: "Search",
-        action: TuiAction::Search,
-    },
-    HelpBinding {
-        keys: "r",
-        label: "Refresh",
-        action: TuiAction::Refresh,
-    },
-    HelpBinding {
-        keys: "p",
-        label: "Provision",
-        action: TuiAction::Provision,
-    },
-    HelpBinding {
-        keys: "Tab/Shift-Tab",
-        label: "Tabs",
-        action: TuiAction::WorkspaceNext,
-    },
-    HelpBinding {
-        keys: "?",
-        label: "Help",
-        action: TuiAction::Help,
-    },
-];
-
-pub const INSPECT_HELP: &[HelpBinding] = &[
-    HelpBinding {
-        keys: "1/2/3/4",
-        label: "业务字段/原始字段/Hex/全盘布局",
-        action: TuiAction::InspectBusiness,
-    },
-    HelpBinding {
-        keys: "Tab/Shift-Tab",
-        label: "子工作区",
-        action: TuiAction::WorkspaceNext,
-    },
-    HelpBinding {
-        keys: "j/k",
-        label: "Move",
-        action: TuiAction::MoveDown,
-    },
-    HelpBinding {
-        keys: "h/l",
-        label: "Fold",
-        action: TuiAction::MoveLeft,
-    },
-    HelpBinding {
-        keys: "Enter",
-        label: "Open",
-        action: TuiAction::Activate,
-    },
-    HelpBinding {
-        keys: "o",
-        label: "Toggle",
-        action: TuiAction::Open,
-    },
-    HelpBinding {
-        keys: "/",
-        label: "Search",
-        action: TuiAction::Search,
-    },
-    HelpBinding {
-        keys: "n/N",
-        label: "Match",
-        action: TuiAction::NextMatch,
-    },
-    HelpBinding {
-        keys: "gl",
-        label: "Goto",
-        action: TuiAction::InspectJump,
-    },
-    HelpBinding {
-        keys: "[/]",
-        label: "Sector",
-        action: TuiAction::SectorPrevious,
-    },
-    HelpBinding {
-        keys: "?",
-        label: "Help",
-        action: TuiAction::Help,
-    },
-];
+#[path = "keymap/help.rs"]
+mod help;
+pub use help::{
+    HelpBinding, BACKUPS_HELP, DEVICES_HELP, GLOBAL_HELP, INSPECT_HELP, PICKER_HELP,
+    PROVISION_HELP, TABLE_HELP,
+};
 
 pub fn is_actionable_key(event: &KeyEvent) -> bool {
     !matches!(event.kind, KeyEventKind::Release)
@@ -228,11 +144,26 @@ impl KeyMapper {
         role: WidgetRole,
         event: KeyEvent,
     ) -> Option<TuiAction> {
+        if mode == InputMode::Normal && role == WidgetRole::Table {
+            let table_action = match event.code {
+                KeyCode::Char('<') => Some(TuiAction::TableMoveColumnLeft),
+                KeyCode::Char('>') => Some(TuiAction::TableMoveColumnRight),
+                _ => None,
+            };
+            if table_action.is_some() {
+                self.clear_pending();
+                return table_action;
+            }
+        }
         let action = self.map(mode, event)?;
         if mode == InputMode::Normal && role == WidgetRole::Table {
             return Some(match action {
-                TuiAction::MoveLeft => TuiAction::TableScrollLeft,
-                TuiAction::MoveRight => TuiAction::TableScrollRight,
+                TuiAction::MoveLeft => TuiAction::TableColumnLeft,
+                TuiAction::MoveRight => TuiAction::TableColumnRight,
+                TuiAction::RowStart => TuiAction::TableColumnFirst,
+                TuiAction::RowEnd => TuiAction::TableColumnLast,
+                TuiAction::Yank => TuiAction::TableCopyCell,
+                TuiAction::YankRaw => TuiAction::TableCopyRow,
                 other => other,
             });
         }
@@ -260,12 +191,6 @@ impl KeyMapper {
             InputMode::Insert => return self.map_insert(event),
             InputMode::Search | InputMode::Command => return self.map_text_entry(event),
             InputMode::Confirm => return self.map_confirm(event),
-            InputMode::Help => {
-                return match event.code {
-                    KeyCode::Esc => Some(TuiAction::Back),
-                    _ => None,
-                };
-            }
             InputMode::Normal => {}
         }
 
@@ -274,6 +199,8 @@ impl KeyMapper {
                 PendingPrefix::G => match event.code {
                     KeyCode::Char('g') => Some(TuiAction::Top),
                     KeyCode::Char('l') => Some(TuiAction::InspectJump),
+                    KeyCode::Char('t') => Some(TuiAction::WorkspaceNext),
+                    KeyCode::Char('T') => Some(TuiAction::WorkspacePrevious),
                     _ => None,
                 },
                 PendingPrefix::CtrlW => match event.code {
@@ -312,12 +239,16 @@ impl KeyMapper {
                 });
                 None
             }
-            KeyCode::Tab => Some(TuiAction::WorkspaceNext),
-            KeyCode::BackTab => Some(TuiAction::WorkspacePrevious),
+            KeyCode::Tab => Some(TuiAction::FocusNext),
+            KeyCode::BackTab => Some(TuiAction::FocusPrevious),
             KeyCode::Char('j') | KeyCode::Down => Some(TuiAction::MoveDown),
             KeyCode::Char('k') | KeyCode::Up => Some(TuiAction::MoveUp),
             KeyCode::Char('h') | KeyCode::Left => Some(TuiAction::MoveLeft),
             KeyCode::Char('l') | KeyCode::Right => Some(TuiAction::MoveRight),
+            KeyCode::Char('H') => Some(TuiAction::TableScrollLeft),
+            KeyCode::Char('L') => Some(TuiAction::TableScrollRight),
+            KeyCode::Char('s') => Some(TuiAction::TableSortToggle),
+            KeyCode::Char('S') => Some(TuiAction::TableSortClear),
             KeyCode::Home => Some(TuiAction::Top),
             KeyCode::End | KeyCode::Char('G') => Some(TuiAction::Bottom),
             KeyCode::Enter => Some(TuiAction::Activate),
@@ -340,7 +271,6 @@ impl KeyMapper {
             KeyCode::Char('1') => Some(TuiAction::InspectBusiness),
             KeyCode::Char('2') => Some(TuiAction::InspectRawFields),
             KeyCode::Char('3') => Some(TuiAction::InspectHex),
-            KeyCode::Char('4') => Some(TuiAction::InspectDiskLayout),
             KeyCode::Char(' ') => Some(TuiAction::Toggle),
             KeyCode::Char('y') => Some(TuiAction::Yank),
             KeyCode::Char('Y') => Some(TuiAction::YankRaw),
@@ -360,6 +290,8 @@ impl KeyMapper {
         match event.code {
             KeyCode::Esc => Some(TuiAction::Back),
             KeyCode::Enter => Some(TuiAction::Submit),
+            KeyCode::Tab => Some(TuiAction::FocusNext),
+            KeyCode::BackTab => Some(TuiAction::FocusPrevious),
             KeyCode::Left => Some(TuiAction::CursorLeft),
             KeyCode::Right => Some(TuiAction::CursorRight),
             KeyCode::Home => Some(TuiAction::CursorHome),

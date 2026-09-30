@@ -13,5 +13,7 @@ mod cli_write_safety;
 mod command_spec;
 #[path = "identify_list.rs"]
 mod identify_list;
+#[path = "post_restore_format_operation.rs"]
+mod post_restore_format_operation;
 #[path = "selectors.rs"]
 mod selectors;

@@ -40,18 +40,6 @@ pub fn lba4_tag16_from(raw: &[u8]) -> Option<[u8; 16]> {
     raw.get(..16)?.try_into().ok()
 }
 
-/// 已在内存中的 LBA0-12 镜像是否为免密状态。
-/// 供扫描、restore、备份创建共用，避免上层重复构造扇区闭包或二次读文件。
-pub fn image_is_nopwd(data: &[u8], device_id: &str) -> bool {
-    if data.len() < crate::common::METADATA_IMAGE_LEN {
-        return false;
-    }
-    let read = |lba: u32| -> EdpCliResult<Vec<u8>> {
-        Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
-    };
-    looks_nopwd(&read, device_id).unwrap_or(false)
-}
-
 pub fn ts_suffix_pos(name: &str) -> Option<usize> {
     // 新备份只认 .edpb；旧 .bin 不进入正式运行时解析路径。
     if !name.ends_with(".edpb") {
@@ -138,8 +126,7 @@ pub struct BackupMeta {
     pub pid: String,
     pub device_id: String,
     pub onlyid: Option<String>,
-    pub tagged_nopwd: bool,
-    pub identity: Option<crate::application::media_identity::MediaIdentitySnapshot>,
+    pub identity: Option<crate::media_identity::MediaIdentitySnapshot>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,8 +140,7 @@ pub struct BackupEntry {
     pub meta: Option<BackupMeta>,
     pub path: PathBuf,
     pub mtime: i64,
-    pub is_nopwd: bool,
-    pub provision_kind: crate::provision::DiskProvisionKind,
+    pub provision_kind: Option<crate::provision::DiskProvisionKind>,
     pub integrity_status: BackupIntegrityStatus,
     pub size_ok: bool,
     /// 扫描时缓存的 LBA8 原始 512B；用于列表/元信息展示，避免随后再次打开同一备份。
@@ -162,7 +148,7 @@ pub struct BackupEntry {
     /// 扫描时实际 `.bin` 内容摘要；删除前用于确认同名文件未被替换/改写。
     pub content_sha256: Option<String>,
     /// Typed region/extent/artifact coverage projected during the background scan.
-    pub coverage: Option<crate::application::backup_coverage::BackupCoverage>,
+    pub coverage: Option<crate::backup_coverage::BackupCoverage>,
 }
 
 fn strip_numeric_suffix<'a>(s: &'a str, marker: &str) -> Option<(&'a str, String)> {
@@ -179,7 +165,8 @@ fn strip_numeric_suffix<'a>(s: &'a str, marker: &str) -> Option<(&'a str, String
     Some((&s[..pos], value.to_string()))
 }
 
-/// 解析本工具备份文件名。device_id 自身含 `&` / `_`，因此不能按 `_` 粗暴 split；
+/// 解析本工具备份文件名。EDP 备份身份段为 device_id；Plain v3 使用显式 `plain`
+/// 占位，避免把派生 device_id candidate 冒充成已观测 EDP device_id。
 /// 固定锚点只使用 disk/secs/vid/pid 与尾部时间戳/状态/onlyid。
 pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
     let ts_pos = ts_suffix_pos(name)?;
@@ -216,11 +203,7 @@ pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
         return None;
     }
 
-    let mut tail = &after_pid[device_pos + 1..];
-    let tagged_nopwd = tail.ends_with("_nopwd");
-    if tagged_nopwd {
-        tail = &tail[..tail.len() - "_nopwd".len()];
-    }
+    let tail = &after_pid[device_pos + 1..];
     let (device_id, onlyid) = match strip_numeric_suffix(tail, "_onlyid") {
         Some((did, id)) => (did, Some(id)),
         None => match strip_numeric_suffix(tail, "_lid") {
@@ -228,7 +211,7 @@ pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
             None => (tail, None),
         },
     };
-    if !device_id.starts_with("disk&ven_") {
+    if device_id != "plain" && !device_id.starts_with("disk&ven_") {
         return None;
     }
 
@@ -239,7 +222,6 @@ pub fn parse_backup_name(name: &str) -> Option<BackupMeta> {
         pid: pid.to_string(),
         device_id: device_id.to_string(),
         onlyid,
-        tagged_nopwd,
         identity: None,
     })
 }
@@ -276,7 +258,7 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
     let content_sha256 = file_data.as_ref().map(|data| sha256_hex(data));
     let verified = crate::edpb::verify_file(path).ok();
     let coverage = verified.as_ref().map(|container| {
-        crate::application::backup_coverage::BackupCoverage::from_manifest(&container.manifest)
+        crate::backup_coverage::BackupCoverage::from_manifest(&container.manifest)
     });
     let raw = verified
         .as_ref()
@@ -285,12 +267,17 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
         let manifest = &container.manifest;
         let mut identity = crate::edpb::canonical_media_identity(manifest).ok()?;
         if identity.protocol.provision_kind.is_none() {
-            if let (Some(device_id), Some(raw)) =
-                (identity.protocol.device_id.as_deref(), raw.as_ref())
-            {
-                identity.protocol.provision_kind = Some(
-                    crate::provision::DiskProvisionKind::from_metadata(raw, device_id),
-                );
+            if let Some(raw) = raw.as_ref() {
+                if let Some(device_id) = identity.protocol.device_id.as_deref() {
+                    identity.protocol.provision_kind =
+                        crate::provision::DiskProvisionKind::from_metadata(raw, device_id);
+                } else if identity.protocol.onlyid.is_none() {
+                    let total_sectors = manifest.geometry.total_sectors.unwrap_or(0);
+                    if crate::partition_table::confirmed_plain_protocol_prefix(raw, total_sectors) {
+                        identity.protocol.provision_kind =
+                            Some(crate::provision::DiskProvisionKind::Plain);
+                    }
+                }
             }
         }
         Some(BackupMeta {
@@ -300,7 +287,6 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
             pid: manifest.device.pid.clone(),
             device_id: manifest.device.device_id.clone(),
             onlyid: manifest.device.onlyid.clone(),
-            tagged_nopwd: manifest.snapshot.device_state == "passwordless",
             identity: Some(identity),
         })
     });
@@ -308,30 +294,34 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
         data.get(8 * SECTOR..9 * SECTOR)
             .and_then(|bytes| bytes.try_into().ok())
     });
-    let size_ok = raw
-        .as_ref()
-        .map(|data| data.len() == crate::common::METADATA_IMAGE_LEN)
-        .unwrap_or(false);
+    // Historical/Core/EDP metadata containers require the fixed LBA0-12
+    // protocol artifact. Plain v3 metadata deliberately does not store that
+    // protocol core; its raw partition-table artifacts are validated by
+    // verify_file()/validate_manifest_graph instead. Do not classify that
+    // intentional omission as a size error.
+    let size_ok = verified.as_ref().is_some_and(|container| {
+        let manifest = &container.manifest;
+        let plain_metadata_v3 = manifest.schema == "edpb.manifest.v3"
+            && manifest.snapshot.device_state.eq_ignore_ascii_case("plain")
+            && manifest.snapshot.capture_level == crate::edpb::CaptureLevel::Metadata;
+        plain_metadata_v3
+            || raw
+                .as_ref()
+                .is_some_and(|data| data.len() == crate::common::METADATA_IMAGE_LEN)
+    });
     let integrity_status = if verified.is_some() && size_ok {
         BackupIntegrityStatus::Verified
     } else {
         BackupIntegrityStatus::Invalid
     };
-    let is_nopwd = match (&meta, &raw) {
-        (Some(meta), Some(data)) => image_is_nopwd(data, &meta.device_id),
-        _ => false,
-    };
-    let provision_kind = match (&meta, &raw) {
-        (Some(meta), Some(data)) => {
-            crate::provision::DiskProvisionKind::from_metadata(data, &meta.device_id)
-        }
-        _ => crate::provision::DiskProvisionKind::Plain,
-    };
+    let provision_kind = meta
+        .as_ref()
+        .and_then(|meta| meta.identity.as_ref())
+        .and_then(|identity| identity.protocol.provision_kind);
     Some(BackupEntry {
         meta,
         path: path.to_path_buf(),
         mtime: mtime_epoch(path),
-        is_nopwd,
         provision_kind,
         integrity_status,
         size_ok,
@@ -376,14 +366,20 @@ pub fn scan_backup_names(dir: &Path) -> Vec<PathBuf> {
 
 /// Automatic prune grouping requires strong canonical identity evidence.
 ///
-/// Prefer usable USB serial digest (physical media). Without it, require an observed EDP
-/// device_id + onlyid pair (EDP instance). Model/capacity-only evidence and filename-derived
-/// metadata never form an automatic deletion group.
+/// Prefer usable USB serial evidence (physical media). v3 carries the reviewed raw serial;
+/// v1/v2 retain the historical digest. Without either, require an observed EDP device_id + onlyid
+/// pair (EDP instance). Model/capacity-only evidence and filename-derived metadata never form an
+/// automatic deletion group.
 pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
-    use crate::application::media_identity::SerialQuality;
+    use crate::media_identity::SerialQuality;
 
     let identity = entry.meta.as_ref()?.identity.as_ref()?;
     if identity.hardware.serial_quality == SerialQuality::Usable {
+        if let Some(serial) = identity.hardware.serial.as_deref() {
+            // The digest is ephemeral grouping material only. It is never written back into a
+            // v3 manifest or canonical identity as serial_sha256.
+            return Some(format!("serial:{}", sha256_hex(serial.as_bytes())));
+        }
         if let Some(serial) = identity.hardware.serial_sha256.as_deref() {
             return Some(format!("serial:{serial}"));
         }
@@ -397,11 +393,25 @@ pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
     }
 }
 
-/// `backup prune` 的纯策略层：
-/// - 加密原盘备份从不成为候选；
-/// - 每盘只对已按内容确认的免密快照按备份文件名时间新→旧保留 `keep` 份；
-///   仅旧命名无法解析时间时才回退文件系统 mtime；
-/// - 若该盘组没有任何加密原盘备份，则至少保留最新 1 份快照，防止清到零份。
+/// Non-destructive list grouping is intentionally broader than prune grouping.
+///
+/// A healthy verified EDPB with weak identity (for example Plain without a usable USB serial) is
+/// still a tool-owned backup and must be displayed normally. Such an entry receives a unique
+/// singleton key here; this does not grant prune or destructive-write authority.
+pub fn backup_list_group_key(entry: &BackupEntry) -> Option<String> {
+    if let Some(key) = backup_group_key(entry) {
+        return Some(format!("identity:{key}"));
+    }
+    (entry.integrity_status == BackupIntegrityStatus::Verified
+        && entry.size_ok
+        && entry.meta.is_some())
+    .then(|| format!("entry:{}", entry.path.to_string_lossy()))
+}
+
+/// backup prune 的纯策略层：
+/// - 每个 canonical identity 组按备份文件名时间新→旧保留 keep 份；
+/// - 仅旧命名无法解析时间时才回退文件系统 mtime；
+/// - 无论 keep 是否为 0，每组至少保留最新 1 份，防止清到零份。
 pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
     let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
     for entry in entries {
@@ -411,15 +421,12 @@ pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
     }
 
     let mut out = Vec::new();
-    for group in groups.values() {
-        let has_original = group.iter().any(|e| !e.is_nopwd);
-        let mut snaps: Vec<&BackupEntry> = group.iter().copied().filter(|e| e.is_nopwd).collect();
-        snaps.sort_by(|a, b| cmp_backup_newest_first(a, b));
-        let preserve = if has_original { keep } else { keep.max(1) };
-        let mut deletable: Vec<&BackupEntry> = snaps.into_iter().skip(preserve).collect();
-        // 候选清单按最旧→较新展示/删除，便于人工核对；保留判定仍严格按最新优先。
+    for group in groups.values_mut() {
+        group.sort_by(|a, b| cmp_backup_newest_first(a, b));
+        let preserve = keep.max(1);
+        let mut deletable: Vec<&BackupEntry> = group.iter().copied().skip(preserve).collect();
         deletable.reverse();
-        out.extend(deletable.into_iter().map(|e| e.path.clone()));
+        out.extend(deletable.into_iter().map(|entry| entry.path.clone()));
     }
     out
 }

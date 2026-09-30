@@ -124,15 +124,7 @@ pub(super) fn mbr_type_name(t: u8) -> &'static str {
 }
 
 pub(super) fn human_bytes(v: u64) -> String {
-    if v >= 1_000_000_000 {
-        format!("{:.2} GB", v as f64 / 1_000_000_000.0)
-    } else if v >= 1_000_000 {
-        format!("{:.2} MB", v as f64 / 1_000_000.0)
-    } else if v >= 1_000 {
-        format!("{:.2} KB", v as f64 / 1_000.0)
-    } else {
-        format!("{} B", v)
-    }
+    crate::common::fmt_capacity(v)
 }
 
 pub(super) fn c_string_bytes(b: &[u8]) -> &[u8] {
@@ -307,8 +299,11 @@ pub(super) fn pass_info_fields(base: usize, pass: &PassInfo, group: &str) -> Vec
         ("保密区强制改密", pass.force_change_encrypt),
         ("保密区最大错误次数", pass.max_encrypt_password_errors),
         ("保密区当前错误次数", pass.current_encrypt_password_errors),
-        ("免密标志", pass.no_password_set),
-        ("免密跳过 IP 检查", pass.no_password_no_check_ip),
+        ("PassInfo.no_password_set", pass.no_password_set),
+        (
+            "PassInfo.no_password_no_check_ip",
+            pass.no_password_no_check_ip,
+        ),
         ("取消密码复杂性验证", pass.no_usb_check_password_safe),
         ("重置 FileKey", pass.reset_file_key),
         ("交换区备份提示周期", pass.share_backup_prompt_period),

@@ -28,6 +28,8 @@ mod lba_early;
 mod lba_late;
 #[path = "inspect/lba_middle.rs"]
 mod lba_middle;
+#[path = "inspect/mbr_adapter.rs"]
+mod mbr_adapter;
 #[path = "inspect/metadata.rs"]
 mod metadata;
 #[path = "inspect/model.rs"]
@@ -38,6 +40,7 @@ pub use field_contract::{
     SectorFieldStatus,
 };
 pub use lba_adapter::{analyze_sector, analyze_sector_with_context};
+pub use mbr_adapter::analyze_mbr_sector;
 pub use metadata::InspectMeta;
 pub use model::{FieldChild, FieldStyle, SectorField, SectorView};
 

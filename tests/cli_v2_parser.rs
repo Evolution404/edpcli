@@ -5,6 +5,29 @@ fn args(values: &[&str]) -> Vec<String> {
 }
 
 #[test]
+fn demo_command_parses_default_scene_and_listing() {
+    assert!(matches!(
+        parse_args(&args(&["demo"])).unwrap(),
+        Parsed::Demo {
+            scene: None,
+            list_scenes: false
+        }
+    ));
+    assert!(matches!(
+        parse_args(&args(&["demo", "--scene", "inspect-lba8"])).unwrap(),
+        Parsed::Demo { scene: Some(scene), list_scenes: false } if scene == "inspect-lba8"
+    ));
+    assert!(matches!(
+        parse_args(&args(&["demo", "--list-scenes"])).unwrap(),
+        Parsed::Demo {
+            scene: None,
+            list_scenes: true
+        }
+    ));
+    assert!(parse_args(&args(&["demo", "--scene"])).is_err());
+}
+
+#[test]
 fn bare_edpcli_defaults_to_list() {
     assert!(matches!(
         parse_args(&[]).expect("bare edpcli should parse"),
@@ -383,18 +406,9 @@ fn provision_password_and_volume_label_have_product_defaults() {
             assert_eq!(opts.encrypt_target_password, "0000aaaa");
             assert_eq!(opts.volume_label, "启动区");
             assert!(!opts.format_boot && !opts.format_share && !opts.format_encrypt);
-            assert_eq!(
-                opts.boot_fs,
-                edpcli::provision::OfficialFilesystemFormat::Fat16
-            );
-            assert_eq!(
-                opts.share_fs,
-                edpcli::provision::OfficialFilesystemFormat::ExFat
-            );
-            assert_eq!(
-                opts.encrypt_fs,
-                edpcli::provision::OfficialFilesystemFormat::ExFat
-            );
+            assert_eq!(opts.boot_fs, edpcli::filesystem::FilesystemKind::Fat16);
+            assert_eq!(opts.share_fs, edpcli::filesystem::FilesystemKind::ExFat);
+            assert_eq!(opts.encrypt_fs, edpcli::filesystem::FilesystemKind::ExFat);
         }
         _ => panic!("expected provision plan"),
     }
@@ -509,14 +523,8 @@ fn provision_format_flags_and_independent_labels_parse() {
                 ),
                 ("启动", "交换", "保密")
             );
-            assert_eq!(
-                opts.boot_fs,
-                edpcli::provision::OfficialFilesystemFormat::ExFat
-            );
-            assert_eq!(
-                opts.share_fs,
-                edpcli::provision::OfficialFilesystemFormat::Fat16
-            );
+            assert_eq!(opts.boot_fs, edpcli::filesystem::FilesystemKind::ExFat);
+            assert_eq!(opts.share_fs, edpcli::filesystem::FilesystemKind::Fat16);
         }
         _ => panic!("expected provision write"),
     }
@@ -612,10 +620,7 @@ fn backup_v2_actions_parse_without_onlyid_or_index_ui() {
     assert!(matches!(
         parse_args(&args(&["backup", "create", "--disk", "4"])).expect("backup create"),
         Parsed::Backup {
-            action: BackupAction::Create {
-                disk: Some(4),
-                deep: false
-            },
+            action: BackupAction::Create { disk: Some(4) },
             ..
         }
     ));
@@ -793,20 +798,4 @@ fn v2_help_names_only_the_new_top_level_commands() {
             "legacy command leaked into help: {removed}\n{help}"
         );
     }
-}
-
-#[test]
-fn deep_backup_is_explicit_and_rejects_duplicate_flags() {
-    assert!(matches!(
-        parse_args(&args(&["backup", "create", "--deep", "--disk", "5"])).unwrap(),
-        Parsed::Backup {
-            action: BackupAction::Create {
-                disk: Some(5),
-                deep: true
-            },
-            ..
-        }
-    ));
-    assert!(parse_args(&args(&["backup", "create", "--deep", "--deep"])).is_err());
-    assert!(parse_args(&args(&["backup", "create", "--deep=false"])).is_err());
 }

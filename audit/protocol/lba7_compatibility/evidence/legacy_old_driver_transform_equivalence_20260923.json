@@ -21,7 +21,7 @@
   "method": "Unicorn x64 executes each driver's own legacy 8-byte-key decrypt function in place, then that same driver's encrypt function; full 3072-byte ciphertext must round-trip byte-for-byte.",
   "samples": [
     {
-      "name": "sandisk_nopwd",
+      "name": "sandisk_mode1",
       "ciphertext_sha256": "aaeffbba440e553c2eb47accac54552c9b53af9d4951f728ac700a2e81aca0a0",
       "key8": "24a4cfbdc9bf4101",
       "old_roundtrip_exact": true,

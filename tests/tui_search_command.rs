@@ -7,12 +7,14 @@ use edpcli::tui::{
 use ratatui::{backend::TestBackend, Terminal};
 
 fn device(disk: u32, user: &str, dept: &str) -> Row {
-    Row {
+    let mut row = Row {
         disk,
         size: 64_000_000_000,
         vid: "1234".into(),
         pid: "5678".into(),
         proto: "USB".into(),
+        serial: None,
+        hardware_model: None,
         device_id: Some(format!("disk&ven_test&prod_{user}")),
         identity_pin: None,
         onlyid: Some(format!("{disk}001")),
@@ -27,10 +29,14 @@ fn device(disk: u32, user: &str, dept: &str) -> Row {
         n_possible_baks: 0,
         denied: false,
         probe_error: None,
-        is_nopwd: false,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
-    }
+        partition_table: None,
+        partition_table_error: None,
+        lce: None,
+    };
+    crate::common::confirm_row_identity(&mut row);
+    row
 }
 
 #[test]

@@ -48,7 +48,7 @@ pub fn dept_and_safe6_fields_replay_physical_profiles_without_losing_backing() {
             v.encrypt_generation_flag,
             u32::from_le_bytes(d[0x1f0..0x1f4].try_into().unwrap())
         );
-        let crc = if c[0] == "authentic-nopwd" {
+        let crc = if c[0] == "authentic-mode1" {
             crc32_bare(b"disk&ven_sandisk&prod_ultra&rev_1.00")
         } else {
             crc32_bare(

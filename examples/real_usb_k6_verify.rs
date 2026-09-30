@@ -12,12 +12,12 @@ mod macos {
     use std::path::PathBuf;
 
     use edpcli::application::device::guard_usb_disk;
-    use edpcli::backup_deep::{
-        analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
-    };
     use edpcli::backup_metadata::PartitionGeometry;
     use edpcli::common::SECTOR;
     use edpcli::diskio::{raw_path, FileDev, SectorDev};
+    use edpcli::filesystem::analysis::{
+        analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
+    };
     use edpcli::provision::{
         parse_existing_provision, KeyDomainRole, PartitionRole, ProvisionImage,
         SourcePasswordKnowledge, TargetIdentity, DEFAULT_KEY_DOMAIN_PASSWORD,
@@ -84,7 +84,7 @@ mod macos {
             }
             match self.file_key {
                 Some(key) => {
-                    edpcli::backup_deep::keys::decrypt_mode2(&raw, &key).map_err(io::Error::other)
+                    edpcli::partition_transform::decrypt_mode2(&raw, &key).map_err(io::Error::other)
                 }
                 None => Ok(raw),
             }

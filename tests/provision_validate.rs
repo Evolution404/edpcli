@@ -9,6 +9,7 @@ fn spec() -> ProvisionSpec {
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "Netac".into(),
             product: "OnlyDisk".into(),
@@ -35,10 +36,9 @@ fn validator_accepts_generated_image_and_reports_identity() {
     let spec = spec();
     let image = generate_image(&spec, &entropy()).unwrap();
     let report = ProvisionValidator::validate(&spec, &image).unwrap();
-    assert_eq!(report.profile_id(), "jiangsu-safe6-nopwd");
+    assert_eq!(report.profile_id(), "jiangsu-safe6-v1");
     assert_eq!(report.device_id(), spec.target().device_id());
     assert_eq!(report.onlyid(), "1402259934");
-    assert!(report.is_nopwd());
 }
 
 #[test]
@@ -97,6 +97,7 @@ fn validator_rejects_image_for_different_hardware_identity() {
         vid: Some(0x21c4),
         pid: Some(0x0cd1),
         transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "Lexar".into(),
             product: "USB Flash Drive".into(),

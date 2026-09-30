@@ -1,5 +1,19 @@
 use super::*;
-use crate::application::inspect_text::{paint, style_name};
+use crate::application::inspect_text::style_name;
+
+pub(super) fn paint(style: FieldStyle, text: &str, bad: bool) -> String {
+    match style {
+        FieldStyle::Magic => crate::ui::bold_cyan(text),
+        FieldStyle::Text => crate::ui::cyan(text),
+        FieldStyle::Identity => crate::ui::yellow(text),
+        FieldStyle::Address => crate::ui::green(text),
+        FieldStyle::Size => crate::ui::magenta(text),
+        FieldStyle::Flag => crate::ui::yellow(text),
+        FieldStyle::Checksum if bad => crate::ui::red(text),
+        FieldStyle::Checksum => crate::ui::green(text),
+    }
+}
+
 use std::collections::BTreeSet;
 
 fn byte_style(fields: &[SectorField], idx: usize) -> Option<(FieldStyle, bool)> {

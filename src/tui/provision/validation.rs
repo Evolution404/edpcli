@@ -13,6 +13,26 @@ impl AppState {
         self.provision.kind.target().official_mode()
     }
 
+    pub(super) fn provision_initial_prefill(
+        &self,
+        kind: ProvisionKind,
+    ) -> Option<crate::provision::ProvisionPrefill> {
+        let target_mode = kind.target().official_mode()?;
+        let row = self.selected_device()?;
+        let source = row.existing_profile_for_prefill();
+        let total_sectors = row.size / crate::common::SECTOR as u64;
+        let lce = crate::application::provision_geometry::verified_usb_compatibility_extent(
+            total_sectors,
+        )?;
+        crate::provision::prefill_for_target_mode(
+            source.as_ref(),
+            target_mode,
+            lce.start_lba,
+            crate::common::SECTOR as u64,
+        )
+        .ok()
+    }
+
     pub(super) fn provision_resolved_prefill(
         &self,
     ) -> Result<
@@ -34,11 +54,10 @@ impl AppState {
             .provision_target_mode()
             .ok_or_else(|| "离线快照工具不使用物理制盘表单".to_string())?;
         let total_sectors = row.size / crate::common::SECTOR as u64;
-        let lce = crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity(
+        let lce = crate::application::provision_geometry::verified_usb_compatibility_extent(
             total_sectors,
-            crate::common::SECTOR as u32,
         )
-        .ok_or_else(|| "当前目标不符合已验证的 512B/255x63 USB LCE 几何".to_string())?;
+        .ok_or_else(|| "当前目标不符合已验证的 USB 制盘兼容几何".to_string())?;
         let source = row.existing_profile_for_prefill();
         let base = crate::provision::prefill_for_target_mode(
             source.as_ref(),
@@ -297,7 +316,7 @@ impl AppState {
             .provision
             .kind
             .mode()
-            .ok_or_else(|| "免密改造不使用新盘表单".to_string())?;
+            .ok_or_else(|| "当前流程不使用新盘表单".to_string())?;
         let parse_sectors = |value: &str, label: &str| -> Result<u64, String> {
             value
                 .parse::<u64>()

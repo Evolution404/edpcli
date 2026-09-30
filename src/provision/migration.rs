@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::backup_deep::{FileEntry, FilePayloadLocator};
+use crate::filesystem::analysis::{FileEntry, FilePayloadLocator};
 
 use super::{
     migration_transform, MigrationSource, MigrationTransform, SourceRegion, TargetPartitionGeometry,
@@ -380,4 +380,17 @@ pub fn finalize_staged_entry(
         mtime: manifest.mtime.clone(),
         ctime: manifest.ctime.clone(),
     })
+}
+
+impl From<&MigrationStagedEntry> for crate::filesystem::FilesystemMigrationEntry {
+    fn from(entry: &MigrationStagedEntry) -> Self {
+        Self {
+            path: entry.path.clone(),
+            is_directory: entry.is_directory,
+            data: entry.data.clone(),
+            attributes: entry.attributes,
+            mtime: entry.mtime.clone(),
+            ctime: entry.ctime.clone(),
+        }
+    }
 }

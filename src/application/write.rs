@@ -4,14 +4,14 @@
 //! system-disk/USB whole-disk guard → selector pinning by callers →
 //! unmount/lock → reopen identity recheck → atomic write → sync/readback/rollback.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::media_identity::{
     match_media_identity, BackupAffinity, BackupAffinityPolicy, MediaIdentityResumePin,
     MediaIdentitySnapshot, RestoreAuthorizationDecision, RestoreAuthorizationPolicy,
     RestoreGeometryRequirements,
 };
-use super::media_identity_observer::media_identity_from_protocol_image;
+use super::media_identity_observer::observe_media_identity_readonly;
 use super::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use crate::common::*;
 use crate::diskio::{self, raw_path, Clock, DiskFacts, SectorDev, SystemClock};
@@ -32,7 +32,6 @@ pub enum WriteEvent {
     BackupCreated {
         path: PathBuf,
     },
-    BackupCreatedIsNopwd,
     RestoreMatchesHeader {
         disk: u32,
         onlyid: String,
@@ -41,7 +40,6 @@ pub enum WriteEvent {
     RestoreMatchRow {
         index: usize,
         time: String,
-        is_nopwd: bool,
         file_name: String,
     },
     RestoreSelectionRetry {
@@ -50,7 +48,6 @@ pub enum WriteEvent {
     BackupShaVerified {
         digest: String,
     },
-    RestoreSnapshotNopwdWarning,
     RestoreDryRunNotice {
         path: PathBuf,
         disk: u32,
@@ -59,13 +56,12 @@ pub enum WriteEvent {
         path: PathBuf,
     },
     RestoreWriteCompleted,
+    PostRestoreAssessment {
+        assessment: super::post_restore::PostRestoreAssessment,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BackupReport {
-    pub path: PathBuf,
-    pub is_nopwd: bool,
-}
+pub type BackupReport = super::post_restore::MetadataBackupReport;
 
 pub struct Ctx<'a> {
     pub runner: &'a dyn CmdRunner,
@@ -88,12 +84,17 @@ fn backup_identity(
 fn authorize_restore(
     backup: &MediaIdentitySnapshot,
     target: &MediaIdentitySnapshot,
-    backup_tag16: &[u8],
+    backup_tag16: Option<[u8; 16]>,
     target_tag16: &[u8],
     target_lba4_nonzero: bool,
     geometry: RestoreGeometryRequirements,
 ) -> EdpCliResult<()> {
+    let backup_is_plain = matches!(
+        backup.protocol.provision_kind,
+        Some(crate::provision::DiskProvisionKind::Plain)
+    );
     if target_lba4_nonzero
+        && !backup_is_plain
         && (target_tag16.iter().all(|byte| *byte == 0)
             || target.protocol.device_id.is_none()
             || target.protocol.provision_kind.is_none())
@@ -116,18 +117,26 @@ fn authorize_restore(
             ));
         }
     }
-    if target_tag16.iter().any(|byte| *byte != 0) {
+    if target_tag16.iter().any(|byte| *byte != 0) && !backup_is_plain {
         if target.protocol.device_id.is_none() || target.protocol.provision_kind.is_none() {
             return Err(err(
                 EXIT_BACKUP,
                 "错误: 当前盘 LBA4 非零但 EDP 协议身份损坏，拒绝 fallback Plain 或写入",
             ));
         }
-        if backup_tag16 != target_tag16 {
+        // Plain media has no EDP LBA4 identity tag/onlyid. Restoring a Plain backup
+        // to the same physical device after it has been provisioned as EDP is a valid
+        // rollback path. The strong physical-media + exact-geometry policy above is
+        // the write grant; do not compare a Plain backup's LBA4 bytes as an EDP tag.
+        if !backup_is_plain
+            && backup_tag16
+                .map(|backup_tag16| backup_tag16.as_slice() != target_tag16)
+                .unwrap_or(true)
+        {
             return Err(err(
                 EXIT_BACKUP,
                 format!(
-                    "错误: 备份属于另一块盘(current onlyid={}, backup onlyid={})，拒绝还原",
+                    "错误: EDP 备份身份标签与当前盘不一致(current onlyid={}, backup onlyid={})，拒绝还原",
                     target.protocol.onlyid.as_deref().unwrap_or("未知"),
                     backup.protocol.onlyid.as_deref().unwrap_or("未知")
                 ),
@@ -135,6 +144,267 @@ fn authorize_restore(
         }
     }
     Ok(())
+}
+
+fn backup_protocol_image(
+    path: &Path,
+    verified: &crate::edpb::VerifiedContainer,
+) -> EdpCliResult<Option<Vec<u8>>> {
+    let Some(artifact) = verified
+        .manifest
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.id == crate::edpb::RAW_PROTOCOL_ARTIFACT_ID)
+    else {
+        let plain_v3 = verified.manifest.schema == "edpb.manifest.v3"
+            && verified
+                .manifest
+                .snapshot
+                .device_state
+                .eq_ignore_ascii_case("plain");
+        return if plain_v3 {
+            Ok(None)
+        } else {
+            Err(err(EXIT_BACKUP, "错误: EDPB 缺少 LBA0-12 原始 Artifact"))
+        };
+    };
+    if artifact.restore_policy != crate::edpb::RestorePolicy::Restorable {
+        return Err(err(
+            EXIT_BACKUP,
+            "错误: EDPB 的 LBA0-12 Artifact 未标记为可恢复，拒绝写盘",
+        ));
+    }
+    let data = crate::edpb::read_raw_protocol(path).map_err(|message| {
+        err(
+            EXIT_BACKUP,
+            format!("错误: 读取 EDPB LBA0-12 失败: {message}"),
+        )
+    })?;
+    if data.len() != METADATA_IMAGE_LEN {
+        return Err(err(
+            EXIT_BACKUP,
+            format!(
+                "错误: EDPB LBA0-12 大小 {} ≠ {}",
+                data.len(),
+                METADATA_IMAGE_LEN
+            ),
+        ));
+    }
+    Ok(Some(data))
+}
+
+fn build_metadata_restore_plan(
+    path: &Path,
+    verified: &crate::edpb::VerifiedContainer,
+    backup_protocol: Option<&[u8]>,
+    target_protocol: &[u8],
+    target_device_id: Option<&str>,
+    target_total_sectors: u64,
+) -> EdpCliResult<diskio::WriteTransactionPlan> {
+    let mut transaction = diskio::WriteTransactionPlan::new(target_total_sectors);
+    for artifact in verified
+        .manifest
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.restore_policy == crate::edpb::RestorePolicy::Restorable)
+    {
+        if artifact.kind != "raw_sectors" {
+            return Err(err(
+                EXIT_BACKUP,
+                format!(
+                    "错误: 可恢复 Artifact {} 不是 raw_sectors，拒绝写盘",
+                    artifact.id
+                ),
+            ));
+        }
+        if artifact.source_extent_ids.len() != 1 {
+            return Err(err(
+                EXIT_BACKUP,
+                format!(
+                    "错误: 可恢复 Artifact {} 必须且只能引用一个 Extent",
+                    artifact.id
+                ),
+            ));
+        }
+        let extent = verified
+            .manifest
+            .extents
+            .iter()
+            .find(|extent| extent.id == artifact.source_extent_ids[0])
+            .ok_or_else(|| {
+                err(
+                    EXIT_BACKUP,
+                    format!("错误: Artifact {} 引用的 Extent 不存在", artifact.id),
+                )
+            })?;
+        let end = extent
+            .start_lba
+            .checked_add(extent.sector_count)
+            .ok_or_else(|| err(EXIT_BACKUP, "错误: 恢复 Extent LBA 范围溢出"))?;
+        if extent.sector_count == 0 || end > target_total_sectors {
+            return Err(err(
+                EXIT_BACKUP,
+                format!(
+                    "错误: Artifact {} 的恢复范围 {}+{} 超过目标盘几何",
+                    artifact.id, extent.start_lba, extent.sector_count
+                ),
+            ));
+        }
+
+        if artifact.id == "raw.lba7_compatibility" {
+            let protocol = backup_protocol
+                .ok_or_else(|| err(EXIT_BACKUP, "错误: 可恢复 LCE 缺少配套 LBA0-12 协议元数据"))?;
+            let backup_total = verified
+                .manifest
+                .geometry
+                .total_sectors
+                .ok_or_else(|| err(EXIT_BACKUP, "错误: 可恢复 LCE 的 EDPB 缺少总扇区数"))?;
+            let geometry = crate::backup_metadata::parse_lba7_compatibility_geometry(
+                protocol,
+                &verified.manifest.device.device_id,
+                backup_total,
+            )
+            .map_err(|message| {
+                err(
+                    EXIT_BACKUP,
+                    format!("错误: 无法从备份 LBA7 复核 LCE 指针: {message}"),
+                )
+            })?;
+            if extent.start_lba != geometry.start_lba
+                || extent.sector_count != geometry.sector_count
+            {
+                return Err(err(
+                    EXIT_BACKUP,
+                    format!(
+                        "错误: EDPB LCE Extent 与备份 LBA7 指针不一致(manifest={}+{}, lba7={}+{})",
+                        extent.start_lba,
+                        extent.sector_count,
+                        geometry.start_lba,
+                        geometry.sector_count
+                    ),
+                ));
+            }
+        }
+        if artifact.id == "raw.tail.metadata_mirror_512k" {
+            let expected_start = target_total_sectors
+                .checked_sub(crate::backup_metadata::TAIL_METADATA_MIRROR_OFFSET_SECTORS)
+                .ok_or_else(|| {
+                    err(
+                        EXIT_BACKUP,
+                        "错误: 目标盘过小，无法恢复盘尾 metadata mirror",
+                    )
+                })?;
+            if extent.start_lba != expected_start
+                || extent.sector_count != crate::backup_metadata::TAIL_METADATA_MIRROR_SECTORS
+            {
+                return Err(err(
+                    EXIT_BACKUP,
+                    "错误: 盘尾 metadata mirror Extent 与目标几何不一致",
+                ));
+            }
+        }
+        if artifact.id == "raw.tail.restore_node_end4" {
+            let expected_start = target_total_sectors
+                .checked_sub(crate::backup_metadata::TAIL_END4_MIRROR_OFFSET_SECTORS)
+                .ok_or_else(|| err(EXIT_BACKUP, "错误: 目标盘过小，无法恢复盘尾 restore node"))?;
+            if extent.start_lba != expected_start || extent.sector_count != 1 {
+                return Err(err(
+                    EXIT_BACKUP,
+                    "错误: 盘尾 restore node Extent 与目标几何不一致",
+                ));
+            }
+        }
+
+        let bytes = crate::edpb::read_artifact(path, &artifact.id).map_err(|message| {
+            err(
+                EXIT_BACKUP,
+                format!("错误: 读取 {} 失败: {message}", artifact.id),
+            )
+        })?;
+        let expected_len = usize::try_from(extent.sector_count)
+            .ok()
+            .and_then(|count| count.checked_mul(SECTOR))
+            .ok_or_else(|| err(EXIT_BACKUP, "错误: 恢复 Artifact 长度溢出"))?;
+        if bytes.len() != expected_len {
+            return Err(err(
+                EXIT_BACKUP,
+                format!(
+                    "错误: Artifact {} 数据长度 {}B ≠ {}B",
+                    artifact.id,
+                    bytes.len(),
+                    expected_len
+                ),
+            ));
+        }
+        for offset in 0..extent.sector_count {
+            let lba64 = extent
+                .start_lba
+                .checked_add(offset)
+                .ok_or_else(|| err(EXIT_BACKUP, "错误: 恢复 LBA 溢出"))?;
+            let lba = u32::try_from(lba64)
+                .map_err(|_| err(EXIT_BACKUP, "错误: 恢复 LBA 超出当前写入器范围"))?;
+            let start = usize::try_from(offset)
+                .ok()
+                .and_then(|index| index.checked_mul(SECTOR))
+                .ok_or_else(|| err(EXIT_BACKUP, "错误: 恢复字节偏移溢出"))?;
+            let stage = if lba == 0 {
+                diskio::SectorWriteStage::Commit
+            } else if lba <= METADATA_LAST_LBA {
+                diskio::SectorWriteStage::Metadata
+            } else {
+                diskio::SectorWriteStage::Data
+            };
+            transaction
+                .insert(
+                    lba,
+                    bytes[start..start + SECTOR].to_vec(),
+                    stage,
+                    format!("metadata restore {}", artifact.id),
+                )
+                .map_err(|message| {
+                    err(
+                        EXIT_BACKUP,
+                        format!("错误: Metadata Restore 计划无效: {message}"),
+                    )
+                })?;
+        }
+    }
+    let plain_v3 = verified.manifest.schema == "edpb.manifest.v3"
+        && verified
+            .manifest
+            .snapshot
+            .device_state
+            .eq_ignore_ascii_case("plain");
+    let target_has_valid_edp = target_protocol.len() == METADATA_IMAGE_LEN
+        && target_device_id
+            .and_then(|device_id| {
+                crate::provision::DiskProvisionKind::from_metadata(target_protocol, device_id)
+            })
+            .is_some();
+    if plain_v3 && target_has_valid_edp {
+        for lba in 1..=METADATA_LAST_LBA {
+            if lba == 3 || transaction.writes().contains_key(&lba) {
+                continue;
+            }
+            transaction
+                .insert(
+                    lba,
+                    vec![0u8; SECTOR],
+                    diskio::SectorWriteStage::Metadata,
+                    "plain restore stale EDP protocol cleanup",
+                )
+                .map_err(|message| {
+                    err(
+                        EXIT_BACKUP,
+                        format!("错误: Plain restore EDP 清理计划无效: {message}"),
+                    )
+                })?;
+        }
+    }
+    if transaction.writes().is_empty() {
+        return Err(err(EXIT_BACKUP, "错误: EDPB 没有任何可恢复元数据 Artifact"));
+    }
+    Ok(transaction)
 }
 
 pub(crate) fn read_image(dev: &mut dyn SectorDev) -> EdpCliResult<Vec<u8>> {
@@ -201,6 +471,15 @@ pub(crate) fn verify_reopened_snapshot(
 /// selected operation. The write flow still performs its existing fresh
 /// snapshot and post-reopen checks; this closes the earlier selection/confirmation
 /// window where another USB device could take the same platform disk number.
+fn protocol_image_confirms_plain(protocol_image: &[u8], total_sectors: u64) -> bool {
+    if protocol_image.len() != METADATA_IMAGE_LEN {
+        return false;
+    }
+    let lba4 = &protocol_image[4 * SECTOR..5 * SECTOR];
+    diskio::lba4_label_id_from(lba4).is_none()
+        && crate::partition_table::confirmed_plain_protocol_prefix(protocol_image, total_sectors)
+}
+
 pub fn verify_expected_identity(
     runner: &dyn CmdRunner,
     disk: u32,
@@ -250,10 +529,11 @@ pub fn verify_expected_identity(
                 ));
             }
         } else {
-            // Plain media intentionally has no EDPF identity in LBA7. Only
-            // permit the hardware-derived fallback when LBA4 is also fully
-            // cleared; a nonzero LBA4 with unreadable LBA7 is treated as
-            // suspected damaged EDP metadata and remains fail-closed.
+            // Plain whole-disk FAT/exFAT/NTFS media may legitimately carry
+            // filesystem boot code in LBA4/LBA7. Nonzero bytes alone are not
+            // EDP evidence. Preserve fail-closed behavior by requiring the
+            // same positive Plain proof used by the canonical media observer
+            // whenever LBA4's identity-tag bytes are nonzero.
             let lba4 = dev.read_sector(4).map_err(|error| {
                 err(
                     EXIT_IO,
@@ -271,11 +551,26 @@ pub fn verify_expected_identity(
             }
             let tag = diskio::lba4_tag16_from(&lba4)
                 .ok_or_else(|| err(EXIT_IO, "错误: Plain 身份复核无法读取 LBA4 身份标签"))?;
-            if tag.iter().any(|&byte| byte != 0) {
+            if diskio::lba4_label_id_from(&lba4).is_some() {
                 return Err(err(
                     EXIT_TARGET,
-                    "错误: LBA7 无法识别但 LBA4 仍非零；疑似损坏 EDP，拒绝按 Plain 硬件身份继续",
+                    "错误: LBA7 无法识别但 LBA4 仍含有效 EDP onlyid；疑似损坏 EDP，拒绝按 Plain 硬件身份继续",
                 ));
+            }
+            if tag.iter().any(|&byte| byte != 0) {
+                let image = read_image(dev)?;
+                let total_sectors = sysinfo::disk_total_sectors(runner, disk).ok_or_else(|| {
+                    err(
+                        EXIT_TARGET,
+                        "错误: Plain 身份复核无法取得物理总扇区数，拒绝按硬件身份继续",
+                    )
+                })?;
+                if !protocol_image_confirms_plain(&image, total_sectors) {
+                    return Err(err(
+                        EXIT_TARGET,
+                        "错误: LBA7 无法识别且 LBA4 非零，同时缺少可验证 Plain 正向证据；疑似损坏 EDP，拒绝继续",
+                    ));
+                }
             }
             if !generate_candidates(runner, disk)
                 .iter()
@@ -327,16 +622,6 @@ pub fn backup_create_flow(
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<BackupReport> {
-    backup_create_level_flow(disk, ctx, dev, false)
-}
-
-/// Explicit Deep opt-in; shares the existing read-only device and identity path.
-pub fn backup_create_level_flow(
-    disk: u32,
-    ctx: &mut Ctx,
-    dev: &mut dyn SectorDev,
-    deep: bool,
-) -> EdpCliResult<BackupReport> {
     guard_usb_disk(ctx.runner, disk)?;
     let observed =
         super::media_identity_observer::observe_media_identity_readonly(ctx.runner, disk, dev)?;
@@ -347,7 +632,7 @@ pub fn backup_create_level_flow(
         .total_sectors
         .ok_or_else(|| err(EXIT_BACKUP, "错误: 无法获取磁盘总扇区数，无法创建备份"))?;
 
-    let (path, is_nopwd) = if let Some(device_id) = identity.protocol.device_id.clone() {
+    let path = if let Some(device_id) = identity.protocol.device_id.clone() {
         if identity.protocol.provision_kind.is_none() {
             return Err(err(
                 EXIT_BACKUP,
@@ -371,23 +656,15 @@ pub fn backup_create_level_flow(
             pid,
             label_id: identity.protocol.onlyid.clone(),
         };
-        let acquire = if deep {
-            crate::backup_deep::acquire_deep
-        } else {
-            crate::backup_metadata::acquire_metadata
-        };
-        let metadata = acquire(dev, &img, &device_id, total_sectors).map_err(|message| {
-            err(
-                EXIT_BACKUP,
-                format!("错误: Metadata 级备份采集失败: {message}"),
-            )
-        })?;
-        let save = if deep {
-            diskio::create_deep_backup
-        } else {
-            diskio::create_metadata_backup
-        };
-        save(
+        let metadata =
+            crate::backup_metadata::acquire_metadata(dev, &img, &device_id, total_sectors)
+                .map_err(|message| {
+                    err(
+                        EXIT_BACKUP,
+                        format!("错误: Metadata 级备份采集失败: {message}"),
+                    )
+                })?;
+        diskio::create_metadata_backup(
             &facts,
             &img,
             &device_id,
@@ -397,12 +674,6 @@ pub fn backup_create_level_flow(
             ctx.clock,
         )?
     } else {
-        if deep {
-            return Err(err(
-                EXIT_BACKUP,
-                "错误: Plain 盘没有 EDP 分区语义，--deep 备份不可用；请使用普通 backup create",
-            ));
-        }
         if identity.protocol.provision_kind != Some(crate::provision::DiskProvisionKind::Plain) {
             return Err(err(
                 EXIT_BACKUP,
@@ -437,22 +708,42 @@ pub fn backup_create_level_flow(
             pid,
             label_id: None,
         };
+        let metadata = crate::backup_metadata::acquire_plain_metadata(dev, total_sectors).map_err(
+            |message| {
+                err(
+                    EXIT_BACKUP,
+                    format!("错误: Plain 元数据备份采集失败: {message}"),
+                )
+            },
+        )?;
         diskio::create_plain_backup(
             &facts,
             &img,
             &legacy_candidate,
+            metadata,
             &identity,
             &ctx.backup_dir,
             ctx.clock,
         )?
     };
-    let report = BackupReport { path, is_nopwd };
+    let verified = crate::edpb::verify_file(&path).map_err(|message| {
+        err(
+            EXIT_BACKUP,
+            format!("错误: 新创建的 EDPB 未通过完整性检查: {message}"),
+        )
+    })?;
+    let report = BackupReport {
+        path,
+        partition_count: verified.manifest.partitions.len(),
+        edp_protocol_saved: verified
+            .manifest
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.id == crate::edpb::RAW_PROTOCOL_ARTIFACT_ID),
+    };
     ctx.prompt.write_event(WriteEvent::BackupCreated {
         path: report.path.clone(),
     });
-    if report.is_nopwd {
-        ctx.prompt.write_event(WriteEvent::BackupCreatedIsNopwd);
-    }
     Ok(report)
 }
 
@@ -463,7 +754,6 @@ pub fn backup_create_on_disk(
     prompt: &mut dyn Prompter,
     expected_onlyid: Option<&str>,
     expected_device_id: Option<&str>,
-    deep: bool,
 ) -> EdpCliResult<BackupReport> {
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     verify_expected_identity(runner, disk, expected_onlyid, expected_device_id, &mut dev)?;
@@ -473,7 +763,7 @@ pub fn backup_create_on_disk(
         prompt,
         backup_dir,
     };
-    backup_create_level_flow(disk, &mut ctx, &mut dev, deep)
+    backup_create_flow(disk, &mut ctx, &mut dev)
 }
 
 pub fn backup_create_on_disk_with_pin(
@@ -482,7 +772,6 @@ pub fn backup_create_on_disk_with_pin(
     backup_dir: PathBuf,
     prompt: &mut dyn Prompter,
     expected: &MediaIdentityResumePin,
-    deep: bool,
 ) -> EdpCliResult<BackupReport> {
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     verify_resume_identity_pin(runner, disk, expected, &mut dev)?;
@@ -492,7 +781,7 @@ pub fn backup_create_on_disk_with_pin(
         prompt,
         backup_dir,
     };
-    backup_create_level_flow(disk, &mut ctx, &mut dev, deep)
+    backup_create_flow(disk, &mut ctx, &mut dev)
 }
 
 /// restore 主流程: bin=None 时交互列出本盘备份并选择。
@@ -502,13 +791,26 @@ pub fn restore_flow(
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<i32> {
+    restore_flow_typed(bin, disk, ctx, dev).map(|_| EXIT_OK)
+}
+
+/// Restore only the metadata transaction and return its verified result.
+/// The subsequent read-only assessment is reported independently via WriteEvent.
+pub fn restore_flow_typed(
+    bin: Option<String>,
+    disk: u32,
+    ctx: &mut Ctx,
+    dev: &mut dyn SectorDev,
+) -> EdpCliResult<super::post_restore::MetadataRestoreOutcome> {
     let target_session = TargetSession::<ReadOnly>::open_usb(ctx.runner, disk)?;
-    let img = read_image(dev)?;
+    let observed = observe_media_identity_readonly(ctx.runner, disk, dev)?;
+    let img = observed.protocol_image;
+    let target_identity = observed.snapshot;
+    let raw_target_device_id = identify(ctx.runner, disk, &img[7 * SECTOR..8 * SECTOR]).device_id;
     let lba4 = &img[4 * SECTOR..5 * SECTOR];
-    let label_id = diskio::lba4_label_id_from(lba4);
+    let label_id = target_identity.protocol.onlyid.clone();
     let tag16 = diskio::lba4_tag16_from(lba4)
         .ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少 16B 身份标签"))?;
-    let target_identity = media_identity_from_protocol_image(ctx.runner, disk, &img)?;
     let target_lba4_nonzero = lba4.iter().any(|byte| *byte != 0);
     let selector = BackupSelector::load(&ctx.backup_dir);
     let path: PathBuf = match bin {
@@ -549,7 +851,6 @@ pub fn restore_flow(
                 ctx.prompt.write_event(WriteEvent::RestoreMatchRow {
                     index: *index,
                     time: diskio::backup_display_time(&entry.path, entry.mtime),
-                    is_nopwd: entry.is_nopwd,
                     file_name: entry
                         .path
                         .file_name()
@@ -586,42 +887,16 @@ pub fn restore_flow(
             format!("错误: EDPB 校验失败 {}: {}", path.display(), message),
         )
     })?;
-    let raw_artifact = verified
-        .manifest
-        .artifacts
-        .iter()
-        .find(|artifact| artifact.id == crate::edpb::RAW_PROTOCOL_ARTIFACT_ID)
-        .ok_or_else(|| err(EXIT_BACKUP, "错误: EDPB 缺少 LBA0-12 原始 Artifact"))?;
-    if raw_artifact.restore_policy != crate::edpb::RestorePolicy::Restorable {
-        return Err(err(
-            EXIT_BACKUP,
-            "错误: EDPB 的 LBA0-12 Artifact 未标记为可恢复，拒绝写盘",
-        ));
-    }
-    let data = crate::edpb::read_raw_protocol(&path).map_err(|message| {
-        err(
-            EXIT_BACKUP,
-            format!("错误: 读取 EDPB LBA0-12 失败: {message}"),
-        )
-    })?;
-    if data.len() != METADATA_IMAGE_LEN {
-        return Err(err(
-            EXIT_BACKUP,
-            format!(
-                "错误: EDPB LBA0-12 大小 {} ≠ {}",
-                data.len(),
-                METADATA_IMAGE_LEN
-            ),
-        ));
-    }
+    let backup_protocol = backup_protocol_image(&path, &verified)?;
     ctx.prompt.write_event(WriteEvent::BackupShaVerified {
         digest: verified.file_sha256.clone(),
     });
 
-    // Protocol tag remains a separate consistency check; it cannot override hardware conflict.
-    let backup_lba4 = &data[4 * SECTOR..5 * SECTOR];
-    let backup_tag16 = diskio::lba4_tag16_from(backup_lba4)
-        .ok_or_else(|| err(EXIT_BACKUP, "错误: 备份 LBA4 缺少 16B 身份标签"))?;
+    // Protocol tag remains a separate consistency check for EDP backups only; it
+    // cannot override the strong physical-media + exact-geometry write grant.
+    let backup_tag16 = backup_protocol
+        .as_deref()
+        .and_then(|data| diskio::lba4_tag16_from(&data[4 * SECTOR..5 * SECTOR]));
     let backup_identity = backup_identity(&verified.manifest)?;
     let current_total_sectors = sysinfo::disk_total_sectors(ctx.runner, disk)
         .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得当前目标盘总扇区数，拒绝恢复"))?;
@@ -629,89 +904,17 @@ pub fn restore_flow(
         total_sectors: current_total_sectors,
         logical_sector_size: SECTOR as u32,
     };
-
-    // Deep EDPB may carry the active six-sector LBA7 compatibility extent.
-    // It is restorable only when its Manifest extent is bound back to the exact
-    // LBA7 pointer encoded in the same backup protocol image.
-    let restorable_lce = if let Some(artifact) = verified
-        .manifest
-        .artifacts
-        .iter()
-        .find(|artifact| artifact.id == "raw.lba7_compatibility")
-    {
-        if artifact.restore_policy == crate::edpb::RestorePolicy::Restorable {
-            if artifact.source_extent_ids.len() != 1 {
-                return Err(err(
-                    EXIT_BACKUP,
-                    "错误: EDPB LCE Artifact 必须且只能引用一个 Extent",
-                ));
-            }
-            let extent = verified
-                .manifest
-                .extents
-                .iter()
-                .find(|extent| extent.id == artifact.source_extent_ids[0])
-                .ok_or_else(|| err(EXIT_BACKUP, "错误: EDPB LCE Artifact 引用的 Extent 不存在"))?;
-            let backup_total = verified
-                .manifest
-                .geometry
-                .total_sectors
-                .ok_or_else(|| err(EXIT_BACKUP, "错误: 可恢复 LCE 的 EDPB 缺少总扇区数"))?;
-            let geometry = crate::backup_metadata::parse_lba7_compatibility_geometry(
-                &data,
-                &verified.manifest.device.device_id,
-                backup_total,
-            )
-            .map_err(|message| {
-                err(
-                    EXIT_BACKUP,
-                    format!("错误: 无法从备份 LBA7 复核 LCE 指针: {message}"),
-                )
-            })?;
-            if extent.start_lba != geometry.start_lba
-                || extent.sector_count != geometry.sector_count
-            {
-                return Err(err(
-                    EXIT_BACKUP,
-                    format!(
-                        "错误: EDPB LCE Extent 与备份 LBA7 指针不一致(manifest={}+{}, lba7={}+{})",
-                        extent.start_lba,
-                        extent.sector_count,
-                        geometry.start_lba,
-                        geometry.sector_count
-                    ),
-                ));
-            }
-            let bytes =
-                crate::edpb::read_artifact(&path, "raw.lba7_compatibility").map_err(|message| {
-                    err(EXIT_BACKUP, format!("错误: 读取 EDPB LCE 失败: {message}"))
-                })?;
-            Some((geometry, bytes))
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    let tagged_nopwd = verified.manifest.snapshot.device_state == "passwordless";
-    let nopwd_snap =
-        tagged_nopwd || diskio::image_is_nopwd(&data, &verified.manifest.device.device_id);
-    if nopwd_snap {
-        ctx.prompt
-            .write_event(WriteEvent::RestoreSnapshotNopwdWarning);
-        ctx.prompt.write_event(WriteEvent::RestoreDryRunNotice {
-            path: path.clone(),
-            disk,
-        });
-        return Ok(EXIT_OK);
-    }
+    let transaction = build_metadata_restore_plan(
+        &path,
+        &verified,
+        backup_protocol.as_deref(),
+        &img,
+        raw_target_device_id.as_deref(),
+        current_total_sectors,
+    )?;
     ctx.prompt
         .write_event(WriteEvent::RestoreTargetHeader { path: path.clone() });
-    let restore_scope = if restorable_lce.is_some() {
-        "LBA0-12 + LCE"
-    } else {
-        "LBA0-12"
-    };
+    let restore_scope = format!("元数据 {} sectors", transaction.writes().len());
     if !ctx
         .prompt
         .confirm_write_yes(&format!("  → disk{} {}? 输入 YES: ", disk, restore_scope))
@@ -721,7 +924,7 @@ pub fn restore_flow(
     authorize_restore(
         &backup_identity,
         &target_identity,
-        &backup_tag16,
+        backup_tag16,
         &tag16,
         target_lba4_nonzero,
         geometry,
@@ -738,7 +941,7 @@ pub fn restore_flow(
             authorize_restore(
                 &backup_identity,
                 &fresh.snapshot,
-                &backup_tag16,
+                backup_tag16,
                 &tag16,
                 target_lba4_nonzero,
                 geometry,
@@ -751,71 +954,82 @@ pub fn restore_flow(
             ),
             ReopenAndVerifyError::Verify(error) => error,
         })?;
-    let mut transaction = diskio::WriteTransactionPlan::new(current_total_sectors);
-    if let Some((geometry, bytes)) = &restorable_lce {
-        let expected_len = usize::try_from(geometry.sector_count)
-            .ok()
-            .and_then(|count| count.checked_mul(SECTOR))
-            .ok_or_else(|| err(EXIT_BACKUP, "错误: LCE 恢复长度溢出"))?;
-        if bytes.len() != expected_len {
-            return Err(err(
-                EXIT_BACKUP,
-                format!(
-                    "错误: EDPB LCE 数据长度 {}B ≠ {}B",
-                    bytes.len(),
-                    expected_len
-                ),
-            ));
-        }
-        for offset in 0..geometry.sector_count {
-            let lba64 = geometry
-                .start_lba
-                .checked_add(offset)
-                .ok_or_else(|| err(EXIT_BACKUP, "错误: LCE 恢复 LBA 溢出"))?;
-            let lba = u32::try_from(lba64)
-                .map_err(|_| err(EXIT_BACKUP, "错误: LCE 恢复 LBA 超出当前写入器范围"))?;
-            let start = usize::try_from(offset)
-                .ok()
-                .and_then(|index| index.checked_mul(SECTOR))
-                .ok_or_else(|| err(EXIT_BACKUP, "错误: LCE 恢复字节偏移溢出"))?;
-            transaction
-                .insert(
-                    lba,
-                    bytes[start..start + SECTOR].to_vec(),
-                    diskio::SectorWriteStage::Data,
-                    "backup restore LCE",
-                )
-                .map_err(|message| {
-                    err(EXIT_BACKUP, format!("错误: LCE 恢复计划无效: {message}"))
-                })?;
-        }
-    }
-    for lba in 1..METADATA_SECTOR_COUNT as u32 {
-        transaction
-            .insert(
-                lba,
-                data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec(),
-                diskio::SectorWriteStage::Metadata,
-                "backup restore protocol",
-            )
-            .map_err(|message| {
-                err(
-                    EXIT_BACKUP,
-                    format!("错误: 协议恢复计划 LBA{lba} 无效: {message}"),
-                )
-            })?;
-    }
-    transaction
-        .insert(
-            0,
-            data[..SECTOR].to_vec(),
-            diskio::SectorWriteStage::Commit,
-            "backup restore MBR",
-        )
-        .map_err(|message| err(EXIT_BACKUP, format!("错误: MBR 恢复计划无效: {message}")))?;
     diskio::execute_write_transaction(dev, &transaction)?;
+    let report = super::post_restore::MetadataRestoreReport {
+        metadata_restored: true,
+        readback_verified: true,
+        restored_artifact_ids: verified
+            .manifest
+            .artifacts
+            .iter()
+            .filter(|artifact| artifact.restore_policy == crate::edpb::RestorePolicy::Restorable)
+            .map(|artifact| artifact.id.clone())
+            .collect(),
+    };
     ctx.prompt.write_event(WriteEvent::RestoreWriteCompleted);
-    Ok(EXIT_OK)
+    let format_target_pin =
+        super::media_identity_observer::observe_media_identity_readonly(ctx.runner, disk, dev)
+            .ok()
+            .map(|observed| {
+                let pin = crate::media_identity::MediaIdentityPin::new(
+                    observed.snapshot,
+                    &observed.protocol_image,
+                );
+                MediaIdentityResumePin::from_pin(&pin)
+            });
+    let assessment = super::post_restore::assess_partitions_readonly(
+        dev,
+        &verified.manifest.snapshot.device_state,
+        &verified.manifest.device.device_id,
+        current_total_sectors,
+        &verified.manifest.partitions,
+    )
+    .unwrap_or_else(|error| {
+        super::post_restore::PostRestoreAssessment::unsupported(
+            &verified.manifest.partitions,
+            format!("恢复后只读检查失败: {error}"),
+        )
+    });
+    ctx.prompt.write_event(WriteEvent::PostRestoreAssessment {
+        assessment: assessment.clone(),
+    });
+    let layout = super::post_restore::project_restored_layout_readonly(
+        dev,
+        &verified.manifest.snapshot.device_state,
+        &verified.manifest.device.device_id,
+        current_total_sectors,
+        &verified.manifest.partitions,
+    );
+    Ok(super::post_restore::MetadataRestoreOutcome {
+        report,
+        assessment,
+        partitions: verified.manifest.partitions.clone(),
+        device_state: verified.manifest.snapshot.device_state.clone(),
+        device_id: verified.manifest.device.device_id.clone(),
+        total_sectors: current_total_sectors,
+        layout,
+        format_target_pin,
+    })
+}
+
+pub fn restore_on_disk_typed(
+    runner: &dyn CmdRunner,
+    bin: Option<String>,
+    disk: u32,
+    backup_dir: PathBuf,
+    prompt: &mut dyn Prompter,
+    expected_onlyid: Option<&str>,
+    expected_device_id: Option<&str>,
+) -> EdpCliResult<super::post_restore::MetadataRestoreOutcome> {
+    let mut dev = open_readonly_usb_disk(runner, disk)?;
+    verify_expected_identity(runner, disk, expected_onlyid, expected_device_id, &mut dev)?;
+    let mut ctx = Ctx {
+        runner,
+        clock: &SystemClock,
+        prompt,
+        backup_dir,
+    };
+    restore_flow_typed(bin, disk, &mut ctx, &mut dev)
 }
 
 pub fn restore_on_disk(
@@ -827,15 +1041,35 @@ pub fn restore_on_disk(
     expected_onlyid: Option<&str>,
     expected_device_id: Option<&str>,
 ) -> EdpCliResult<i32> {
+    restore_on_disk_typed(
+        runner,
+        bin,
+        disk,
+        backup_dir,
+        prompt,
+        expected_onlyid,
+        expected_device_id,
+    )
+    .map(|_| EXIT_OK)
+}
+
+pub fn restore_on_disk_typed_with_pin(
+    runner: &dyn CmdRunner,
+    bin: Option<String>,
+    disk: u32,
+    backup_dir: PathBuf,
+    prompt: &mut dyn Prompter,
+    expected: &MediaIdentityResumePin,
+) -> EdpCliResult<super::post_restore::MetadataRestoreOutcome> {
     let mut dev = open_readonly_usb_disk(runner, disk)?;
-    verify_expected_identity(runner, disk, expected_onlyid, expected_device_id, &mut dev)?;
+    verify_resume_identity_pin(runner, disk, expected, &mut dev)?;
     let mut ctx = Ctx {
         runner,
         clock: &SystemClock,
         prompt,
         backup_dir,
     };
-    restore_flow(bin, disk, &mut ctx, &mut dev)
+    restore_flow_typed(bin, disk, &mut ctx, &mut dev)
 }
 
 pub fn restore_on_disk_with_pin(
@@ -879,6 +1113,122 @@ mod tests {
         let error = read_image(&mut ShortSectorDev).unwrap_err();
         assert_eq!(error.code, EXIT_IO);
         assert!(error.msg.contains("512B"), "{}", error.msg);
+    }
+
+    fn ntfs_plain_protocol_image(total_sectors: u64) -> Vec<u8> {
+        let mut image = vec![0u8; METADATA_IMAGE_LEN];
+        let boot = &mut image[..SECTOR];
+        boot[..3].copy_from_slice(&[0xeb, 0x52, 0x90]);
+        boot[3..11].copy_from_slice(b"NTFS    ");
+        boot[11..13].copy_from_slice(&(SECTOR as u16).to_le_bytes());
+        boot[13] = 8;
+        boot[21] = 0xf8;
+        boot[40..48].copy_from_slice(&(total_sectors - 1).to_le_bytes());
+        boot[48..56].copy_from_slice(&4u64.to_le_bytes());
+        boot[56..64].copy_from_slice(&8u64.to_le_bytes());
+        boot[510..512].copy_from_slice(&[0x55, 0xaa]);
+        image
+    }
+
+    #[test]
+    fn plain_confirmation_allows_nonzero_lba4_filesystem_code() {
+        let total = 30_277_632u64;
+        let mut image = ntfs_plain_protocol_image(total);
+        image[4 * SECTOR..4 * SECTOR + 16].copy_from_slice(&[
+            0x66, 0x61, 0x90, 0x1f, 0x07, 0xc3, 0x06, 0x1e, 0x66, 0x60, 0x66, 0xb8, 1, 0, 0, 0,
+        ]);
+        assert!(protocol_image_confirms_plain(&image, total));
+    }
+
+    #[test]
+    fn plain_confirmation_rejects_edp_onlyid_even_with_valid_filesystem_boot() {
+        let total = 30_277_632u64;
+        let mut image = ntfs_plain_protocol_image(total);
+        image[4 * SECTOR..4 * SECTOR + 9].copy_from_slice(b"$$$123$$$");
+        assert!(!protocol_image_confirms_plain(&image, total));
+    }
+
+    fn restore_test_hardware(
+        serial: &str,
+    ) -> super::super::media_identity::HardwareIdentityEvidence {
+        let raw_serial = serial.to_string();
+        let serial = super::super::media_identity::serial_digest_evidence(Some(serial));
+        super::super::media_identity::HardwareIdentityEvidence {
+            vid: Some(0x2bdf),
+            pid: Some(0x0300),
+            serial: Some(raw_serial),
+            serial_sha256: serial.sha256,
+            serial_quality: serial.quality,
+            vendor: Some("HIKSEMI".into()),
+            product: Some("HIKSEMI".into()),
+            revision: Some("1.00".into()),
+            transport: Some(crate::platform::NativeTransport::Uas),
+            total_sectors: Some(245_760_000),
+            logical_sector_size: Some(SECTOR as u32),
+        }
+    }
+
+    fn restore_test_plain(serial: &str) -> MediaIdentitySnapshot {
+        MediaIdentitySnapshot::plain(
+            restore_test_hardware(serial),
+            super::super::media_identity::DerivedProtocolEvidence::default(),
+            super::super::media_identity::IdentityObservation::default(),
+        )
+    }
+
+    fn restore_test_edp(serial: &str, onlyid: &str) -> MediaIdentitySnapshot {
+        MediaIdentitySnapshot {
+            hardware: restore_test_hardware(serial),
+            protocol: super::super::media_identity::ProtocolIdentityEvidence {
+                device_id: Some("disk&ven_hiksemi&prod_".into()),
+                onlyid: Some(onlyid.into()),
+                provision_kind: Some(crate::provision::DiskProvisionKind::Mode0),
+                lba4_identity_digest: Some(format!("digest-{onlyid}")),
+            },
+            derived: super::super::media_identity::DerivedProtocolEvidence::default(),
+            observation: super::super::media_identity::IdentityObservation::default(),
+        }
+    }
+
+    #[test]
+    fn plain_backup_can_restore_same_physical_device_after_edp_provisioning() {
+        let backup = restore_test_plain("HIKSEMI-SERIAL-001");
+        let target = restore_test_edp("HIKSEMI-SERIAL-001", "914806819");
+        let geometry = RestoreGeometryRequirements {
+            total_sectors: 245_760_000,
+            logical_sector_size: SECTOR as u32,
+        };
+        let backup_tag = [0u8; 16];
+        let target_tag = *b"$$$914806819$$$";
+        authorize_restore(
+            &backup,
+            &target,
+            Some(backup_tag),
+            &target_tag,
+            true,
+            geometry,
+        )
+        .expect("same physical media Plain rollback must be authorized");
+    }
+
+    #[test]
+    fn edp_backup_tag_mismatch_remains_rejected() {
+        let backup = restore_test_edp("HIKSEMI-SERIAL-001", "111111111");
+        let target = restore_test_edp("HIKSEMI-SERIAL-001", "914806819");
+        let geometry = RestoreGeometryRequirements {
+            total_sectors: 245_760_000,
+            logical_sector_size: SECTOR as u32,
+        };
+        let error = authorize_restore(
+            &backup,
+            &target,
+            Some(*b"$$$111111111$$$\0"),
+            b"$$$914806819$$$\0",
+            true,
+            geometry,
+        )
+        .unwrap_err();
+        assert!(error.msg.contains("身份标签与当前盘不一致"));
     }
 
     struct PatternSectorDev;

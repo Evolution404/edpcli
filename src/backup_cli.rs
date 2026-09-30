@@ -40,16 +40,15 @@ fn backup_model_name(meta: &BackupMeta) -> String {
 fn backup_capacity(meta: &BackupMeta) -> String {
     meta.secs
         .and_then(|s| s.checked_mul(SECTOR as u64))
-        .map(crate::common::fmt_gb)
+        .map(crate::common::fmt_capacity)
         .unwrap_or_else(|| "容量未知".into())
 }
 
 fn backup_kind(entry: &BackupEntry) -> &'static str {
-    if entry.is_nopwd || entry.meta.as_ref().map(|m| m.tagged_nopwd).unwrap_or(false) {
-        "[免密状态]"
-    } else {
-        "[加密原盘]"
-    }
+    entry
+        .provision_kind
+        .map(|kind| kind.short_name())
+        .unwrap_or("未知 / 未确认")
 }
 
 fn backup_health(entry: &BackupEntry) -> String {
@@ -151,7 +150,7 @@ pub fn backup_list(backup_dir: &Path) -> i32 {
     let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
     let mut unknown = Vec::new();
     for entry in selected {
-        if let Some(key) = diskio::backup_group_key(entry) {
+        if let Some(key) = diskio::backup_list_group_key(entry) {
             groups.entry(key).or_default().push(entry);
         } else {
             unknown.push(entry);
@@ -286,16 +285,16 @@ pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {
     if plan.targets.is_empty() {
         println!("无需清理：当前策略不会删除任何备份。");
         println!(
-            "保留: 加密原盘 {} 份 · 免密快照 {} 份",
-            stats.originals, stats.retained_snapshots
+            "保留: {} / {} 份受管备份",
+            stats.retained_backups, stats.managed_backups
         );
         return EXIT_OK;
     }
 
     println!(
-        "将删除 {} 个免密状态快照(每盘保留最新 {} 份, 加密原盘永不自动删除):",
+        "将删除 {} 份旧备份（每个 canonical identity 组至少保留最新 {} 份）:",
         plan.targets.len(),
-        keep
+        keep.max(1)
     );
     for entry in &plan.targets {
         let model = entry
@@ -307,8 +306,8 @@ pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {
     }
     println!();
     println!(
-        "保留: 加密原盘 {} 份 · 免密快照 {} 份",
-        stats.originals, stats.retained_snapshots
+        "保留: {} / {} 份受管备份",
+        stats.retained_backups, stats.managed_backups
     );
     if !yes {
         println!("确认执行: edpcli backup prune --keep {} --yes", keep);
@@ -325,7 +324,7 @@ pub fn backup_prune(backup_dir: &Path, keep: usize, yes: bool) -> i32 {
     if failed == 0 {
         println!(
             "{}",
-            crate::ui::green(&format!("已删除 {} 份免密状态快照。", plan.targets.len()))
+            crate::ui::green(&format!("已删除 {} 份旧备份。", plan.targets.len()))
         );
         EXIT_OK
     } else {

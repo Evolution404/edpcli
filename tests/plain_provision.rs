@@ -1,21 +1,19 @@
 use edpcli::{
-    backup_deep::{analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader},
     backup_metadata::PartitionGeometry,
+    filesystem::analysis::{
+        analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
+    },
+    filesystem::FilesystemKind,
     provision::{
         build_plain_migrated_provision_write_plan, build_plain_provision_write_plan,
-        max_plain_sector_count, MigrationStagedEntry, MigrationTransform, OfficialFilesystemFormat,
-        PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan, PlainProvisionWritePlan,
-        PlainSectorOwner, DEFAULT_PLAIN_START_LBA,
+        max_plain_sector_count, MigrationStagedEntry, MigrationTransform, PlainCleanupExtent,
+        PlainPartitionSpec, PlainProvisionPlan, PlainProvisionWritePlan, PlainSectorOwner,
+        DEFAULT_PLAIN_START_LBA,
     },
 };
 
 fn part(start_lba: u64, sector_count: u64) -> PlainPartitionSpec {
-    PlainPartitionSpec::new(
-        start_lba,
-        sector_count,
-        OfficialFilesystemFormat::ExFat,
-        "DATA",
-    )
+    PlainPartitionSpec::new(start_lba, sector_count, FilesystemKind::ExFat, "DATA")
 }
 
 #[test]

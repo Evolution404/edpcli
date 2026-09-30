@@ -1,8 +1,10 @@
 //! Canonical source/target region compatibility for reprovision planning.
 
+use crate::filesystem::FilesystemKind;
+
 use super::{
-    ExistingPartition, ExistingPartitionRecord, FileKeyWrapMode, KeyDomainRole,
-    OfficialFilesystemFormat, PartitionRole, TargetPartitionGeometry,
+    ExistingPartition, ExistingPartitionRecord, FileKeyWrapMode, KeyDomainRole, PartitionRole,
+    TargetPartitionGeometry,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -27,7 +29,7 @@ pub enum PhysicalCryptoProfile {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FilesystemProfile {
-    Known(OfficialFilesystemFormat),
+    Known(FilesystemKind),
     Unknown,
     None,
 }

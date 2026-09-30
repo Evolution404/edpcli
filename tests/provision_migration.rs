@@ -1,15 +1,15 @@
 use edpcli::{
-    backup_deep::{
+    backup_metadata::PartitionGeometry,
+    filesystem::analysis::{
         analyze_partition, stream_file_payload, AnalysisStatus, FileEntry, FilePayloadExtent,
         FilePayloadLocator, PartitionReader,
     },
-    backup_metadata::PartitionGeometry,
+    filesystem::{build_migrated_filesystem, FilesystemKind, FilesystemMigrationEntry},
     protocol::edpf::EdpPartitionType,
     provision::{
-        build_migrated_filesystem, build_migration_manifest, Extent, FilesystemProfile,
-        MigrationBudgets, MigrationInventory, MigrationPreflightError, MigrationSource,
-        MigrationStagedEntry, MigrationTransform, OfficialFilesystemFormat, PartitionRole,
-        PhysicalCryptoProfile, SourceRegion, TargetPartitionGeometry,
+        build_migration_manifest, Extent, FilesystemProfile, MigrationBudgets, MigrationInventory,
+        MigrationPreflightError, MigrationSource, MigrationStagedEntry, MigrationTransform,
+        PartitionRole, PhysicalCryptoProfile, SourceRegion, TargetPartitionGeometry,
     },
 };
 
@@ -27,7 +27,7 @@ fn source_region(
             sector_count,
         },
         physical_crypto: PhysicalCryptoProfile::Plain,
-        filesystem: FilesystemProfile::Known(OfficialFilesystemFormat::ExFat),
+        filesystem: FilesystemProfile::Known(FilesystemKind::ExFat),
         key_profile: None,
     }
 }
@@ -71,7 +71,7 @@ fn combined_target(sector_count: u64) -> TargetPartitionGeometry {
         start_lba: 63,
         sector_count,
         physically_encrypted: false,
-        filesystem: Some(OfficialFilesystemFormat::ExFat),
+        filesystem: Some(FilesystemKind::ExFat),
     }
 }
 
@@ -202,7 +202,7 @@ fn migration_manifest_fails_closed_on_budget_path_and_locator_errors() {
 }
 
 struct ImageReader<'a> {
-    image: &'a edpcli::provision::SparseFilesystemImage,
+    image: &'a edpcli::filesystem::SparseFilesystemImage,
 }
 
 impl PartitionReader for ImageReader<'_> {
@@ -214,11 +214,11 @@ impl PartitionReader for ImageReader<'_> {
     }
 }
 
-fn roundtrip_migrated_filesystem(filesystem: OfficialFilesystemFormat, volume_sectors: u64) {
+fn roundtrip_migrated_filesystem(filesystem: FilesystemKind, volume_sectors: u64) {
     let payload = (0..1_537)
         .map(|index| (index % 251) as u8)
         .collect::<Vec<_>>();
-    let staged = vec![
+    let staged = [
         MigrationStagedEntry {
             source_index: 0,
             transform: MigrationTransform::ShareToBootShareCombined,
@@ -240,13 +240,17 @@ fn roundtrip_migrated_filesystem(filesystem: OfficialFilesystemFormat, volume_se
             ctime: None,
         },
     ];
+    let filesystem_entries = staged
+        .iter()
+        .map(FilesystemMigrationEntry::from)
+        .collect::<Vec<_>>();
     let image = build_migrated_filesystem(
         filesystem,
         2_048,
         volume_sectors,
         0x1234_5678,
         "K6",
-        &staged,
+        &filesystem_entries,
     )
     .unwrap();
 
@@ -285,10 +289,10 @@ fn roundtrip_migrated_filesystem(filesystem: OfficialFilesystemFormat, volume_se
 
 #[test]
 fn populated_fat16_migration_image_roundtrips_inventory_and_payload() {
-    roundtrip_migrated_filesystem(OfficialFilesystemFormat::Fat16, 20_417);
+    roundtrip_migrated_filesystem(FilesystemKind::Fat16, 20_417);
 }
 
 #[test]
 fn populated_exfat_migration_image_roundtrips_inventory_and_payload() {
-    roundtrip_migrated_filesystem(OfficialFilesystemFormat::ExFat, 262_144);
+    roundtrip_migrated_filesystem(FilesystemKind::ExFat, 262_144);
 }

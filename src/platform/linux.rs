@@ -344,6 +344,7 @@ pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
         vid,
         pid,
         transport,
+        windows_pnp_instance_id: None,
         inquiry,
     })
 }

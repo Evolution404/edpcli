@@ -70,7 +70,7 @@ pub fn lba7_packed_entries_and_pass_info_replay_all_physical_profiles() {
         let image =
             std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(c[4])).unwrap();
         let raw: &[u8; 512] = image[7 * 512..8 * 512].try_into().unwrap();
-        let device_id = if c[0] == "authentic-nopwd" {
+        let device_id = if c[0] == "authentic-mode1" {
             "disk&ven_sandisk&prod_ultra&rev_1.00".to_string()
         } else {
             crate::gold_name::parse_gold_name(c[3]).unwrap().device_id
@@ -141,7 +141,7 @@ pub fn lba12_outer_cipher_and_wrapped_key_modes_keep_profile_axes_distinct() {
         let image =
             std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(c[4])).unwrap();
         let raw: &[u8; 512] = image[12 * 512..13 * 512].try_into().unwrap();
-        let device_id = if c[0] == "authentic-nopwd" {
+        let device_id = if c[0] == "authentic-mode1" {
             "disk&ven_sandisk&prod_ultra&rev_1.00".to_string()
         } else {
             crate::gold_name::parse_gold_name(c[3]).unwrap().device_id

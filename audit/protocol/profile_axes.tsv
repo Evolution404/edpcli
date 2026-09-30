@@ -16,8 +16,8 @@ dept_layout	join59	owner	6:000-03f;9:080-0ff	OwnershipChanged	Dept seam is an in
 dept_layout	join60	owner	6:000-03f;9:080-0ff	OwnershipChanged	Dept seam is an independent serialization axis spanning LBA6 and LBA9.	S-JOIN59-SEMANTIC;P-GOLD-ENC
 lba6_mbr_underlay	zero-underlay	owner	6:1e0-1ed	OwnershipChanged	Post-NUL LBA6 slice is zero backing or surviving MBR entry3 snapshot.	S-MBR-SNAPSHOT-SEMANTIC;P-GOLD-ENC
 lba6_mbr_underlay	legacy-mbr-snapshot	owner	6:1e0-1ed	OwnershipChanged	Post-NUL LBA6 slice is zero backing or surviving MBR entry3 snapshot.	S-MBR-SNAPSHOT-SEMANTIC;P-GOLD-ENC
-lba7_entry_count	two-entry	owner	7:080-0bf	AddedRemoved	Third packed legacy EDPF entry is independently absent or present.	S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-NOPWD
-lba7_entry_count	three-entry	owner	7:080-0bf	AddedRemoved	Third packed legacy EDPF entry is independently absent or present.	S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-NOPWD
+lba7_entry_count	two-entry	owner	7:080-0bf	AddedRemoved	Third packed legacy EDPF entry is independently absent or present.	S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-MODE1
+lba7_entry_count	three-entry	owner	7:080-0bf	AddedRemoved	Third packed legacy EDPF entry is independently absent or present.	S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-MODE1
 lba7_passinfo_version	legacy-v0064	owner	7:0c0-0cd	ProducerChanged	LBA7 pass-info version is independent from packed entry count.	S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC
 lba7_passinfo_version	current-v0206	owner	7:0c0-0cd	ProducerChanged	LBA7 pass-info version is independent from packed entry count.	S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC
 lba8_usb_only_info	current	owner	8:01e-02d	ProducerChanged	UsbOnlyInfo has current, transitional, and absent producer states.	S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC
@@ -35,7 +35,7 @@ lba11_capacity	disk-size	owner	11:000-1ff	ProducerChanged	LBA11 capacity key inp
 lba11_capacity	repair-chs	owner	11:000-1ff	ProducerChanged	LBA11 capacity key input differs by writer path, not hardware identity.	S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC
 lba12_mode	legacy-v0064	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF
 lba12_mode	mode1	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12
-lba12_mode	mode2	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC;P-GOLD-NOPWD
+lba12_mode	mode2	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC;P-GOLD-MODE1
 lba12_mode	mode3	owner	12:000-1ff	EncodingChanged	LBA12 wrapped-key mode is independent from all other profile axes.	S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12
 lba4_second_key_source	current-main-onlyid	overlay	4:01c-01f	ProducerChanged	OnllyID2Nd meaning is stable while producer seed source changes.	S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC
 lba4_second_key_source	legacy-guid-crc	overlay	4:01c-01f	ProducerChanged	OnllyID2Nd meaning is stable while producer seed source changes.	S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC

@@ -112,29 +112,69 @@ fn build_lba4(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
     Ok(out)
 }
 
-fn build_lba6(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
+fn build_lba6_lba9(spec: &ProvisionSpec) -> Result<([u8; SECTOR], [u8; SECTOR]), String> {
+    const LONG_MARKER: &[u8; 4] = b"*^$@";
+    const DEPT_INLINE: usize = 60;
+    const DEPT_CONTINUATION: usize = 128;
+    const USER_INLINE: usize = 28;
+    const USER_CONTINUATION: usize = 128;
+
     let mut plain = spec.profile().safe6_template();
+    let mut lba9 = [0u8; SECTOR];
     let dept = gbk(spec.metadata().dept())?;
     let user = gbk(spec.metadata().user())?;
-    if dept.len() > 63 {
-        return Err("Dept exceeds LBA6 63-byte field".into());
-    }
-    if !(4..=6).contains(&user.len()) {
-        return Err("canonical v1 SAFE6 profile requires User to encode to 4..=6 GBK bytes".into());
-    }
-    plain[..0x40].fill(0);
-    plain[..dept.len()].copy_from_slice(&dept);
-    plain[dept.len()] = 0;
 
-    plain[0x55..0x58].copy_from_slice(&[0x73, 0x2a, 0xfe]);
-    plain[0x50..0x50 + user.len()].copy_from_slice(&user);
-    plain[0x50 + user.len()] = 0;
+    // Official current writer: Dept <=63B is an inline C string. At 64B and
+    // above it switches to marker + Dept[0..60) in LBA6 and Dept[60..] as a
+    // 128-byte C-string continuation at LBA9+0x80. The source array capacity
+    // is 188 bytes, so 187 bytes is the largest legal Dept.
+    plain[..0x40].fill(0);
+    if dept.len() <= 63 {
+        plain[..dept.len()].copy_from_slice(&dept);
+        plain[dept.len()] = 0;
+    } else {
+        let continuation = &dept[DEPT_INLINE..];
+        if continuation.len() >= DEPT_CONTINUATION {
+            return Err(format!(
+                "Dept continuation exceeds official LBA9 capacity: {} > 127 bytes",
+                continuation.len()
+            ));
+        }
+        plain[..4].copy_from_slice(LONG_MARKER);
+        plain[4..0x40].copy_from_slice(&dept[..DEPT_INLINE]);
+        lba9[0x80..0x80 + continuation.len()].copy_from_slice(continuation);
+        lba9[0x80 + continuation.len()] = 0;
+    }
+
+    // Official current writer: User <32B is an inline C string. At 32B and
+    // above it stores marker + User[0..28) in LBA6 and User[28..] as the
+    // LBA9+0x100 continuation. The source array is 156 bytes, hence max155B.
+    // For deterministic new media we zero the short-slot backing instead of
+    // reproducing the official uninitialised-tail artefact.
+    plain[0x50..0x70].fill(0);
+    if user.len() < 32 {
+        plain[0x50..0x50 + user.len()].copy_from_slice(&user);
+        plain[0x50 + user.len()] = 0;
+    } else {
+        let continuation = &user[USER_INLINE..];
+        if continuation.len() >= USER_CONTINUATION {
+            return Err(format!(
+                "User continuation exceeds official LBA9 capacity: {} > 127 bytes",
+                continuation.len()
+            ));
+        }
+        plain[0x50..0x54].copy_from_slice(LONG_MARKER);
+        plain[0x54..0x70].copy_from_slice(&user[..USER_INLINE]);
+        lba9[0x100..0x100 + continuation.len()].copy_from_slice(continuation);
+        lba9[0x100 + continuation.len()] = 0;
+    }
 
     let serial = spec.profile().autonum().as_bytes();
-    if serial.len() != 8 {
-        return Err("canonical autonum must be exactly 8 ASCII bytes".into());
+    if serial.len() > 15 {
+        return Err("SAFE6 Autonum exceeds 15-byte on-disk slot".into());
     }
-    plain[0x70..0x78].copy_from_slice(serial);
+    plain[0x70..0x80].fill(0);
+    plain[0x70..0x70 + serial.len()].copy_from_slice(serial);
 
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     put_u32(&mut plain, 0x100, crc);
@@ -155,10 +195,10 @@ fn build_lba6(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
 
     let encrypted = xor_rolling(&plain[..0x1fc], LBA6_K0);
     let checksum = lba6_checksum(&encrypted);
-    let mut out = [0u8; SECTOR];
-    out[..0x1fc].copy_from_slice(&encrypted);
-    out[0x1fc..].copy_from_slice(&checksum.to_le_bytes());
-    Ok(out)
+    let mut lba6 = [0u8; SECTOR];
+    lba6[..0x1fc].copy_from_slice(&encrypted);
+    lba6[0x1fc..].copy_from_slice(&checksum.to_le_bytes());
+    Ok((lba6, lba9))
 }
 
 fn edpf_entry(stride: usize, ptype: u32, start: u64, size_bytes: u64, material: &[u8]) -> Vec<u8> {
@@ -465,12 +505,14 @@ pub fn generate_image(
 ) -> Result<ProvisionImage, String> {
     let layout = layout(spec)?;
     let mut image = vec![0u8; PROVISION_IMAGE_LEN];
+    let (lba6, lba9) = build_lba6_lba9(spec)?;
     let sectors = [
         (0usize, build_lba0(layout).to_vec()),
         (4, build_lba4(spec)?.to_vec()),
-        (6, build_lba6(spec)?.to_vec()),
+        (6, lba6.to_vec()),
         (7, build_lba7(spec, layout).to_vec()),
         (8, build_lba8(spec)?.to_vec()),
+        (9, lba9.to_vec()),
         (11, build_lba11(spec, entropy)?.to_vec()),
         (12, build_lba12(spec, layout).to_vec()),
     ];
@@ -491,12 +533,14 @@ pub fn generate_official_image(
 ) -> Result<ProvisionImage, String> {
     let logical = validate_official_geometry(spec, plan)?;
     let mut image = vec![0u8; PROVISION_IMAGE_LEN];
+    let (lba6, lba9) = build_lba6_lba9(spec)?;
     let sectors = [
         (0usize, build_official_lba0(plan, &logical)?.to_vec()),
         (4, build_lba4(spec)?.to_vec()),
-        (6, build_lba6(spec)?.to_vec()),
+        (6, lba6.to_vec()),
         (7, build_official_lba7(spec, plan, &logical)?.to_vec()),
         (8, build_lba8(spec)?.to_vec()),
+        (9, lba9.to_vec()),
         (11, build_lba11(spec, entropy)?.to_vec()),
         (12, build_official_lba12(spec, plan, &logical)?.to_vec()),
     ];

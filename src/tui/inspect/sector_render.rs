@@ -114,7 +114,7 @@ pub(super) fn draw_sector_inspector(
                         .then_some(field.status)
                 });
                 let style = if index == sector.cursor {
-                    selected()
+                    crate::tui::theme::current().cursor()
                 } else if let Some(status) = active_status {
                     inspect_field_status_style(status)
                 } else if sector.mode == SectorInspectMode::Mixed

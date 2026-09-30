@@ -154,16 +154,16 @@ impl TaskHub {
             let result = catch_unwind(AssertUnwindSafe(|| {
                 let session = crate::application::backup::DeleteSession::open(&backup_dir);
                 let plan = session.plan_prune(keep).map_err(|error| error.message())?;
-                let (originals, retained_snapshots) = plan
+                let (managed_backups, retained_backups) = plan
                     .prune_stats
                     .as_ref()
-                    .map(|stats| (stats.originals, stats.retained_snapshots))
+                    .map(|stats| (stats.managed_backups, stats.retained_backups))
                     .unwrap_or((0, 0));
                 Ok(crate::tui::state::BackupPrunePrepared {
                     plan,
                     keep,
-                    originals,
-                    retained_snapshots,
+                    managed_backups,
+                    retained_backups,
                 })
             }))
             .unwrap_or_else(|payload| {
@@ -270,7 +270,6 @@ impl TaskHub {
                     backup_dir,
                     &mut prompt,
                     expected,
-                    intent.kind == crate::tui::state::WriteKind::BackupCreateDeep,
                 )
                 .map(|_| ())
                 .map_err(|error| error.msg)

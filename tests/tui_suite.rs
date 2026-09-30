@@ -1,6 +1,11 @@
 #[path = "common/mod.rs"]
 pub mod common;
 
+#[path = "canonical_disk_layout.rs"]
+mod canonical_disk_layout;
+#[path = "tui_demo.rs"]
+mod tui_demo;
+
 #[path = "tui_animation.rs"]
 mod tui_animation;
 #[path = "tui_backup_coverage.rs"]
@@ -27,6 +32,10 @@ mod tui_keymap_contract;
 mod tui_lifecycle;
 #[path = "tui_nonblocking.rs"]
 mod tui_nonblocking;
+#[path = "tui_operation_progress.rs"]
+mod tui_operation_progress;
+#[path = "tui_operation_result.rs"]
+mod tui_operation_result;
 #[path = "tui_pane_contract.rs"]
 mod tui_pane_contract;
 #[path = "tui_search_command.rs"]

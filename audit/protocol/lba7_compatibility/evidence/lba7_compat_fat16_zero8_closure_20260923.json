@@ -63,7 +63,7 @@
   },
   "physical_crosscheck": [
     {
-      "profile": "sandisk-nopwd-two-entry",
+      "profile": "sandisk-mode1-two-entry",
       "start_lba": 120164408,
       "physical_byte_offset": 61524176896,
       "ciphertext_sha256": "aaeffbba440e553c2eb47accac54552c9b53af9d4951f728ac700a2e81aca0a0",

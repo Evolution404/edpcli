@@ -181,6 +181,7 @@ struct UsbIdentity {
     pid: Option<u16>,
     transport: NativeTransport,
     serial: Option<String>,
+    pnp_instance_id: Option<String>,
 }
 
 fn parse_hex_tag(text: &str, tag: &str) -> Option<u16> {
@@ -214,14 +215,26 @@ fn usb_identity_from_instance_chain(ids: &[String]) -> Option<UsbIdentity> {
             transport = NativeTransport::Bot;
         }
     }
-    (vid.is_some() || pid.is_some() || transport != NativeTransport::Unknown).then_some(
-        UsbIdentity {
-            vid,
-            pid,
-            transport,
-            serial,
-        },
-    )
+    let pnp_instance_id = ids
+        .iter()
+        .find(|id| {
+            let upper = id.to_ascii_uppercase();
+            upper.split_once('\\').is_some_and(|(_, segment)| {
+                segment.starts_with("DISK&VEN_") && segment.contains("&PROD_")
+            })
+        })
+        .cloned();
+    (vid.is_some()
+        || pid.is_some()
+        || transport != NativeTransport::Unknown
+        || pnp_instance_id.is_some())
+    .then_some(UsbIdentity {
+        vid,
+        pid,
+        transport,
+        serial,
+        pnp_instance_id,
+    })
 }
 
 fn devinst_id(devinst: u32) -> Option<String> {
@@ -463,7 +476,8 @@ pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
             .as_ref()
             .map(|id| id.transport)
             .unwrap_or(NativeTransport::Unknown),
-        inquiry: (!probe.vendor.is_empty()).then_some(InquiryInfo {
+        windows_pnp_instance_id: usb.as_ref().and_then(|id| id.pnp_instance_id.clone()),
+        inquiry: Some(InquiryInfo {
             vendor: probe.vendor,
             product: probe.product,
             revision: probe.revision,
@@ -896,6 +910,7 @@ mod tests {
                 pid: Some(0x6300),
                 transport: NativeTransport::Uas,
                 serial: Some("123".into()),
+                pnp_instance_id: Some(r"SCSI\Disk&Ven_aigo&Prod_U335&Rev_PMAP".into()),
             })
         );
     }
@@ -910,6 +925,7 @@ mod tests {
                 pid: None,
                 transport: NativeTransport::Uas,
                 serial: None,
+                pnp_instance_id: Some(r"UASPSTOR\Disk&Ven_aigo&Prod_U335&Rev_PMAP".into()),
             })
         );
     }
@@ -928,6 +944,7 @@ mod tests {
                 pid: Some(0x2005),
                 transport: NativeTransport::Bot,
                 serial: Some("ABC".into()),
+                pnp_instance_id: Some(r"SCSI\Disk&Ven_Netac&Prod_OnlyDisk".into()),
             })
         );
     }
@@ -960,6 +977,7 @@ mod tests {
                 pid: None,
                 transport: NativeTransport::Uas,
                 serial: None,
+                pnp_instance_id: Some(r"UASPSTOR\Disk&Ven_aigo&Prod_U335".into()),
             })
         );
     }

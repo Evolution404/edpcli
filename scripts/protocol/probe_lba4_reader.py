@@ -2,7 +2,7 @@
 """Read-only Unicorn probe for current CEMSUsbRegsiter.dll::ReadSector4.
 
 This harness never opens a physical disk and never invokes a producer/writer.
-It feeds the checked-in authentic no-password LBA4 sector directly to the
+It feeds the checked-in authentic mode1 LBA4 sector directly to the
 official x86 ReadSector4 machine code and stubs only allocator / MSVC string /
 atoi runtime boundaries needed by that function.
 
@@ -54,7 +54,7 @@ def parse_args() -> argparse.Namespace:
         "--image",
         type=Path,
         default=Path(
-            "audit/protocol/gold/authentic-nopwd/sandisk_ultra_20260823_lba0_12.bin"
+            "audit/protocol/gold/authentic-mode1/sandisk_ultra_20260823_lba0_12.bin"
         ),
     )
     return parser.parse_args()

@@ -2,7 +2,9 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use edpcli::tui::{
-    keymap::{KeyMapper, TuiAction, WidgetRole, INSPECT_HELP, NORMAL_HELP},
+    keymap::{
+        KeyMapper, TuiAction, WidgetRole, DEVICES_HELP, GLOBAL_HELP, INSPECT_HELP, TABLE_HELP,
+    },
     state::InputMode,
 };
 
@@ -19,7 +21,7 @@ fn h_l_follow_widget_role_without_changing_insert_text() {
             WidgetRole::Table,
             key(KeyCode::Char('h'))
         ),
-        Some(TuiAction::TableScrollLeft)
+        Some(TuiAction::TableColumnLeft)
     );
     assert_eq!(
         mapper.map_for_role(
@@ -27,7 +29,23 @@ fn h_l_follow_widget_role_without_changing_insert_text() {
             WidgetRole::Table,
             key(KeyCode::Char('l'))
         ),
-        Some(TuiAction::TableScrollRight)
+        Some(TuiAction::TableColumnRight)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('<'))
+        ),
+        Some(TuiAction::TableMoveColumnLeft)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('>'))
+        ),
+        Some(TuiAction::TableMoveColumnRight)
     );
     assert_eq!(
         mapper.map_for_role(InputMode::Normal, WidgetRole::Tree, key(KeyCode::Char('h'))),
@@ -52,6 +70,55 @@ fn h_l_follow_widget_role_without_changing_insert_text() {
             key(KeyCode::Char('l'))
         ),
         Some(TuiAction::Text('l'))
+    );
+
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('H'))
+        ),
+        Some(TuiAction::TableScrollLeft)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('L'))
+        ),
+        Some(TuiAction::TableScrollRight)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('s'))
+        ),
+        Some(TuiAction::TableSortToggle)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('S'))
+        ),
+        Some(TuiAction::TableSortClear)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('0'))
+        ),
+        Some(TuiAction::TableColumnFirst)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('$'))
+        ),
+        Some(TuiAction::TableColumnLast)
     );
 }
 
@@ -135,9 +202,14 @@ fn normal_navigation_uses_vim_semantics_without_workspace_side_effects() {
 }
 
 #[test]
-fn g_prefix_is_reserved_for_vim_top_and_inspect_jump_only() {
+fn g_prefix_keeps_vim_navigation_and_adds_standard_tab_switching() {
     let mut mapper = KeyMapper::new();
-    for (second, expected) in [('g', TuiAction::Top), ('l', TuiAction::InspectJump)] {
+    for (second, expected) in [
+        ('g', TuiAction::Top),
+        ('l', TuiAction::InspectJump),
+        ('t', TuiAction::WorkspaceNext),
+        ('T', TuiAction::WorkspacePrevious),
+    ] {
         assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
         assert_eq!(
             mapper.map(InputMode::Normal, key(KeyCode::Char(second))),
@@ -145,12 +217,12 @@ fn g_prefix_is_reserved_for_vim_top_and_inspect_jump_only() {
             "g{second}"
         );
     }
-    for second in ['t', 'T', 'd', 'b', 'p', 'i'] {
+    for second in ['d', 'b', 'p', 'i'] {
         assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
         assert_eq!(
             mapper.map(InputMode::Normal, key(KeyCode::Char(second))),
             None,
-            "g{second} must not remain a workspace/function shortcut"
+            "g{second} must not become an unrelated function shortcut"
         );
     }
 }
@@ -188,7 +260,7 @@ fn single_g_invalid_or_timed_out_prefix_never_executes_jump() {
 }
 
 #[test]
-fn tab_switches_top_level_tabs_and_ctrl_w_owns_panel_navigation() {
+fn tab_is_context_focus_and_gt_owns_top_level_switching() {
     let mut mapper = KeyMapper::new();
     for (second, expected) in [
         (KeyCode::Char('h'), TuiAction::PanelLeft),
@@ -204,14 +276,72 @@ fn tab_switches_top_level_tabs_and_ctrl_w_owns_panel_navigation() {
 
     assert_eq!(
         mapper.map(InputMode::Normal, key(KeyCode::Tab)),
-        Some(TuiAction::WorkspaceNext)
+        Some(TuiAction::FocusNext)
     );
     assert_eq!(
         mapper.map(
             InputMode::Normal,
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
         ),
+        Some(TuiAction::FocusPrevious)
+    );
+    assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('t'))),
+        Some(TuiAction::WorkspaceNext)
+    );
+    assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('T'))),
         Some(TuiAction::WorkspacePrevious)
+    );
+}
+
+#[test]
+fn tab_focus_actions_are_distinct_from_top_level_workspace_actions() {
+    assert_ne!(TuiAction::FocusNext, TuiAction::WorkspaceNext);
+    assert_ne!(TuiAction::FocusPrevious, TuiAction::WorkspacePrevious);
+
+    let inspect = include_str!("../src/tui/runtime_input/inspect.rs");
+    let provision = include_str!("../src/tui/runtime_input/provision.rs");
+    assert!(inspect.contains("TuiAction::FocusNext"));
+    assert!(provision.contains("TuiAction::FocusNext"));
+}
+
+#[test]
+fn table_role_maps_y_to_cell_copy_and_shift_y_to_row_copy() {
+    let mut mapper = KeyMapper::new();
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('y'))
+        ),
+        Some(TuiAction::TableCopyCell)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Table,
+            key(KeyCode::Char('Y'))
+        ),
+        Some(TuiAction::TableCopyRow)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Other,
+            key(KeyCode::Char('y'))
+        ),
+        Some(TuiAction::Yank)
+    );
+    assert_eq!(
+        mapper.map_for_role(
+            InputMode::Normal,
+            WidgetRole::Other,
+            key(KeyCode::Char('Y'))
+        ),
+        Some(TuiAction::YankRaw)
     );
 }
 
@@ -235,40 +365,46 @@ fn normal_mode_keeps_inspect_and_backup_as_single_key_actions() {
         Some(TuiAction::Restore)
     );
 
-    let dispatch_source = include_str!("../src/tui/dispatch.rs");
-    let dispatch = source_section(
-        dispatch_source,
-        "pub(super) fn dispatch_tui_action(",
-        "pub(super) fn open_advanced_inspect_selection(",
+    let controller = include_str!("../src/tui/controller.rs");
+    assert!(!controller.contains("TuiAction::Plan if state.workspace() == Workspace::Devices"));
+    assert!(
+        !controller.contains("TuiAction::Activate | TuiAction::Open => match state.workspace()")
     );
-    assert!(!dispatch.contains("TuiAction::Plan if state.workspace() == state::Workspace::Devices"));
-    assert!(!dispatch.contains("TuiAction::Activate | TuiAction::Open => match state.workspace()"));
     assert!(contains_tokens_in_order(
-        dispatch,
+        controller,
         &[
             "TuiAction::Insert",
-            "if matches!(",
-            "state.workspace()",
-            "state::Workspace::Devices | state::Workspace::Backups",
-            "NavCommand::OpenInspect",
+            "if matches!(state.workspace(), Workspace::Devices | Workspace::Backups)",
+            "ActionRequest::Navigate(NavCommand::OpenInspect)",
         ],
     ));
     assert!(contains_tokens_in_order(
-        dispatch,
+        controller,
         &[
             "TuiAction::BackupCreate",
-            "if matches!(",
-            "state.workspace()",
-            "state::Workspace::Devices | state::Workspace::Backups",
-            "state.begin_backup_create_choice()",
+            "if matches!(state.workspace(), Workspace::Devices | Workspace::Backups)",
+            "ActionRequest::Navigate(NavCommand::BeginBackupCreate)",
         ],
     ));
     assert!(contains_tokens_in_order(
-        dispatch,
+        controller,
         &[
             "TuiAction::Restore",
-            "state.workspace() == state::Workspace::Backups",
+            "state.workspace() == Workspace::Backups",
+            "state.workspace() == Workspace::Devices",
+            "state.devices_focused_pane() == PaneId::DevicesDetail",
+            "state.selected_device_related_backup().is_some()",
+            "ActionRequest::Navigate(NavCommand::BeginRestore)",
+        ],
+    ));
+    let production = include_str!("../src/tui/dispatch.rs");
+    assert!(contains_tokens_in_order(
+        production,
+        &[
             "NavCommand::BeginRestore",
+            "state.selected_restore_backup_path()",
+            "state.begin_write_wizard_for_identity(",
+            "state::WriteKind::Restore",
         ],
     ));
 }
@@ -307,7 +443,17 @@ fn insert_mode_treats_vim_action_letters_as_text_and_arrows_as_cursor_motion() {
         mapper.map(InputMode::Insert, key(KeyCode::End)),
         Some(TuiAction::CursorEnd)
     );
-    assert_eq!(mapper.map(InputMode::Insert, key(KeyCode::Tab)), None);
+    assert_eq!(
+        mapper.map(InputMode::Insert, key(KeyCode::Tab)),
+        Some(TuiAction::FocusNext)
+    );
+    assert_eq!(
+        mapper.map(
+            InputMode::Insert,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
+        ),
+        Some(TuiAction::FocusPrevious)
+    );
 }
 
 #[test]
@@ -358,10 +504,10 @@ fn confirm_mode_has_uniform_yes_no_escape_contract_without_weakening_typed_yes()
 
 #[test]
 fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
-    let event_loop = include_str!("../src/tui/mod.rs");
+    let controller = include_str!("../src/tui/controller/provision.rs");
     let form = source_section(
-        event_loop,
-        "ProvisionStage::Form => match action {",
+        controller,
+        "ProvisionStage::Form if state.input_mode()",
         "ProvisionStage::Review =>",
     );
     assert!(
@@ -371,7 +517,7 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
                 "TuiAction::Insert",
                 "state.provision_begin_insert()",
                 "TuiAction::Activate",
-                "start_provision_plan(&mut state, &mut tasks)",
+                "ActionRequest::ProvisionPlan",
             ],
         ),
         "Provision Form Insert must edit while Enter/Activate generates the plan"
@@ -383,24 +529,38 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
         ),
         "Provision Form Enter must not enter Insert mode or toggle checkbox state"
     );
-
-    let render = include_str!("../src/tui/render.rs");
+    let production = include_str!("../src/tui/dispatch.rs");
     assert!(
-        !render.contains("i/Enter 进入 Insert"),
+        contains_tokens_in_order(
+            production,
+            &[
+                "ActionRequest::ProvisionPlan",
+                "start_provision_plan(state, tasks)",
+            ],
+        ),
+        "Provision Form plan request must execute through the production task adapter"
+    );
+
+    let keymap = include_str!("../src/tui/keymap/help.rs");
+    assert!(
+        !keymap.contains("i/Enter 进入 Insert"),
         "help/footer must not advertise the regressed Enter-to-edit behavior"
     );
     assert!(
-        render.contains("Enter 生成计划"),
-        "Provision Form footer must advertise Enter as generate-plan"
+        keymap.contains("进入下一阶段"),
+        "Provision help registry must advertise Enter as the forward action"
     );
 }
 
 #[test]
 fn user_visible_inspect_hints_point_to_full_disk_tree_entry() {
-    let devices = include_str!("../src/tui/devices/render.rs");
-    assert!(devices.contains("Span::styled(\"i\", accent())"));
-    assert!(devices.contains("Span::styled(\"Enter\", accent())"));
-    assert!(!devices.contains("gi"));
+    let keymap = include_str!("../src/tui/keymap/help.rs");
+    let shell = include_str!("../src/tui/shell/mod.rs");
+    assert!(keymap.contains("检查当前设备"));
+    assert!(shell.contains("? 帮助"));
+    assert!(keymap.contains("打开设备信息 / 进入详情"));
+    assert!(!keymap.contains("i Inspect"));
+    assert!(!keymap.contains("gi Inspect"));
 
     let dispatch = include_str!("../src/tui/dispatch.rs");
     assert!(dispatch.contains("NavCommand::OpenInspect =>"));
@@ -417,7 +577,8 @@ fn legacy_flat_inspect_state_worker_and_renderer_are_removed() {
 
     assert!(!state.contains("inspect_data:"));
     assert!(!state.contains("inspect_pending:"));
-    assert!(!inspect_state.contains("struct InspectState"));
+    assert!(inspect_state.contains("pub struct InspectState"));
+    assert!(inspect_state.contains("advanced: Option<AdvancedInspectState>"));
     assert!(!task.contains("WorkerResult::Inspect"));
     assert!(!task.contains("InspectRequest"));
     assert!(!inspect_task.contains("request_inspect_disk"));
@@ -427,7 +588,15 @@ fn legacy_flat_inspect_state_worker_and_renderer_are_removed() {
 
 #[test]
 fn event_loop_does_not_parse_text_or_confirmation_chars_outside_keymap() {
-    let source = include_str!("../src/tui/mod.rs");
+    let source = concat!(
+        include_str!("../src/tui/mod.rs"),
+        include_str!("../src/tui/runtime_input/inspect.rs"),
+        include_str!("../src/tui/runtime_input/provision.rs"),
+        include_str!("../src/tui/runtime_input/backup_batch.rs"),
+        include_str!("../src/tui/runtime_input/backup_prune.rs"),
+        include_str!("../src/tui/runtime_input/backup_wizard.rs"),
+        include_str!("../src/tui/runtime_input/shell.rs"),
+    );
     assert!(
         !source.contains("ct_event::KeyCode::Char(ch)"),
         "text/confirmation character handling must go through KeyMapper"
@@ -467,7 +636,7 @@ fn sector_inspector_sector_navigation_is_separate_from_page_scroll() {
 
 #[test]
 fn sector_inspector_dispatches_the_documented_vim_actions() {
-    let source = include_str!("../src/tui/mod.rs");
+    let source = include_str!("../src/tui/runtime_input/inspect.rs");
     let page_section = source_section(
         source,
         "TuiAction::PageUp => {",
@@ -515,15 +684,28 @@ fn release_events_never_reach_keymap() {
 
 #[test]
 fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
-    assert!(NORMAL_HELP
+    assert!(DEVICES_HELP
         .iter()
-        .any(|binding| binding.keys == "j/k" && binding.label == "Move"));
-    assert!(NORMAL_HELP
-        .iter()
-        .any(|binding| binding.keys == "r" && binding.action == TuiAction::Refresh));
-    assert!(NORMAL_HELP.iter().any(|binding| {
-        binding.keys == "Tab/Shift-Tab" && binding.action == TuiAction::WorkspaceNext
+        .any(|binding| binding.keys.contains("j/k") && binding.action == TuiAction::MoveDown));
+    assert!(GLOBAL_HELP.iter().any(|binding| {
+        binding.keys == "Tab / Shift-Tab"
+            && binding.label == "切换当前层级焦点 / 顶层标签"
+            && binding.action == TuiAction::FocusNext
     }));
+    assert!(GLOBAL_HELP.iter().any(|binding| {
+        binding.keys == "gt / gT"
+            && binding.label == "下一个 / 上一个顶层标签"
+            && binding.action == TuiAction::WorkspaceNext
+    }));
+    assert!(TABLE_HELP
+        .iter()
+        .any(|binding| binding.keys == "y / Y" && binding.action == TuiAction::TableCopyCell));
+    assert!(INSPECT_HELP.iter().any(|binding| {
+        binding.keys == "Tab/Shift-Tab"
+            && binding.label == "切换当前页 Pane"
+            && binding.action == TuiAction::FocusNext
+    }));
+    assert!(!INSPECT_HELP.iter().any(|binding| binding.keys == "gt/gT"));
     assert!(INSPECT_HELP
         .iter()
         .any(|binding| binding.keys == "gl" && binding.action == TuiAction::InspectJump));

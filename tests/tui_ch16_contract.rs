@@ -3,7 +3,6 @@ use edpcli::application::inspect::{
     InspectField, InspectFieldStatus, InspectFieldType,
 };
 use edpcli::inspect::{FieldChild, FieldStyle, InspectFieldKey, InspectMeta, InspectParseState};
-use edpcli::inspect_target::InspectDiskContext;
 use edpcli::tui::{
     render,
     state::{AdvancedInspectSource, AppState},
@@ -72,8 +71,7 @@ fn lba8_state() -> AppState {
         notes: Vec::new(),
         meta_text: None,
     };
-    let context =
-        InspectDiskContext::new(vec![0; edpcli::common::METADATA_IMAGE_LEN], None, 16_384);
+    let context = crate::common::edp_inspect_context(16_384);
     let workspace = AdvancedInspectWorkspace {
         source: "chapter-16-fixture".into(),
         meta: InspectMeta::default(),
@@ -81,6 +79,8 @@ fn lba8_state() -> AppState {
         items: vec![sector],
         export_dir: None,
         topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
+        disk_layout: None,
+        disk_layout_issue: None,
     };
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
@@ -90,12 +90,14 @@ fn lba8_state() -> AppState {
 }
 
 fn device() -> edpcli::disk_scan::Row {
-    edpcli::disk_scan::Row {
+    let mut row = edpcli::disk_scan::Row {
         disk: 6,
         size: 64_000_000_000,
         vid: "1234".into(),
         pid: "5678".into(),
         proto: "USB".into(),
+        serial: None,
+        hardware_model: None,
         device_id: Some("disk&ven_demo&prod_u335".into()),
         identity_pin: None,
         onlyid: Some("ABCDEF0123456789".into()),
@@ -110,19 +112,22 @@ fn device() -> edpcli::disk_scan::Row {
         n_possible_baks: 1,
         denied: false,
         probe_error: None,
-        is_nopwd: false,
         provision_kind: edpcli::provision::DiskProvisionKind::Mode0,
         partitions: None,
-    }
+        partition_table: None,
+        partition_table_error: None,
+        lce: None,
+    };
+    crate::common::confirm_row_identity(&mut row);
+    row
 }
 
 fn provision_state() -> AppState {
-    use edpcli::tui::state::NavCommand;
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    assert_eq!(state.provision_select_disk(), Some(6));
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     state.provision_begin_selected();
+    state.provision_enter_form_workspace();
     state
 }
 
@@ -130,44 +135,80 @@ fn provision_state() -> AppState {
 fn ch16_provision_has_shared_stepper_and_card_surfaces() {
     let state = provision_state();
     let text = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
-    for value in [
-        "选择设备",
-        "制盘配置",
-        "分区预览",
-        "计划确认",
-        "执行",
-        "完成",
-    ] {
+    for value in ["制盘配置", "生成计划", "计划确认", "执行", "完成"] {
         assert!(text.contains(value), "missing {value}");
     }
     assert!(text.contains("固定目标"));
 }
 
 #[test]
+fn provision_breadcrumb_tracks_page_surface_not_overlay_stage() {
+    use edpcli::tui::state::ProvisionStage;
+
+    let mut state = provision_state();
+    let form = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
+    assert!(form.contains("设备/disk6>制盘/mode0>制盘配置"), "{form}");
+    assert!(form.contains("Esc返回：设备列表"), "{form}");
+
+    state.provision_mut().stage = ProvisionStage::Planning;
+    let planning = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
+    assert!(
+        planning.contains("设备/disk6>制盘/mode0>制盘配置"),
+        "{planning}"
+    );
+    assert!(planning.contains("2生成计划"), "{planning}");
+
+    state.provision_mut().stage = ProvisionStage::Review;
+    state.provision_mut().pane_focus = edpcli::tui::pane::PaneFocus::provision_review();
+    let review = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
+    assert!(
+        review.contains("设备/disk6>制盘/mode0>计划确认"),
+        "{review}"
+    );
+    assert!(review.contains("Esc返回：制盘配置"), "{review}");
+
+    state.provision_mut().stage = ProvisionStage::Confirm;
+    let confirm = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
+    assert!(
+        confirm.contains("设备/disk6>制盘/mode0>计划确认"),
+        "{confirm}"
+    );
+    assert!(confirm.contains("Esc返回：制盘配置"), "{confirm}");
+}
+
+#[test]
 fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
-    use edpcli::application::progress::{Phase, ProgressEvent, Step};
+    use edpcli::application::progress::{
+        OverallProgress, Phase, ProgressEvent, Step, TransactionActivityPhase, Unit, WorkProgress,
+    };
     use edpcli::tui::state::ProvisionStage;
     let mut state = provision_state();
     state.provision_mut().stage = ProvisionStage::Running;
     state.provision_mut().pane_focus = edpcli::tui::pane::PaneFocus::provision_running();
     let now = std::time::Instant::now();
-    state.provision_mut().run = Some(edpcli::tui::state::ProvisionRunState {
-        started_at: now,
-        last_activity_at: now,
-        latest: None,
-        log: std::collections::VecDeque::new(),
-    });
-    state.provision_push_progress(ProgressEvent::new(
-        Phase::Transaction,
-        Step::ProtocolReadback,
-        7,
-        10,
-    ));
-    let text = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
+    let mut run = edpcli::application::progress::OperationRunState::new(
+        edpcli::application::progress::OperationKind::Provision,
+        "disk6",
+    );
+    run.started_at = now;
+    run.last_activity_at = now;
+    state.provision_mut().run = Some(run);
+    let event = ProgressEvent::new(Phase::Transaction, Step::ProtocolReadback, 2, 7)
+        .with_overall(OverallProgress::from_basis_points(7_000))
+        .with_work(WorkProgress {
+            current: 75,
+            total: 100,
+            unit: Unit::Sectors,
+            activity: Some(TransactionActivityPhase::FormatWrite),
+        });
+    state.provision_push_progress(event);
+    let lines = rendered_lines(&state, 160, 45);
+    let text = lines.join("\n").replace(' ', "");
     for value in [
         "总体进度",
         "70%",
         "当前阶段",
+        "2/7",
         "事务写入",
         "当前步骤",
         "协议读回校验",
@@ -176,6 +217,19 @@ fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
     ] {
         assert!(text.contains(value), "missing {value}");
     }
+    let phase_row = lines
+        .iter()
+        .position(|line| line.replace(' ', "").contains("当前阶段2/7"))
+        .expect("current-stage content row");
+    assert!(
+        lines[phase_row + 2].contains("75 / 100 sector · 75%"),
+        "work gauge label must occupy exactly the final content row: {:?}",
+        &lines[phase_row.saturating_sub(1)..=phase_row + 3]
+    );
+    assert!(
+        !lines[phase_row + 3].contains("75 / 100 sector · 75%"),
+        "work gauge must never overwrite the current-status bottom border"
+    );
     for (width, height) in [(40, 10), (80, 24), (120, 36), (240, 60)] {
         let compact = rendered_lines(&state, width, height)
             .join("\n")
@@ -188,20 +242,25 @@ fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
 }
 
 #[test]
-fn ch16_provision_result_uses_typed_outcome_badges() {
+fn ch16_provision_result_uses_workbench_hero_and_panes() {
     use edpcli::application::provision::ProvisionExecutionStatus as Status;
     use edpcli::tui::state::ProvisionStage;
     let mut state = provision_state();
     state.provision_mut().stage = ProvisionStage::Result;
     for (status, label) in [
-        (Status::Success, "[制盘成功]"),
-        (Status::CompletedWithWarnings, "[制盘完成，存在警告]"),
-        (Status::PartialFormatFailure, "[部分完成：格式化失败]"),
-        (Status::FatalFailure, "[制盘失败]"),
+        (Status::Success, "✓制盘成功"),
+        (Status::CompletedWithWarnings, "⚠制盘完成·存在警告"),
+        (Status::PartialFormatFailure, "⚠制盘完成·部分格式化失败"),
+        (Status::FatalFailure, "✗制盘失败"),
     ] {
         state.provision_mut().result_status = Some(status);
-        let text = rendered_lines(&state, 120, 36).join("\n").replace(' ', "");
+        let text = rendered_lines(&state, 140, 40).join("\n").replace(' ', "");
         assert!(text.contains(label), "missing {label}");
+        for required in ["制盘结果", "分区结果", "全盘布局", "验收与执行"] {
+            assert!(text.contains(required), "missing {required}");
+        }
+        assert!(text.contains("Esc/Enter返回设备列表"));
+        assert!(!text.contains("最近进度事件"));
     }
 }
 
@@ -214,33 +273,43 @@ fn ch16_shell_exposes_four_top_level_workspaces() {
         .cloned()
         .collect::<String>()
         .replace(' ', "");
-    for title in ["设备", "Inspect", "制盘", "备份"] {
-        assert!(
-            navigation.contains(title),
-            "missing {title} in {navigation}"
-        );
-    }
+    let device = navigation.find("设备").expect("missing 设备 tab");
+    let backups = navigation.find("备份").expect("missing 备份 tab");
+    assert!(device < backups);
+    assert!(!navigation.contains("检查"));
+    assert!(!navigation.contains("制盘"));
+    assert!(!navigation.contains("Inspect"));
 }
 
 #[test]
-fn ch16_inspect_is_a_workspace_with_a_real_return_target() {
+fn ch16_inspect_is_nested_and_top_level_switching_cannot_leave_it() {
     use edpcli::tui::state::{NavCommand, Workspace};
 
     let mut state = AppState::new();
+    assert_eq!(
+        Workspace::TOP_LEVEL,
+        [Workspace::Devices, Workspace::Backups]
+    );
     assert_eq!(
         Workspace::ALL,
         [
             Workspace::Devices,
             Workspace::Inspect,
-            Workspace::Provision,
-            Workspace::Backups
+            Workspace::Backups,
+            Workspace::Provision
         ]
     );
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
     assert_eq!(state.workspace(), Workspace::Inspect);
     let lines = rendered_lines(&state, 120, 36).join("\n").replace(' ', "");
-    assert!(lines.contains("Inspect"));
+    assert!(lines.contains("检查"));
     state.advanced_inspect_finish(Err("test".into()));
+    state.navigate(NavCommand::NextWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Inspect);
+    assert!(state.advanced_inspect().is_some());
+    state.navigate(NavCommand::PreviousWorkspace, 20);
+    assert_eq!(state.workspace(), Workspace::Inspect);
+    assert!(state.advanced_inspect().is_some());
     state.navigate(NavCommand::Escape, 20);
     assert_eq!(state.workspace(), Workspace::Devices);
 }
@@ -252,66 +321,75 @@ fn ch16_devices_and_backups_have_independent_pane_focus_and_viewports() {
     let mut state = AppState::new();
     assert_eq!(state.devices_focused_pane(), PaneId::DevicesList);
     assert_eq!(state.backups_focused_pane(), PaneId::BackupsList);
-    state.focus_devices_pane(PaneId::DevicesSummary);
-    state
-        .pane_viewport_mut(PaneId::DevicesSummary)
-        .scroll_y
-        .offset = 7;
+    state.focus_devices_pane(PaneId::DevicesTree);
+    state.pane_viewport_mut(PaneId::DevicesTree).scroll_y.offset = 7;
     state.focus_backups_pane(PaneId::BackupCoverage);
     state.pane_viewport_mut(PaneId::BackupCoverage).scroll_x = 3;
-    assert_eq!(state.devices_focused_pane(), PaneId::DevicesSummary);
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesTree);
     assert_eq!(state.backups_focused_pane(), PaneId::BackupCoverage);
-    assert_eq!(
-        state.pane_viewport(PaneId::DevicesSummary).scroll_y.offset,
-        7
-    );
+    assert_eq!(state.pane_viewport(PaneId::DevicesTree).scroll_y.offset, 7);
     assert_eq!(state.pane_viewport(PaneId::BackupCoverage).scroll_x, 3);
 }
 
 #[test]
-fn ch16_devices_wide_shows_current_identity_stats_and_no_animation_sidebar() {
+fn ch16_devices_wide_is_list_plus_tree_plus_detail_without_redundant_current_device_banner() {
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
     let text = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
     for value in [
         "设备列表",
-        "当前设备disk6",
-        "张三",
-        "输电运检中心",
-        "总体统计",
-        "已确认备份3",
+        "设备信息",
+        "容量布局",
+        "身份与协议",
+        "状态与备份",
+        "无法建立可靠容量布局",
     ] {
         assert!(text.contains(value), "missing {value}");
     }
+    assert!(!text.contains("当前设备·disk6"));
     assert!(!text.contains("EDPCORE·LIVE"));
 }
 
 #[test]
-fn ch16_devices_compact_enter_opens_detail_and_escape_returns_to_list() {
+fn ch16_devices_compact_enter_opens_tree_then_detail_and_escape_walks_back() {
     use edpcli::tui::{pane::PaneId, state::NavCommand};
 
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
     assert_eq!(state.activate_device_for_viewport(40).unwrap(), None);
-    assert_eq!(state.devices_focused_pane(), PaneId::DevicesSummary);
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesTree);
     let text = rendered_lines(&state, 40, 10).join("\n").replace(' ', "");
-    for value in ["当前设备disk6", "用户张三", "部门输电运检中心"] {
+    for value in ["设备信息", "身份与协议", "容量布局"] {
         assert!(text.contains(value), "missing {value} at 40x10");
     }
+    assert!(!text.contains("当前设备·disk6"));
+    state.device_info_focus_detail();
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesDetail);
+    state.navigate(NavCommand::Escape, 7);
+    assert_eq!(state.devices_focused_pane(), PaneId::DevicesTree);
     state.navigate(NavCommand::Escape, 7);
     assert_eq!(state.devices_focused_pane(), PaneId::DevicesList);
 }
 
 #[test]
-fn ch16_device_secondary_pane_remains_reachable_at_standard_width() {
-    use edpcli::tui::pane::PaneId;
+fn ch16_device_detail_pane_remains_reachable_at_standard_width() {
+    use edpcli::tui::{pane::PaneId, state::NavCommand};
 
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
-    state.focus_devices_pane(PaneId::DevicesStats);
-    let text = rendered_lines(&state, 100, 30).join("\n").replace(' ', "");
-    assert!(text.contains("总体统计"));
-    assert!(text.contains("可能相关备份1"));
+    state.focus_devices_pane(PaneId::DevicesDetail);
+    let default_text = rendered_lines(&state, 100, 30).join("\n").replace(' ', "");
+    assert!(default_text.contains("容量布局"));
+    assert!(default_text.contains("无法建立可靠容量布局"));
+
+    state.focus_devices_pane(PaneId::DevicesTree);
+    state.navigate(NavCommand::Bottom, 10);
+    state.device_info_move_tree(-1);
+    state.focus_devices_pane(PaneId::DevicesDetail);
+    let identity_text = rendered_lines(&state, 100, 30).join("\n").replace(' ', "");
+    assert!(identity_text.contains("身份与协议"));
+    assert!(identity_text.contains("device_id"));
+    assert!(!identity_text.contains("总设备1"));
 }
 
 #[test]
@@ -437,7 +515,7 @@ fn ch16_inspect_lba8_renders_at_all_required_sizes() {
             .join("\n")
             .replace(' ', "");
         assert!(
-            text.contains("Inspect"),
+            text.contains("结构树") || text.contains("LBA8"),
             "missing workspace at {width}x{height}"
         );
     }
@@ -456,7 +534,6 @@ fn ch16_inspect_view_shortcuts_are_explicit() {
         ('1', TuiAction::InspectBusiness),
         ('2', TuiAction::InspectRawFields),
         ('3', TuiAction::InspectHex),
-        ('4', TuiAction::InspectDiskLayout),
     ] {
         assert_eq!(
             mapper.map(
@@ -466,6 +543,14 @@ fn ch16_inspect_view_shortcuts_are_explicit() {
             Some(expected)
         );
     }
+    assert_eq!(
+        mapper.map(
+            InputMode::Normal,
+            KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE)
+        ),
+        None,
+        "Inspect no longer has a standalone disk-layout page"
+    );
 }
 
 #[test]
@@ -546,7 +631,7 @@ fn ch16_business_layouts_do_not_use_legacy_animation_or_workspace_sidebars() {
 #[test]
 fn ch16_design_primitives_share_theme_and_render_at_compact_size() {
     use edpcli::tui::ui::{
-        card, data_table, key_hints, notice_banner, panel, status_badge, BadgeTone, BannerTone,
+        card, data_table, notice_banner, panel, status_badge, BadgeTone, BannerTone,
     };
     use ratatui::{
         layout::Constraint,
@@ -576,8 +661,7 @@ fn ch16_design_primitives_share_theme_and_render_at_compact_size() {
                 ratatui::layout::Rect::new(0, 4, 40, 1),
             );
             frame.render_widget(
-                Paragraph::new(key_hints(&[("r", "刷新"), ("?", "帮助")]))
-                    .block(panel("操作", false)),
+                Paragraph::new("动态状态").block(panel("状态", false)),
                 ratatui::layout::Rect::new(0, 5, 40, 4),
             );
         })
@@ -587,7 +671,7 @@ fn ch16_design_primitives_share_theme_and_render_at_compact_size() {
         .map(|position| terminal.backend().buffer()[position].symbol().to_owned())
         .collect::<String>()
         .replace(' ', "");
-    for value in ["设备", "正常", "disk4", "扫描完成", "刷新"] {
+    for value in ["设备", "正常", "disk4", "扫描完成", "动态状态"] {
         assert!(text.contains(value), "missing {value}");
     }
 }

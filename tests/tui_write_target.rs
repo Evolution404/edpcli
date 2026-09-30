@@ -10,12 +10,14 @@ use edpcli::tui::{
 use ratatui::{backend::TestBackend, Terminal};
 
 fn device(disk: u32) -> Row {
-    Row {
+    let mut row = Row {
         disk,
         size: 64_000_000_000,
         vid: "1234".into(),
         pid: "5678".into(),
         proto: "USB".into(),
+        serial: None,
+        hardware_model: None,
         device_id: Some("disk&ven_test&prod_test".into()),
         identity_pin: None,
         onlyid: Some(format!("{disk}001")),
@@ -30,10 +32,14 @@ fn device(disk: u32) -> Row {
         n_possible_baks: 0,
         denied: false,
         probe_error: None,
-        is_nopwd: false,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
-    }
+        partition_table: None,
+        partition_table_error: None,
+        lce: None,
+    };
+    crate::common::confirm_row_identity(&mut row);
+    row
 }
 
 fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
@@ -50,8 +56,7 @@ fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
         identity: None,
         user: None,
         dept: None,
-        is_nopwd: false,
-        provision_kind: edpcli::provision::DiskProvisionKind::Plain,
+        provision_kind: Some(edpcli::provision::DiskProvisionKind::Plain),
         integrity_status: BackupIntegrityStatus::Verified,
         size_ok: true,
         content_sha256: Some(
@@ -357,4 +362,81 @@ fn switching_to_backups_pins_the_real_device_selected_through_a_filter() {
 
     state.navigate(NavCommand::WorkspaceBackups, 20);
     assert_eq!(state.selected_device_disk(), Some(7));
+}
+
+#[test]
+fn d0_plain_disk_without_device_id_uses_canonical_plain_kind() {
+    use edpcli::application::identity::WorkspaceIdentity;
+    use edpcli::application::media_identity::{
+        DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation, MediaIdentityPin,
+        MediaIdentitySnapshot,
+    };
+    use edpcli::provision::DiskProvisionKind;
+
+    let mut row = device(4);
+    row.device_id = None;
+    row.onlyid = None;
+    row.provision_kind = DiskProvisionKind::Plain;
+    let snapshot = MediaIdentitySnapshot::plain(
+        HardwareIdentityEvidence {
+            vid: Some(0x3535),
+            pid: Some(0x6300),
+            total_sectors: Some(row.size / 512),
+            logical_sector_size: Some(512),
+            ..HardwareIdentityEvidence::default()
+        },
+        DerivedProtocolEvidence::default(),
+        IdentityObservation::default(),
+    );
+    row.identity_pin = Some(MediaIdentityPin::new(snapshot, &[0; 13 * 512]));
+
+    let identity = WorkspaceIdentity::from_device(&row);
+    assert_eq!(identity.provision_kind, Some(DiskProvisionKind::Plain));
+    assert_eq!(
+        identity.display_cells()[6],
+        "普通盘",
+        "a canonical Plain disk must not become unknown just because it has no EDP device_id"
+    );
+}
+
+#[test]
+fn backup_table_sort_preserves_selected_backup_reference() {
+    use edpcli::tui::table_layout::TableKind;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(7)]);
+    state.replace_backups(vec![backup(1, "one.bin"), backup(2, "two.bin")]);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    state.navigate(NavCommand::Down, 20);
+    assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
+
+    assert!(state.move_table_column(TableKind::Backups, false)); // time
+    assert!(state.move_table_column(TableKind::Backups, false)); // name
+    assert_eq!(state.table_active_column(TableKind::Backups), 2);
+
+    state.toggle_table_sort(TableKind::Backups);
+    assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
+    state.toggle_table_sort(TableKind::Backups);
+    assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
+    assert!(state.clear_table_sort(TableKind::Backups));
+    assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
+}
+
+#[test]
+fn backup_copy_skips_control_column_and_normalizes_unicode_text() {
+    use edpcli::tui::table_layout::TableKind;
+
+    let mut item = backup(1, "中文🙂.edpb");
+    item.user = Some("张三\t测试\r\n🙂".into());
+    let mut state = AppState::new();
+    state.replace_backups(vec![item]);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    let kind = TableKind::Backups;
+    assert_eq!(state.table_copy_payload(kind, false), None);
+    assert!(state.move_table_column_for_viewport(kind, false, 160, 30));
+    assert_eq!(state.table_copy_payload(kind, false).as_deref(), Some("1"));
+    let row = state.table_copy_payload(kind, true).unwrap();
+    assert_eq!(row.split('\t').count(), 11);
+    assert!(row.contains("张三 测试  🙂"));
+    assert!(!row.starts_with('✓'));
 }

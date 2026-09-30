@@ -12,7 +12,11 @@ mod macos {
     use std::time::Duration;
 
     use edpcli::application::device::guard_usb_disk;
-    use edpcli::backup_metadata::parse_partition_geometry;
+    use edpcli::backup_metadata::{
+        parse_lba7_compatibility_geometry, parse_partition_geometry,
+        TAIL_END4_MIRROR_OFFSET_SECTORS, TAIL_METADATA_MIRROR_OFFSET_SECTORS,
+        TAIL_METADATA_MIRROR_SECTORS,
+    };
     use edpcli::common::{EXIT_ROLLED_BACK, SECTOR};
     use edpcli::diskio::{
         execute_write_transaction, raw_path, FileDev, SectorDev, SectorWriteStage,
@@ -135,9 +139,6 @@ mod macos {
         guard_usb_disk(&runner, disk).map_err(|error| error.msg)?;
         let total_before = disk_total_sectors(&runner, disk)
             .ok_or_else(|| format!("无法读取 disk{disk} 总扇区数"))?;
-        if touched[2] as u64 >= total_before.saturating_sub(2048) {
-            return Err("故障注入扇区不得进入盘尾 2048-sector 保护区".into());
-        }
         let serial_before = runner
             .hardware_serial(disk)
             .ok_or_else(|| format!("无法读取 disk{disk} 硬件序列号"))?;
@@ -151,6 +152,14 @@ mod macos {
             .clone()
             .or_else(|| generate_candidates(&runner, disk).into_iter().next())
             .ok_or_else(|| "无法从 EDPF 或 USB/SCSI 硬件信息取得 device_id".to_string())?;
+        let lce = if edp_device_id.is_some() {
+            Some(
+                parse_lba7_compatibility_geometry(&metadata, &device_id, total_before)
+                    .map_err(|error| format!("EDP LCE 几何无法确认，拒绝 HIL: {error}"))?,
+            )
+        } else {
+            None
+        };
         let lba4_tag = edpcli::diskio::lba4_tag16_from(&metadata[4 * SECTOR..5 * SECTOR])
             .ok_or_else(|| "LBA4 缺少身份标签范围".to_string())?;
         let partitions = match parse_partition_geometry(&metadata, &device_id, total_before) {
@@ -164,6 +173,27 @@ mod macos {
         };
         let mbr_ranges = mbr_partition_ranges(&metadata)?;
         for &lba in &touched {
+            if let Some(lce) = lce.as_ref() {
+                let lba = u64::from(lba);
+                if lba >= lce.start_lba && lba < lce.start_lba + lce.sector_count {
+                    return Err(format!("LBA{lba} 落在 LCE 内，拒绝故障注入"));
+                }
+                if total_before
+                    >= TAIL_METADATA_MIRROR_OFFSET_SECTORS + TAIL_METADATA_MIRROR_SECTORS
+                {
+                    let start = total_before - TAIL_METADATA_MIRROR_OFFSET_SECTORS;
+                    if lba >= start && lba < start + TAIL_METADATA_MIRROR_SECTORS {
+                        return Err(format!(
+                            "LBA{lba} 落在历史 9-sector 备份镜像内，拒绝故障注入"
+                        ));
+                    }
+                }
+                if total_before > TAIL_END4_MIRROR_OFFSET_SECTORS
+                    && lba == total_before - TAIL_END4_MIRROR_OFFSET_SECTORS
+                {
+                    return Err(format!("LBA{lba} 落在盘尾恢复节点内，拒绝故障注入"));
+                }
+            }
             if let Some(partition) = partitions.iter().find(|partition| {
                 let start = partition.start_sector;
                 let end = start + partition.sector_count;

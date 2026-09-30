@@ -1,5 +1,9 @@
 #[path = "common/mod.rs"]
 pub mod common;
+#[path = "filesystem_contract.rs"]
+mod filesystem_contract;
+#[path = "filesystem_domain.rs"]
+mod filesystem_domain;
 #[path = "support/gold_name.rs"]
 pub mod gold_name;
 

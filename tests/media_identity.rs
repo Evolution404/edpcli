@@ -8,6 +8,8 @@ use edpcli::application::media_identity::{
     MediaRelationship, ProtocolIdentityEvidence, RestoreAuthorizationDecision,
     RestoreAuthorizationPolicy, RestoreGeometryRequirements, RestoreRejection, SerialQuality,
 };
+#[cfg(target_os = "macos")]
+use edpcli::application::media_identity_observer::media_identity_from_protocol_image;
 use edpcli::application::media_identity_observer::observe_media_identity_readonly;
 use edpcli::diskio::SectorDev;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
@@ -15,10 +17,12 @@ use edpcli::provision::DiskProvisionKind;
 use edpcli::sysinfo::CmdRunner;
 
 fn hardware(serial: Option<&str>, vid: u16, pid: u16, sectors: u64) -> HardwareIdentityEvidence {
+    let raw_serial = serial.map(str::to_string);
     let serial = serial_digest_evidence(serial);
     HardwareIdentityEvidence {
         vid: Some(vid),
         pid: Some(pid),
+        serial: raw_serial,
         serial_sha256: serial.sha256,
         serial_quality: serial.quality,
         vendor: Some("AIGO".into()),
@@ -80,7 +84,7 @@ fn same_usable_serial_plain_to_edp_is_physical_strong() {
         DiskProvisionKind::Plain,
     );
     let edp = snapshot(
-        hardware(Some(" SERIAL-001 "), 0x1234, 0x5678, 1_000_000),
+        hardware(Some("SERIAL-001"), 0x1234, 0x5678, 1_000_000),
         Some("disk&ven_aigo&prod_u335"),
         Some("42"),
         DiskProvisionKind::Mode0,
@@ -399,9 +403,15 @@ fn elevation_pin_contains_only_digest_and_rejects_reopened_clone() {
 struct ObservationRunner;
 
 impl CmdRunner for ObservationRunner {
-    fn check_output(&self, _cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+    fn check_output(&self, cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+        if cmd == ["diskutil", "info", "-plist", "disk6"] {
+            return Ok(
+                r#"<plist version="1.0"><dict><key>DiskSize</key><integer>64000000000</integer></dict></plist>"#
+                    .into(),
+            );
+        }
         Err(io::Error::other(
-            "platform geometry unavailable in unit fixture",
+            "platform query unavailable in unit fixture",
         ))
     }
 
@@ -410,6 +420,7 @@ impl CmdRunner for ObservationRunner {
             vid: Some(0x3535),
             pid: Some(0x6300),
             transport: NativeTransport::Uas,
+            windows_pnp_instance_id: None,
             inquiry: Some(InquiryInfo {
                 vendor: "AIGO".into(),
                 product: "U335".into(),
@@ -432,8 +443,16 @@ struct ReadOnlyAuditDev {
 
 impl ReadOnlyAuditDev {
     fn plain() -> Self {
+        let mut image = vec![0u8; 13 * 512];
+        let total_sectors = 64_000_000_000u64 / 512;
+        let entry = 0x1be;
+        image[entry + 4] = 0x07;
+        image[entry + 8..entry + 12].copy_from_slice(&2048u32.to_le_bytes());
+        image[entry + 12..entry + 16]
+            .copy_from_slice(&u32::try_from(total_sectors - 2048).unwrap().to_le_bytes());
+        image[510..512].copy_from_slice(&[0x55, 0xaa]);
         Self {
-            image: vec![0u8; 13 * 512],
+            image,
             reads: 0,
             writes: 0,
             reopens: 0,
@@ -465,8 +484,127 @@ impl SectorDev for ReadOnlyAuditDev {
     }
 }
 
+#[cfg(target_os = "macos")]
+struct StaleEdpRunner;
+
+#[cfg(target_os = "macos")]
+impl CmdRunner for StaleEdpRunner {
+    fn check_output(&self, cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+        if cmd == ["diskutil", "info", "-plist", "disk26"] {
+            return Ok(
+                r#"<plist version="1.0"><dict><key>DiskSize</key><integer>125829120000</integer></dict></plist>"#
+                    .into(),
+            );
+        }
+        Err(io::Error::other(
+            "platform query unavailable in stale fixture",
+        ))
+    }
+
+    fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
+        Some(HardwareProbe {
+            vid: Some(0x3535),
+            pid: Some(0x6300),
+            transport: NativeTransport::Uas,
+            windows_pnp_instance_id: None,
+            inquiry: Some(InquiryInfo {
+                vendor: "AIGO".into(),
+                product: "U335".into(),
+                revision: "PMAP".into(),
+            }),
+        })
+    }
+
+    fn hardware_serial(&self, _disk: u32) -> Option<String> {
+        Some("AIGO-STALE-EDP-PLAIN".into())
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct StaleEdpPlainDev {
+    protocol: Vec<u8>,
+    boot: Vec<u8>,
+    reads: usize,
+    writes: usize,
+}
+
+#[cfg(target_os = "macos")]
+impl SectorDev for StaleEdpPlainDev {
+    fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+        self.reads += 1;
+        if lba < 13 {
+            let start = lba as usize * 512;
+            return Ok(self.protocol[start..start + 512].to_vec());
+        }
+        if lba == 2_048 {
+            return Ok(self.boot.clone());
+        }
+        Ok(vec![0u8; 512])
+    }
+
+    fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+        self.writes += 1;
+        Err(io::Error::other(
+            "stale identity observation attempted a write",
+        ))
+    }
+}
+
+#[cfg(target_os = "macos")]
 #[test]
-fn readonly_observation_collects_plain_identity_without_any_write_transition() {
+fn formatted_plain_layout_overrides_stale_valid_edp_protocol_for_readonly_identity() {
+    const TOTAL: u64 = 245_760_000;
+    let runner = StaleEdpRunner;
+    let original = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/backup/disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_mode1_20260916_233626.bin"
+    ))
+    .to_vec();
+    assert_eq!(original.len(), 13 * 512);
+    let original_identity =
+        media_identity_from_protocol_image(&runner, 26, &original).expect("original EDP identity");
+    assert_eq!(
+        original_identity.protocol.provision_kind,
+        Some(DiskProvisionKind::Mode1),
+        "authentic EDP fixture must remain recognized before the MBR is replaced"
+    );
+
+    let mut protocol = original;
+    protocol[..512].fill(0);
+    let entry = 0x1be;
+    protocol[entry + 4] = 0x07;
+    protocol[entry + 8..entry + 12].copy_from_slice(&2_048u32.to_le_bytes());
+    protocol[entry + 12..entry + 16]
+        .copy_from_slice(&u32::try_from(TOTAL - 2_048).unwrap().to_le_bytes());
+    protocol[510..512].copy_from_slice(&[0x55, 0xaa]);
+
+    let fs = edpcli::filesystem::build_empty_exfat(2_048, TOTAL - 2_048, 0x1234_5678, "PLAIN")
+        .expect("build strict exFAT boot");
+    let boot = fs.sectors().get(&0).expect("exFAT boot sector").to_vec();
+    let mut dev = StaleEdpPlainDev {
+        protocol,
+        boot,
+        reads: 0,
+        writes: 0,
+    };
+
+    let observed =
+        observe_media_identity_readonly(&runner, 26, &mut dev).expect("readonly stale-media audit");
+    assert_eq!(
+        observed.snapshot.protocol.provision_kind,
+        Some(DiskProvisionKind::Plain)
+    );
+    assert_eq!(observed.snapshot.protocol.device_id, None);
+    assert_eq!(observed.snapshot.protocol.onlyid, None);
+    assert_eq!(dev.writes, 0);
+    assert!(
+        dev.reads > 13,
+        "runtime Plain proof must inspect the live filesystem boot"
+    );
+}
+
+#[test]
+fn readonly_observation_never_writes_and_classifies_plain_with_fixture_geometry() {
     let runner = ObservationRunner;
     let mut dev = ReadOnlyAuditDev::plain();
 
@@ -488,6 +626,11 @@ fn readonly_observation_collects_plain_identity_without_any_write_transition() {
     assert_eq!(observed.protocol_image.len(), 13 * 512);
     assert_eq!(observed.snapshot.protocol.device_id, None);
     assert_eq!(observed.snapshot.protocol.onlyid, None);
+    // ObservationRunner stubs macOS `diskutil` geometry. Linux and Windows obtain
+    // whole-disk geometry through native platform APIs instead of CmdRunner, so this
+    // synthetic fixture cannot truthfully prove Plain classification on those targets.
+    // The cross-platform zero-write/read-only assertions above remain active everywhere.
+    #[cfg(target_os = "macos")]
     assert_eq!(
         observed.snapshot.protocol.provision_kind,
         Some(DiskProvisionKind::Plain)
@@ -498,7 +641,16 @@ fn readonly_observation_collects_plain_identity_without_any_write_transition() {
         SerialQuality::Usable
     );
     assert!(observed.snapshot.hardware.serial_sha256.is_some());
+    assert_eq!(
+        observed.snapshot.hardware.serial.as_deref(),
+        Some("RAW-SERIAL-MUST-NOT-ESCAPE")
+    );
 
+    let serialized = serde_json::to_string(&observed.snapshot).unwrap();
+    assert!(
+        !serialized.contains("RAW-SERIAL-MUST-NOT-ESCAPE"),
+        "raw USB serial must not enter generic snapshot serialization"
+    );
     let debug = format!("{:?}", observed.snapshot);
     assert!(
         !debug.contains("RAW-SERIAL-MUST-NOT-ESCAPE"),

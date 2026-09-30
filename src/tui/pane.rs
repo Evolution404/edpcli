@@ -5,12 +5,11 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PaneId {
     DevicesList,
-    DevicesSummary,
-    DevicesStats,
+    DevicesTree,
+    DevicesDetail,
     BackupsList,
     BackupSummary,
     BackupCoverage,
-    InspectDiskLayout,
     InspectTree,
     InspectOverview,
     InspectDetail,
@@ -19,18 +18,20 @@ pub enum PaneId {
     ProvisionSummary,
     ProvisionChanges,
     ProvisionRunLog,
+    ResultPartitions,
+    ResultDiskLayout,
+    ResultVerification,
 }
 
 impl PaneId {
     pub const DEVICES_ORDER: [Self; 3] =
-        [Self::DevicesList, Self::DevicesSummary, Self::DevicesStats];
+        [Self::DevicesList, Self::DevicesTree, Self::DevicesDetail];
     pub const BACKUPS_ORDER: [Self; 3] =
         [Self::BackupsList, Self::BackupSummary, Self::BackupCoverage];
-    pub const INSPECT_ORDER: [Self; 4] = [
+    pub const INSPECT_ORDER: [Self; 3] = [
         Self::InspectTree,
         Self::InspectOverview,
         Self::InspectDetail,
-        Self::InspectDiskLayout,
     ];
     pub const PROVISION_FORM_ORDER: [Self; 2] =
         [Self::ProvisionParameters, Self::ProvisionDiskLayout];
@@ -39,14 +40,16 @@ impl PaneId {
         Self::ProvisionDiskLayout,
         Self::ProvisionChanges,
     ];
+    pub const RESULT_ORDER: [Self; 3] = [
+        Self::ResultPartitions,
+        Self::ResultDiskLayout,
+        Self::ResultVerification,
+    ];
 
     pub const fn is_inspect(self) -> bool {
         matches!(
             self,
-            Self::InspectDiskLayout
-                | Self::InspectTree
-                | Self::InspectOverview
-                | Self::InspectDetail
+            Self::InspectTree | Self::InspectOverview | Self::InspectDetail
         )
     }
 
@@ -64,7 +67,7 @@ impl PaneId {
     pub const fn is_devices(self) -> bool {
         matches!(
             self,
-            Self::DevicesList | Self::DevicesSummary | Self::DevicesStats
+            Self::DevicesList | Self::DevicesTree | Self::DevicesDetail
         )
     }
 
@@ -72,6 +75,13 @@ impl PaneId {
         matches!(
             self,
             Self::BackupsList | Self::BackupSummary | Self::BackupCoverage
+        )
+    }
+
+    pub const fn is_result(self) -> bool {
+        matches!(
+            self,
+            Self::ResultPartitions | Self::ResultDiskLayout | Self::ResultVerification
         )
     }
 }
@@ -180,6 +190,10 @@ impl PaneFocus {
         Self::new(PaneId::ProvisionRunLog, [PaneId::ProvisionRunLog])
     }
 
+    pub fn result_workbench() -> Self {
+        Self::new(PaneId::ResultPartitions, PaneId::RESULT_ORDER)
+    }
+
     pub const fn focused(&self) -> PaneId {
         self.focused
     }
@@ -218,10 +232,8 @@ impl PaneFocus {
     pub fn spatial_inspect(&mut self, dx: i8, dy: i8) {
         use PaneId::*;
         let next = match (self.focused, dx.signum(), dy.signum()) {
-            (InspectDiskLayout, _, -1) => Some(InspectDetail),
             (InspectTree | InspectOverview, _, 1) => Some(InspectDetail),
             (InspectDetail, _, -1) => Some(InspectOverview),
-            (InspectDetail, _, 1) => Some(InspectDiskLayout),
             (InspectTree, 1, _) => Some(InspectOverview),
             (InspectOverview, -1, _) => Some(InspectTree),
             _ => None,

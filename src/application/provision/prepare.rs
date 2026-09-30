@@ -1,34 +1,42 @@
 use super::*;
-use crate::provision::DiskProvisionKind;
 
-fn confirmed_filesystem(
-    boot: &[u8],
-    start_lba: u64,
-    sectors: u64,
-) -> Option<OfficialFilesystemFormat> {
+fn confirmed_filesystem(boot: &[u8], start_lba: u64, sectors: u64) -> Option<FilesystemKind> {
     if boot.len() != SECTOR {
         return None;
     }
-    if boot.get(3..11) == Some(b"EXFAT   ")
-        && u64::from_le_bytes(boot.get(64..72)?.try_into().ok()?) == start_lba
-        && u64::from_le_bytes(boot.get(72..80)?.try_into().ok()?) == sectors
-    {
-        return Some(OfficialFilesystemFormat::ExFat);
-    }
-    if boot.get(54..62) == Some(b"FAT16   ")
-        && u32::from_le_bytes(boot.get(28..32)?.try_into().ok()?) as u64 == start_lba
-    {
-        let short = u16::from_le_bytes(boot.get(19..21)?.try_into().ok()?) as u64;
-        let total = if short != 0 {
-            short
-        } else {
-            u32::from_le_bytes(boot.get(32..36)?.try_into().ok()?) as u64
-        };
-        if total == sectors {
-            return Some(OfficialFilesystemFormat::Fat16);
-        }
-    }
-    None
+    let registry = crate::filesystem::default_registry();
+    let mut detection_reader = crate::filesystem::BootSectorReader::new(boot, sectors);
+    let detected = registry.detect(&mut detection_reader).ok()??;
+    let geometry = crate::filesystem::FilesystemGeometry::new(start_lba, sectors, SECTOR as u32);
+    let mut geometry_reader = crate::filesystem::BootSectorReader::new(boot, sectors);
+    detected
+        .driver
+        .matches_geometry(&mut geometry_reader, geometry)
+        .ok()?
+        .then_some(detected.kind())
+}
+
+fn classify_live_source_identity(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    source_metadata: &[u8],
+    total_sectors: u64,
+    dev: &mut dyn SectorDev,
+) -> EdpCliResult<crate::media_identity::MediaIdentitySnapshot> {
+    let identity = media_identity_from_protocol_image(runner, disk, source_metadata)?;
+    Ok(
+        crate::media_identity_observer::apply_runtime_plain_override(
+            identity,
+            source_metadata,
+            total_sectors,
+            |lba| {
+                let lba = u32::try_from(lba)
+                    .map_err(|_| format!("Plain runtime evidence LBA{lba} exceeds u32"))?;
+                dev.read_sector(lba)
+                    .map_err(|error| format!("read Plain runtime evidence LBA{lba}: {error}"))
+            },
+        ),
+    )
 }
 
 fn resolved_source_password<'a>(
@@ -88,7 +96,7 @@ fn inspect_source_profile(
                 let Ok(key) = source.records[index].verified_sm4_file_key(password) else {
                     continue;
                 };
-                let Ok(value) = crate::backup_deep::keys::decrypt_mode2(&raw, &key) else {
+                let Ok(value) = crate::partition_transform::decrypt_mode2(&raw, &key) else {
                     continue;
                 };
                 value
@@ -259,19 +267,26 @@ pub fn prepare_target_provision(
             )
         })?;
     let source_metadata = read_image(dev)?;
-    let source_kind =
-        crate::provision::DiskProvisionKind::from_metadata(&source_metadata, &device_id);
-    let before_pin = MediaIdentityPin::new(
-        media_identity_from_protocol_image(runner, disk, &source_metadata)?,
-        &source_metadata,
-    );
-    let source = inspect_source_profile(
-        dev,
-        &source_metadata,
-        &device_id,
-        total_sectors,
-        &request.key_domains,
-    )?;
+    let source_identity =
+        classify_live_source_identity(runner, disk, &source_metadata, total_sectors, dev)?;
+    let source_kind = source_identity.protocol.provision_kind.ok_or_else(|| {
+        err(
+            EXIT_TARGET,
+            "错误: 来源盘型未确认；拒绝把未知/损坏介质按 Plain 或 EDP 继续制盘",
+        )
+    })?;
+    let before_pin = MediaIdentityPin::new(source_identity, &source_metadata);
+    let source = if source_kind == crate::provision::DiskProvisionKind::Plain {
+        None
+    } else {
+        inspect_source_profile(
+            dev,
+            &source_metadata,
+            &device_id,
+            total_sectors,
+            &request.key_domains,
+        )?
+    };
     let source_identity = if source.is_some() {
         let base = crate::protocol::semantic::SemanticContext {
             device_id: Some(device_id.clone()),
@@ -383,9 +398,11 @@ pub fn prepare_target_provision(
     })?;
     let mut prepared_plain_import = None;
     if source.is_none() && source_kind == crate::provision::DiskProvisionKind::Plain {
-        let import = super::migration::prepare_plain_to_official(dev, &target_plan)?;
-        let role = target_plan.partitions[import.target_index].geometry.role;
+        let target_index = super::migration::plain_import_target_index(&target_plan)?;
+        let role = target_plan.partitions[target_index].geometry.role;
         if !request.format.choice(role).0 {
+            let import =
+                super::migration::prepare_plain_to_official(dev, &target_plan, total_sectors)?;
             let target = &mut target_plan.partitions[import.target_index];
             target.disposition = RegionDisposition::Migrate;
             target.action = RegionDisposition::Migrate.legacy_action();
@@ -729,13 +746,18 @@ pub fn prepare_target_provision(
                 format!("错误: {} K6 迁移目标没有文件系统", migration.role.label()),
             )
         })?;
+        let filesystem_entries = migration
+            .entries
+            .iter()
+            .map(FilesystemMigrationEntry::from)
+            .collect::<Vec<_>>();
         let plain = build_migrated_filesystem(
             filesystem,
             part.geometry.start_lba,
             part.geometry.sector_count,
             serials[migration.target_index],
             &choice.volume_label,
-            &migration.entries,
+            &filesystem_entries,
         )
         .map_err(|message| {
             err(
@@ -748,7 +770,7 @@ pub fn prepare_target_provision(
         })?;
         verify_migration_image(&plain, &part.geometry, migration)?;
         let physical = if choice.target.physically_encrypted {
-            encrypt_sparse_mode2(&plain, &file_keys[migration.target_index])
+            plain.transformed(&EdpSm4Transform::new(file_keys[migration.target_index]))
         } else {
             plain
         };
@@ -812,6 +834,21 @@ pub fn probe_provision_key_domains_on_disk(
     let device_id = target.device_id().to_string();
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     let source_metadata = read_image(&mut dev)?;
+    let source_identity =
+        classify_live_source_identity(runner, disk, &source_metadata, total_sectors, &mut dev)?;
+    let source_kind = source_identity
+        .protocol
+        .provision_kind
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 来源盘型未确认；拒绝继续探测密码域"))?;
+    if source_kind == crate::provision::DiskProvisionKind::Plain {
+        return Ok(ProvisionKeyProbe {
+            source_kind,
+            share: None,
+            share_opaque_profile: false,
+            encrypt: None,
+            encrypt_opaque_profile: false,
+        });
+    }
     let image = ProvisionImage::from_bytes(source_metadata.clone())
         .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
     let parsed =
@@ -821,7 +858,6 @@ pub fn probe_provision_key_domains_on_disk(
                 format!("错误: 来源盘注册结构无法可靠解析: {message}"),
             )
         })?;
-    let source_kind = DiskProvisionKind::from_metadata(&source_metadata, &device_id);
     let domain_probe = |domain: KeyDomainRole| {
         parsed
             .as_ref()
@@ -871,6 +907,14 @@ pub fn verify_provision_source_password_on_disk(
         .map_err(|message| err(EXIT_TARGET, format!("错误: 目标硬件身份不完整: {message}")))?;
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     let source_metadata = read_image(&mut dev)?;
+    let source_identity =
+        classify_live_source_identity(runner, disk, &source_metadata, total_sectors, &mut dev)?;
+    if source_identity.protocol.provision_kind == Some(crate::provision::DiskProvisionKind::Plain) {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 当前来源盘已确认是 Plain；不存在可验证的 EDP key domain",
+        ));
+    }
     let image = ProvisionImage::from_bytes(source_metadata)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
     let source = parse_existing_provision(&image, target.device_id(), total_sectors)
@@ -958,13 +1002,15 @@ fn prepare_plain_provision_with_key_domains(
     let device_id = target.device_id().to_string();
 
     let source_metadata = read_image(dev)?;
-    let before_pin = MediaIdentityPin::new(
-        media_identity_from_protocol_image(runner, disk, &source_metadata)?,
-        &source_metadata,
-    );
-    let lba7 = &source_metadata[7 * SECTOR..8 * SECTOR];
-    let lba12 = &source_metadata[12 * SECTOR..13 * SECTOR];
-    let source_kind = crate::provision::DiskProvisionKind::from_sectors(lba7, lba12, &device_id);
+    let source_identity =
+        classify_live_source_identity(runner, disk, &source_metadata, total_sectors, dev)?;
+    let source_kind = source_identity.protocol.provision_kind.ok_or_else(|| {
+        err(
+            EXIT_TARGET,
+            "错误: 来源盘型未确认；拒绝把未知/损坏介质恢复为 Plain",
+        )
+    })?;
+    let before_pin = MediaIdentityPin::new(source_identity, &source_metadata);
     let source_lce =
         if source_kind == crate::provision::DiskProvisionKind::Plain {
             None

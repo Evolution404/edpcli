@@ -14,20 +14,31 @@ pub(crate) fn style_name(style: FieldStyle) -> &'static str {
     }
 }
 
-pub(crate) fn paint(style: FieldStyle, text: &str, bad: bool) -> String {
-    match style {
-        FieldStyle::Magic => crate::ui::bold_cyan(text),
-        FieldStyle::Text => crate::ui::cyan(text),
-        FieldStyle::Identity => crate::ui::yellow(text),
-        FieldStyle::Address => crate::ui::green(text),
-        FieldStyle::Size => crate::ui::magenta(text),
-        FieldStyle::Flag => crate::ui::yellow(text),
-        FieldStyle::Checksum if bad => crate::ui::red(text),
-        FieldStyle::Checksum => crate::ui::green(text),
-    }
+pub(crate) struct InspectTextTheme {
+    pub paint: fn(FieldStyle, &str, bool) -> String,
+    pub emphasize: fn(&str) -> String,
+    pub dim: fn(&str) -> String,
 }
 
-pub fn render_fields(view: &SectorView) -> String {
+fn plain(text: &str) -> String {
+    text.to_string()
+}
+fn plain_field(_: FieldStyle, text: &str, _: bool) -> String {
+    text.to_string()
+}
+
+pub(crate) fn render_fields_plain(view: &SectorView) -> String {
+    render_fields_with(
+        view,
+        InspectTextTheme {
+            paint: plain_field,
+            emphasize: plain,
+            dim: plain,
+        },
+    )
+}
+
+pub(crate) fn render_fields_with(view: &SectorView, theme: InspectTextTheme) -> String {
     if view.fields.is_empty() {
         return String::new();
     }
@@ -52,8 +63,8 @@ pub fn render_fields(view: &SectorView) -> String {
                 let range = format!("+0x{start:03X}..0x{:03X}", end.saturating_sub(1));
                 out.push_str(&format!(
                     "    {}  {}\n",
-                    crate::ui::bold_cyan(group_name),
-                    crate::ui::dim(&range)
+                    (theme.emphasize)(group_name),
+                    (theme.dim)(&range)
                 ));
             }
         }
@@ -67,8 +78,8 @@ pub fn render_fields(view: &SectorView) -> String {
             let prefix = format!(
                 "{}{}  {}  ",
                 indent,
-                crate::ui::pad_to(&range, 18),
-                crate::ui::pad_to(&f.label, 18)
+                crate::text_width::pad_to(&range, 18),
+                crate::text_width::pad_to(&f.label, 18)
             );
             let chunks = wrap_value(&f.value, 64);
             for (idx, chunk) in chunks.iter().enumerate() {
@@ -78,9 +89,9 @@ pub fn render_fields(view: &SectorView) -> String {
                     out.push_str(&" ".repeat(6 + 18 + 2 + 18 + 2));
                 }
                 if chunk == "<空>" {
-                    out.push_str(&crate::ui::dim(chunk));
+                    out.push_str(&(theme.dim)(chunk));
                 } else {
-                    out.push_str(&paint(f.style, chunk, f.value.contains('✗')));
+                    out.push_str(&(theme.paint)(f.style, chunk, f.value.contains('✗')));
                 }
                 out.push('\n');
             }
@@ -94,8 +105,8 @@ pub fn render_fields(view: &SectorView) -> String {
             if !f.label.is_empty() {
                 out.push_str(&format!(
                     "      {}  {}\n",
-                    crate::ui::pad_to(&f.label, 12),
-                    crate::ui::dim(&range)
+                    crate::text_width::pad_to(&f.label, 12),
+                    (theme.dim)(&range)
                 ));
             }
             let mut empty_labels = Vec::new();
@@ -110,18 +121,18 @@ pub fn render_fields(view: &SectorView) -> String {
                         out.push_str(&format!(
                             "{}{}  {}\n",
                             child_indent,
-                            crate::ui::pad_to(&child.label, 12),
+                            crate::text_width::pad_to(&child.label, 12),
                             if chunk == "<空>" {
-                                crate::ui::dim(chunk)
+                                (theme.dim)(chunk)
                             } else {
-                                paint(f.style, chunk, chunk.contains('✗'))
+                                (theme.paint)(f.style, chunk, chunk.contains('✗'))
                             }
                         ));
                     } else {
                         let rendered = if chunk == "<空>" {
-                            crate::ui::dim(chunk)
+                            (theme.dim)(chunk)
                         } else {
-                            paint(f.style, chunk, chunk.contains('✗'))
+                            (theme.paint)(f.style, chunk, chunk.contains('✗'))
                         };
                         out.push_str(&format!(
                             "{}{}  {}\n",
@@ -136,8 +147,8 @@ pub fn render_fields(view: &SectorView) -> String {
                 out.push_str(&format!(
                     "{}{}  {}\n",
                     child_indent,
-                    crate::ui::pad_to("空字段", 12),
-                    crate::ui::dim(&empty_labels.join(" · "))
+                    crate::text_width::pad_to("空字段", 12),
+                    (theme.dim)(&empty_labels.join(" · "))
                 ));
             }
         }

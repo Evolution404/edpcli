@@ -34,6 +34,10 @@ pub struct HardwareProbe {
     pub vid: Option<u16>,
     pub pid: Option<u16>,
     pub transport: NativeTransport,
+    /// Native Windows disk PnP InstanceId when the platform can provide it exactly.
+    /// macOS/Linux leave this empty and the identity layer reconstructs the Windows form
+    /// from SCSI inquiry data.
+    pub windows_pnp_instance_id: Option<String>,
     pub inquiry: Option<InquiryInfo>,
 }
 

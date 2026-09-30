@@ -290,6 +290,7 @@ pub(super) fn fallback_hardware_probe(runner: &dyn CmdRunner, disk: u32) -> Opti
             vid,
             pid,
             transport,
+            windows_pnp_instance_id: None,
             inquiry,
         })
 }
@@ -362,12 +363,21 @@ fn disk_info(runner: &dyn CmdRunner, disk: u32) -> Option<plist::Plist> {
     plist::parse(&out).ok()
 }
 
+fn physical_disk_size_bytes(info: &plist::Plist) -> Option<u64> {
+    // For whole disks, diskutil's TotalSize/VolumeSize may describe the
+    // filesystem volume and can be smaller than the physical media (for
+    // example, whole-disk NTFS reserves trailing sectors). Prefer physical
+    // IOKit/disk fields and keep TotalSize only as a compatibility fallback.
+    ["IOKitSize", "DiskSize", "Size", "TotalSize"]
+        .iter()
+        .find_map(|key| info.get(key).and_then(|v| v.as_int()).filter(|&v| v > 0))
+        .and_then(|bytes| u64::try_from(bytes).ok())
+}
+
 pub(super) fn disk_total_sectors(runner: &dyn CmdRunner, disk: u32) -> Option<u64> {
     let info = disk_info(runner, disk)?;
-    let bytes = ["DiskSize", "TotalSize", "Size"]
-        .iter()
-        .find_map(|key| info.get(key).and_then(|v| v.as_int()).filter(|&v| v > 0))?;
-    Some(bytes as u64 / SECTOR as u64)
+    let bytes = physical_disk_size_bytes(&info)?;
+    Some(bytes / SECTOR as u64)
 }
 
 pub(super) fn usb_vid_pid(runner: &dyn CmdRunner, disk: u32) -> (String, String) {
@@ -409,10 +419,7 @@ fn external_disk_info(runner: &dyn CmdRunner, disk: u32) -> Option<ExtDisk> {
         .and_then(|v| v.as_str())
         .unwrap_or("?")
         .to_string();
-    let size = ["TotalSize", "DiskSize", "Size"]
-        .iter()
-        .find_map(|key| info.get(key).and_then(|v| v.as_int()).filter(|&v| v > 0))
-        .unwrap_or(0) as u64;
+    let size = physical_disk_size_bytes(&info).unwrap_or(0);
     let (vid, pid) = if proto == "USB" {
         usb_vid_pid(runner, disk)
     } else {

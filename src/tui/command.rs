@@ -10,7 +10,6 @@ pub enum PaletteAction {
     Inspect,
     Restore,
     BackupCreate,
-    BackupCreateDeep,
     BackupVerify,
     BackupDelete,
     BackupBatchDelete,
@@ -33,7 +32,6 @@ pub fn parse_command(input: &str) -> Result<PaletteAction, String> {
         "inspect" | "i" => Ok(PaletteAction::Inspect),
         "restore" | "r" => Ok(PaletteAction::Restore),
         "backup-create" | "create-backup" | "bc" => Ok(PaletteAction::BackupCreate),
-        "backup-deep" | "deep-backup" | "bdp" => Ok(PaletteAction::BackupCreateDeep),
         "backup-verify" | "verify-backup" | "verify" | "v" => Ok(PaletteAction::BackupVerify),
         "backup-delete" | "delete-backup" | "delete" | "bd" => Ok(PaletteAction::BackupDelete),
         "backup-delete-selected" | "batch-delete" | "bdx" => Ok(PaletteAction::BackupBatchDelete),
@@ -51,14 +49,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn palette_exposes_provision_deep_backup_and_prune() {
+    fn palette_exposes_provision_metadata_backup_and_prune() {
         assert_eq!(
             parse_command(":provision").unwrap(),
             PaletteAction::Provision
-        );
-        assert_eq!(
-            parse_command("deep-backup").unwrap(),
-            PaletteAction::BackupCreateDeep
         );
         assert_eq!(parse_command("prune").unwrap(), PaletteAction::BackupPrune);
         assert_eq!(

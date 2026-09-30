@@ -64,6 +64,7 @@ const EMPTY_OPTIONS: &[OptionSpec] = &[];
 const HELP: OptionSpec = switch("--help");
 
 const LIST_OPTIONS: &[OptionSpec] = &[value("--backup-dir"), HELP];
+const DEMO_OPTIONS: &[OptionSpec] = &[value("--scene"), switch("--list-scenes"), HELP];
 const INFO_OPTIONS: &[OptionSpec] = &[value("--disk"), value("--id"), value("--backup-dir"), HELP];
 const INSPECT_OPTIONS: &[OptionSpec] = &[
     value("--disk"),
@@ -75,12 +76,7 @@ const INSPECT_OPTIONS: &[OptionSpec] = &[
     HELP,
 ];
 
-const BACKUP_CREATE_OPTIONS: &[OptionSpec] = &[
-    value("--disk"),
-    switch("--deep"),
-    value("--backup-dir"),
-    HELP,
-];
+const BACKUP_CREATE_OPTIONS: &[OptionSpec] = &[value("--disk"), value("--backup-dir"), HELP];
 const BACKUP_LIST_OPTIONS: &[OptionSpec] = &[value("--backup-dir"), HELP];
 const BACKUP_RESTORE_OPTIONS: &[OptionSpec] = &[
     value("--disk"),
@@ -238,6 +234,13 @@ const COMMANDS: &[CommandSpec] = &[
         summary: "交互式 TUI（Vim 键位）",
         usage: "edpcli tui",
         options: EMPTY_OPTIONS,
+        actions: &[],
+    },
+    CommandSpec {
+        name: "demo",
+        summary: "浏览不访问真实介质的 TUI 演示",
+        usage: "edpcli demo [--scene NAME | --list-scenes]",
+        options: DEMO_OPTIONS,
         actions: &[],
     },
     CommandSpec {

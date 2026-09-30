@@ -11,8 +11,7 @@ use std::path::{Path, PathBuf};
 use crate::common::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
 use crate::diskio::{self, FileDev};
 use crate::edpb::Manifest;
-use crate::identify::identify;
-use crate::sysinfo::{self, CmdRunner};
+use crate::sysinfo::CmdRunner;
 
 use super::target_session::{ReadOnly, TargetSession};
 
@@ -107,12 +106,14 @@ pub struct EvidenceIdentity {
     pub pid: Option<String>,
     pub size_bytes: Option<u64>,
     pub onlyid: Option<String>,
+    pub provision_kind: Option<crate::provision::DiskProvisionKind>,
 }
 
 struct BackupSectorReader {
     path: PathBuf,
     manifest: Manifest,
     protocol: Vec<u8>,
+    has_full_protocol: bool,
     cache: BTreeMap<String, Vec<u8>>,
 }
 
@@ -137,7 +138,7 @@ impl BackupSectorReader {
 
 impl SectorReader for BackupSectorReader {
     fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
-        if lba < METADATA_SECTOR_COUNT as u64 {
+        if self.has_full_protocol && lba < METADATA_SECTOR_COUNT as u64 {
             let start = usize::try_from(lba)
                 .ok()
                 .and_then(|sector| sector.checked_mul(SECTOR))
@@ -191,6 +192,63 @@ pub struct EvidenceSource {
     reader: EvidenceReader,
 }
 
+fn plain_protocol_context(path: &Path, manifest: &Manifest) -> Result<Vec<u8>, EvidenceError> {
+    let mut protocol = vec![0u8; METADATA_IMAGE_LEN];
+    for artifact in manifest
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.kind == "raw_sectors")
+    {
+        let touches_prefix = artifact.source_extent_ids.iter().any(|extent_id| {
+            manifest
+                .extents
+                .iter()
+                .find(|extent| &extent.id == extent_id)
+                .is_some_and(|extent| extent.start_lba < METADATA_SECTOR_COUNT as u64)
+        });
+        if !touches_prefix {
+            continue;
+        }
+        let data = crate::edpb::read_artifact(path, &artifact.id).map_err(|message| {
+            EvidenceError::BackupProtocolRead {
+                path: path.to_path_buf(),
+                message,
+            }
+        })?;
+        for extent_id in &artifact.source_extent_ids {
+            let Some(extent) = manifest
+                .extents
+                .iter()
+                .find(|extent| &extent.id == extent_id)
+            else {
+                continue;
+            };
+            if extent.start_lba >= METADATA_SECTOR_COUNT as u64 {
+                continue;
+            }
+            let copy_sectors = extent
+                .sector_count
+                .min(METADATA_SECTOR_COUNT as u64 - extent.start_lba);
+            for offset in 0..copy_sectors {
+                let src = usize::try_from(offset)
+                    .ok()
+                    .and_then(|sector| sector.checked_mul(SECTOR))
+                    .ok_or(EvidenceError::BackupProtocolLength { actual: data.len() })?;
+                let dst_lba = extent.start_lba + offset;
+                let dst = usize::try_from(dst_lba)
+                    .ok()
+                    .and_then(|sector| sector.checked_mul(SECTOR))
+                    .ok_or(EvidenceError::BackupProtocolLength { actual: data.len() })?;
+                let Some(source) = data.get(src..src + SECTOR) else {
+                    return Err(EvidenceError::BackupProtocolLength { actual: data.len() });
+                };
+                protocol[dst..dst + SECTOR].copy_from_slice(source);
+            }
+        }
+    }
+    Ok(protocol)
+}
+
 impl EvidenceSource {
     pub fn open_backup(path: &Path) -> Result<Self, EvidenceError> {
         let verified =
@@ -198,12 +256,44 @@ impl EvidenceSource {
                 path: path.to_path_buf(),
                 message: error.to_string(),
             })?;
-        let protocol = crate::edpb::read_raw_protocol(path).map_err(|error| {
-            EvidenceError::BackupProtocolRead {
+        let canonical =
+            crate::edpb::canonical_media_identity(&verified.manifest).map_err(|message| {
+                EvidenceError::BackupVerify {
+                    path: path.to_path_buf(),
+                    message,
+                }
+            })?;
+        let current_plain_v3 = verified.manifest.schema == "edpb.manifest.v3"
+            && verified.manifest.backup_purpose == Some(crate::edpb::BackupPurpose::MetadataOnly)
+            && verified.manifest.snapshot.capture_level == crate::edpb::CaptureLevel::Metadata
+            && canonical.protocol.provision_kind
+                == Some(crate::provision::DiskProvisionKind::Plain);
+        let has_full_protocol = verified
+            .manifest
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.id == crate::edpb::RAW_PROTOCOL_ARTIFACT_ID);
+        if current_plain_v3 && has_full_protocol {
+            return Err(EvidenceError::BackupVerify {
                 path: path.to_path_buf(),
-                message: error.to_string(),
-            }
-        })?;
+                message: "Plain v3 metadata-only 不应包含固定 LBA0-12 protocol core".into(),
+            });
+        }
+        let protocol = if has_full_protocol {
+            crate::edpb::read_raw_protocol(path).map_err(|error| {
+                EvidenceError::BackupProtocolRead {
+                    path: path.to_path_buf(),
+                    message: error.to_string(),
+                }
+            })?
+        } else if current_plain_v3 {
+            plain_protocol_context(path, &verified.manifest)?
+        } else {
+            return Err(EvidenceError::BackupProtocolRead {
+                path: path.to_path_buf(),
+                message: "EDPB 缺少可读的 LBA0-12 原始 Artifact".into(),
+            });
+        };
         if protocol.len() != METADATA_IMAGE_LEN {
             return Err(EvidenceError::BackupProtocolLength {
                 actual: protocol.len(),
@@ -215,12 +305,39 @@ impl EvidenceSource {
                 path: path.to_path_buf(),
             }
         })?;
+        let legacy_nonplain = !manifest.snapshot.device_state.eq_ignore_ascii_case("plain");
+        let effective_device_id = canonical
+            .protocol
+            .device_id
+            .clone()
+            .or_else(|| legacy_nonplain.then(|| manifest.device.device_id.clone()));
+        let provision_kind = canonical
+            .protocol
+            .provision_kind
+            .or_else(|| {
+                effective_device_id.as_deref().and_then(|device_id| {
+                    crate::provision::DiskProvisionKind::from_metadata(&protocol, device_id)
+                })
+            })
+            .or_else(|| {
+                (!legacy_nonplain
+                    && crate::partition_table::confirmed_plain_protocol_prefix(
+                        &protocol,
+                        total_sectors,
+                    ))
+                .then_some(crate::provision::DiskProvisionKind::Plain)
+            });
         let identity = EvidenceIdentity {
-            device_id: Some(manifest.device.device_id.clone()),
-            vid: Some(manifest.device.vid.clone()),
-            pid: Some(manifest.device.pid.clone()),
+            device_id: effective_device_id,
+            vid: canonical.hardware.vid.map(|value| format!("{value:04x}")),
+            pid: canonical.hardware.pid.map(|value| format!("{value:04x}")),
             size_bytes: manifest.geometry.capacity_bytes,
-            onlyid: manifest.device.onlyid.clone(),
+            onlyid: canonical.protocol.onlyid.clone().or_else(|| {
+                legacy_nonplain
+                    .then(|| manifest.device.onlyid.clone())
+                    .flatten()
+            }),
+            provision_kind,
         };
         Ok(Self {
             source_label: path.display().to_string(),
@@ -231,6 +348,7 @@ impl EvidenceSource {
                 path: path.to_path_buf(),
                 manifest,
                 protocol,
+                has_full_protocol,
                 cache: BTreeMap::new(),
             })),
         })
@@ -255,15 +373,24 @@ impl EvidenceSource {
         })?;
         debug_assert_eq!(protocol.len(), METADATA_IMAGE_LEN);
 
-        let raw7 = &protocol[7 * SECTOR..8 * SECTOR];
-        let id = identify(runner, disk, raw7).device_id;
-        let (vid, pid) = sysinfo::usb_vid_pid(runner, disk);
+        let canonical =
+            crate::application::media_identity_observer::media_identity_from_protocol_image(
+                runner, disk, &protocol,
+            )
+            .map_err(|error| EvidenceError::Target(error.msg))?;
+        let canonical = crate::application::media_identity_observer::apply_runtime_plain_override(
+            canonical,
+            &protocol,
+            total_sectors,
+            |lba| SectorReader::read_sector(&mut dev, lba).map_err(|error| error.to_string()),
+        );
         let identity = EvidenceIdentity {
-            device_id: id,
-            vid: (vid != "xxxx").then_some(vid),
-            pid: (pid != "xxxx").then_some(pid),
+            device_id: canonical.protocol.device_id.clone(),
+            vid: canonical.hardware.vid.map(|value| format!("{value:04x}")),
+            pid: canonical.hardware.pid.map(|value| format!("{value:04x}")),
             size_bytes: total_sectors.checked_mul(SECTOR as u64),
-            onlyid: diskio::lba4_label_id_from(&protocol[4 * SECTOR..5 * SECTOR]),
+            onlyid: canonical.protocol.onlyid.clone(),
+            provision_kind: canonical.protocol.provision_kind,
         };
         Ok(Self {
             source_label: format!("物理盘 disk{disk} ({path})"),

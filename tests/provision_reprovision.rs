@@ -1,5 +1,6 @@
 use edpcli::{
     crypto::{a6b0_full, crc32_bare, xor_rolling},
+    filesystem::FilesystemKind,
     platform::{HardwareProbe, InquiryInfo, NativeTransport},
     protocol::edpf::EdpPartitionType,
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
@@ -7,13 +8,13 @@ use edpcli::{
         apply_target_geometry_overrides, decide_partition_action, generate_official_image,
         parse_existing_provision, prefill_for_target_mode, wrap_file_key,
         wrap_legacy_lba7_file_key, CapacityInput, CapacityInputMode, CapacitySource,
-        DiskProvisionKind, ExistingPartition, ExistingProvisionProfile, FileKeyWrapMode,
-        KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, MigrationTransform,
-        OfficialFilesystemFormat, OfficialPartitionMode, OfficialPartitionSizes,
-        OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole, PassInfoPolicy,
-        ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget,
-        QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge, TargetGeometryOverrides,
-        TargetIdentity, TargetProvisionPlan, OFFICIAL_PARTITION_START_SECTOR,
+        DiskProvisionKind, ExistingFileKeyError, ExistingPartition, ExistingProvisionProfile,
+        FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, MigrationTransform,
+        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId,
+        PartitionAction, PartitionRole, PassInfoPolicy, ProvisionEntropy, ProvisionMetadata,
+        ProvisionProfile, ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
+        SourcePasswordKnowledge, TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
+        OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
@@ -58,9 +59,9 @@ fn part(
         sector_count,
         physically_encrypted: encrypted,
         filesystem: Some(match role {
-            PartitionRole::Boot => OfficialFilesystemFormat::Fat16,
-            PartitionRole::CompatibilityReserve => OfficialFilesystemFormat::ExFat,
-            _ => OfficialFilesystemFormat::ExFat,
+            PartitionRole::Boot => FilesystemKind::Fat16,
+            PartitionRole::CompatibilityReserve => FilesystemKind::ExFat,
+            _ => FilesystemKind::ExFat,
         }),
     }
 }
@@ -716,6 +717,7 @@ fn generated_mode0_with_domain_passwords(
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "Netac".into(),
             product: "OnlyDisk".into(),
@@ -781,6 +783,51 @@ fn source_password_probe_is_independent_per_key_domain() {
 }
 
 #[test]
+fn existing_partition_file_key_is_typed_and_checks_mode_before_password() {
+    let (image, did) = generated_mode0_with_domain_passwords(b"SharePass1!", b"EncryptPass1!");
+    let parsed = parse_existing_provision(&image, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    let record = parsed.records[2];
+    assert_eq!(
+        record.verified_file_key(None),
+        Err(ExistingFileKeyError::PasswordRequired)
+    );
+    assert_eq!(
+        record.verified_file_key(Some(b"wrong")),
+        Err(ExistingFileKeyError::PasswordMismatch)
+    );
+    assert_eq!(
+        record.verified_file_key(Some(b"EncryptPass1!")),
+        Ok([0x61; 16])
+    );
+    for mode in [FileKeyWrapMode::A7f0, FileKeyWrapMode::Aes128Ecb] {
+        let mut variant = record;
+        let material = wrap_file_key(b"EncryptPass1!", [0x61; 16], mode);
+        variant.lba12.encrypt_mode = mode.raw();
+        variant.lba12.user_key_crc = material.user_key_crc;
+        variant.lba12.file_key_crc = material.file_key_crc;
+        variant.lba12.encrypted_file_key = material.wrapped_file_key;
+        assert_eq!(
+            variant.verified_file_key(Some(b"EncryptPass1!")),
+            Ok([0x61; 16])
+        );
+    }
+    let mut unsupported = record;
+    unsupported.lba12.encrypt_mode = 99;
+    assert_eq!(
+        unsupported.verified_file_key(None),
+        Err(ExistingFileKeyError::UnsupportedEncryptMode)
+    );
+    let mut damaged = record;
+    damaged.lba12.file_key_crc ^= 1;
+    assert_eq!(
+        damaged.verified_file_key(Some(b"EncryptPass1!")),
+        Err(ExistingFileKeyError::FileKeyCrcMismatch)
+    );
+}
+
+#[test]
 fn default_password_probe_is_per_domain_and_enables_verified_preserve() {
     let (image, did) = generated_mode0_with_domain_passwords(b"SharePass1!", b"0000aaaa");
     let mut source = parse_existing_provision(&image, &did, 16_777_216)
@@ -797,7 +844,7 @@ fn default_password_probe_is_per_domain_and_enables_verified_preserve() {
     );
 
     source
-        .confirm_filesystem(PartitionRole::Encrypt, OfficialFilesystemFormat::ExFat)
+        .confirm_filesystem(PartitionRole::Encrypt, FilesystemKind::ExFat)
         .unwrap();
     let prefill = prefill_for_target_mode(
         Some(&source.profile),
@@ -844,6 +891,7 @@ fn generated_source_with_policy(
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "Netac".into(),
             product: "OnlyDisk".into(),
@@ -966,7 +1014,7 @@ fn existing_profile_decodes_all_four_modes_and_keeps_partition_owned_key_fields(
         let (_, image, did) = generated_source(mode);
         assert_eq!(
             DiskProvisionKind::from_metadata(image.as_bytes(), &did),
-            DiskProvisionKind::from_mode(mode)
+            Some(DiskProvisionKind::from_mode(mode))
         );
         let parsed = parse_existing_provision(&image, &did, 16_777_216)
             .unwrap()
@@ -990,7 +1038,7 @@ fn existing_profile_decodes_all_four_modes_and_keeps_partition_owned_key_fields(
             .is_none());
         assert_eq!(
             DiskProvisionKind::from_metadata(image.as_bytes(), "wrong-device"),
-            DiskProvisionKind::Plain
+            None
         );
     }
 }
@@ -1166,7 +1214,7 @@ fn target_plan_preserves_only_verified_matching_data() {
     assert_eq!(unknown_fs.partitions[1].action, PartitionAction::Rebuild);
 
     source
-        .confirm_filesystem(PartitionRole::Encrypt, OfficialFilesystemFormat::ExFat)
+        .confirm_filesystem(PartitionRole::Encrypt, FilesystemKind::ExFat)
         .unwrap();
     let plan = TargetProvisionPlan::build(
         Some(&source),
@@ -1272,7 +1320,7 @@ fn exact_encrypted_extent_with_unknown_password_stays_a_preserve_candidate() {
         .unwrap()
         .unwrap();
     source
-        .confirm_filesystem(PartitionRole::Encrypt, OfficialFilesystemFormat::ExFat)
+        .confirm_filesystem(PartitionRole::Encrypt, FilesystemKind::ExFat)
         .unwrap();
 
     let prefill = prefill_for_target_mode(
@@ -1315,7 +1363,7 @@ fn verified_source_with_different_target_password_plans_rewrap_without_rebuild()
         .unwrap()
         .unwrap();
     source
-        .confirm_filesystem(PartitionRole::Encrypt, OfficialFilesystemFormat::ExFat)
+        .confirm_filesystem(PartitionRole::Encrypt, FilesystemKind::ExFat)
         .unwrap();
     let prefill = prefill_for_target_mode(
         Some(&source.profile),

@@ -8,10 +8,10 @@ use edpcli::{
         execute_write_transaction_observed, SectorDev, SectorWriteStage, TransactionActivityPhase,
         WriteTransactionPlan,
     },
+    filesystem::{build_migrated_filesystem, FilesystemKind, FilesystemMigrationEntry},
     provision::{
-        build_migrated_filesystem, build_plain_provision_write_plan, MigrationStagedEntry,
-        MigrationTransform, OfficialFilesystemFormat, PlainCleanupExtent, PlainPartitionSpec,
-        PlainProvisionPlan,
+        build_plain_provision_write_plan, MigrationStagedEntry, MigrationTransform,
+        PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
     },
 };
 
@@ -155,7 +155,7 @@ fn plain_plan_maps_to_the_same_generic_transaction_stages() {
         vec![PlainPartitionSpec::new(
             2_048,
             20_000,
-            OfficialFilesystemFormat::ExFat,
+            FilesystemKind::ExFat,
             "DATA",
         )],
     )
@@ -225,22 +225,24 @@ fn official_writer_rejects_incomplete_or_out_of_bounds_plan_before_writing() {
 #[test]
 fn k6_populated_filesystem_write_set_rolls_back_with_official_transaction() {
     let payload = b"k6-rollback-payload".repeat(96);
+    let staged = MigrationStagedEntry {
+        source_index: 0,
+        transform: MigrationTransform::ShareToEncrypt,
+        path: "/payload.bin".into(),
+        is_directory: false,
+        data: payload,
+        attributes: 0x20,
+        mtime: None,
+        ctime: None,
+    };
+    let filesystem_entries = [FilesystemMigrationEntry::from(&staged)];
     let image = build_migrated_filesystem(
-        OfficialFilesystemFormat::ExFat,
+        FilesystemKind::ExFat,
         2_048,
         200_000,
         0x4b36_5242,
         "K6ROLL",
-        &[MigrationStagedEntry {
-            source_index: 0,
-            transform: MigrationTransform::ShareToEncrypt,
-            path: "/payload.bin".into(),
-            is_directory: false,
-            data: payload,
-            attributes: 0x20,
-            mtime: None,
-            ctime: None,
-        }],
+        &filesystem_entries,
     )
     .unwrap();
     let mut k6_patch = patch();

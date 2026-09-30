@@ -269,7 +269,7 @@ impl AppState {
             lines.push(message.clone());
         }
         lines.extend([
-            "Enter 进入最终 YES 确认".into(),
+            "Enter 打开写入确认".into(),
             "e 导出目标绑定镜像 · Esc 返回修改".into(),
         ]);
         lines

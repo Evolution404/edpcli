@@ -196,7 +196,7 @@ fn lba0_bootstrap_blob_is_closed_while_selector_provenance_stays_separate() {
         .expect("LBA0 bootstrap blob row");
     assert!(row.contains("\tCOMPLETE\t"));
     assert!(row.contains("S-NETAC-MBR"));
-    assert!(row.contains("P-GOLD-NOPWD"));
+    assert!(row.contains("P-GOLD-MODE1"));
     assert!(row.contains("selector chooses a known producer profile"));
     assert!(DOC.contains("8×全零 + 11×UsbMainBSec + 1×Netac"));
     assert!(DOC.contains("调用链来源开放问题"));

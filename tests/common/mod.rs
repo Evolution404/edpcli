@@ -1,4 +1,4 @@
-//! 测试公用: 真实协议夹具定位、金标(与 Python 版逐字一致)、临时目录、免密盘镜像合成。
+//! 测试公用: 真实协议夹具定位、金标(与 Python 版逐字一致)、临时目录、mode1 盘镜像合成。
 //! 每个集成测试文件各自引入本模块, 未被该文件用到的项不算死代码。
 #![allow(dead_code)]
 
@@ -65,9 +65,9 @@ pub fn read_fn_of(
     move |lba| Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
 }
 
-/// 用当前正式 provisioning builder 合成一张结构完整的 mode1 免密元数据镜像。
-/// 这类样本供识别/备份测试使用，不再依赖已废弃的离线转换业务。
-pub fn passwordless_image(key: &str) -> Option<(Vec<u8>, String)> {
+/// 用当前正式 provisioning builder 合成一张结构完整的 mode1 元数据镜像。
+/// 这类样本供 mode1 协议识别、备份与恢复测试使用。
+pub fn mode1_fixture_image(key: &str) -> Option<(Vec<u8>, String)> {
     let (vid, pid, total_sectors, transport, vendor, product, revision, onlyid) = match key {
         "netac" => (
             0x0dd8,
@@ -105,6 +105,7 @@ pub fn passwordless_image(key: &str) -> Option<(Vec<u8>, String)> {
         vid: Some(vid),
         pid: Some(pid),
         transport,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: vendor.into(),
             product: product.into(),
@@ -281,4 +282,83 @@ pub fn set_mtime(path: &std::path::Path, epoch: i64) {
     let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(epoch as u64);
     f.set_times(std::fs::FileTimes::new().set_modified(t))
         .unwrap();
+}
+
+/// Upgrade a hand-written test row to the same canonical media-identity shape
+/// that production device scanning provides.
+pub fn confirm_row_identity(row: &mut edpcli::disk_scan::Row) {
+    use edpcli::application::media_identity::{
+        DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation, MediaIdentityPin,
+        MediaIdentitySnapshot, ProtocolIdentityEvidence,
+    };
+
+    let hardware = HardwareIdentityEvidence {
+        total_sectors: Some(row.size / edpcli::common::SECTOR as u64),
+        logical_sector_size: Some(edpcli::common::SECTOR as u32),
+        ..HardwareIdentityEvidence::default()
+    };
+    let snapshot = if row.provision_kind == edpcli::provision::DiskProvisionKind::Plain {
+        MediaIdentitySnapshot::plain(
+            hardware,
+            DerivedProtocolEvidence::default(),
+            IdentityObservation::default(),
+        )
+    } else {
+        MediaIdentitySnapshot {
+            hardware,
+            protocol: ProtocolIdentityEvidence {
+                device_id: row.device_id.clone(),
+                onlyid: row.onlyid.clone(),
+                provision_kind: Some(row.provision_kind),
+                lba4_identity_digest: None,
+            },
+            derived: DerivedProtocolEvidence::default(),
+            observation: IdentityObservation::default(),
+        }
+    };
+    row.identity_pin = Some(MediaIdentityPin::new(
+        snapshot,
+        &vec![0; edpcli::common::METADATA_IMAGE_LEN],
+    ));
+}
+
+/// Explicit EDP inspect context for TUI tests that exercise the protocol tree.
+pub fn edp_inspect_context(total_sectors: u64) -> edpcli::inspect_target::InspectDiskContext {
+    use edpcli::backup_metadata::{Lba7CompatibilityGeometry, PartitionGeometry};
+
+    let mut context = edpcli::inspect_target::InspectDiskContext::new_with_partition_table(
+        vec![0; edpcli::common::METADATA_IMAGE_LEN],
+        Some("disk&ven_test&prod_test".into()),
+        total_sectors,
+        Some(edpcli::provision::DiskProvisionKind::Mode0),
+        None,
+        None,
+    );
+    let partition = |index, partition_type, start_sector, sector_count| PartitionGeometry {
+        index,
+        partition_type,
+        partition_count: 3,
+        need_disturb: 0,
+        need_encrypt: u32::from(partition_type != 1),
+        start_sector,
+        sector_size: edpcli::common::SECTOR as u64,
+        partition_size: sector_count * edpcli::common::SECTOR as u64,
+        sector_count,
+        user_key_crc: 0,
+        file_key_crc: 0,
+        encrypt_mode: if partition_type == 1 { 0 } else { 2 },
+    };
+    context.partitions = vec![
+        partition(0, 1, 63, 37),
+        partition(1, 2, 2_048, 200),
+        partition(2, 4, 2_300, 200),
+    ];
+    context.lce = Some(Lba7CompatibilityGeometry {
+        start_lba: total_sectors.saturating_sub(1_500),
+        sector_count: 6,
+        lba7_pointer_entries: Vec::new(),
+        official_partition_mode: None,
+        chs_expected_start_lba: None,
+    });
+    context
 }

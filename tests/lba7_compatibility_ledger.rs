@@ -12,10 +12,10 @@ const LEXAR_IMAGE: &[u8] = include_bytes!(
     "../audit/protocol/gold/strict-encrypted/disk4_243625984_vid21c4_pid0cd1_disk&ven_lexar&prod_usb_flash_drive_onlyid3164177653_20260827_221910.bin"
 );
 const SANDISK_LBA7: &[u8] = include_bytes!(
-    "../audit/protocol/lba7_compatibility/live_captures/sandisk_nopwd_20260923/lba7_raw.bin"
+    "../audit/protocol/lba7_compatibility/live_captures/sandisk_mode1_20260923/lba7_raw.bin"
 );
 const SANDISK_COMPAT: &[u8] = include_bytes!(
-    "../audit/protocol/lba7_compatibility/live_captures/sandisk_nopwd_20260923/lba7_compat_extent.bin"
+    "../audit/protocol/lba7_compatibility/live_captures/sandisk_mode1_20260923/lba7_compat_extent.bin"
 );
 
 fn parse_hex(value: &str) -> usize {

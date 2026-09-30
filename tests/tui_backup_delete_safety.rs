@@ -8,24 +8,24 @@ use edpcli::edpb::{self, CoreCapture};
 
 const ORIGINAL: &str =
     "disk4_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_20260827_191701.bin";
-const SNAPSHOT: &str =
-    "disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_nopwd_20260916_233626.bin";
+const SECOND: &str =
+    "disk4_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_20260827_191702.bin";
 
-fn copy_fixture(root: &Path, name: &str) -> PathBuf {
-    let source = Path::new(common::FIXTURE_DIR).join(name);
+fn copy_fixture_as(root: &Path, source_name: &str, target_name: &str) -> PathBuf {
+    let source = Path::new(common::FIXTURE_DIR).join(source_name);
     assert!(
         source.is_file(),
         "missing backup fixture {}",
         source.display()
     );
-    let target = root.join(name).with_extension("edpb");
+    let target = root.join(target_name).with_extension("edpb");
     let bytes = fs::read(&source).expect("read protocol fixture");
     let meta = edpcli::diskio::parse_backup_name(target.file_name().unwrap().to_str().unwrap())
         .expect("EDPB name");
     edpb::write_core_backup(
         &target,
         &CoreCapture {
-            snapshot_id: name.into(),
+            snapshot_id: target_name.into(),
             created_epoch: 1_789_000_000,
             disk_number: Some(meta.disk),
             vid: meta.vid,
@@ -35,17 +35,16 @@ fn copy_fixture(root: &Path, name: &str) -> PathBuf {
             total_sectors: meta.secs,
             logical_sector_size: 512,
             edpcli_version: env!("CARGO_PKG_VERSION").into(),
-            device_state: if meta.tagged_nopwd {
-                "passwordless"
-            } else {
-                "encrypted"
-            }
-            .into(),
+            device_state: "edp".into(),
             lba0_12: &bytes,
         },
     )
     .expect("write EDPB fixture");
     target
+}
+
+fn copy_fixture(root: &Path, name: &str) -> PathBuf {
+    copy_fixture_as(root, name, name)
 }
 
 fn expected_sha256(root: &Path, path: &Path) -> String {
@@ -60,7 +59,7 @@ fn expected_sha256(root: &Path, path: &Path) -> String {
 fn delete_rejects_a_backup_replaced_after_selection() {
     let tmp = common::TmpDir::new("tui_backup_delete_stale");
     let target = copy_fixture(&tmp.0, ORIGINAL);
-    let _keep = copy_fixture(&tmp.0, SNAPSHOT);
+    let _keep = copy_fixture_as(&tmp.0, ORIGINAL, SECOND);
     let expected = expected_sha256(&tmp.0, &target);
 
     let mut changed = fs::read(&target).expect("read target");
@@ -81,7 +80,7 @@ fn delete_rejects_a_backup_replaced_after_selection() {
 fn delete_removes_selected_edpb_when_another_copy_remains() {
     let tmp = common::TmpDir::new("tui_backup_delete_pair");
     let target = copy_fixture(&tmp.0, ORIGINAL);
-    let keep = copy_fixture(&tmp.0, SNAPSHOT);
+    let keep = copy_fixture_as(&tmp.0, ORIGINAL, SECOND);
     let expected = expected_sha256(&tmp.0, &target);
 
     delete_backup_exact(&tmp.0, &target, &expected).expect("delete selected backup");

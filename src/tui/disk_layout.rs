@@ -3,7 +3,7 @@
 use ratatui::{
     layout::Rect,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Paragraph, Wrap},
     Frame,
 };
 
@@ -11,15 +11,638 @@ use super::state::ProvisionBarKind;
 
 pub use crate::application::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskLayoutProfile {
+    CompactHuman,
+    DetailedExact,
+    EditorExact,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TailExpansion {
+    #[default]
+    Collapsed,
+    Expanded,
+}
+
+impl TailExpansion {
+    pub fn toggle(&mut self) {
+        *self = match self {
+            Self::Collapsed => Self::Expanded,
+            Self::Expanded => Self::Collapsed,
+        };
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskCapacityMapProfile {
+    Full,
+    Compact,
+    Mini,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiskCapacitySelection {
+    pub start_lba: u64,
+    pub end_exclusive: u64,
+    pub kind: DiskRegionKind,
+}
+
+impl DiskCapacitySelection {
+    pub fn from_segment(segment: &DiskLayoutSegment) -> Option<Self> {
+        Some(Self {
+            start_lba: segment.start_lba,
+            end_exclusive: segment.end_exclusive().ok()?,
+            kind: segment.kind,
+        })
+    }
+
+    pub fn from_lba(model: &DiskLayoutModel, lba: u64) -> Option<Self> {
+        model
+            .segments
+            .iter()
+            .find(|segment| {
+                segment
+                    .end_exclusive()
+                    .ok()
+                    .is_some_and(|end| segment.start_lba <= lba && lba < end)
+            })
+            .and_then(Self::from_segment)
+    }
+}
+
+pub struct DiskCapacityMap<'a> {
+    model: &'a DiskLayoutModel,
+    profile: DiskCapacityMapProfile,
+    tail: TailExpansion,
+    selection: Option<DiskCapacitySelection>,
+    show_marker: bool,
+}
+
+impl<'a> DiskCapacityMap<'a> {
+    pub fn new(model: &'a DiskLayoutModel, profile: DiskCapacityMapProfile) -> Self {
+        Self {
+            model,
+            profile,
+            tail: TailExpansion::Collapsed,
+            selection: None,
+            show_marker: matches!(profile, DiskCapacityMapProfile::Full),
+        }
+    }
+
+    pub fn with_tail(mut self, tail: TailExpansion) -> Self {
+        self.tail = tail;
+        self
+    }
+
+    pub fn with_selection(mut self, selection: Option<DiskCapacitySelection>) -> Self {
+        self.selection = selection;
+        self
+    }
+
+    pub fn with_marker(mut self, show_marker: bool) -> Self {
+        self.show_marker = show_marker;
+        self
+    }
+
+    pub fn visible_model(&self) -> DiskLayoutModel {
+        match self.tail {
+            TailExpansion::Collapsed => self.model.collapsed_tail_model(),
+            TailExpansion::Expanded => self.model.clone(),
+        }
+    }
+
+    pub fn lines(&self, width: usize) -> Vec<Line<'static>> {
+        let visible = self.visible_model();
+        let segment_count = visible.segments.len().max(1);
+        let map_width = width.max(segment_count);
+        let allocations = capacity_map_allocations(&visible, map_width);
+        let mut lines = Vec::new();
+
+        match self.profile {
+            DiskCapacityMapProfile::Full => {
+                lines.extend(capacity_map_axis_lines(map_width));
+                lines.push(capacity_map_half_band_line(
+                    &visible,
+                    &allocations,
+                    self.selection.as_ref(),
+                    true,
+                ));
+                lines.push(capacity_map_content_line(
+                    &visible,
+                    &allocations,
+                    self.selection.as_ref(),
+                    CapacityContent::Label,
+                ));
+                lines.push(capacity_map_content_line(
+                    &visible,
+                    &allocations,
+                    self.selection.as_ref(),
+                    CapacityContent::Value,
+                ));
+                lines.push(capacity_map_half_band_line(
+                    &visible,
+                    &allocations,
+                    self.selection.as_ref(),
+                    false,
+                ));
+            }
+            DiskCapacityMapProfile::Compact => {
+                lines.push(capacity_map_half_band_line(
+                    &visible,
+                    &allocations,
+                    self.selection.as_ref(),
+                    true,
+                ));
+                lines.push(capacity_map_content_line(
+                    &visible,
+                    &allocations,
+                    self.selection.as_ref(),
+                    CapacityContent::Compact,
+                ));
+                lines.push(capacity_map_half_band_line(
+                    &visible,
+                    &allocations,
+                    self.selection.as_ref(),
+                    false,
+                ));
+            }
+            DiskCapacityMapProfile::Mini => {
+                lines.push(capacity_map_mini_line(
+                    &visible,
+                    &allocations,
+                    self.selection.as_ref(),
+                ));
+            }
+        }
+
+        if self.show_marker && !matches!(self.profile, DiskCapacityMapProfile::Mini) {
+            if let Some(selection) = self.selection.as_ref() {
+                let marker = capacity_map_marker_column(&visible, &allocations, selection);
+                lines.push(Line::from(vec![
+                    Span::raw(" ".repeat(marker)),
+                    Span::styled(
+                        "▲",
+                        super::theme::current().disk_region_outline(selection.kind, true),
+                    ),
+                ]));
+            } else if matches!(self.profile, DiskCapacityMapProfile::Full) {
+                lines.push(Line::from(""));
+            }
+        }
+        lines
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CapacityContent {
+    Label,
+    Value,
+    Compact,
+}
+
+fn capacity_map_allocations(model: &DiskLayoutModel, cell_budget: usize) -> Vec<usize> {
+    let count = model.segments.len();
+    if count == 0 {
+        return Vec::new();
+    }
+    let min_width: usize = if cell_budget >= count.saturating_mul(3) {
+        3
+    } else if cell_budget >= count.saturating_mul(2) {
+        2
+    } else {
+        1
+    };
+    let mut allocations = vec![min_width; count];
+    let remaining = cell_budget.saturating_sub(min_width.saturating_mul(count));
+    if remaining == 0 {
+        return allocations;
+    }
+
+    let total = model
+        .segments
+        .iter()
+        .map(|segment| u128::from(segment.sector_count))
+        .sum::<u128>()
+        .max(1);
+    let mut assigned = 0usize;
+    let mut remainders = Vec::with_capacity(count);
+    for (index, segment) in model.segments.iter().enumerate() {
+        let scaled = u128::from(segment.sector_count) * remaining as u128;
+        let extra = (scaled / total) as usize;
+        allocations[index] += extra;
+        assigned += extra;
+        remainders.push((scaled % total, index));
+    }
+    remainders.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    for (_, index) in remainders
+        .into_iter()
+        .take(remaining.saturating_sub(assigned))
+    {
+        allocations[index] += 1;
+    }
+    allocations
+}
+
+fn capacity_map_axis_lines(width: usize) -> Vec<Line<'static>> {
+    let width = width.max(1);
+    let mut labels = vec![' '; width];
+    for (percent, label) in [
+        (0usize, "0%"),
+        (25, "25%"),
+        (50, "50%"),
+        (75, "75%"),
+        (100, "100%"),
+    ] {
+        let target = width.saturating_sub(1).saturating_mul(percent) / 100;
+        let label_width = label.len().min(width);
+        let start = if percent == 0 {
+            0
+        } else if percent == 100 {
+            width.saturating_sub(label_width)
+        } else {
+            target
+                .saturating_sub(label_width / 2)
+                .min(width.saturating_sub(label_width))
+        };
+        for (index, ch) in label.chars().take(label_width).enumerate() {
+            labels[start + index] = ch;
+        }
+    }
+    let mut ticks = vec!['┈'; width];
+    for percent in [0usize, 25, 50, 75, 100] {
+        let index = width.saturating_sub(1).saturating_mul(percent) / 100;
+        ticks[index] = '┊';
+    }
+    let style = super::theme::current().muted();
+    vec![
+        Line::from(Span::styled(labels.into_iter().collect::<String>(), style)),
+        Line::from(Span::styled(ticks.into_iter().collect::<String>(), style)),
+    ]
+}
+
+fn capacity_map_half_band_line(
+    model: &DiskLayoutModel,
+    allocations: &[usize],
+    selection: Option<&DiskCapacitySelection>,
+    top: bool,
+) -> Line<'static> {
+    let theme = super::theme::current();
+    let glyph = if top { "▄" } else { "▀" };
+    Line::from(
+        model
+            .segments
+            .iter()
+            .zip(allocations.iter().copied())
+            .map(|(segment, width)| {
+                Span::styled(
+                    glyph.repeat(width),
+                    // Leave bg unset so the unused half-cell inherits the enclosing surface.
+                    theme.disk_region_half_block(
+                        segment.kind,
+                        capacity_segment_active(segment, selection),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn capacity_map_mini_line(
+    model: &DiskLayoutModel,
+    allocations: &[usize],
+    selection: Option<&DiskCapacitySelection>,
+) -> Line<'static> {
+    let theme = super::theme::current();
+    Line::from(
+        model
+            .segments
+            .iter()
+            .zip(allocations.iter().copied())
+            .map(|(segment, width)| {
+                Span::styled(
+                    " ".repeat(width),
+                    theme.disk_region_fill(
+                        segment.kind,
+                        capacity_segment_active(segment, selection),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn capacity_map_content_line(
+    model: &DiskLayoutModel,
+    allocations: &[usize],
+    selection: Option<&DiskCapacitySelection>,
+    content: CapacityContent,
+) -> Line<'static> {
+    let theme = super::theme::current();
+    Line::from(
+        model
+            .segments
+            .iter()
+            .zip(allocations.iter().copied())
+            .map(|(segment, width)| {
+                let text = match content {
+                    CapacityContent::Label => capacity_segment_label(segment, width),
+                    CapacityContent::Value => {
+                        capacity_segment_value(segment, width, model.total_sectors)
+                    }
+                    CapacityContent::Compact => capacity_segment_compact(segment, width),
+                };
+                let active = capacity_segment_active(segment, selection);
+                Span::styled(
+                    center_capacity_label(&text, width),
+                    theme
+                        .disk_region_fill(segment.kind, active)
+                        .patch(theme.disk_region_content_text(segment.kind, active)),
+                )
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn capacity_segment_label(segment: &DiskLayoutSegment, width: usize) -> String {
+    if width > 0 && crate::tui::table_layout::display_width(&segment.label) <= width {
+        segment.label.clone()
+    } else {
+        String::new()
+    }
+}
+
+fn capacity_segment_value(segment: &DiskLayoutSegment, width: usize, total: u64) -> String {
+    if width < 8 {
+        return String::new();
+    }
+    let capacity = format_sector_size(segment.sector_count);
+    let full = format!("{capacity} · {}", percentage(segment.sector_count, total));
+    if crate::tui::table_layout::display_width(&full) <= width {
+        full
+    } else if crate::tui::table_layout::display_width(&capacity) <= width {
+        capacity
+    } else {
+        String::new()
+    }
+}
+
+fn capacity_segment_compact(segment: &DiskLayoutSegment, width: usize) -> String {
+    let capacity = format_sector_size(segment.sector_count);
+    let full = format!("{} {capacity}", segment.label);
+    if crate::tui::table_layout::display_width(&full) <= width {
+        full
+    } else if crate::tui::table_layout::display_width(&segment.label) <= width {
+        segment.label.clone()
+    } else {
+        String::new()
+    }
+}
+
+fn center_capacity_label(label: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let clipped = crate::tui::table_layout::truncate_cell(
+        label,
+        width,
+        crate::tui::table_layout::TruncatePolicy::Clip,
+    );
+    let used = crate::tui::table_layout::display_width(&clipped);
+    let left = width.saturating_sub(used) / 2;
+    let right = width.saturating_sub(used).saturating_sub(left);
+    format!("{}{}{}", " ".repeat(left), clipped, " ".repeat(right))
+}
+
+fn capacity_segment_active(
+    segment: &DiskLayoutSegment,
+    selection: Option<&DiskCapacitySelection>,
+) -> bool {
+    let Some(selection) = selection else {
+        return false;
+    };
+    segment
+        .end_exclusive()
+        .ok()
+        .is_some_and(|end| segment.start_lba < selection.end_exclusive && end > selection.start_lba)
+}
+
+fn capacity_map_marker_column(
+    model: &DiskLayoutModel,
+    allocations: &[usize],
+    selection: &DiskCapacitySelection,
+) -> usize {
+    let active_mid =
+        u128::from(selection.start_lba).saturating_add(u128::from(selection.end_exclusive)) / 2;
+    let mut cursor = 0usize;
+    for (segment, width) in model.segments.iter().zip(allocations.iter().copied()) {
+        let Ok(segment_end) = segment.end_exclusive() else {
+            cursor = cursor.saturating_add(width);
+            continue;
+        };
+        if segment.start_lba < selection.end_exclusive && segment_end > selection.start_lba {
+            let segment_start = u128::from(segment.start_lba);
+            let segment_len = u128::from(segment.sector_count).max(1);
+            let relative = active_mid
+                .clamp(segment_start, u128::from(segment_end).saturating_sub(1))
+                .saturating_sub(segment_start);
+            let offset = ((relative.saturating_mul(width as u128)) / segment_len)
+                .min(width.saturating_sub(1) as u128) as usize;
+            return cursor.saturating_add(offset);
+        }
+        cursor = cursor.saturating_add(width);
+    }
+    0
+}
+
+/// A view over one canonical physical layout. Profiles only change its formatting.
+pub struct DiskLayoutPresentation<'a> {
+    model: &'a DiskLayoutModel,
+    profile: DiskLayoutProfile,
+    tail: TailExpansion,
+}
+
+impl<'a> DiskLayoutPresentation<'a> {
+    pub fn new(
+        model: &'a DiskLayoutModel,
+        profile: DiskLayoutProfile,
+        tail: TailExpansion,
+    ) -> Self {
+        Self {
+            model,
+            profile,
+            tail,
+        }
+    }
+
+    pub fn visible_model(&self) -> DiskLayoutModel {
+        match self.tail {
+            TailExpansion::Collapsed => self.model.collapsed_tail_model(),
+            TailExpansion::Expanded => self.model.clone(),
+        }
+    }
+
+    pub fn legend_lines(&self) -> Vec<String> {
+        let visible = self.visible_model();
+        let tail_start = if self.tail == TailExpansion::Expanded {
+            self.model.tail_group().map(|tail| tail.start_lba)
+        } else {
+            None
+        };
+        visible
+            .segments
+            .iter()
+            .map(|segment| {
+                let label = if tail_start.is_some_and(|start| segment.start_lba >= start) {
+                    let branch = if segment.end_exclusive().ok() == Some(visible.total_sectors) {
+                        "└─"
+                    } else {
+                        "├─"
+                    };
+                    format!("{branch} {}", segment.label)
+                } else {
+                    segment.label.clone()
+                };
+                let capacity = match self.profile {
+                    DiskLayoutProfile::CompactHuman => format_sector_size(segment.sector_count),
+                    DiskLayoutProfile::DetailedExact | DiskLayoutProfile::EditorExact => {
+                        format!(
+                            "{} sectors / {} bytes",
+                            segment.sector_count,
+                            segment
+                                .sector_count
+                                .saturating_mul(crate::common::SECTOR as u64)
+                        )
+                    }
+                };
+                format!(
+                    "{}  {}  {}  {}",
+                    crate::ui::pad_to(&label, 18),
+                    crate::ui::pad_to(&segment.closed_range(), 24),
+                    crate::ui::pad_to(&capacity, 28),
+                    percentage(segment.sector_count, visible.total_sectors)
+                )
+            })
+            .collect()
+    }
+
+    pub fn compact_grid_lines(&self, width: usize) -> Vec<Line<'static>> {
+        use crate::tui::table_layout::display_width;
+
+        let visible = self.visible_model();
+        let mut entries = vec![(
+            None,
+            format!("总容量  {}", format_sector_size(visible.total_sectors)),
+        )];
+        entries.extend(visible.segments.iter().map(|segment| {
+            (
+                Some(segment.kind),
+                format!(
+                    "{}  {}",
+                    segment.label,
+                    format_sector_size(segment.sector_count)
+                ),
+            )
+        }));
+        let available = width.max(1);
+        let gap = 4usize;
+        let max_entry_width = entries
+            .iter()
+            .map(|(kind, text)| display_width(text) + usize::from(kind.is_some()) * 2)
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        let mut columns = entries.len().clamp(1, 4);
+        while columns > 1
+            && max_entry_width
+                .saturating_mul(columns)
+                .saturating_add(gap.saturating_mul(columns - 1))
+                > available
+        {
+            columns -= 1;
+        }
+        let cell_width = if columns == 1 {
+            available
+        } else {
+            available.saturating_sub(gap.saturating_mul(columns - 1)) / columns
+        }
+        .max(1);
+        entries
+            .chunks(columns)
+            .map(|chunk| {
+                let mut spans = vec![Span::raw("    ")];
+                for (position, (kind, text)) in chunk.iter().enumerate() {
+                    if position > 0 {
+                        spans.push(Span::raw(" ".repeat(gap)));
+                    }
+                    let prefix_width = if let Some(kind) = kind {
+                        spans.push(Span::styled(
+                            "■ ",
+                            super::theme::current().disk_region(*kind),
+                        ));
+                        2
+                    } else {
+                        0
+                    };
+                    let room = cell_width.saturating_sub(prefix_width);
+                    let text = if display_width(text) <= room {
+                        text.clone()
+                    } else {
+                        crate::tui::table_layout::truncate_cell(
+                            text,
+                            room,
+                            crate::tui::table_layout::TruncatePolicy::Clip,
+                        )
+                    };
+                    spans.push(Span::styled(
+                        crate::ui::pad_to(&text, room),
+                        if kind.is_some() {
+                            super::theme::current().muted()
+                        } else {
+                            ratatui::style::Style::default()
+                        },
+                    ));
+                }
+                Line::from(spans)
+            })
+            .collect()
+    }
+
+    pub fn pane_line_count(&self, summary: &str, details: &[DiskLayoutDetail]) -> usize {
+        self.visible_model().pane_line_count(summary, details)
+            + usize::from(self.tail == TailExpansion::Expanded && self.model.tail_group().is_some())
+    }
+}
+
+fn percentage(sectors: u64, total: u64) -> String {
+    if total == 0 {
+        return "0.00%".into();
+    }
+    let ratio = sectors as f64 * 100.0 / total as f64;
+    if ratio > 0.0 && ratio < 0.01 {
+        "<0.01%".into()
+    } else {
+        format!("{ratio:.2}%")
+    }
+}
+
+fn format_sector_size(sectors: u64) -> String {
+    crate::common::fmt_capacity_sectors(sectors)
+}
+
 impl DiskRegionKind {
     pub const fn visual_kind(self) -> ProvisionBarKind {
         match self {
             Self::Protocol | Self::Boot => ProvisionBarKind::Boot,
             Self::Share | Self::Combined => ProvisionBarKind::Share,
             Self::Encrypt => ProvisionBarKind::Encrypt,
-            Self::Compatibility | Self::Reserved | Self::Lce | Self::Tail => {
-                ProvisionBarKind::Compatibility
-            }
+            Self::Metadata
+            | Self::Compatibility
+            | Self::Reserved
+            | Self::Lce
+            | Self::BackupMirror
+            | Self::RestoreNode
+            | Self::Tail => ProvisionBarKind::Compatibility,
             Self::Plain => ProvisionBarKind::Plain,
             Self::Free | Self::Unknown => ProvisionBarKind::Free,
         }
@@ -40,6 +663,8 @@ pub struct DiskLayoutDetail {
     pub text: String,
     pub tone: DiskLayoutDetailTone,
     pub columns: Option<[String; 4]>,
+    pub region_kind: Option<DiskRegionKind>,
+    pub selected: bool,
 }
 
 impl DiskLayoutDetail {
@@ -48,6 +673,8 @@ impl DiskLayoutDetail {
             text: text.into(),
             tone: DiskLayoutDetailTone::Muted,
             columns: None,
+            region_kind: None,
+            selected: false,
         }
     }
 
@@ -56,6 +683,8 @@ impl DiskLayoutDetail {
             text: text.into(),
             tone: DiskLayoutDetailTone::Accent,
             columns: None,
+            region_kind: None,
+            selected: false,
         }
     }
 
@@ -64,6 +693,8 @@ impl DiskLayoutDetail {
             text: text.into(),
             tone: DiskLayoutDetailTone::Success,
             columns: None,
+            region_kind: None,
+            selected: false,
         }
     }
 
@@ -72,6 +703,8 @@ impl DiskLayoutDetail {
             text: text.into(),
             tone: DiskLayoutDetailTone::Warning,
             columns: None,
+            region_kind: None,
+            selected: false,
         }
     }
 
@@ -80,20 +713,26 @@ impl DiskLayoutDetail {
             text: text.into(),
             tone: DiskLayoutDetailTone::Danger,
             columns: None,
+            region_kind: None,
+            selected: false,
         }
     }
 
-    pub fn partition_columns(
+    pub fn region_columns(
+        kind: DiskRegionKind,
+        selected: bool,
         name: impl Into<String>,
-        range: impl Into<String>,
         capacity: impl Into<String>,
+        range: impl Into<String>,
         status: impl Into<String>,
         tone: DiskLayoutDetailTone,
     ) -> Self {
         Self {
             text: String::new(),
             tone,
-            columns: Some([name.into(), range.into(), capacity.into(), status.into()]),
+            columns: Some([name.into(), capacity.into(), range.into(), status.into()]),
+            region_kind: Some(kind),
+            selected,
         }
     }
 }
@@ -104,80 +743,44 @@ pub struct DiskLayoutPane<'a> {
     pub details: &'a [DiskLayoutDetail],
     pub focused: bool,
     pub scroll_y: usize,
+    pub profile: DiskLayoutProfile,
+    pub tail: TailExpansion,
+    pub selected_segment: usize,
 }
 
 impl DiskLayoutModel {
-    pub fn render_compact(&self, frame: &mut Frame<'_>, area: Rect, current_lba: Option<u64>) {
-        let title = match current_lba {
-            Some(lba) => format!("磁盘概览 · 当前 LBA{lba} · 全盘布局可下钻"),
-            None => "磁盘概览 · 全盘布局可下钻".into(),
-        };
+    pub fn render_mini(&self, frame: &mut Frame<'_>, area: Rect, current_lba: Option<u64>) {
+        let title = current_lba
+            .map(|lba| format!("磁盘概览 · 当前 LBA{lba}"))
+            .unwrap_or_else(|| "磁盘概览".into());
+        let selection = current_lba.and_then(|lba| DiskCapacitySelection::from_lba(self, lba));
+        let lines = DiskCapacityMap::new(self, DiskCapacityMapProfile::Mini)
+            .with_tail(TailExpansion::Collapsed)
+            .with_selection(selection)
+            .with_marker(false)
+            .lines(area.width.saturating_sub(2) as usize);
         frame.render_widget(
-            Paragraph::new(self.bar_line(area.width.saturating_sub(4) as usize))
-                .block(super::ui::panel(title, false)),
+            Paragraph::new(lines).block(super::ui::panel(title, false)),
             area,
         );
     }
 
-    pub fn bar_line(&self, width: usize) -> Line<'static> {
-        self.bar_line_with_label(width, "")
-    }
-
-    pub fn bar_line_with_label(&self, width: usize, label: &'static str) -> Line<'static> {
-        let bar = self.bar(width);
-        let mut spans = vec![Span::raw(label), Span::raw("[")];
-        let mut start = 0;
-        while start < bar.len() {
-            let kind = bar[start];
-            let mut end = start + 1;
-            while end < bar.len() && bar[end] == kind {
-                end += 1;
-            }
-            spans.push(Span::styled(
-                "━".repeat(end - start),
-                super::theme::current().disk_region(kind),
-            ));
-            start = end;
-        }
-        spans.push(Span::raw("]"));
-        Line::from(spans)
-    }
-
     pub fn legend_lines(&self) -> Vec<String> {
-        self.segments
-            .iter()
-            .map(|segment| {
-                let percent = if self.total_sectors == 0 {
-                    "0.00%".into()
-                } else {
-                    let ratio = segment.sector_count as f64 * 100.0 / self.total_sectors as f64;
-                    if ratio > 0.0 && ratio < 0.01 {
-                        "<0.01%".into()
-                    } else {
-                        format!("{ratio:.2}%")
-                    }
-                };
-                format!(
-                    "{}  {}  {}  {}",
-                    crate::ui::pad_to(&segment.label, 18),
-                    crate::ui::pad_to(&segment.closed_range(), 24),
-                    crate::ui::pad_to(&format!("{} sectors", segment.sector_count), 18),
-                    percent
-                )
-            })
-            .collect()
+        DiskLayoutPresentation::new(
+            self,
+            DiskLayoutProfile::DetailedExact,
+            TailExpansion::Expanded,
+        )
+        .legend_lines()
     }
 
     pub fn pane_line_count(&self, summary: &str, details: &[DiskLayoutDetail]) -> usize {
-        usize::from(!summary.is_empty())
-            + 1
-            + usize::from(!self.segments.is_empty())
-            + self.segments.len()
-            + usize::from(!details.is_empty())
-            + details.len()
+        usize::from(!summary.is_empty()) + 4 + usize::from(!details.is_empty()) + details.len()
     }
 
     pub fn render_pane(&self, frame: &mut Frame<'_>, area: Rect, pane: DiskLayoutPane<'_>) {
+        let presentation = DiskLayoutPresentation::new(self, pane.profile, pane.tail);
+        let visible = presentation.visible_model();
         let theme = super::theme::current();
         let compact =
             super::ui::ViewportClass::for_width(area.width) == super::ui::ViewportClass::Compact;
@@ -188,40 +791,22 @@ impl DiskLayoutModel {
                 theme.secondary_text(),
             )));
         }
-        lines.push(self.bar_line(area.width.saturating_sub(4) as usize));
-        if !self.segments.is_empty() {
-            lines.push(Line::from(""));
-            if !compact {
-                lines.push(Line::from(Span::styled(
-                    format!(
-                        "{}  {}  {}  {}",
-                        crate::ui::pad_to("区域", 18),
-                        crate::ui::pad_to("LBA 范围", 24),
-                        crate::ui::pad_to("扇区数", 18),
-                        "占比"
-                    ),
-                    theme.secondary_text(),
-                )));
-            }
-        }
-        for (segment, text) in self.segments.iter().zip(self.legend_lines()) {
-            if compact {
-                lines.push(Line::from(vec![
-                    Span::styled("■ ", theme.disk_region(segment.kind)),
-                    Span::styled(segment.label.clone(), theme.muted()),
-                ]));
-                lines.push(Line::from(format!(
-                    "  {}  {} sector",
-                    segment.closed_range(),
-                    segment.sector_count
-                )));
-            } else {
-                lines.push(Line::from(vec![
-                    Span::styled("■ ", theme.disk_region(segment.kind)),
-                    Span::styled(text, theme.muted()),
-                ]));
-            }
-        }
+        let selection = pane
+            .focused
+            .then(|| {
+                visible
+                    .segments
+                    .get(pane.selected_segment)
+                    .and_then(DiskCapacitySelection::from_segment)
+            })
+            .flatten();
+        lines.extend(
+            DiskCapacityMap::new(self, DiskCapacityMapProfile::Compact)
+                .with_tail(pane.tail)
+                .with_selection(selection)
+                .with_marker(pane.focused)
+                .lines(area.width.saturating_sub(4) as usize),
+        );
         if !pane.details.is_empty() {
             lines.push(Line::from(""));
         }
@@ -233,18 +818,35 @@ impl DiskLayoutModel {
                 DiskLayoutDetailTone::Warning => theme.warning(),
                 DiskLayoutDetailTone::Danger => theme.danger(),
             };
-            if let Some([name, range, capacity, status]) = &detail.columns {
+            if let Some([name, capacity, range, status]) = &detail.columns {
+                let region_style = detail
+                    .region_kind
+                    .map(|kind| theme.disk_region_tree(kind, detail.selected && pane.focused));
+                let name_style = region_style.unwrap_or_else(|| theme.muted());
+                let marker_style = region_style.unwrap_or_else(|| theme.accent());
+                let marker = if detail.selected && pane.focused {
+                    "▌"
+                } else {
+                    " "
+                };
                 if compact {
                     lines.push(Line::from(vec![
-                        Span::styled(crate::ui::pad_to(name, 18), theme.muted()),
+                        Span::styled(marker, marker_style),
+                        Span::styled(crate::ui::pad_to(name, 17), name_style),
                         Span::styled(status.clone(), style),
                     ]));
-                    lines.push(Line::from(format!("  {range}  {capacity}")));
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(capacity.clone(), theme.secondary_text()),
+                        Span::raw("  "),
+                        Span::styled(range.clone(), theme.muted()),
+                    ]));
                 } else {
                     lines.push(Line::from(vec![
-                        Span::styled(crate::ui::pad_to(name, 18), theme.muted()),
+                        Span::styled(marker, marker_style),
+                        Span::styled(crate::ui::pad_to(name, 17), name_style),
+                        Span::styled(crate::ui::pad_to(capacity, 14), theme.secondary_text()),
                         Span::styled(crate::ui::pad_to(range, 24), theme.muted()),
-                        Span::styled(crate::ui::pad_to(capacity, 14), theme.muted()),
                         Span::styled(status.clone(), style),
                     ]));
                 }
@@ -254,16 +856,7 @@ impl DiskLayoutModel {
         }
         frame.render_widget(
             Paragraph::new(lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(if pane.focused {
-                            theme.focused_panel()
-                        } else {
-                            theme.panel()
-                        })
-                        .title(pane.title.to_string()),
-                )
+                .block(super::ui::card(pane.title.to_string(), pane.focused))
                 .scroll((pane.scroll_y.min(u16::MAX as usize) as u16, 0))
                 .wrap(Wrap { trim: false }),
             area,
@@ -274,9 +867,83 @@ impl DiskLayoutModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backup_metadata::Lba7CompatibilityGeometry;
-    use crate::inspect_target::InspectDiskContext;
     use ratatui::{backend::TestBackend, Terminal};
+
+    fn capacity_map_fixture() -> DiskLayoutModel {
+        DiskLayoutModel::new(
+            1_000,
+            vec![
+                DiskLayoutSegment {
+                    label: "启动区".into(),
+                    start_lba: 0,
+                    sector_count: 100,
+                    kind: DiskRegionKind::Boot,
+                },
+                DiskLayoutSegment {
+                    label: "交换区".into(),
+                    start_lba: 100,
+                    sector_count: 700,
+                    kind: DiskRegionKind::Share,
+                },
+                DiskLayoutSegment {
+                    label: "保密区".into(),
+                    start_lba: 800,
+                    sector_count: 200,
+                    kind: DiskRegionKind::Encrypt,
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn capacity_map_profiles_share_one_renderer_with_page_specific_density() {
+        let model = capacity_map_fixture();
+        let full = DiskCapacityMap::new(&model, DiskCapacityMapProfile::Full)
+            .with_marker(false)
+            .lines(80);
+        assert_eq!(full.len(), 6);
+        assert!(full[0].to_string().contains("0%"));
+        assert!(full[0].to_string().contains("100%"));
+        assert!(full[1].to_string().contains('┈'));
+        assert!(full[2].to_string().contains('▄'));
+        assert!(full[5].to_string().contains('▀'));
+
+        let compact = DiskCapacityMap::new(&model, DiskCapacityMapProfile::Compact).lines(80);
+        assert_eq!(compact.len(), 3);
+        assert!(compact[0].to_string().contains('▄'));
+        assert!(compact[2].to_string().contains('▀'));
+        assert!(!compact.iter().any(|line| line.to_string().contains('%')));
+
+        let mini = DiskCapacityMap::new(&model, DiskCapacityMapProfile::Mini).lines(80);
+        assert_eq!(mini.len(), 1);
+        let mini_text = mini[0].to_string();
+        assert!(!mini_text.contains('%'));
+        assert!(!mini_text.contains('▄'));
+        assert!(!mini_text.contains('▀'));
+        assert!(!mini_text.contains('▲'));
+    }
+
+    #[test]
+    fn mini_capacity_map_highlights_the_region_containing_current_lba() {
+        let model = capacity_map_fixture();
+        let selection = DiskCapacitySelection::from_lba(&model, 850).expect("encrypt selection");
+        let line = DiskCapacityMap::new(&model, DiskCapacityMapProfile::Mini)
+            .with_selection(Some(selection))
+            .lines(80)
+            .pop()
+            .expect("mini line");
+        let active_encrypt = super::super::theme::current()
+            .disk_region_fill(DiskRegionKind::Encrypt, true)
+            .bg;
+        let normal_share = super::super::theme::current()
+            .disk_region_fill(DiskRegionKind::Share, false)
+            .bg;
+        assert!(line
+            .spans
+            .iter()
+            .any(|span| span.style.bg == active_encrypt));
+        assert!(line.spans.iter().any(|span| span.style.bg == normal_share));
+    }
 
     #[test]
     fn partition_status_stays_visible_at_60_80_100_and_120_columns() {
@@ -289,10 +956,12 @@ mod tests {
                 kind: DiskRegionKind::Encrypt,
             }],
         );
-        let details = [DiskLayoutDetail::partition_columns(
+        let details = [DiskLayoutDetail::region_columns(
+            DiskRegionKind::Encrypt,
+            true,
             "保密区",
-            "LBA 0–99999",
             "48.8 MiB",
+            "LBA 0–99999",
             "⚠ 需重建",
             DiskLayoutDetailTone::Warning,
         )];
@@ -309,6 +978,9 @@ mod tests {
                             details: &details,
                             focused: true,
                             scroll_y: 0,
+                            profile: DiskLayoutProfile::DetailedExact,
+                            tail: TailExpansion::Collapsed,
+                            selected_segment: 0,
                         },
                     );
                 })
@@ -412,24 +1084,39 @@ mod tests {
     }
 
     #[test]
-    fn inspect_topology_and_provision_share_the_same_bar_allocation() {
-        let mut context =
-            InspectDiskContext::new(vec![0; crate::common::METADATA_IMAGE_LEN], None, 10_000);
-        context.lce = Some(Lba7CompatibilityGeometry {
-            start_lba: 6_000,
-            sector_count: 6,
-            lba7_pointer_entries: Vec::new(),
-            official_partition_mode: None,
-            chs_expected_start_lba: None,
-        });
-        let topology = crate::application::inspect_tree::build_inspect_topology(&context);
-        let model = DiskLayoutModel::from_topology(&topology);
+    fn canonical_layout_bar_preserves_lce_and_complete_coverage() {
+        let model = DiskLayoutModel::canonical_edp(
+            10_000,
+            vec![
+                DiskLayoutSegment {
+                    label: "启动区".into(),
+                    start_lba: 63,
+                    sector_count: 37,
+                    kind: DiskRegionKind::Boot,
+                },
+                DiskLayoutSegment {
+                    label: "交换区".into(),
+                    start_lba: 100,
+                    sector_count: 4_900,
+                    kind: DiskRegionKind::Share,
+                },
+                DiskLayoutSegment {
+                    label: "保密区".into(),
+                    start_lba: 5_000,
+                    sector_count: 1_000,
+                    kind: DiskRegionKind::Encrypt,
+                },
+            ],
+            6_000,
+            6,
+        )
+        .unwrap();
         assert_eq!(model.total_sectors, 10_000);
         assert_eq!(
             model
                 .segments
                 .iter()
-                .find(|segment| segment.label.starts_with("LCE"))
+                .find(|segment| segment.kind == DiskRegionKind::Lce)
                 .unwrap()
                 .sector_count,
             6
@@ -442,6 +1129,14 @@ mod tests {
                 .map(|segment| segment.sector_count)
                 .sum::<u64>(),
             10_000
+        );
+        assert_eq!(
+            model
+                .collapsed_tail_model()
+                .segments
+                .last()
+                .map(|segment| segment.kind),
+            Some(DiskRegionKind::Tail)
         );
     }
 }
