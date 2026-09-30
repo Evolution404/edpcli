@@ -9,6 +9,17 @@ impl AppState {
         self.provision.result_workbench.cycle_pane(reverse);
     }
 
+    pub fn provision_result_shift_partition_column(&mut self, reverse: bool) -> bool {
+        if self.provision.result_workbench.focused_pane()
+            != crate::tui::pane::PaneId::ResultPartitions
+        {
+            return false;
+        }
+        self.provision
+            .result_workbench
+            .move_partition_active_column(reverse, 7)
+    }
+
     pub fn provision_initialize_result_workbench(&mut self) {
         let Some(plan) = self.provision.result_plan.clone() else {
             self.provision.result_workbench =
