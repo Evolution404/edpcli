@@ -9,9 +9,7 @@ impl AppState {
             Some(mode) => format!("./edp-mode{mode}.img"),
             None => "./edp-plain.img".into(),
         };
-        self.provision.stage = ProvisionStage::ExportPath;
-        self.shell.input_mode = InputMode::Insert;
-        self.provision.message = None;
+        self.provision_transition_begin_export_path();
     }
 
     pub fn provision_export_push_char(&mut self, ch: char) {
@@ -47,14 +45,13 @@ impl AppState {
         }
         let prepared = self.provision.prepared.as_ref()?.clone();
         let path = std::path::PathBuf::from(path);
-        self.provision.stage = ProvisionStage::Exporting;
+        self.provision_transition_begin_exporting();
         self.provision.message = Some(format!("正在后台导出 {}…", path.display()));
         Some((prepared, path))
     }
 
     pub fn provision_finish_export(&mut self, result: Result<std::path::PathBuf, String>) {
-        self.provision.stage = ProvisionStage::Review;
-        self.shell.input_mode = InputMode::Normal;
+        self.provision_transition_return_to_review();
         self.provision.message = Some(match result {
             Ok(path) => format!("镜像导出完成：{}", path.display()),
             Err(message) => message,
@@ -63,18 +60,14 @@ impl AppState {
 
     pub fn provision_cancel_export(&mut self) {
         if self.provision.stage == ProvisionStage::ExportPath {
-            self.provision.stage = ProvisionStage::Review;
+            self.provision_transition_return_to_review();
             self.provision.message = None;
-            self.shell.input_mode = InputMode::Normal;
         }
     }
 
     pub fn provision_begin_confirm(&mut self) {
         if self.provision.prepared.is_some() {
-            self.provision.stage = ProvisionStage::Confirm;
-            self.shell.input_mode = InputMode::Confirm;
-            self.provision.confirmation.clear();
-            self.provision.message = None;
+            self.provision_transition_begin_confirm();
         }
     }
 
@@ -110,8 +103,7 @@ impl AppState {
             &prepared,
             total_bytes,
         ));
-        self.provision.stage = ProvisionStage::Running;
-        self.shell.input_mode = InputMode::Normal;
+        self.provision_transition_begin_running();
         self.provision.message = Some("事务写盘进行中；退出请求会延迟到安全检查点".into());
         self.provision.result_status = None;
         self.provision.result_outcome = None;
@@ -129,8 +121,7 @@ impl AppState {
         result: Result<crate::application::provision::ProvisionWriteOutcome, String>,
     ) {
         self.shell.critical_operation = false;
-        self.provision.stage = ProvisionStage::Result;
-        self.shell.input_mode = InputMode::Normal;
+        self.provision_transition_finish_running();
         match result {
             Ok(outcome) => {
                 self.provision.result_status = Some(outcome.execution_status());

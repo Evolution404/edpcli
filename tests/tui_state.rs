@@ -47,6 +47,73 @@ fn provision_result_escape_returns_directly_to_originating_devices_workspace() {
     assert_eq!(state.navigation().depth(), 0);
 }
 
+#[test]
+fn provision_review_escape_restores_valid_form_focus_and_insert() {
+    use edpcli::tui::pane::{PaneFocus, PaneId};
+
+    for review_pane in [PaneId::ProvisionSummary, PaneId::ProvisionChanges] {
+        let mut state = AppState::new();
+        state.replace_devices(vec![device(64_000_000_000)]);
+        assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+        state.provision_mut().field_selected = 0;
+        state.provision_mut().pane_focus = PaneFocus::provision_review();
+        state.provision_focus_pane(review_pane);
+        state.provision_mut().stage = ProvisionStage::Review;
+
+        assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
+        assert_eq!(state.provision().stage, ProvisionStage::Form);
+        assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
+        assert!(
+            state.provision_begin_insert(),
+            "review pane {review_pane:?} must return to an editable form focus"
+        );
+        assert_eq!(state.input_mode(), InputMode::Insert);
+    }
+}
+
+#[test]
+fn provision_review_subflows_return_to_exact_review_pane() {
+    use edpcli::tui::pane::{PaneFocus, PaneId};
+
+    for stage in [ProvisionStage::Confirm, ProvisionStage::ExportPath] {
+        let mut state = AppState::new();
+        state.replace_devices(vec![device(64_000_000_000)]);
+        assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+        state.provision_mut().pane_focus = PaneFocus::provision_review();
+        state.provision_focus_pane(PaneId::ProvisionChanges);
+        state.provision_mut().stage = stage;
+
+        assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
+        assert_eq!(state.provision().stage, ProvisionStage::Review);
+        assert_eq!(state.provision_focused_pane(), PaneId::ProvisionChanges);
+    }
+}
+
+#[test]
+fn provision_review_escape_restores_form_layout_snapshot() {
+    use edpcli::tui::pane::{PaneFocus, PaneId};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_mut().field_selected = 0;
+    state.provision_mut().field_cursor = 2;
+    state.provision_focus_pane(PaneId::ProvisionDiskLayout);
+    state.provision_set_planning();
+
+    state.provision_mut().stage = ProvisionStage::Review;
+    state.provision_mut().pane_focus = PaneFocus::provision_review();
+    state.provision_focus_pane(PaneId::ProvisionChanges);
+
+    assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
+    assert_eq!(state.provision().stage, ProvisionStage::Form);
+    assert_eq!(state.provision_focused_pane(), PaneId::ProvisionDiskLayout);
+    assert_eq!(state.provision().field_selected, 0);
+    assert_eq!(state.provision_field_cursor(), 2);
+    assert_eq!(state.input_mode(), InputMode::Normal);
+    assert!(state.provision().prepared.is_none());
+}
+
 fn device(size: u64) -> edpcli::disk_scan::Row {
     let mut row = edpcli::disk_scan::Row {
         disk: 6,

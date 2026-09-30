@@ -111,6 +111,9 @@ mod fields_access;
 mod form;
 #[path = "key_domains.rs"]
 mod key_domains;
+#[path = "transitions.rs"]
+mod transitions;
+use transitions::{ProvisionFormViewSnapshot, ProvisionReviewViewSnapshot};
 #[path = "layout.rs"]
 mod layout;
 #[path = "layout_presentation.rs"]
@@ -153,6 +156,8 @@ pub struct ProvisionState {
     pub result_plan: Option<ProvisionResultSnapshot>,
     pub run: Option<crate::application::progress::OperationRunState>,
     pub pane_focus: crate::tui::pane::PaneFocus,
+    form_view_snapshot: Option<ProvisionFormViewSnapshot>,
+    review_view_snapshot: Option<ProvisionReviewViewSnapshot>,
     pub(super) target_disk: Option<u32>,
     form_initialized_for: Option<(u32, u64, Option<String>, ProvisionKind)>,
 }
@@ -177,6 +182,8 @@ impl Default for ProvisionState {
             result_plan: None,
             run: None,
             pane_focus: crate::tui::pane::PaneFocus::provision_form(),
+            form_view_snapshot: None,
+            review_view_snapshot: None,
             target_disk: None,
             form_initialized_for: None,
         }
@@ -223,7 +230,7 @@ impl AppState {
         self.provision.target_disk = target_disk;
         self.shell.pinned_disk = target_disk;
         if self.shell.workspace == Workspace::Provision {
-            self.provision.stage = ProvisionStage::Form;
+            self.provision_transition_enter_form();
             self.provision.scheme_picker_open = false;
             self.set_item_count(0);
         }
@@ -255,7 +262,7 @@ impl AppState {
             .selected_device()
             .map(|row| (row.disk, row.size, row.device_id.clone(), kind));
         if self.provision.form_initialized_for == current_target {
-            self.provision.stage = ProvisionStage::Form;
+            self.provision_transition_enter_form();
             self.provision_sync_cursor_to_end();
             return kind;
         }
@@ -268,13 +275,13 @@ impl AppState {
                 Ok(form) => {
                     self.provision.plain_form = form;
                     self.provision.form_initialized_for = current_target;
-                    self.provision.stage = ProvisionStage::Form;
+                    self.provision_transition_enter_form();
                     self.provision.message = None;
                     self.provision_sync_cursor_to_end();
                 }
                 Err(message) => {
                     self.provision.plain_form = PlainProvisionForm::default();
-                    self.provision.stage = ProvisionStage::Form;
+                    self.provision_transition_enter_form();
                     self.provision.message = Some(message);
                 }
             }
@@ -335,7 +342,7 @@ impl AppState {
             self.provision.form.apply_prefill(&prefill);
         }
         self.provision.form_initialized_for = current_target;
-        self.provision.stage = ProvisionStage::Form;
+        self.provision_transition_enter_form();
         self.provision_sync_cursor_to_end();
         kind
     }

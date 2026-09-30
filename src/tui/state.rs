@@ -1532,7 +1532,7 @@ impl AppState {
         }
         let disk = row.disk;
         self.provision.target_disk = Some(disk);
-        self.provision.stage = ProvisionStage::Form;
+        self.provision_transition_enter_form();
         self.shell.pinned_disk = Some(disk);
         self.provision.message = None;
         self.provision.scheme_picker_open = true;
@@ -1759,12 +1759,10 @@ impl AppState {
                         self.set_notice("制盘安全事务正在执行，当前不能返回。");
                     }
                     ProvisionStage::Confirm => {
-                        self.provision.stage = ProvisionStage::Review;
+                        self.provision_transition_return_to_review();
                         self.provision.confirmation.clear();
                     }
-                    ProvisionStage::Review => {
-                        self.provision.stage = ProvisionStage::Form;
-                    }
+                    ProvisionStage::Review => self.provision_return_review_to_form(),
                     ProvisionStage::ExportPath => self.provision_cancel_export(),
                     ProvisionStage::Exporting => {
                         self.set_notice("镜像正在后台导出，请等待完成。");

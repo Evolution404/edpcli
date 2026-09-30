@@ -175,6 +175,30 @@ fn tui_does_not_import_protocol_implementation_modules() {
 }
 
 #[test]
+fn provision_stage_writes_are_centralized_in_transitions() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for path in rust_sources_under("src/tui") {
+        let relative = path.strip_prefix(root).unwrap_or(&path);
+        let relative = relative.to_string_lossy();
+        if relative == "src/tui/provision/transitions.rs" || relative == "src/tui/demo/mod.rs" {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !source.contains("self.provision.stage = ProvisionStage::"),
+            "{} writes ProvisionStage outside transitions",
+            relative
+        );
+        assert!(
+            !source.contains("provision_mut().stage = ProvisionStage::"),
+            "{} writes ProvisionStage outside transitions",
+            relative
+        );
+    }
+}
+
+#[test]
 fn library_root_exposes_stable_interfaces_only() {
     let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
         .expect("read library root");
