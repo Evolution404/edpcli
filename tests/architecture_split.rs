@@ -1828,7 +1828,6 @@ fn passive_capacity_display_uses_one_global_unit_system() {
     }
 }
 
-
 #[test]
 fn post_restore_layout_projection_is_application_owned_and_nonfatal() {
     let projection = include_str!("../src/application/post_restore/layout_projection.rs");
@@ -1864,7 +1863,6 @@ fn post_restore_layout_projection_is_application_owned_and_nonfatal() {
         "layout projection failure must not reclassify a verified restore as failed"
     );
 }
-
 
 #[test]
 fn restore_result_has_one_selection_source_of_truth() {
