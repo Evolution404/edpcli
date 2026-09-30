@@ -1,11 +1,5 @@
 use super::*;
 
-#[path = "result_render.rs"]
-mod result_render;
-use result_render::{
-    draw_backup_batch_delete_result, draw_backup_delete_result, draw_backup_prune_result,
-};
-
 fn backup_table_values(
     backup: &crate::application::BackupWorkspaceItem,
     checked: bool,
@@ -515,10 +509,6 @@ pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect,
         );
         return;
     }
-    if delete.stage == WizardStage::Result {
-        draw_backup_delete_result(frame, area, delete);
-        return;
-    }
     let mut lines = vec![
         Line::from(Span::styled("删除备份", danger())),
         Line::from(vec![
@@ -527,14 +517,10 @@ pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect,
         ]),
         Line::from("安全规则：固定选中时 SHA-256 → 删除前重新扫描 → 内容复核 → 至少保留该盘 1 份备份 → 删除单文件 .edpb"),
     ];
-    match delete.stage {
-        WizardStage::Running => {
-            lines.push(Line::from(
-                "正在复核并删除；q / Esc / Ctrl-C 将延迟到安全结束点。",
-            ));
-        }
-        WizardStage::Result => unreachable!("result uses shared result renderer"),
-        _ => {}
+    if delete.stage == WizardStage::Running {
+        lines.push(Line::from(
+            "正在复核并删除；q / Esc / Ctrl-C 将延迟到安全结束点。",
+        ));
     }
     if let Some(message) = &delete.message {
         lines.push(Line::from(safe(message)));
@@ -568,10 +554,6 @@ pub(super) fn draw_backup_batch_delete(
         .as_ref()
         .map(|plan| plan.targets.len())
         .unwrap_or_else(|| state.backup_selection_count());
-    if batch.stage == BackupBatchDeleteStage::Result {
-        draw_backup_batch_delete_result(frame, area, batch);
-        return;
-    }
     let mut lines = vec![
         Line::from(Span::styled("批量删除备份", danger())),
         Line::from(format!("当前勾选: {} 份", state.backup_selection_count())),
@@ -584,15 +566,6 @@ pub(super) fn draw_backup_batch_delete(
                 "正在生成固定批量删除计划…",
                 secondary(),
             )));
-        }
-        BackupBatchDeleteStage::Review => {
-            lines.extend([
-                Line::from(Span::styled(
-                    format!("计划已固定：将删除 {planned} 份备份。"),
-                    warning(),
-                )),
-                Line::from("Enter 打开删除确认；Esc 取消计划并保留勾选。"),
-            ]);
         }
         BackupBatchDeleteStage::Confirm => {
             crate::tui::ui::render_action_confirmation_modal(
@@ -620,14 +593,9 @@ pub(super) fn draw_backup_batch_delete(
                 warning(),
             )));
         }
-        BackupBatchDeleteStage::Result => {
-            unreachable!("result uses shared result renderer")
-        }
     }
-    if batch.stage != BackupBatchDeleteStage::Result {
-        if let Some(message) = &batch.message {
-            lines.push(Line::from(Span::styled(safe(message), muted())));
-        }
+    if let Some(message) = &batch.message {
+        lines.push(Line::from(Span::styled(safe(message), muted())));
     }
 
     frame.render_widget(
@@ -650,11 +618,6 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
     };
     use super::super::state::BackupPruneStage;
 
-    if prune.stage == BackupPruneStage::Result {
-        draw_backup_prune_result(frame, area, prune);
-        return;
-    }
-
     let mut lines = vec![
         Line::from(Span::styled("备份保留策略清理", warning())),
         Line::from("按同盘组执行 keep-N；原始盘备份与保留底线由 application 层统一保护。"),
@@ -676,24 +639,6 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
                 secondary(),
             )));
         }
-        BackupPruneStage::Review => {
-            if let Some(prepared) = prune.prepared.as_ref() {
-                lines.extend([
-                    Line::from(format!("keep-N: {}", prepared.keep)),
-                    Line::from(format!("受管备份: {} 份", prepared.managed_backups)),
-                    Line::from(format!(
-                        "计划删除: {} 份   清理后快照: {} 份",
-                        prepared.plan.targets.len(),
-                        prepared.retained_backups
-                    )),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "Enter 打开清理确认；执行时逐条按固定 SHA-256 复核。",
-                        warning(),
-                    )),
-                ]);
-            }
-        }
         BackupPruneStage::Confirm => {
             let count = prune
                 .prepared
@@ -706,14 +651,23 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
                 crate::tui::ui::ActionConfirmationSpec {
                     title: "备份清理确认",
                     headline: "确认执行 keep-N 清理？",
-                    details: vec![
-                        Line::from(format!("将删除 {count} 份旧备份。")),
-                        Line::from("删除前逐条复核固定摘要与保留底线。"),
-                        Line::from(Span::styled(
-                            "此操作不可撤销，但不是目标介质写入。",
-                            warning(),
-                        )),
-                    ],
+                    details: if let Some(prepared) = prune.prepared.as_ref() {
+                        vec![
+                            Line::from(format!("keep-N  {}", prepared.keep)),
+                            Line::from(format!("受管备份  {} 份", prepared.managed_backups)),
+                            Line::from(format!(
+                                "计划删除  {count} 份 · 清理后保留 {} 份",
+                                prepared.retained_backups
+                            )),
+                            Line::from("删除前逐条复核固定摘要与保留底线。"),
+                            Line::from(Span::styled(
+                                "此操作不可撤销，但不是目标介质写入。",
+                                warning(),
+                            )),
+                        ]
+                    } else {
+                        vec![Line::from("清理计划不可用。")]
+                    },
                     tone: crate::tui::ui::ConfirmationTone::Destructive,
                 },
             );
@@ -725,14 +679,9 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
                 warning(),
             )));
         }
-        BackupPruneStage::Result => {
-            unreachable!("result uses shared result renderer")
-        }
     }
-    if prune.stage != BackupPruneStage::Result {
-        if let Some(message) = &prune.message {
-            lines.push(Line::from(Span::styled(safe(message), danger())));
-        }
+    if let Some(message) = &prune.message {
+        lines.push(Line::from(Span::styled(safe(message), danger())));
     }
 
     frame.render_widget(

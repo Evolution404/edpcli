@@ -270,7 +270,6 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/inspect/sector_render.rs",
         "src/tui/backups/state.rs",
         "src/tui/backups/render.rs",
-        "src/tui/backups/result_render.rs",
         "src/tui/devices/render.rs",
         "src/tui/devices/state.rs",
         "src/tui/dispatch.rs",
@@ -491,7 +490,6 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/ui/result_supplement.rs") < 100);
     assert!(lines("src/tui/ui/result_table.rs") < 140);
     assert!(lines("src/tui/wizard_result_render.rs") < 120);
-    assert!(lines("src/tui/backups/result_render.rs") < 180);
     assert!(lines("src/tui/operation_progress_render.rs") < 260);
     assert!(lines("src/tui/operation_progress_status.rs") < 120);
     assert!(lines("src/tui/progress_transport.rs") < 180);
@@ -1429,6 +1427,7 @@ fn provision_stage_renderers_are_split_from_workspace_root() {
         );
     }
     assert!(!root.join("src/tui/runtime_input/backup_choice.rs").exists());
+    assert!(!root.join("src/tui/backups/result_render.rs").exists());
 }
 
 #[test]

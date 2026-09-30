@@ -11,10 +11,8 @@ pub struct BackupDeleteState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackupBatchDeleteStage {
     Planning,
-    Review,
     Confirm,
     Running,
-    Result,
 }
 
 pub struct BackupBatchDeleteState {
@@ -27,10 +25,8 @@ pub struct BackupBatchDeleteState {
 pub enum BackupPruneStage {
     Input,
     Planning,
-    Review,
     Confirm,
     Running,
-    Result,
 }
 
 pub struct BackupPrunePrepared {
@@ -150,32 +146,22 @@ impl AppState {
         &mut self,
         result: Result<crate::application::backup::DeletePlan, String>,
     ) {
-        let Some(batch) = self.backups.batch_delete.as_mut() else {
-            return;
-        };
         match result {
             Ok(plan) if plan.targets.is_empty() => {
-                batch.stage = BackupBatchDeleteStage::Result;
-                batch.message = Some("批量删除计划为空，没有可删除目标。".into());
+                self.backups.batch_delete = None;
+                self.set_notice("批量删除计划为空，没有可删除目标。");
             }
             Ok(plan) => {
-                batch.prepared = Some(plan);
-                batch.stage = BackupBatchDeleteStage::Review;
-                batch.message = None;
+                if let Some(batch) = self.backups.batch_delete.as_mut() {
+                    batch.prepared = Some(plan);
+                    batch.stage = BackupBatchDeleteStage::Confirm;
+                    batch.message = None;
+                    self.shell.input_mode = InputMode::Normal;
+                }
             }
             Err(message) => {
-                batch.stage = BackupBatchDeleteStage::Result;
-                batch.message = Some(message);
-            }
-        }
-    }
-
-    pub fn backup_batch_delete_begin_confirm(&mut self) {
-        if let Some(batch) = self.backups.batch_delete.as_mut() {
-            if batch.stage == BackupBatchDeleteStage::Review {
-                batch.stage = BackupBatchDeleteStage::Confirm;
-                batch.message = None;
-                self.shell.input_mode = InputMode::Normal;
+                self.backups.batch_delete = None;
+                self.set_notice(message);
             }
         }
     }
@@ -198,16 +184,15 @@ impl AppState {
     pub fn backup_batch_delete_finish_execute(&mut self, result: Result<usize, String>) {
         self.shell.critical_operation = false;
         let success = result.is_ok();
-        if let Some(batch) = self.backups.batch_delete.as_mut() {
-            batch.stage = BackupBatchDeleteStage::Result;
-            batch.message = Some(match result {
-                Ok(count) => format!("批量删除完成：已安全删除 {count} 份备份。"),
-                Err(message) => message,
-            });
-        }
+        let message = match result {
+            Ok(count) => format!("批量删除完成：已安全删除 {count} 份备份。"),
+            Err(message) => message,
+        };
+        self.backups.batch_delete = None;
         if success {
             self.backups.selection.clear();
         }
+        self.set_notice(message);
     }
 
     pub fn close_backup_batch_delete(&mut self) {
@@ -279,36 +264,26 @@ impl AppState {
     }
 
     pub fn backup_prune_finish_plan(&mut self, result: Result<BackupPrunePrepared, String>) {
-        let Some(prune) = self.backups.prune.as_mut() else {
-            return;
-        };
         match result {
             Ok(prepared) if prepared.plan.targets.is_empty() => {
-                prune.prepared = Some(prepared);
-                prune.stage = BackupPruneStage::Result;
-                prune.message = Some("无需清理：当前备份已经满足保留策略。".into());
+                self.backups.prune = None;
                 self.shell.input_mode = InputMode::Normal;
+                self.set_notice("无需清理：当前备份已经满足保留策略。");
             }
             Ok(prepared) => {
-                prune.prepared = Some(prepared);
-                prune.stage = BackupPruneStage::Review;
-                prune.message = None;
-                self.shell.input_mode = InputMode::Normal;
+                if let Some(prune) = self.backups.prune.as_mut() {
+                    prune.prepared = Some(prepared);
+                    prune.stage = BackupPruneStage::Confirm;
+                    prune.message = None;
+                    self.shell.input_mode = InputMode::Normal;
+                }
             }
             Err(message) => {
-                prune.stage = BackupPruneStage::Input;
-                prune.message = Some(message);
-                self.shell.input_mode = InputMode::Insert;
-            }
-        }
-    }
-
-    pub fn backup_prune_begin_confirm(&mut self) {
-        if let Some(prune) = self.backups.prune.as_mut() {
-            if prune.stage == BackupPruneStage::Review {
-                prune.stage = BackupPruneStage::Confirm;
-                prune.message = None;
-                self.shell.input_mode = InputMode::Normal;
+                if let Some(prune) = self.backups.prune.as_mut() {
+                    prune.stage = BackupPruneStage::Input;
+                    prune.message = Some(message);
+                    self.shell.input_mode = InputMode::Insert;
+                }
             }
         }
     }
@@ -328,13 +303,13 @@ impl AppState {
 
     pub fn backup_prune_finish_execute(&mut self, result: Result<usize, String>) {
         self.shell.critical_operation = false;
-        if let Some(prune) = self.backups.prune.as_mut() {
-            prune.stage = BackupPruneStage::Result;
-            prune.message = Some(match result {
-                Ok(count) => format!("清理完成：已安全删除 {count} 份旧备份。"),
-                Err(message) => message,
-            });
-        }
+        let message = match result {
+            Ok(count) => format!("清理完成：已安全删除 {count} 份旧备份。"),
+            Err(message) => message,
+        };
+        self.backups.prune = None;
+        self.shell.input_mode = InputMode::Normal;
+        self.set_notice(message);
     }
 
     pub fn close_backup_prune(&mut self) {
@@ -377,13 +352,12 @@ impl AppState {
 
     pub fn finish_backup_delete(&mut self, result: Result<(), String>) {
         self.shell.critical_operation = false;
-        if let Some(delete) = self.backups.delete.as_mut() {
-            delete.stage = WizardStage::Result;
-            delete.message = Some(match result {
-                Ok(()) => "备份已删除；列表已刷新".to_string(),
-                Err(message) => message,
-            });
-        }
+        self.backups.delete = None;
+        let message = match result {
+            Ok(()) => "备份已删除；列表已刷新".to_string(),
+            Err(message) => message,
+        };
+        self.set_notice(message);
     }
 
     pub const fn workspace(&self) -> Workspace {

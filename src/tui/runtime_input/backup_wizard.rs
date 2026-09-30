@@ -35,17 +35,6 @@ pub(super) fn handle_backup_wizard_key(
                 return Some(KeyOutcome::NextIteration);
             }
             state::WizardStage::Running => {}
-            state::WizardStage::Result => {
-                if let Some(action) = keys.map(state::InputMode::Normal, key) {
-                    if matches!(
-                        action,
-                        keymap::TuiAction::Activate | keymap::TuiAction::Back
-                    ) {
-                        let _ = state.navigate(NavCommand::Escape, 1);
-                    }
-                }
-                return Some(KeyOutcome::NextIteration);
-            }
             _ => {}
         }
     }

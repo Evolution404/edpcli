@@ -44,16 +44,6 @@ pub(super) fn handle_backup_prune_key(
                 }
                 return Some(KeyOutcome::NextIteration);
             }
-            BackupPruneStage::Review => {
-                if let Some(action) = keys.map(state::InputMode::Normal, key) {
-                    match action {
-                        keymap::TuiAction::Activate => state.backup_prune_begin_confirm(),
-                        keymap::TuiAction::Back => state.close_backup_prune(),
-                        _ => {}
-                    }
-                }
-                return Some(KeyOutcome::NextIteration);
-            }
             BackupPruneStage::Confirm => {
                 if let Some(action) = keys.map(state::InputMode::Normal, key) {
                     match action {
@@ -76,17 +66,6 @@ pub(super) fn handle_backup_prune_key(
                 return Some(KeyOutcome::NextIteration);
             }
             BackupPruneStage::Running => {}
-            BackupPruneStage::Result => {
-                if let Some(action) = keys.map(state::InputMode::Normal, key) {
-                    if matches!(
-                        action,
-                        keymap::TuiAction::Activate | keymap::TuiAction::Back
-                    ) {
-                        state.close_backup_prune();
-                    }
-                }
-                return Some(KeyOutcome::NextIteration);
-            }
         }
     }
     None

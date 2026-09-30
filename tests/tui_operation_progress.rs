@@ -118,10 +118,13 @@ fn result_report_pages_share_one_component_and_provision_is_result_oriented() {
     let provision = include_str!("../src/tui/provision/result_render.rs");
     let provision_root = include_str!("../src/tui/provision/render.rs");
     let wizard = include_str!("../src/tui/wizard_result_render.rs");
-    let backup = include_str!("../src/tui/backups/result_render.rs");
 
     assert!(shared.contains("pub fn render_operation_result"));
-    for adapter in [provision, wizard, backup] {
+    assert!(
+        !std::path::Path::new("src/tui/backups/result_render.rs").exists(),
+        "notification-only backup result pages must not return"
+    );
+    for adapter in [provision, wizard] {
         assert!(adapter.contains("render_operation_result"));
     }
     for required in ["盘型", "分区结果", "大小", "验收结果", "备份文件", "总耗时"]

@@ -17,20 +17,6 @@ pub(super) fn handle_backup_batch_key(
                 }
                 return Some(KeyOutcome::NextIteration);
             }
-            BackupBatchDeleteStage::Review => {
-                if let Some(action) = keys.map(state::InputMode::Normal, key) {
-                    match action {
-                        keymap::TuiAction::Activate => {
-                            state.backup_batch_delete_begin_confirm();
-                        }
-                        keymap::TuiAction::Back => {
-                            state.close_backup_batch_delete();
-                        }
-                        _ => {}
-                    }
-                }
-                return Some(KeyOutcome::NextIteration);
-            }
             BackupBatchDeleteStage::Confirm => {
                 if let Some(action) = keys.map(state::InputMode::Normal, key) {
                     match action {
@@ -55,17 +41,6 @@ pub(super) fn handle_backup_batch_key(
                 return Some(KeyOutcome::NextIteration);
             }
             BackupBatchDeleteStage::Running => {}
-            BackupBatchDeleteStage::Result => {
-                if let Some(action) = keys.map(state::InputMode::Normal, key) {
-                    if matches!(
-                        action,
-                        keymap::TuiAction::Activate | keymap::TuiAction::Back
-                    ) {
-                        state.close_backup_batch_delete();
-                    }
-                }
-                return Some(KeyOutcome::NextIteration);
-            }
         }
     }
     None
