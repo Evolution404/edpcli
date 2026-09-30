@@ -993,6 +993,13 @@ pub fn restore_flow_typed(
     ctx.prompt.write_event(WriteEvent::PostRestoreAssessment {
         assessment: assessment.clone(),
     });
+    let layout = super::post_restore::project_restored_layout_readonly(
+        dev,
+        &verified.manifest.snapshot.device_state,
+        &verified.manifest.device.device_id,
+        current_total_sectors,
+        &verified.manifest.partitions,
+    );
     Ok(super::post_restore::MetadataRestoreOutcome {
         report,
         assessment,
@@ -1000,6 +1007,7 @@ pub fn restore_flow_typed(
         device_state: verified.manifest.snapshot.device_state.clone(),
         device_id: verified.manifest.device.device_id.clone(),
         total_sectors: current_total_sectors,
+        layout,
         format_target_pin,
     })
 }
