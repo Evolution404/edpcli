@@ -1860,3 +1860,24 @@ fn post_restore_layout_projection_is_application_owned_and_nonfatal() {
         "layout projection failure must not reclassify a verified restore as failed"
     );
 }
+
+
+#[test]
+fn restore_result_has_one_selection_source_of_truth() {
+    let state = include_str!("../src/tui/state.rs");
+    let result_state = include_str!("../src/tui/restore_result_state.rs");
+    let render = include_str!("../src/tui/render.rs");
+
+    assert!(
+        !state.contains("post_restore_selected"),
+        "legacy restore result row selection must not return"
+    );
+    assert!(
+        result_state.contains("post_restore_workbench.selected_partition"),
+        "restore actions must resolve selection through the shared result workbench"
+    );
+    assert!(
+        render.contains("WizardStage::PostRestore => unreachable!"),
+        "legacy inline PostRestore renderer must remain unreachable"
+    );
+}
