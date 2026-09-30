@@ -16,12 +16,14 @@ use crate::provision::{
 };
 
 mod format_operation;
+mod layout_projection;
 mod reinitialize;
 pub use format_operation::format_partition_after_restore_on_disk;
 pub use format_operation::format_partition_on_disk;
 pub use format_operation::{
     format_encrypted_partition_after_restore_on_disk, format_encrypted_partition_on_disk,
 };
+pub use layout_projection::project_restored_layout_readonly;
 pub use reinitialize::{
     reinitialize_encrypted_partition_after_restore_on_disk,
     reinitialize_encrypted_partition_on_disk, EncryptedPartitionReinitializeResult,
@@ -49,6 +51,7 @@ pub struct MetadataRestoreOutcome {
     pub device_state: String,
     pub device_id: String,
     pub total_sectors: u64,
+    pub layout: Result<crate::application::disk_layout::DiskLayoutModel, String>,
     pub format_target_pin: Option<crate::media_identity::MediaIdentityResumePin>,
 }
 
