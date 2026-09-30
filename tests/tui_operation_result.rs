@@ -230,13 +230,45 @@ fn provision_result_snapshot_rebuilds_complete_official_disk_layout() {
 fn provision_result_page_attaches_interactive_shared_full_disk_layout() {
     let source = include_str!("../src/tui/provision/result_render.rs");
     let layout = include_str!("../src/tui/provision/result_partition_layout.rs");
+    let regions = include_str!("../src/tui/disk_region_list/render.rs");
+    let workbench = include_str!("../src/tui/result_workbench.rs");
+    let input = include_str!("../src/tui/runtime_input/provision.rs");
     let supplement = include_str!("../src/tui/ui/result_supplement.rs");
     let devices = include_str!("../src/tui/devices/presentation.rs");
+
     assert!(source.contains("render_result_workbench_shell"));
     assert!(layout.contains("disk_layout_model"));
     assert!(layout.contains("DiskCapacityMapProfile::Full"));
     assert!(layout.contains("TailExpansion::Collapsed"));
     assert!(layout.contains("render_result_region_list"));
+    assert!(layout.contains(".with_marker(true)"));
+    assert!(!layout.contains(".with_marker(false)"));
+
+    assert!(
+        layout.contains("theme.apply_selection(theme.table_text(), selected_row, focused)"),
+        "result rows must use the shared table selection background"
+    );
+    assert!(
+        layout.contains("theme.table_cell(base, column == active_column, focused)"),
+        "only the active result column may receive bright/bold table-cell emphasis"
+    );
+    assert!(
+        !layout.contains("row.style(theme.accent"),
+        "result rows must never regress to accent/blue whole-row activation"
+    );
+    assert!(
+        regions.contains("theme.apply_selection(theme.disk_region(segment.kind), active, focused)"),
+        "disk region rows must share table-style background selection"
+    );
+    assert!(
+        workbench.contains("render_disk_region_list_body"),
+        "full disk layout must remain one top-level pane without a nested focused card"
+    );
+    assert!(
+        input.contains("provision_result_shift_partition_column"),
+        "result h/l semantics must keep partition-column navigation"
+    );
+
     assert!(supplement.contains("render_disk_region_list"));
     assert!(supplement.contains("DiskRegionListMode::Readonly"));
     assert!(devices.contains("disk_region_list_lines"));
