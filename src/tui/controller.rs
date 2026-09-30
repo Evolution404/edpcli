@@ -100,8 +100,6 @@ fn action_to_nav(action: TuiAction) -> Option<NavCommand> {
         TuiAction::PreviousMatch => NavCommand::PreviousMatch,
         TuiAction::Command => NavCommand::CommandPalette,
         TuiAction::Refresh => NavCommand::Refresh,
-        TuiAction::WorkspaceNext => NavCommand::NextWorkspace,
-        TuiAction::WorkspacePrevious => NavCommand::PreviousWorkspace,
         _ => return None,
     })
 }
@@ -333,21 +331,6 @@ pub(super) fn dispatch_action(
                 ActionOutcome::handled()
             }
         };
-    }
-
-    if matches!(
-        action,
-        TuiAction::WorkspaceNext | TuiAction::WorkspacePrevious
-    ) {
-        if !matches!(state.workspace(), Workspace::Devices | Workspace::Backups) {
-            return ActionOutcome::handled();
-        }
-        let command = if action == TuiAction::WorkspaceNext {
-            NavCommand::NextWorkspace
-        } else {
-            NavCommand::PreviousWorkspace
-        };
-        return ActionOutcome::effect(state.navigate(command, viewport_height));
     }
 
     if action == TuiAction::Quit {

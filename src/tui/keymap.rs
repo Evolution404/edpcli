@@ -51,8 +51,6 @@ pub enum TuiAction {
     RowEnd,
     FocusNext,
     FocusPrevious,
-    WorkspaceNext,
-    WorkspacePrevious,
     InspectJump,
     InspectBusiness,
     InspectRawFields,
@@ -198,9 +196,6 @@ impl KeyMapper {
             return match pending.prefix {
                 PendingPrefix::G => match event.code {
                     KeyCode::Char('g') => Some(TuiAction::Top),
-                    KeyCode::Char('l') => Some(TuiAction::InspectJump),
-                    KeyCode::Char('t') => Some(TuiAction::WorkspaceNext),
-                    KeyCode::Char('T') => Some(TuiAction::WorkspacePrevious),
                     _ => None,
                 },
                 PendingPrefix::CtrlW => match event.code {
@@ -271,6 +266,7 @@ impl KeyMapper {
             KeyCode::Char('1') => Some(TuiAction::InspectBusiness),
             KeyCode::Char('2') => Some(TuiAction::InspectRawFields),
             KeyCode::Char('3') => Some(TuiAction::InspectHex),
+            KeyCode::Char('J') => Some(TuiAction::InspectJump),
             KeyCode::Char(' ') => Some(TuiAction::Toggle),
             KeyCode::Char('y') => Some(TuiAction::Yank),
             KeyCode::Char('Y') => Some(TuiAction::YankRaw),

@@ -1357,7 +1357,6 @@ fn help_and_status_information_architecture_has_single_owners() {
     assert!(!render.contains("制盘方案：j/k"));
     assert!(!render.contains("检查字段表："));
     assert!(!render.contains("y 单元格 · Y 整行"));
-    assert!(!render.contains("Tab/Shift-Tab 或 gt/gT"));
     assert!(keymap.contains("pub use help::"));
     assert!(help_registry.contains("pub const DEVICES_HELP"));
     assert!(help_registry.contains("pub const BACKUPS_HELP"));

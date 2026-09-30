@@ -202,33 +202,32 @@ fn normal_navigation_uses_vim_semantics_without_workspace_side_effects() {
 }
 
 #[test]
-fn g_prefix_keeps_vim_navigation_and_adds_standard_tab_switching() {
+fn g_prefix_only_keeps_supported_vim_navigation() {
     let mut mapper = KeyMapper::new();
-    for (second, expected) in [
-        ('g', TuiAction::Top),
-        ('l', TuiAction::InspectJump),
-        ('t', TuiAction::WorkspaceNext),
-        ('T', TuiAction::WorkspacePrevious),
-    ] {
-        assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
-        assert_eq!(
-            mapper.map(InputMode::Normal, key(KeyCode::Char(second))),
-            Some(expected),
-            "g{second}"
-        );
-    }
-    for second in ['d', 'b', 'p', 'i'] {
+    assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('g'))),
+        Some(TuiAction::Top)
+    );
+    for second in ['d', 'b', 'p', 'i', 'l', 't', 'T'] {
         assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
         assert_eq!(
             mapper.map(InputMode::Normal, key(KeyCode::Char(second))),
             None,
-            "g{second} must not become an unrelated function shortcut"
+            "g{second} must remain unbound"
         );
     }
 }
 
 #[test]
 fn single_g_invalid_or_timed_out_prefix_never_executes_jump() {
+    let mut direct = KeyMapper::new();
+    assert_eq!(
+        direct.map(InputMode::Normal, key(KeyCode::Char('J'))),
+        Some(TuiAction::InspectJump),
+        "J is the single-key Inspect jump command"
+    );
+
     let mut mapper = KeyMapper::new();
     let now = Instant::now();
     assert_eq!(
@@ -260,7 +259,7 @@ fn single_g_invalid_or_timed_out_prefix_never_executes_jump() {
 }
 
 #[test]
-fn tab_is_context_focus_and_gt_owns_top_level_switching() {
+fn tab_is_context_focus_and_ctrl_w_owns_panel_switching() {
     let mut mapper = KeyMapper::new();
     for (second, expected) in [
         (KeyCode::Char('h'), TuiAction::PanelLeft),
@@ -285,23 +284,10 @@ fn tab_is_context_focus_and_gt_owns_top_level_switching() {
         ),
         Some(TuiAction::FocusPrevious)
     );
-    assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
-    assert_eq!(
-        mapper.map(InputMode::Normal, key(KeyCode::Char('t'))),
-        Some(TuiAction::WorkspaceNext)
-    );
-    assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
-    assert_eq!(
-        mapper.map(InputMode::Normal, key(KeyCode::Char('T'))),
-        Some(TuiAction::WorkspacePrevious)
-    );
 }
 
 #[test]
-fn tab_focus_actions_are_distinct_from_top_level_workspace_actions() {
-    assert_ne!(TuiAction::FocusNext, TuiAction::WorkspaceNext);
-    assert_ne!(TuiAction::FocusPrevious, TuiAction::WorkspacePrevious);
-
+fn tab_focus_actions_remain_available_in_nested_workspaces() {
     let inspect = include_str!("../src/tui/runtime_input/inspect.rs");
     let provision = include_str!("../src/tui/runtime_input/provision.rs");
     assert!(inspect.contains("TuiAction::FocusNext"));
@@ -710,11 +696,6 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
             && binding.label == "切换当前层级焦点 / 顶层标签"
             && binding.action == TuiAction::FocusNext
     }));
-    assert!(GLOBAL_HELP.iter().any(|binding| {
-        binding.keys == "gt / gT"
-            && binding.label == "下一个 / 上一个顶层标签"
-            && binding.action == TuiAction::WorkspaceNext
-    }));
     assert!(TABLE_HELP
         .iter()
         .any(|binding| binding.keys == "y / Y" && binding.action == TuiAction::TableCopyCell));
@@ -723,10 +704,9 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
             && binding.label == "切换当前页 Pane"
             && binding.action == TuiAction::FocusNext
     }));
-    assert!(!INSPECT_HELP.iter().any(|binding| binding.keys == "gt/gT"));
     assert!(INSPECT_HELP
         .iter()
-        .any(|binding| binding.keys == "gl" && binding.action == TuiAction::InspectJump));
+        .any(|binding| binding.keys == "J" && binding.action == TuiAction::InspectJump));
     assert!(INSPECT_HELP
         .iter()
         .any(|binding| binding.keys == "h/l" && binding.label == "Fold"));

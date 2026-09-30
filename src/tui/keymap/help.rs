@@ -54,8 +54,8 @@ pub const INSPECT_HELP: &[HelpBinding] = &[
         action: TuiAction::NextMatch,
     },
     HelpBinding {
-        keys: "gl",
-        label: "Goto",
+        keys: "J",
+        label: "跳转 LBA / byte offset",
         action: TuiAction::InspectJump,
     },
     HelpBinding {
@@ -202,11 +202,6 @@ pub const GLOBAL_HELP: &[HelpBinding] = &[
         keys: "Tab / Shift-Tab",
         label: "切换当前层级焦点 / 顶层标签",
         action: TuiAction::FocusNext,
-    },
-    HelpBinding {
-        keys: "gt / gT",
-        label: "下一个 / 上一个顶层标签",
-        action: TuiAction::WorkspaceNext,
     },
     HelpBinding {
         keys: "Esc",

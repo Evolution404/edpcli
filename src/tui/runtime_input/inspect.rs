@@ -80,10 +80,7 @@ pub(super) fn handle_inspect_key(
                     };
                     use keymap::TuiAction;
                     match action {
-                        TuiAction::FocusNext
-                        | TuiAction::FocusPrevious
-                        | TuiAction::WorkspaceNext
-                        | TuiAction::WorkspacePrevious => {}
+                        TuiAction::FocusNext | TuiAction::FocusPrevious => {}
                         TuiAction::MoveLeft => {
                             state.advanced_inspect_sector_move_cursor(-1);
                         }
