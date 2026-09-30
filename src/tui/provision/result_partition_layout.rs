@@ -2,7 +2,7 @@ use super::*;
 use crate::tui::state::{ProvisionResultPartition, ProvisionState};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
+    style::Style,
     widgets::{Cell, Paragraph, Row, Table},
 };
 
@@ -95,16 +95,26 @@ pub(super) fn render_partition_pane(
     };
 
     let theme = crate::tui::theme::current();
-    let header = Row::new([
-        "分区",
-        "角色",
-        "文件系统",
-        "LBA 范围",
-        "容量",
-        "处理方式",
-        "最终状态",
-    ])
-    .style(theme.table_header(false, focused));
+    let active_column = state
+        .provision()
+        .result_workbench
+        .partition_active_column(7);
+    let header = Row::new(
+        [
+            "分区",
+            "角色",
+            "文件系统",
+            "LBA 范围",
+            "容量",
+            "处理方式",
+            "最终状态",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(column, label)| {
+            Cell::from(label).style(theme.table_header(column == active_column, focused))
+        }),
+    );
 
     let selected = state.provision().result_workbench.selected_partition;
     let rows = plan
@@ -126,25 +136,28 @@ pub(super) fn render_partition_pane(
                     .unwrap_or("写入")
             };
             let (final_status, tone) = partition_final_status(state.provision(), plan, partition);
-            let row = Row::new(vec![
-                Cell::from(format!("P{}", index + 1)),
+            let selected_row = selected == Some(index);
+            let cell_style = |base: Style, column: usize| {
+                theme.table_cell(base, column == active_column, focused)
+            };
+            Row::new(vec![
+                Cell::from(format!("P{}", index + 1)).style(cell_style(theme.table_text(), 0)),
                 Cell::from(
                     partition
                         .role
                         .map(crate::provision::PartitionRole::label)
                         .unwrap_or("普通分区"),
-                ),
-                Cell::from(filesystem),
-                Cell::from(format!("{}..={end}", partition.start_lba)),
-                Cell::from(crate::common::fmt_capacity(partition.size_bytes)),
-                Cell::from(action),
-                Cell::from(final_status).style(tone_style(tone)),
-            ]);
-            if selected == Some(index) {
-                row.style(theme.accent().add_modifier(Modifier::BOLD))
-            } else {
-                row.style(theme.table_text())
-            }
+                )
+                .style(cell_style(theme.table_text(), 1)),
+                Cell::from(filesystem).style(cell_style(theme.table_text(), 2)),
+                Cell::from(format!("{}..={end}", partition.start_lba))
+                    .style(cell_style(theme.table_text(), 3)),
+                Cell::from(crate::common::fmt_capacity(partition.size_bytes))
+                    .style(cell_style(theme.table_text(), 4)),
+                Cell::from(action).style(cell_style(theme.table_text(), 5)),
+                Cell::from(final_status).style(cell_style(tone_style(tone), 6)),
+            ])
+            .style(theme.apply_selection(theme.table_text(), selected_row, focused))
         });
 
     frame.render_widget(
@@ -189,7 +202,7 @@ pub(super) fn render_layout_pane(frame: &mut Frame, area: Rect, state: &AppState
         return;
     }
 
-    let map_height = if inner.height >= 16 { 6 } else { 3 };
+    let map_height = if inner.height >= 16 { 7 } else { 4 };
     let parts = Layout::vertical([
         Constraint::Length(map_height),
         Constraint::Length(1),
@@ -204,7 +217,7 @@ pub(super) fn render_layout_pane(frame: &mut Frame, area: Rect, state: &AppState
     let lines = crate::tui::disk_layout::DiskCapacityMap::new(&model, profile)
         .with_tail(crate::tui::disk_layout::TailExpansion::Collapsed)
         .with_selection(state.provision().result_workbench.region_selection())
-        .with_marker(false)
+        .with_marker(true)
         .lines(parts[0].width as usize);
     frame.render_widget(Paragraph::new(lines), parts[0]);
     crate::tui::result_workbench::render_result_region_list(
