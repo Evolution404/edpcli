@@ -21,6 +21,8 @@ mod provision_state;
 mod shell_state;
 #[path = "table_state.rs"]
 mod table_state;
+#[path = "restore_result_state.rs"]
+mod restore_result_state;
 
 pub use backups_state::*;
 pub use devices_state::*;
@@ -106,6 +108,7 @@ pub struct WizardState {
     pub message: Option<String>,
     pub detail_expanded: bool,
     pub restore_outcome: Option<crate::application::post_restore::MetadataRestoreOutcome>,
+    pub post_restore_workbench: crate::tui::result_workbench::ResultWorkbenchState,
     pub post_restore_selected: usize,
     pub pending_format: Option<crate::application::post_restore::PartitionFormatRequest>,
     pub volume_label_input: String,
@@ -474,6 +477,7 @@ impl AppState {
             message: None,
             detail_expanded: false,
             restore_outcome: None,
+            post_restore_workbench: crate::tui::result_workbench::ResultWorkbenchState::default(),
             post_restore_selected: 0,
             pending_format: None,
             volume_label_input: String::new(),
