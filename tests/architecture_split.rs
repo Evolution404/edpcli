@@ -1801,7 +1801,7 @@ fn passive_capacity_display_uses_one_global_unit_system() {
         "src/application/identity.rs",
         "src/metainfo.rs",
         "src/inspect/model.rs",
-        "src/tui/render.rs",
+        "src/tui/restore_result_partition_layout.rs",
         "src/tui/devices/state.rs",
         "src/tui/devices/presentation.rs",
         "src/tui/disk_layout.rs",
