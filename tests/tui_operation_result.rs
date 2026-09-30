@@ -324,4 +324,14 @@ fn restore_post_result_uses_shared_workbench_and_typed_layout() {
             && input.contains("PaneId::ResultPartitions"),
         "post-restore actions must only activate from the partition pane"
     );
+    assert!(root.contains("let post_restore_overlay ="));
+    assert!(root.contains("super::ui::centered_modal_rect(area, 92, 24)"));
+    assert!(
+        root.matches("draw_post_restore_result(frame, area, state)").count() >= 2,
+        "follow-up restore stages must retain the result workbench as their background"
+    );
+    assert!(
+        root.contains("render_write_confirmation_modal"),
+        "post-restore destructive follow-up operations must retain the shared YES confirmation modal"
+    );
 }
