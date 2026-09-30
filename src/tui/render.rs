@@ -25,6 +25,8 @@ mod operation_progress_render;
 mod provision_render;
 #[path = "restore_confirmation_render.rs"]
 mod restore_confirmation_render;
+#[path = "restore_result_render.rs"]
+mod restore_result_render;
 #[path = "wizard_result_render.rs"]
 mod wizard_result_render;
 
@@ -36,6 +38,7 @@ use inspect_render::draw_advanced_inspect;
 use operation_progress_render::draw_operation_progress;
 use provision_render::{draw_provision, draw_scheme_picker};
 use restore_confirmation_render::draw_restore_write_confirmation;
+use restore_result_render::draw_post_restore_result;
 use wizard_result_render::draw_wizard_result;
 
 fn backup_health(backup: &crate::application::BackupWorkspaceItem) -> (&'static str, Style) {
@@ -211,10 +214,6 @@ fn muted() -> Style {
     super::theme::current().muted()
 }
 
-fn selection_marker() -> Style {
-    super::theme::current().selection_marker()
-}
-
 fn tab() -> Style {
     super::theme::current().tab()
 }
@@ -327,6 +326,11 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         return;
     }
 
+    if wizard.kind == WriteKind::Restore && wizard.stage == WizardStage::PostRestore {
+        draw_post_restore_result(frame, area, state);
+        return;
+    }
+
     if wizard.stage == WizardStage::Result {
         draw_wizard_result(frame, area, wizard);
         return;
@@ -397,90 +401,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
             }
         }
         WizardStage::Running => unreachable!("running wizard uses shared operation renderer"),
-        WizardStage::PostRestore => {
-            lines.push(Line::from(Span::styled(
-                "元数据恢复成功 ✓",
-                success().add_modifier(Modifier::BOLD),
-            )));
-            lines.push(Line::from(
-                "分区结构与元数据已完成写入并通过读回校验；文件系统内容没有恢复。",
-            ));
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "恢复后分区状态",
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
-            if let Some(outcome) = wizard.restore_outcome.as_ref() {
-                if outcome.assessment.partitions.is_empty() {
-                    lines.push(Line::from(Span::styled("  没有可显示的分区状态", muted())));
-                }
-                for (index, partition) in outcome.assessment.partitions.iter().enumerate() {
-                    use crate::application::post_restore::PostRestorePartitionState;
-                    let (state_text, state_style) = match partition.state {
-                        PostRestorePartitionState::Usable => ("可用 ✓", success()),
-                        PostRestorePartitionState::NeedsFormat => ("需要格式化", warning()),
-                        PostRestorePartitionState::PasswordRequired => ("需要原密码", warning()),
-                        PostRestorePartitionState::CryptoMetadataInvalid => {
-                            ("加密元数据异常", danger())
-                        }
-                        PostRestorePartitionState::Unsupported => ("暂不支持", muted()),
-                    };
-                    let marker = if index == wizard.post_restore_selected {
-                        ">"
-                    } else {
-                        " "
-                    };
-                    let capacity = crate::common::fmt_capacity(
-                        partition
-                            .sector_count
-                            .saturating_mul(crate::common::SECTOR as u64),
-                    );
-                    let line_style = super::theme::current().apply_selection(
-                        Style::default(),
-                        index == wizard.post_restore_selected,
-                        true,
-                    );
-                    lines.push(
-                        Line::from(vec![
-                            Span::styled(format!("{marker} "), selection_marker()),
-                            Span::styled(format!("分区 {}  ", partition.index), line_style),
-                            Span::styled(format!("{capacity:<10} "), line_style),
-                            Span::styled(state_text, state_style),
-                        ])
-                        .style(line_style),
-                    );
-                    if index == wizard.post_restore_selected {
-                        lines.push(Line::from(vec![
-                            Span::styled("    ", muted()),
-                            Span::styled(
-                                format!("LBA{} + {}", partition.start_lba, partition.sector_count),
-                                muted(),
-                            ),
-                        ]));
-                        if wizard.detail_expanded {
-                            lines.push(Line::from(vec![
-                                Span::styled("    ", muted()),
-                                Span::styled(safe(&partition.detail), muted()),
-                            ]));
-                        }
-                    }
-                }
-            }
-            lines.push(Line::from(""));
-            if let Some(message) = &wizard.message {
-                lines.push(Line::from(Span::styled(safe(message), secondary())));
-            }
-            lines.push(Line::from(vec![
-                Span::styled("Enter", accent().add_modifier(Modifier::BOLD)),
-                Span::raw(" 处理选中分区    "),
-                Span::styled("j/k", muted()),
-                Span::raw(" 选择    "),
-                Span::styled("o", muted()),
-                Span::raw(" 详情    "),
-                Span::styled("Esc", muted()),
-                Span::raw(" 完成"),
-            ]));
-        }
+        WizardStage::PostRestore => unreachable!("post-restore uses shared result workbench"),
         WizardStage::VolumeLabelInput => {
             let request = wizard.pending_format.as_ref();
             let original_label = wizard.restore_outcome.as_ref().and_then(|outcome| {
