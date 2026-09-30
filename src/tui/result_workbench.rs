@@ -79,11 +79,7 @@ impl ResultWorkbenchState {
             .min(column_count.saturating_sub(1))
     }
 
-    pub fn move_partition_active_column(
-        &mut self,
-        reverse: bool,
-        column_count: usize,
-    ) -> bool {
+    pub fn move_partition_active_column(&mut self, reverse: bool, column_count: usize) -> bool {
         if column_count == 0 {
             self.partition_active_column = 0;
             return false;
