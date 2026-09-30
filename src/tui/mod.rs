@@ -9,6 +9,7 @@ pub mod command;
 mod controller;
 pub mod demo;
 pub mod disk_layout;
+mod disk_region_list;
 mod dispatch;
 pub mod event;
 pub mod execution;

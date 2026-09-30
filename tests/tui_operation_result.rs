@@ -144,8 +144,8 @@ fn shared_result_page_prioritizes_outcome_in_wide_and_narrow_viewports() {
             "交换区",
             "31.00GiB",
             "新盘全局布局",
-            "0%",
-            "100%",
+            "区域列表",
+            "LBA范围",
             "验收结果",
             "自动备份已创建",
             "总耗时",
@@ -154,6 +154,20 @@ fn shared_result_page_prioritizes_outcome_in_wide_and_narrow_viewports() {
                 text.contains(required),
                 "missing {required} at {width}x{height}"
             );
+        }
+        if width >= 110 {
+            for marker in ["0%", "100%"] {
+                assert!(
+                    text.contains(marker),
+                    "missing capacity marker {marker} at {width}x{height}"
+                );
+            }
+            for region in ["EDP主协议区", "启动/交换区", "保密区", "尾部区域"] {
+                assert!(
+                    text.contains(region),
+                    "missing region {region} at {width}x{height}"
+                );
+            }
         }
         assert!(!text.contains("最近进度事件"));
     }
@@ -213,12 +227,15 @@ fn provision_result_snapshot_rebuilds_complete_official_disk_layout() {
 }
 
 #[test]
-fn provision_result_page_attaches_shared_full_disk_map() {
+fn provision_result_page_attaches_shared_full_disk_layout() {
     let source = include_str!("../src/tui/provision/result_render.rs");
     let supplement = include_str!("../src/tui/ui/result_supplement.rs");
+    let devices = include_str!("../src/tui/devices/presentation.rs");
     assert!(source.contains("disk_layout_model"));
     assert!(source.contains("ResultSupplement::DiskCapacityMap"));
     assert!(source.contains("新盘全局布局"));
     assert!(supplement.contains("DiskCapacityMapProfile::Full"));
     assert!(supplement.contains("TailExpansion::Collapsed"));
+    assert!(supplement.contains("disk_region_list_lines"));
+    assert!(devices.contains("disk_region_list_lines"));
 }

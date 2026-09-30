@@ -25,14 +25,23 @@ pub(super) fn render_result_supplement(
             if inner.width == 0 || inner.height == 0 {
                 return;
             }
-            let lines = crate::tui::disk_layout::DiskCapacityMap::new(
-                model,
-                crate::tui::disk_layout::DiskCapacityMapProfile::Full,
-            )
-            .with_tail(crate::tui::disk_layout::TailExpansion::Collapsed)
-            .with_selection(None)
-            .with_marker(false)
-            .lines(inner.width as usize);
+            let visible_regions = model.collapsed_tail_model().segments.len() as u16;
+            let full_height = 6u16
+                .saturating_add(1)
+                .saturating_add(2)
+                .saturating_add(visible_regions);
+            let profile = if inner.height >= full_height {
+                crate::tui::disk_layout::DiskCapacityMapProfile::Full
+            } else {
+                crate::tui::disk_layout::DiskCapacityMapProfile::Compact
+            };
+            let mut lines = crate::tui::disk_layout::DiskCapacityMap::new(model, profile)
+                .with_tail(crate::tui::disk_layout::TailExpansion::Collapsed)
+                .with_selection(None)
+                .with_marker(false)
+                .lines(inner.width as usize);
+            lines.push(ratatui::text::Line::from(""));
+            lines.extend(crate::tui::disk_region_list::disk_region_list_lines(model));
             frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
         }
     }

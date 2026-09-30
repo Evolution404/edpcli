@@ -1599,9 +1599,11 @@ fn device_capacity_tree_and_region_list_use_partition_semantic_colors() {
         "device capacity tree children must derive normal/active styling from DiskRegionKind"
     );
     let presentation_source = include_str!("../src/tui/devices/presentation.rs");
+    let region_list_source = include_str!("../src/tui/disk_region_list.rs");
     assert!(
-        presentation_source.contains("disk_region(segment.kind)"),
-        "capacity region list rows must derive their text color from DiskRegionKind"
+        presentation_source.contains("disk_region_list_lines")
+            && region_list_source.contains("disk_region(segment.kind)"),
+        "device and result region lists must share DiskRegionKind-derived semantic colors"
     );
     assert!(
         boot_colored >= 1,

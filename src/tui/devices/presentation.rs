@@ -96,39 +96,9 @@ fn capacity_detail_lines(
             warning(),
         ))];
     };
-    let collapsed = model.collapsed_tail_model();
     let mut lines = capacity_map_lines(&model, key, width);
     lines.push(Line::from(""));
-    lines.push(section_line("区域列表"));
-    lines.push(Line::from(Span::styled(
-        format!(
-            "{}  {}  {}  {}",
-            crate::ui::pad_to("区域", 18),
-            crate::ui::pad_to("LBA 范围", 24),
-            crate::ui::pad_to("容量", 14),
-            "占比"
-        ),
-        secondary(),
-    )));
-    for segment in &collapsed.segments {
-        lines.push(Line::from(Span::styled(
-            format!(
-                "{}  {}  {}  {}",
-                crate::ui::pad_to(&segment.label, 18),
-                crate::ui::pad_to(&segment.closed_range(), 24),
-                crate::ui::pad_to(
-                    &format_bytes(
-                        segment
-                            .sector_count
-                            .saturating_mul(crate::common::SECTOR as u64),
-                    ),
-                    14,
-                ),
-                percentage(segment.sector_count, model.total_sectors)
-            ),
-            crate::tui::theme::current().disk_region(segment.kind),
-        )));
-    }
+    lines.extend(crate::tui::disk_region_list::disk_region_list_lines(&model));
     lines
 }
 
