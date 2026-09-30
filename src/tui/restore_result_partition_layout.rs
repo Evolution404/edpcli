@@ -3,7 +3,7 @@ use crate::application::post_restore::PostRestorePartition;
 use ratatui::{
     layout::{Constraint, Layout},
     text::{Line, Span},
-    widgets::{Cell, Paragraph, Row, Table, Wrap},
+    widgets::{Block, Cell, Paragraph, Row, Table, Wrap},
 };
 
 fn partition_status(
@@ -50,15 +50,7 @@ pub(super) fn render_partition_pane(
     };
     let theme = crate::tui::theme::current();
     let kind = TableKind::ResultPartitions;
-    let headings = [
-        "分区",
-        "状态",
-        "文件系统",
-        "LBA 范围",
-        "容量",
-        "密钥",
-        "说明",
-    ];
+    let headings = ["分区", "状态", "文件系统", "容量", "密钥", "说明"];
     let Some(view) = state.result_partition_table_view() else {
         return;
     };
@@ -83,7 +75,6 @@ pub(super) fn render_partition_pane(
     let rows = visible_sources.iter().filter_map(|index| {
         outcome.assessment.partitions.get(*index).map(|partition| {
             let (status, status_tone) = partition_status(partition);
-            let selected_row = selected == Some(*index);
             Row::new(
                 viewport
                     .columns
@@ -96,7 +87,7 @@ pub(super) fn render_partition_pane(
                                 let _ = status;
                                 tone_style(status_tone)
                             }
-                            5 | 6 => theme.table_text_muted(),
+                            4 | 5 => theme.table_text_muted(),
                             _ => theme.table_text(),
                         };
                         let style = theme.table_cell(
@@ -104,7 +95,6 @@ pub(super) fn render_partition_pane(
                             column.index == interaction.active_column(),
                             focused,
                         );
-                        let style = theme.apply_selection(style, selected_row, focused);
                         Cell::from(visible_cell(&value, column)).style(style)
                     })
                     .collect::<Vec<_>>(),
@@ -115,9 +105,22 @@ pub(super) fn render_partition_pane(
     frame.render_widget(
         Table::new(rows, viewport.widths())
             .header(header)
-            .column_spacing(1),
+            .column_spacing(0),
         inner,
     );
+    if let Some(visual_row) = selected.and_then(|selected| {
+        visible_sources
+            .iter()
+            .position(|source| *source == selected)
+    }) {
+        let row_y = inner.y.saturating_add(1).saturating_add(visual_row as u16);
+        if row_y < inner.bottom() && inner.width > 1 {
+            frame.render_widget(
+                Block::default().style(theme.selection_overlay(focused)),
+                ratatui::layout::Rect::new(inner.x, row_y, inner.width.saturating_sub(1), 1),
+            );
+        }
+    }
     render_table_scrollbars(
         frame,
         area,

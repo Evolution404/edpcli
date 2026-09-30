@@ -39,10 +39,6 @@ impl AppState {
                         .map(|value| value.label().to_string())
                         .or_else(|| partition.filesystem_hint.clone())
                         .unwrap_or_else(|| "—".into());
-                    let end = partition
-                        .start_lba
-                        .saturating_add(partition.sector_count)
-                        .saturating_sub(1);
                     let key_state = if partition.requires_original_key {
                         "需要原密钥域"
                     } else {
@@ -52,7 +48,6 @@ impl AppState {
                         format!("P{}", partition.index),
                         status.into(),
                         filesystem,
-                        format!("{}..={end}", partition.start_lba),
                         crate::common::fmt_capacity(
                             partition
                                 .sector_count
@@ -129,11 +124,6 @@ impl AppState {
                             .unwrap_or("普通分区")
                             .into(),
                         filesystem,
-                        format!(
-                            "{}..={}",
-                            partition.start_lba,
-                            partition.end_exclusive().saturating_sub(1)
-                        ),
                         crate::common::fmt_capacity(partition.size_bytes),
                         action.into(),
                         final_status,

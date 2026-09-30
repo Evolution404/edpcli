@@ -3,7 +3,7 @@ use crate::tui::state::{ProvisionResultPartition, ProvisionState};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
-    widgets::{Cell, Paragraph, Row, Table},
+    widgets::{Block, Cell, Paragraph, Row, Table},
 };
 
 fn tone_style(tone: crate::tui::ui::ResultTone) -> Style {
@@ -99,15 +99,7 @@ pub(super) fn render_partition_pane(
     };
     let theme = crate::tui::theme::current();
     let kind = TableKind::ResultPartitions;
-    let headings = [
-        "分区",
-        "角色",
-        "文件系统",
-        "LBA 范围",
-        "容量",
-        "处理方式",
-        "最终状态",
-    ];
+    let headings = ["分区", "角色", "文件系统", "容量", "处理方式", "最终状态"];
     let Some(view) = state.result_partition_table_view() else {
         return;
     };
@@ -132,7 +124,6 @@ pub(super) fn render_partition_pane(
     let rows = visible_sources.iter().filter_map(|index| {
         plan.partitions.get(*index).map(|partition| {
             let (final_status, tone) = partition_final_status(state.provision(), plan, partition);
-            let selected_row = selected == Some(*index);
             Row::new(
                 viewport
                     .columns
@@ -140,7 +131,7 @@ pub(super) fn render_partition_pane(
                     .map(|column| {
                         let logical = order[column.index];
                         let value = view.rows[*index].get(logical).cloned().unwrap_or_default();
-                        let base = if logical == 6 {
+                        let base = if logical == 5 {
                             let _ = &final_status;
                             tone_style(tone)
                         } else {
@@ -151,7 +142,6 @@ pub(super) fn render_partition_pane(
                             column.index == interaction.active_column(),
                             focused,
                         );
-                        let style = theme.apply_selection(style, selected_row, focused);
                         Cell::from(visible_cell(&value, column)).style(style)
                     })
                     .collect::<Vec<_>>(),
@@ -162,9 +152,22 @@ pub(super) fn render_partition_pane(
     frame.render_widget(
         Table::new(rows, viewport.widths())
             .header(header)
-            .column_spacing(1),
+            .column_spacing(0),
         inner,
     );
+    if let Some(visual_row) = selected.and_then(|selected| {
+        visible_sources
+            .iter()
+            .position(|source| *source == selected)
+    }) {
+        let row_y = inner.y.saturating_add(1).saturating_add(visual_row as u16);
+        if row_y < inner.bottom() && inner.width > 1 {
+            frame.render_widget(
+                Block::default().style(theme.selection_overlay(focused)),
+                Rect::new(inner.x, row_y, inner.width.saturating_sub(1), 1),
+            );
+        }
+    }
     render_table_scrollbars(
         frame,
         area,

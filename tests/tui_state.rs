@@ -171,7 +171,7 @@ fn provision_result_cycles_only_result_workbench_panes() {
         let _ = state.move_table_column_for_viewport(kind, false, 160, 30);
     }
     assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
-    assert_eq!(state.table_active_column(kind), 6);
+    assert_eq!(state.table_active_column(kind), 5);
     assert!(!state.move_table_column_for_viewport(kind, false, 160, 30));
     assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
 
@@ -206,7 +206,7 @@ fn provision_result_table_supports_edges_and_visual_order_copy_contract() {
     assert_eq!(state.active_table_kind(), Some(kind));
 
     assert!(state.move_table_column_edge_for_viewport(kind, true, 160, 30));
-    assert_eq!(state.table_active_column(kind), 6);
+    assert_eq!(state.table_active_column(kind), 5);
     assert!(state.move_table_column_edge_for_viewport(kind, false, 160, 30));
     assert_eq!(state.table_active_column(kind), 0);
     assert_eq!(state.table_copy_payload(kind, false).as_deref(), Some("P1"));
@@ -219,7 +219,7 @@ fn provision_result_table_supports_edges_and_visual_order_copy_contract() {
     let cells = row.split('\t').collect::<Vec<_>>();
     assert_eq!(cells[0], "普通分区");
     assert_eq!(cells[1], "P1");
-    assert_eq!(cells.len(), 7);
+    assert_eq!(cells.len(), 6);
 }
 
 #[test]

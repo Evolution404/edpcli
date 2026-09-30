@@ -42,7 +42,6 @@ pub enum ColumnId {
     Partition,
     RoleOrState,
     Filesystem,
-    LbaRange,
     ActionOrKey,
     FinalState,
 }
@@ -149,7 +148,6 @@ pub fn table_column_schema(kind: TableKind) -> Option<Vec<TableColumnSpec>> {
             table_column(Partition, "分区", column(5, 6, 8, 100, 1, true)),
             table_column(RoleOrState, "角色/状态", column(8, 14, 18, 96, 1, true)),
             table_column(Filesystem, "文件系统", column(8, 12, 16, 90, 1, true)),
-            table_column(LbaRange, "LBA 范围", column(14, 22, 28, 88, 2, true)),
             table_column(Capacity, "容量", column(8, 12, 16, 86, 1, true)),
             table_column(ActionOrKey, "处理/密钥", column(10, 16, 24, 78, 1, false)),
             table_column(FinalState, "结果/说明", column(12, 24, 48, 72, 3, false)),

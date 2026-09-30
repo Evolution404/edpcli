@@ -245,8 +245,9 @@ fn provision_result_page_attaches_interactive_shared_full_disk_layout() {
     assert!(!layout.contains(".with_marker(false)"));
 
     assert!(
-        layout.contains("theme.apply_selection(style, selected_row, focused)"),
-        "result rows must use the shared table selection background"
+        layout.contains("Block::default().style(theme.selection_overlay(focused))")
+            && layout.contains(".column_spacing(0)"),
+        "result rows must paint one continuous selection background without physical column gaps"
     );
     assert!(
         layout.contains("column.index == interaction.active_column()"),
@@ -299,8 +300,9 @@ fn restore_post_result_uses_shared_workbench_and_typed_layout() {
     }
     assert!(partition_layout.contains(".with_marker(true)"));
     assert!(
-        partition_layout.contains("theme.apply_selection(style, selected_row, focused)"),
-        "restore result rows must use the shared selected-row background"
+        partition_layout.contains("Block::default().style(theme.selection_overlay(focused))")
+            && partition_layout.contains(".column_spacing(0)"),
+        "restore result rows must paint one continuous selection background without physical column gaps"
     );
     assert!(
         partition_layout.contains("column.index == interaction.active_column()"),

@@ -1,5 +1,6 @@
 use edpcli::tui::{demo, render};
 use ratatui::{backend::TestBackend, Terminal};
+use unicode_width::UnicodeWidthStr;
 
 fn screen_text(scene: &str) -> String {
     let state = demo::build_scene(scene).unwrap();
@@ -118,6 +119,52 @@ fn provision_result_demo_uses_real_result_workbench_state() {
             "missing {expected} in result demo"
         );
     }
+}
+
+#[test]
+fn provision_result_partition_row_is_contiguous_and_omits_lba_range() {
+    let state = demo::build_scene("provision-result-success").unwrap();
+    let (width, height) = (160, 45);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let buffer = terminal.backend().buffer();
+
+    let left_limit = 76u16;
+    let (p1_x, row_y) = (0..height)
+        .find_map(|y| {
+            (0..left_limit.saturating_sub(1)).find_map(|x| {
+                (buffer[(x, y)].symbol() == "P" && buffer[(x + 1, y)].symbol() == "1")
+                    .then_some((x, y))
+            })
+        })
+        .expect("selected P1 row in result partition table");
+    let selected_bg = buffer[(p1_x, row_y)].bg;
+    let selected_x = (0..left_limit)
+        .filter(|x| buffer[(*x, row_y)].bg == selected_bg)
+        .collect::<Vec<_>>();
+    assert!(
+        selected_x.len() > 20,
+        "selected result row background is too short"
+    );
+    let first = *selected_x.first().unwrap();
+    let last = *selected_x.last().unwrap();
+    for x in first..=last {
+        if buffer[(x, row_y)].bg == selected_bg {
+            continue;
+        }
+        let wide_continuation =
+            x > first && UnicodeWidthStr::width(buffer[(x - 1, row_y)].symbol()) == 2;
+        assert!(
+            wide_continuation,
+            "selected result row background has a real gap at x={x}, y={row_y}"
+        );
+    }
+
+    let screen = screen_text("provision-result-success");
+    assert!(
+        !screen.contains("LBA 范围"),
+        "result table must not expose LBA range"
+    );
 }
 
 #[test]
