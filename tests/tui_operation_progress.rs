@@ -113,26 +113,35 @@ fn overall_and_work_gauges_share_high_contrast_progress_labels() {
 }
 
 #[test]
-fn result_report_pages_share_one_component_and_provision_is_result_oriented() {
+fn result_report_pages_keep_static_primitive_and_provision_uses_interactive_workbench() {
     let shared = include_str!("../src/tui/ui/operation_result.rs");
+    let workbench = include_str!("../src/tui/result_workbench.rs");
     let provision = include_str!("../src/tui/provision/result_render.rs");
+    let provision_layout = include_str!("../src/tui/provision/result_partition_layout.rs");
     let provision_root = include_str!("../src/tui/provision/render.rs");
     let wizard = include_str!("../src/tui/wizard_result_render.rs");
 
     assert!(shared.contains("pub fn render_operation_result"));
+    assert!(wizard.contains("render_operation_result"));
+    assert!(workbench.contains("render_result_workbench_shell"));
+    assert!(provision.contains("render_result_workbench_shell"));
+    assert!(!provision.contains("render_operation_result"));
     assert!(
         !std::path::Path::new("src/tui/backups/result_render.rs").exists(),
         "notification-only backup result pages must not return"
     );
-    for adapter in [provision, wizard] {
-        assert!(adapter.contains("render_operation_result"));
-    }
-    for required in ["盘型", "分区结果", "大小", "验收结果", "备份文件", "总耗时"]
+    let provision_result_sources = format!("{provision}\n{provision_layout}");
+    for required in ["分区结果", "全盘布局", "验收与执行", "备份文件", "总耗时"]
     {
-        assert!(provision.contains(required), "missing {required}");
+        assert!(
+            provision_result_sources.contains(required),
+            "missing {required}"
+        );
     }
     let execution = include_str!("../src/tui/provision/execution_state.rs");
     let result_model = include_str!("../src/tui/provision/result_model.rs");
+    let result_geometry = include_str!("../src/tui/provision/result_geometry.rs");
+    let result_interaction = include_str!("../src/tui/provision/result_interaction.rs");
     let write_section = execution
         .split("pub fn provision_take_for_write")
         .nth(1)
@@ -149,10 +158,12 @@ fn result_report_pages_share_one_component_and_provision_is_result_oriented() {
         "file_key",
         "lba12_material",
     ] {
-        assert!(
-            !result_model.contains(secret_marker),
-            "result snapshot must not retain {secret_marker}"
-        );
+        for source in [result_model, result_geometry, result_interaction, workbench] {
+            assert!(
+                !source.contains(secret_marker),
+                "result workbench state must not retain {secret_marker}"
+            );
+        }
     }
     assert!(!provision_root.contains("最近进度事件"));
     assert!(!provision.contains("最近进度事件"));

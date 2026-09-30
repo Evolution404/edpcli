@@ -30,6 +30,10 @@ pub(crate) use field_model::{
 #[path = "result_model.rs"]
 mod result_model;
 pub use result_model::{ProvisionResultPartition, ProvisionResultSnapshot};
+#[path = "result_geometry.rs"]
+mod result_geometry;
+#[path = "result_interaction.rs"]
+mod result_interaction;
 
 impl ProvisionKind {
     pub const ALL: [Self; 5] = [
@@ -157,6 +161,7 @@ pub struct ProvisionState {
     pub result_status: Option<crate::application::provision::ProvisionExecutionStatus>,
     pub result_outcome: Option<crate::application::provision::ProvisionWriteOutcome>,
     pub result_plan: Option<ProvisionResultSnapshot>,
+    pub result_workbench: crate::tui::result_workbench::ResultWorkbenchState,
     pub run: Option<crate::application::progress::OperationRunState>,
     pub pane_focus: crate::tui::pane::PaneFocus,
     form_view_snapshot: Option<ProvisionFormViewSnapshot>,
@@ -183,6 +188,7 @@ impl Default for ProvisionState {
             result_status: None,
             result_outcome: None,
             result_plan: None,
+            result_workbench: crate::tui::result_workbench::ResultWorkbenchState::default(),
             run: None,
             pane_focus: crate::tui::pane::PaneFocus::provision_form(),
             form_view_snapshot: None,
@@ -260,6 +266,8 @@ impl AppState {
         self.provision.result_status = None;
         self.provision.result_outcome = None;
         self.provision.result_plan = None;
+        self.provision.result_workbench =
+            crate::tui::result_workbench::ResultWorkbenchState::default();
         self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_form();
         let current_target = self
             .selected_device()

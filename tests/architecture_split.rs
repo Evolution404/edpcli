@@ -260,6 +260,9 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/form_render.rs",
         "src/tui/provision/review_render.rs",
         "src/tui/provision/result_render.rs",
+        "src/tui/provision/result_partition_layout.rs",
+        "src/tui/provision/result_interaction.rs",
+        "src/tui/provision/result_geometry.rs",
         "src/tui/provision/result_model.rs",
         "src/tui/ui/operation_result.rs",
         "src/tui/ui/result_supplement.rs",
@@ -510,6 +513,9 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/provision/form_render.rs") < 300);
     assert!(lines("src/tui/provision/review_render.rs") < 170);
     assert!(lines("src/tui/provision/result_render.rs") < 340);
+    assert!(lines("src/tui/provision/result_partition_layout.rs") < 260);
+    assert!(lines("src/tui/provision/result_interaction.rs") < 180);
+    assert!(lines("src/tui/provision/result_geometry.rs") < 120);
     assert!(lines("src/tui/provision/result_model.rs") < 120);
     assert!(lines("src/tui/ui/operation_result.rs") < 340);
     assert!(lines("src/tui/ui/result_supplement.rs") < 100);

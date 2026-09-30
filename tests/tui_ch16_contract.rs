@@ -242,23 +242,24 @@ fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
 }
 
 #[test]
-fn ch16_provision_result_uses_typed_outcome_badges() {
+fn ch16_provision_result_uses_workbench_hero_and_panes() {
     use edpcli::application::provision::ProvisionExecutionStatus as Status;
     use edpcli::tui::state::ProvisionStage;
     let mut state = provision_state();
     state.provision_mut().stage = ProvisionStage::Result;
     for (status, label) in [
-        (Status::Success, "[制盘成功]"),
-        (Status::CompletedWithWarnings, "[制盘完成，存在警告]"),
-        (Status::PartialFormatFailure, "[部分完成：格式化失败]"),
-        (Status::FatalFailure, "[制盘失败]"),
+        (Status::Success, "✓制盘成功"),
+        (Status::CompletedWithWarnings, "⚠制盘完成·存在警告"),
+        (Status::PartialFormatFailure, "⚠制盘完成·部分格式化失败"),
+        (Status::FatalFailure, "✗制盘失败"),
     ] {
         state.provision_mut().result_status = Some(status);
-        let text = rendered_lines(&state, 120, 36).join("\n").replace(' ', "");
+        let text = rendered_lines(&state, 140, 40).join("\n").replace(' ', "");
         assert!(text.contains(label), "missing {label}");
-        for required in ["盘型", "总容量", "验收结果"] {
+        for required in ["制盘结果", "分区结果", "全盘布局", "验收与执行"] {
             assert!(text.contains(required), "missing {required}");
         }
+        assert!(text.contains("Esc/Enter返回设备列表"));
         assert!(!text.contains("最近进度事件"));
     }
 }

@@ -47,6 +47,129 @@ fn provision_result_escape_returns_directly_to_originating_devices_workspace() {
     assert_eq!(state.navigation().depth(), 0);
 }
 
+fn plain_result_plan() -> edpcli::tui::state::ProvisionResultSnapshot {
+    use edpcli::filesystem::FilesystemKind;
+    use edpcli::tui::state::{ProvisionResultPartition, ProvisionResultSnapshot};
+
+    ProvisionResultSnapshot {
+        disk: 6,
+        target: edpcli::provision::ProvisionTarget::Plain,
+        total_bytes: 20_000 * 512,
+        partitions: vec![
+            ProvisionResultPartition {
+                role: None,
+                filesystem: Some(FilesystemKind::ExFat),
+                start_lba: 2_048,
+                size_bytes: 2_000 * 512,
+                selected_for_format: true,
+                disposition: None,
+            },
+            ProvisionResultPartition {
+                role: None,
+                filesystem: Some(FilesystemKind::Ntfs),
+                start_lba: 6_000,
+                size_bytes: 3_000 * 512,
+                selected_for_format: true,
+                disposition: None,
+            },
+        ],
+    }
+}
+
+#[test]
+fn provision_result_partition_and_region_selection_sync_by_exact_geometry() {
+    use edpcli::tui::{
+        disk_layout::{DiskCapacitySelection, DiskRegionKind},
+        pane::PaneId,
+    };
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(20_000 * 512)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_mut().stage = ProvisionStage::Result;
+    state.provision_mut().result_plan = Some(plain_result_plan());
+    state.provision_initialize_result_workbench();
+
+    assert_eq!(
+        state.provision().result_workbench.selected_partition,
+        Some(0)
+    );
+    let first = state
+        .provision()
+        .result_plan
+        .as_ref()
+        .unwrap()
+        .partition_selection(0)
+        .unwrap();
+    assert_eq!(
+        state.provision().result_workbench.region_selection(),
+        Some(first)
+    );
+
+    state.provision_result_move(1, 8);
+    assert_eq!(
+        state.provision().result_workbench.selected_partition,
+        Some(1)
+    );
+    let second = state
+        .provision()
+        .result_plan
+        .as_ref()
+        .unwrap()
+        .partition_selection(1)
+        .unwrap();
+    assert_eq!(
+        state.provision().result_workbench.region_selection(),
+        Some(second)
+    );
+
+    let model = state
+        .provision()
+        .result_plan
+        .as_ref()
+        .unwrap()
+        .disk_layout_model()
+        .unwrap();
+    let free = model
+        .collapsed_tail_model()
+        .segments
+        .into_iter()
+        .find(|segment| segment.kind == DiskRegionKind::Free)
+        .expect("plain fixture must contain free space");
+    let free_selection = DiskCapacitySelection::from_segment(&free).unwrap();
+
+    state.provision_focus_pane(PaneId::ResultDiskLayout);
+    assert!(state
+        .provision_mut()
+        .result_workbench
+        .select_region_geometry(&model, &free_selection, 8));
+    state.provision_result_move(0, 8);
+
+    assert_eq!(state.provision().result_workbench.selected_partition, None);
+    assert_eq!(
+        state.provision().result_workbench.region_selection(),
+        Some(free_selection)
+    );
+}
+
+#[test]
+fn provision_result_cycles_only_result_workbench_panes() {
+    use edpcli::tui::pane::PaneId;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(20_000 * 512)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_mut().stage = ProvisionStage::Result;
+
+    assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
+    state.provision_tab_focus(false);
+    assert_eq!(state.provision_focused_pane(), PaneId::ResultDiskLayout);
+    state.provision_tab_focus(false);
+    assert_eq!(state.provision_focused_pane(), PaneId::ResultVerification);
+    state.provision_tab_focus(false);
+    assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
+}
+
 #[test]
 fn provision_review_escape_restores_valid_form_focus_and_insert() {
     use edpcli::tui::pane::{PaneFocus, PaneId};

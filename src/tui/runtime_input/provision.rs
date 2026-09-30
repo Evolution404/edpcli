@@ -185,8 +185,25 @@ pub(super) fn handle_provision_key(
                 }
             }
             ProvisionStage::Result => {
-                if matches!(action, TuiAction::Activate | TuiAction::Back) {
-                    let _ = state.navigate(NavCommand::Escape, viewport_height);
+                match action {
+                    TuiAction::MoveUp => state.provision_result_move(-1, viewport_height),
+                    TuiAction::MoveDown => state.provision_result_move(1, viewport_height),
+                    TuiAction::PageUp => state
+                        .provision_result_move(-(viewport_height.max(1) as isize), viewport_height),
+                    TuiAction::PageDown => state
+                        .provision_result_move(viewport_height.max(1) as isize, viewport_height),
+                    TuiAction::Top => state.provision_result_top(viewport_height),
+                    TuiAction::Bottom => state.provision_result_bottom(viewport_height),
+                    TuiAction::MoveLeft | TuiAction::PanelPrevious => {
+                        state.provision_result_shift_pane(true)
+                    }
+                    TuiAction::MoveRight | TuiAction::PanelNext => {
+                        state.provision_result_shift_pane(false)
+                    }
+                    TuiAction::Activate | TuiAction::Submit | TuiAction::Back => {
+                        let _ = state.navigate(NavCommand::Escape, viewport_height);
+                    }
+                    _ => {}
                 }
             }
         }

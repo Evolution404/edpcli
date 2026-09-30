@@ -227,15 +227,16 @@ fn provision_result_snapshot_rebuilds_complete_official_disk_layout() {
 }
 
 #[test]
-fn provision_result_page_attaches_shared_full_disk_layout() {
+fn provision_result_page_attaches_interactive_shared_full_disk_layout() {
     let source = include_str!("../src/tui/provision/result_render.rs");
+    let layout = include_str!("../src/tui/provision/result_partition_layout.rs");
     let supplement = include_str!("../src/tui/ui/result_supplement.rs");
     let devices = include_str!("../src/tui/devices/presentation.rs");
-    assert!(source.contains("disk_layout_model"));
-    assert!(source.contains("ResultSupplement::DiskCapacityMap"));
-    assert!(source.contains("新盘全局布局"));
-    assert!(supplement.contains("DiskCapacityMapProfile::Full"));
-    assert!(supplement.contains("TailExpansion::Collapsed"));
+    assert!(source.contains("render_result_workbench_shell"));
+    assert!(layout.contains("disk_layout_model"));
+    assert!(layout.contains("DiskCapacityMapProfile::Full"));
+    assert!(layout.contains("TailExpansion::Collapsed"));
+    assert!(layout.contains("render_result_region_list"));
     assert!(supplement.contains("render_disk_region_list"));
     assert!(supplement.contains("DiskRegionListMode::Readonly"));
     assert!(devices.contains("disk_region_list_lines"));

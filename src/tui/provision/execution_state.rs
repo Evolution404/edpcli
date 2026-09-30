@@ -121,7 +121,6 @@ impl AppState {
         result: Result<crate::application::provision::ProvisionWriteOutcome, String>,
     ) {
         self.shell.critical_operation = false;
-        self.provision_transition_finish_running();
         match result {
             Ok(outcome) => {
                 self.provision.result_status = Some(outcome.execution_status());
@@ -135,5 +134,7 @@ impl AppState {
                 self.provision.message = Some(message);
             }
         }
+        self.provision_initialize_result_workbench();
+        self.provision_transition_finish_running();
     }
 }

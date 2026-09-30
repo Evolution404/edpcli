@@ -2,16 +2,26 @@ use super::*;
 
 impl AppState {
     pub fn provision_focused_pane(&self) -> crate::tui::pane::PaneId {
-        self.provision.pane_focus.focused()
+        if self.provision.stage == ProvisionStage::Result {
+            self.provision.result_workbench.focused_pane()
+        } else {
+            self.provision.pane_focus.focused()
+        }
     }
 
     pub fn provision_focus_pane(&mut self, pane: crate::tui::pane::PaneId) {
-        if pane.is_provision() {
+        if self.provision.stage == ProvisionStage::Result && pane.is_result() {
+            self.provision.result_workbench.focus(pane);
+        } else if pane.is_provision() {
             self.provision.pane_focus.focus(pane);
         }
     }
 
     pub fn provision_shift_pane(&mut self, reverse: bool) {
+        if self.provision.stage == ProvisionStage::Result {
+            self.provision_result_shift_pane(reverse);
+            return;
+        }
         let order = match self.provision.stage {
             ProvisionStage::Review => crate::tui::pane::PaneId::PROVISION_REVIEW_ORDER.as_slice(),
             _ => crate::tui::pane::PaneId::PROVISION_FORM_ORDER.as_slice(),
@@ -51,6 +61,7 @@ impl AppState {
                 }
             }
             ProvisionStage::Review => self.provision_shift_pane(reverse),
+            ProvisionStage::Result => self.provision_result_shift_pane(reverse),
             _ => {}
         }
     }

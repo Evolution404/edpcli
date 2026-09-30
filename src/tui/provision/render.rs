@@ -25,7 +25,7 @@ fn provision_content_layout(
     ratatui::layout::Rect,
     Option<(ratatui::layout::Rect, Option<ratatui::layout::Rect>)>,
 ) {
-    if stage == ProvisionStage::Running {
+    if matches!(stage, ProvisionStage::Running | ProvisionStage::Result) {
         return (area, None);
     }
     let class = crate::tui::ui::ViewportClass::for_width(area.width);
