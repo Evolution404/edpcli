@@ -93,11 +93,11 @@ pub(crate) fn render_disk_region_list(
     lines.extend(visible.segments[start..end].iter().map(|segment| {
         let active =
             selected.is_some_and(|selection| segment_matches_selection(segment, selection));
-        let style = if active {
-            theme.disk_region_outline(segment.kind, true)
-        } else {
-            theme.disk_region(segment.kind)
-        };
+        let style = theme.apply_selection(
+            theme.disk_region(segment.kind),
+            active,
+            focused,
+        );
         Line::from(Span::styled(
             region_row(segment, model.total_sectors),
             style,
