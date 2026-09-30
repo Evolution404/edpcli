@@ -412,6 +412,7 @@ fn backup_management_input_is_overlay_on_backups_workspace() {
     let width = 120;
     let height = 32;
     let content_area = ratatui::layout::Rect::new(0, 2, width, height - 3);
+    let viewport = ratatui::layout::Rect::new(0, 0, width, height);
 
     let mut before_terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     before_terminal
@@ -420,7 +421,7 @@ fn backup_management_input_is_overlay_on_backups_workspace() {
     let before = before_terminal.backend().buffer().clone();
 
     assert!(state.begin_backup_prune());
-    let popup = edpcli::tui::ui::centered_modal_rect(content_area, 78, 5);
+    let popup = edpcli::tui::ui::centered_modal_rect(viewport, 78, 5);
     let mut modal_terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     modal_terminal
         .draw(|frame| render::draw(frame, &state))

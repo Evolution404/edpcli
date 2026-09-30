@@ -726,8 +726,12 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         );
         if width >= 80 {
             assert!(
-                active_tab.replace(' ', "").contains("2原始字段"),
-                "Detail focus must be visible in the shared Inspect tabs: {active_tab}"
+                active_tab.replace(' ', "").contains("1业务字段"),
+                "Pane focus must not implicitly switch the explicit Inspect view tab: {active_tab}"
+            );
+            assert_eq!(
+                state.advanced_inspect_view_mode(),
+                Some(edpcli::tui::state::InspectViewMode::Business)
             );
         } else {
             assert!(

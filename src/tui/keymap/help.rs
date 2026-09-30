@@ -158,6 +158,11 @@ pub const PROVISION_HELP: &[HelpBinding] = &[
         action: TuiAction::Insert,
     },
     HelpBinding {
+        keys: "h / l",
+        label: "当前选项上一个 / 下一个",
+        action: TuiAction::MoveRight,
+    },
+    HelpBinding {
         keys: "Space",
         label: "切换当前选项 / 容量单位",
         action: TuiAction::Toggle,

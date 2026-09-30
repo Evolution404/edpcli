@@ -109,6 +109,7 @@ impl AppState {
             field_expanded: false,
             pinned_field: None,
         });
+        state.view_mode = InspectViewMode::Hex;
         state.panel = AdvancedInspectPanel::Detail;
         state
             .pane_focus

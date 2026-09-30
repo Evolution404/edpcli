@@ -272,6 +272,7 @@ fn selecting_lba12_shows_canonical_fields_before_enter() {
     let current = state.advanced_inspect().unwrap().tree_selected;
     state.advanced_inspect_move_tree(lba12 as isize - current as isize);
     assert!(state.advanced_inspect_sector().is_none());
+    state.advanced_inspect_set_view_mode(edpcli::tui::state::InspectViewMode::RawFields);
 
     let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
@@ -502,7 +503,12 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
         .collect::<String>()
         .replace(' ', "");
     assert!(text.contains("Esc返回：Inspect"), "{text}");
-    assert!(text.contains("对象快照"), "{text}");
+    assert!(text.contains("SectorInspector"), "{text}");
+    assert_eq!(
+        state.advanced_inspect_view_mode(),
+        Some(edpcli::tui::state::InspectViewMode::Hex),
+        "Pane navigation must not implicitly change the explicit Inspect view mode"
+    );
     assert!(state.advanced_inspect_close_sector());
     assert_eq!(
         state.advanced_inspect().unwrap().panel,

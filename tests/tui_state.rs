@@ -191,6 +191,38 @@ fn provision_result_cycles_only_result_workbench_panes() {
 }
 
 #[test]
+fn provision_result_table_supports_edges_and_visual_order_copy_contract() {
+    use edpcli::tui::{pane::PaneId, table_layout::TableKind};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(20_000 * 512)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_mut().stage = ProvisionStage::Result;
+    state.provision_mut().result_plan = Some(plain_result_plan());
+    state.provision_initialize_result_workbench();
+
+    let kind = TableKind::ResultPartitions;
+    assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
+    assert_eq!(state.active_table_kind(), Some(kind));
+
+    assert!(state.move_table_column_edge_for_viewport(kind, true, 160, 30));
+    assert_eq!(state.table_active_column(kind), 6);
+    assert!(state.move_table_column_edge_for_viewport(kind, false, 160, 30));
+    assert_eq!(state.table_active_column(kind), 0);
+    assert_eq!(state.table_copy_payload(kind, false).as_deref(), Some("P1"));
+
+    assert!(state.reorder_table_column_for_viewport(kind, false, 160, 30));
+    assert_eq!(state.table_column_order(kind)[..2], [1, 0]);
+    let row = state
+        .table_copy_payload(kind, true)
+        .expect("Result whole-row copy");
+    let cells = row.split('\t').collect::<Vec<_>>();
+    assert_eq!(cells[0], "普通分区");
+    assert_eq!(cells[1], "P1");
+    assert_eq!(cells.len(), 7);
+}
+
+#[test]
 fn provision_review_escape_restores_valid_form_focus_and_insert() {
     use edpcli::tui::pane::{PaneFocus, PaneId};
 
