@@ -56,18 +56,12 @@ fn edp_layout(
         })
         .collect::<Vec<_>>();
 
-    let lce = crate::application::provision_geometry::verified_usb_compatibility_extent(
-        total_sectors,
-    )
-    .ok_or_else(|| "无法从已验证整盘容量确定恢复后的 LCE 几何".to_string())?;
+    let lce =
+        crate::application::provision_geometry::verified_usb_compatibility_extent(total_sectors)
+            .ok_or_else(|| "无法从已验证整盘容量确定恢复后的 LCE 几何".to_string())?;
 
-    DiskLayoutModel::canonical_edp(
-        total_sectors,
-        partitions,
-        lce.start_lba,
-        lce.sector_count,
-    )
-    .map_err(|error| format!("恢复后 EDP 全盘布局不可用: {error}"))
+    DiskLayoutModel::canonical_edp(total_sectors, partitions, lce.start_lba, lce.sector_count)
+        .map_err(|error| format!("恢复后 EDP 全盘布局不可用: {error}"))
 }
 
 pub fn project_restored_layout_readonly(
