@@ -124,26 +124,42 @@ impl PlainPartitionForm {
         self.capacity_edited = false;
     }
 
-    pub(super) fn cycle_capacity_unit(&mut self) -> Result<(), String> {
+    pub(super) fn shift_capacity_unit(&mut self, reverse: bool) -> Result<(), String> {
         use crate::provision::{CapacityInputMode, QuickCapacityUnit};
         let sectors = self.resolve_sector_count("普通分区容量")?;
         self.sector_count = sectors.to_string();
-        match (self.input_mode, self.quick_unit) {
-            (CapacityInputMode::Exact, _) => {
+        match (reverse, self.input_mode, self.quick_unit) {
+            (true, CapacityInputMode::Exact, _) => {
+                self.input_mode = CapacityInputMode::Quick;
+                self.quick_unit = QuickCapacityUnit::GiB;
+                self.quick_capacity = ProvisionForm::format_sector_unit_3(sectors, 2_097_152);
+            }
+            (true, CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
+                self.input_mode = CapacityInputMode::Exact;
+            }
+            (true, CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
+                self.quick_unit = QuickCapacityUnit::MiB;
+                self.quick_capacity = ProvisionForm::format_sector_unit_3(sectors, 2_048);
+            }
+            (false, CapacityInputMode::Exact, _) => {
                 self.input_mode = CapacityInputMode::Quick;
                 self.quick_unit = QuickCapacityUnit::MiB;
                 self.quick_capacity = ProvisionForm::format_sector_unit_3(sectors, 2_048);
             }
-            (CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
+            (false, CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
                 self.quick_unit = QuickCapacityUnit::GiB;
                 self.quick_capacity = ProvisionForm::format_sector_unit_3(sectors, 2_097_152);
             }
-            (CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
+            (false, CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
                 self.input_mode = CapacityInputMode::Exact;
             }
         }
         self.capacity_edited = false;
         Ok(())
+    }
+
+    pub(super) fn cycle_capacity_unit(&mut self) -> Result<(), String> {
+        self.shift_capacity_unit(false)
     }
 }
 
@@ -208,8 +224,17 @@ impl ProvisionInputPolicy {
 pub(super) fn toggle_supported_fs(
     value: crate::filesystem::FilesystemKind,
 ) -> crate::filesystem::FilesystemKind {
+    shift_supported_fs(value, false)
+}
+
+pub(super) fn shift_supported_fs(
+    value: crate::filesystem::FilesystemKind,
+    reverse: bool,
+) -> crate::filesystem::FilesystemKind {
     match value {
         crate::filesystem::FilesystemKind::Fat16 => crate::filesystem::FilesystemKind::ExFat,
+        crate::filesystem::FilesystemKind::ExFat => crate::filesystem::FilesystemKind::Fat16,
+        _ if reverse => crate::filesystem::FilesystemKind::ExFat,
         _ => crate::filesystem::FilesystemKind::Fat16,
     }
 }
@@ -410,6 +435,14 @@ impl ProvisionForm {
         &mut self,
         role: crate::provision::PartitionRole,
     ) -> Result<(), String> {
+        self.shift_capacity_input(role, false)
+    }
+
+    pub(super) fn shift_capacity_input(
+        &mut self,
+        role: crate::provision::PartitionRole,
+        reverse: bool,
+    ) -> Result<(), String> {
         use crate::provision::{CapacityInputMode, QuickCapacityUnit};
         let (mode, unit, quick, exact, edited) = match role {
             crate::provision::PartitionRole::Boot => (
@@ -438,8 +471,29 @@ impl ProvisionForm {
                 return Err("兼容保留区没有可编辑容量字段".into())
             }
         };
-        match (*mode, *unit) {
-            (CapacityInputMode::Exact, _) => {
+        match (reverse, *mode, *unit) {
+            (true, CapacityInputMode::Exact, _) => {
+                let sectors = exact
+                    .parse::<u64>()
+                    .map_err(|_| "请先输入有效的 sector 数".to_string())?;
+                *quick = Self::format_sector_unit_3(sectors, 2_097_152);
+                *mode = CapacityInputMode::Quick;
+                *unit = QuickCapacityUnit::GiB;
+            }
+            (true, CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
+                let sectors =
+                    Self::resolve_quick_sectors(quick, exact, *unit, *edited, "当前容量")?;
+                *exact = sectors.to_string();
+                *mode = CapacityInputMode::Exact;
+            }
+            (true, CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
+                let sectors =
+                    Self::resolve_quick_sectors(quick, exact, *unit, *edited, "当前容量")?;
+                *exact = sectors.to_string();
+                *quick = Self::format_sector_unit_3(sectors, 2_048);
+                *unit = QuickCapacityUnit::MiB;
+            }
+            (false, CapacityInputMode::Exact, _) => {
                 let sectors = exact
                     .parse::<u64>()
                     .map_err(|_| "请先输入有效的 sector 数".to_string())?;
@@ -447,14 +501,14 @@ impl ProvisionForm {
                 *mode = CapacityInputMode::Quick;
                 *unit = QuickCapacityUnit::MiB;
             }
-            (CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
+            (false, CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
                 let sectors =
                     Self::resolve_quick_sectors(quick, exact, *unit, *edited, "当前容量")?;
                 *exact = sectors.to_string();
                 *quick = Self::format_sector_unit_3(sectors, 2_097_152);
                 *unit = QuickCapacityUnit::GiB;
             }
-            (CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
+            (false, CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
                 let sectors =
                     Self::resolve_quick_sectors(quick, exact, *unit, *edited, "当前容量")?;
                 *exact = sectors.to_string();

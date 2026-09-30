@@ -141,7 +141,7 @@ pub(crate) use review::{ProvisionReviewRowKind, ProvisionReviewTone};
 #[path = "validation.rs"]
 mod validation;
 
-use form::{toggle_supported_fs, ProvisionInputPolicy};
+use form::{shift_supported_fs, toggle_supported_fs, ProvisionInputPolicy};
 pub use form::{PlainPartitionForm, PlainProvisionForm, ProvisionForm};
 
 #[derive(Debug, Clone)]

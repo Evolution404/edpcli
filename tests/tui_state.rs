@@ -966,6 +966,65 @@ fn provision_capacity_unit_cycles_mib_gib_sector_without_geometry_change() {
 }
 
 #[test]
+fn provision_capacity_h_l_moves_previous_and_next_without_changing_geometry() {
+    use edpcli::provision::{CapacityInputMode, QuickCapacityUnit};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+
+    state.provision_mut().form.share_input_mode = CapacityInputMode::Exact;
+    state.provision_mut().form.share_sectors = "13606912".into();
+    state.provision_mut().field_selected = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label.starts_with("交换区容量"))
+        .expect("share capacity field");
+
+    assert!(state.provision_shift_selected_option(true));
+    assert_eq!(
+        state.provision().form.share_input_mode,
+        CapacityInputMode::Quick
+    );
+    assert_eq!(
+        state.provision().form.share_quick_unit,
+        QuickCapacityUnit::GiB
+    );
+    assert_eq!(
+        state.provision_request().unwrap().share_sectors,
+        Some(13_606_912)
+    );
+
+    assert!(state.provision_shift_selected_option(false));
+    assert_eq!(
+        state.provision().form.share_input_mode,
+        CapacityInputMode::Exact
+    );
+    assert_eq!(state.provision().form.share_sectors, "13606912");
+
+    assert!(state.provision_shift_selected_option(false));
+    assert_eq!(
+        state.provision().form.share_input_mode,
+        CapacityInputMode::Quick
+    );
+    assert_eq!(
+        state.provision().form.share_quick_unit,
+        QuickCapacityUnit::MiB
+    );
+    assert_eq!(
+        state.provision_request().unwrap().share_sectors,
+        Some(13_606_912)
+    );
+
+    assert!(state.provision_shift_selected_option(true));
+    assert_eq!(
+        state.provision().form.share_input_mode,
+        CapacityInputMode::Exact
+    );
+    assert_eq!(state.provision().form.share_sectors, "13606912");
+}
+
+#[test]
 fn editing_generated_gib_text_uses_user_value_even_if_display_text_is_identical() {
     use edpcli::provision::{CapacityInputMode, QuickCapacityUnit};
 

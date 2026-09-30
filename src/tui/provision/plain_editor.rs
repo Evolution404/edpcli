@@ -1,4 +1,7 @@
-use super::{toggle_supported_fs, PlainPartitionForm, PlainProvisionFieldKind, PlainProvisionForm};
+use super::{
+    shift_supported_fs, toggle_supported_fs, PlainPartitionForm, PlainProvisionFieldKind,
+    PlainProvisionForm,
+};
 
 impl PlainProvisionForm {
     fn specs(&self) -> Result<Vec<crate::provision::PlainPartitionSpec>, String> {
@@ -81,6 +84,28 @@ impl PlainProvisionForm {
             }
             PlainProvisionFieldKind::Filesystem => {
                 part.filesystem = toggle_supported_fs(part.filesystem);
+                Ok(true)
+            }
+            PlainProvisionFieldKind::StartLba | PlainProvisionFieldKind::VolumeLabel => Ok(false),
+        }
+    }
+
+    pub(super) fn shift_partition_option(
+        &mut self,
+        partition: usize,
+        kind: PlainProvisionFieldKind,
+        reverse: bool,
+    ) -> Result<bool, String> {
+        let Some(part) = self.partitions.get_mut(partition) else {
+            return Ok(false);
+        };
+        match kind {
+            PlainProvisionFieldKind::Capacity => {
+                part.shift_capacity_unit(reverse)?;
+                Ok(true)
+            }
+            PlainProvisionFieldKind::Filesystem => {
+                part.filesystem = shift_supported_fs(part.filesystem, reverse);
                 Ok(true)
             }
             PlainProvisionFieldKind::StartLba | PlainProvisionFieldKind::VolumeLabel => Ok(false),

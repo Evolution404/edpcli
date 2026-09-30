@@ -477,8 +477,56 @@ fn search_and_command_modes_consume_text_before_normal_bindings() {
             Some(TuiAction::Submit)
         );
         assert_eq!(mapper.map(mode, key(KeyCode::Esc)), Some(TuiAction::Back));
-        assert_eq!(mapper.map(mode, key(KeyCode::Tab)), None);
+        assert_eq!(
+            mapper.map(mode, key(KeyCode::Tab)),
+            Some(TuiAction::FocusNext)
+        );
     }
+}
+
+#[test]
+fn input_modes_keep_q_as_text_ctrl_c_as_cancel_and_ctrl_w_as_panel_prefix() {
+    let mut mapper = KeyMapper::new();
+    for mode in [InputMode::Insert, InputMode::Search, InputMode::Command] {
+        assert_eq!(
+            mapper.map(mode, key(KeyCode::Char('q'))),
+            Some(TuiAction::Text('q')),
+            "q must remain text in {mode:?}"
+        );
+        assert_eq!(
+            mapper.map(mode, ctrl('c')),
+            Some(TuiAction::Back),
+            "Ctrl-C must cancel input instead of quitting in {mode:?}"
+        );
+        assert_eq!(mapper.map(mode, ctrl('w')), None);
+        assert_eq!(
+            mapper.map(mode, key(KeyCode::Char('h'))),
+            Some(TuiAction::PanelLeft)
+        );
+    }
+
+    assert_eq!(
+        mapper.map(InputMode::Confirm, key(KeyCode::Char('q'))),
+        Some(TuiAction::Text('q'))
+    );
+    assert_eq!(
+        mapper.map(InputMode::Confirm, ctrl('c')),
+        Some(TuiAction::Cancel)
+    );
+    assert_eq!(mapper.map(InputMode::Confirm, ctrl('w')), None);
+    assert_eq!(
+        mapper.map(InputMode::Confirm, key(KeyCode::Char('l'))),
+        Some(TuiAction::PanelRight)
+    );
+
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('q'))),
+        Some(TuiAction::Quit)
+    );
+    assert_eq!(
+        mapper.map(InputMode::Normal, ctrl('c')),
+        Some(TuiAction::Quit)
+    );
 }
 
 #[test]
@@ -532,6 +580,20 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
             &["TuiAction::Activate", "state.provision_begin_insert()"],
         ),
         "Provision Form Enter must not enter Insert mode or toggle checkbox state"
+    );
+    assert!(
+        contains_tokens_in_order(
+            form,
+            &[
+                "TuiAction::MoveLeft",
+                "state.provision_shift_selected_option(true)",
+                "TuiAction::MoveRight",
+                "state.provision_shift_selected_option(false)",
+                "TuiAction::Toggle",
+                "state.provision_toggle_selected_option()",
+            ],
+        ),
+        "Provision Form h/l must be directional while Space remains cycle/toggle"
     );
     let production = include_str!("../src/tui/dispatch.rs");
     assert!(

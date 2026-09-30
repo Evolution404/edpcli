@@ -205,6 +205,77 @@ impl AppState {
         }
     }
 
+    pub fn provision_shift_selected_option(&mut self, reverse: bool) -> bool {
+        let descriptor = self.provision_field_descriptor(self.provision.field_selected);
+        if descriptor.is_some_and(|descriptor| !descriptor.capabilities.toggle) {
+            return false;
+        }
+        let selected_id = descriptor.map(|descriptor| descriptor.id);
+        if let Some(ProvisionFieldId::Plain { partition, kind }) = selected_id {
+            let result = self
+                .provision
+                .plain_form
+                .shift_partition_option(partition, kind, reverse);
+            match result {
+                Ok(true) if kind == PlainProvisionFieldKind::Capacity => {
+                    self.provision.message = None;
+                    self.provision_sync_cursor_to_end();
+                    return true;
+                }
+                Ok(true) => {
+                    self.provision.message = None;
+                    return true;
+                }
+                Ok(false) => return false,
+                Err(message) => {
+                    self.provision.message = Some(message);
+                    if kind == PlainProvisionFieldKind::Capacity {
+                        self.provision_sync_cursor_to_end();
+                    }
+                    return true;
+                }
+            }
+        }
+        match selected_id {
+            Some(ProvisionFieldId::Capacity(role)) => {
+                match self.provision.form.shift_capacity_input(role, reverse) {
+                    Ok(()) => {
+                        self.provision.message = None;
+                        self.provision_sync_cursor_to_end();
+                    }
+                    Err(message) => self.provision.message = Some(message),
+                }
+                true
+            }
+            Some(ProvisionFieldId::Filesystem(role)) => {
+                match role {
+                    crate::provision::PartitionRole::Boot => {
+                        self.provision.form.boot_fs =
+                            shift_supported_fs(self.provision.form.boot_fs, reverse);
+                    }
+                    crate::provision::PartitionRole::Share
+                    | crate::provision::PartitionRole::BootShareCombined => {
+                        self.provision.form.share_fs =
+                            shift_supported_fs(self.provision.form.share_fs, reverse);
+                    }
+                    crate::provision::PartitionRole::Encrypt => {
+                        self.provision.form.encrypt_fs =
+                            shift_supported_fs(self.provision.form.encrypt_fs, reverse);
+                    }
+                    crate::provision::PartitionRole::CompatibilityReserve => return false,
+                }
+                self.provision.message = None;
+                true
+            }
+            Some(
+                ProvisionFieldId::ForceChangePassword
+                | ProvisionFieldId::CancelPasswordComplexityCheck
+                | ProvisionFieldId::FormatEnabled(_),
+            ) => self.provision_toggle_selected_option(),
+            _ => false,
+        }
+    }
+
     pub fn provision_plain_plan(&self) -> Result<crate::provision::PlainProvisionPlan, String> {
         if self.provision.kind != ProvisionKind::Plain {
             return Err("当前不是普通盘目标".into());

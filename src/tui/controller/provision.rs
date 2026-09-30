@@ -124,9 +124,19 @@ pub(super) fn dispatch_provision(
             TuiAction::PageDown => {
                 move_provision(state, viewport_height.max(1) as isize, viewport_height)
             }
-            TuiAction::MoveLeft | TuiAction::MoveRight | TuiAction::Toggle
+            TuiAction::MoveLeft
                 if state.provision_focused_pane() == PaneId::ProvisionParameters =>
             {
+                state.provision_shift_selected_option(true);
+                ActionOutcome::handled()
+            }
+            TuiAction::MoveRight
+                if state.provision_focused_pane() == PaneId::ProvisionParameters =>
+            {
+                state.provision_shift_selected_option(false);
+                ActionOutcome::handled()
+            }
+            TuiAction::Toggle if state.provision_focused_pane() == PaneId::ProvisionParameters => {
                 state.provision_toggle_selected_option();
                 ActionOutcome::handled()
             }
