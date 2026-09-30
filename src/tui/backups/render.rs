@@ -482,14 +482,9 @@ fn draw_backup_coverage(frame: &mut Frame, area: ratatui::layout::Rect, state: &
     );
 }
 
-fn draw_backup_status_modal(
-    frame: &mut Frame,
-    area: ratatui::layout::Rect,
-    title: &str,
-    lines: Vec<Line<'static>>,
-) {
+fn draw_backup_status_modal(frame: &mut Frame, title: &str, lines: Vec<Line<'static>>) {
     let height = (lines.len() as u16).saturating_add(2).clamp(5, 12);
-    let modal = crate::tui::ui::centered_modal_rect(area, 78, height);
+    let modal = crate::tui::ui::centered_modal_rect(frame.area(), 78, height);
     crate::tui::ui::render_modal(frame, modal, title, |frame, inner| {
         frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
     });
@@ -525,7 +520,6 @@ pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect,
     if delete.stage == WizardStage::Running {
         draw_backup_status_modal(
             frame,
-            area,
             "删除备份 · 执行中",
             vec![
                 Line::from(format!(
@@ -567,7 +561,6 @@ pub(super) fn draw_backup_batch_delete(
         BackupBatchDeleteStage::Planning => {
             draw_backup_status_modal(
                 frame,
-                area,
                 "批量删除 · 生成计划",
                 vec![
                     Line::from(format!("已勾选  {} 份备份", state.backup_selection_count())),
@@ -598,7 +591,6 @@ pub(super) fn draw_backup_batch_delete(
         BackupBatchDeleteStage::Running => {
             draw_backup_status_modal(
                 frame,
-                area,
                 "批量删除 · 执行中",
                 vec![
                     Line::from(format!("固定目标  {planned} 份")),
@@ -626,7 +618,6 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
         BackupPruneStage::Input => {
             draw_backup_status_modal(
                 frame,
-                area,
                 "备份清理 · keep-N",
                 vec![
                     Line::from("按同盘组保留最近 N 份快照。"),
@@ -641,7 +632,6 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
         BackupPruneStage::Planning => {
             draw_backup_status_modal(
                 frame,
-                area,
                 "备份清理 · 生成计划",
                 vec![
                     Line::from(format!("keep-N  {}", safe(&prune.keep_input))),
@@ -691,7 +681,6 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
                 .unwrap_or(0);
             draw_backup_status_modal(
                 frame,
-                area,
                 "备份清理 · 执行中",
                 vec![
                     Line::from(format!("固定目标  {count} 份")),

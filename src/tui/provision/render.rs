@@ -100,14 +100,9 @@ fn draw_provision_stepper(frame: &mut Frame, area: ratatui::layout::Rect, state:
     frame.render_widget(Paragraph::new(line), area);
 }
 
-fn draw_provision_status_modal(
-    frame: &mut Frame,
-    area: ratatui::layout::Rect,
-    title: &str,
-    lines: Vec<Line<'static>>,
-) {
+fn draw_provision_status_modal(frame: &mut Frame, title: &str, lines: Vec<Line<'static>>) {
     let height = (lines.len() as u16).saturating_add(2).clamp(5, 10);
-    let modal = crate::tui::ui::centered_modal_rect(area, 76, height);
+    let modal = crate::tui::ui::centered_modal_rect(frame.area(), 76, height);
     crate::tui::ui::render_modal(frame, modal, title, |frame, inner| {
         frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
     });
@@ -197,7 +192,6 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             draw_provision_form(frame, main_area, state);
             draw_provision_status_modal(
                 frame,
-                main_area,
                 "只读规划 · 生成计划",
                 vec![
                     Line::from(safe(
@@ -236,7 +230,6 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             draw_provision_review(frame, main_area, state);
             draw_provision_status_modal(
                 frame,
-                main_area,
                 "镜像导出 · 执行中",
                 vec![
                     Line::from(safe(

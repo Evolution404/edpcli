@@ -197,6 +197,21 @@ fn provision_waiting_states_are_overlays_not_full_pages() {
     assert!(exporting.contains("draw_provision_review(frame, main_area, state)"));
     assert!(exporting.contains("draw_provision_status_modal"));
     assert!(!exporting.contains(".block(crate::tui::ui::card"));
+    assert!(
+        provision.contains("centered_modal_rect(frame.area(), 76, height)"),
+        "Provision waiting overlays must be centered from the full terminal viewport"
+    );
+
+    let backups = include_str!("../src/tui/backups/render.rs");
+    assert!(
+        backups.contains("centered_modal_rect(frame.area(), 78, height)"),
+        "Backup waiting overlays must be centered from the full terminal viewport"
+    );
+    assert!(!provision.contains(
+        "draw_provision_status_modal(\n                frame,\n                main_area,"
+    ));
+    assert!(!backups
+        .contains("draw_backup_status_modal(\n                frame,\n                area,"));
 }
 
 #[test]

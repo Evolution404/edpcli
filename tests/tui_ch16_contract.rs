@@ -177,6 +177,36 @@ fn provision_breadcrumb_tracks_page_surface_not_overlay_stage() {
 }
 
 #[test]
+fn provision_planning_modal_is_centered_on_the_full_terminal_viewport() {
+    use edpcli::tui::state::ProvisionStage;
+    use ratatui::layout::Rect;
+
+    for (width, height) in [(160, 45), (120, 36), (60, 18)] {
+        let mut state = provision_state();
+        state.provision_mut().stage = ProvisionStage::Planning;
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+
+        let expected = edpcli::tui::ui::centered_modal_rect(Rect::new(0, 0, width, height), 76, 5);
+        let buffer = terminal.backend().buffer();
+        assert_eq!(
+            buffer[(expected.x, expected.y)].symbol(),
+            "┌",
+            "{width}x{height}: planning modal must use the full viewport center"
+        );
+        assert_eq!(
+            buffer[(
+                expected.x + expected.width - 1,
+                expected.y + expected.height - 1,
+            )]
+                .symbol(),
+            "┘",
+            "{width}x{height}: planning modal bottom-right corner mismatch"
+        );
+    }
+}
+
+#[test]
 fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
     use edpcli::application::progress::{
         OverallProgress, Phase, ProgressEvent, Step, TransactionActivityPhase, Unit, WorkProgress,
