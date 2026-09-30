@@ -371,10 +371,10 @@ fn ch14_partition_layout_has_typed_status_and_concise_selection_summary() {
     let partitions = details
         .iter()
         .filter_map(|row| row.columns.as_ref())
-        .filter(|columns| columns[3] == "⚠ 需重建")
+        .filter(|columns| columns[3] == "… 待计划")
         .collect::<Vec<_>>();
     assert_eq!(partitions.len(), 3);
-    assert!(partitions.iter().all(|columns| columns[3] == "⚠ 需重建"));
+    assert!(partitions.iter().all(|columns| columns[3] == "… 待计划"));
     assert!(details.iter().any(|row| row.text.starts_with("当前区域  ")));
     assert!(details.iter().any(|row| row.text.starts_with("LBA ")));
     assert!(!details.iter().any(|row| row.text.starts_with("原因      ")));
@@ -855,6 +855,68 @@ fn mode0_to_mode1_unknown_encrypt_requires_explicit_format_for_password_change()
     );
     state.provision_mut().field_selected = share_target;
     assert!(state.provision_selected_field_is_editable());
+}
+
+#[test]
+fn unknown_source_password_geometry_change_is_blocked_synchronously_by_same_preflight_as_layout() {
+    use edpcli::provision::{CapacityInputMode, DiskProvisionKind, SourcePasswordKnowledge};
+    use edpcli::sectors::EdpfPartition;
+
+    let mut row = device(64_000_000_000);
+    row.provision_kind = DiskProvisionKind::Mode0;
+    crate::common::confirm_row_identity(&mut row);
+    row.partitions = Some(vec![
+        EdpfPartition {
+            ptype: 1,
+            active: 1,
+            enc: 0,
+            start_lba: 63,
+            size_bytes: 20_417 * 512,
+        },
+        EdpfPartition {
+            ptype: 2,
+            active: 1,
+            enc: 1,
+            start_lba: 20_480,
+            size_bytes: 4_000_000 * 512,
+        },
+        EdpfPartition {
+            ptype: 4,
+            active: 1,
+            enc: 1,
+            start_lba: 4_020_480,
+            size_bytes: 2_097_153 * 512,
+        },
+    ]);
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    assert_eq!(enter_provision_kind(&mut state, 0), ProvisionKind::Mode0);
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: DiskProvisionKind::Mode0,
+        share: Some(SourcePasswordKnowledge::Unknown),
+        share_opaque_profile: true,
+        encrypt: Some(SourcePasswordKnowledge::Unknown),
+        encrypt_opaque_profile: true,
+    }));
+
+    state.provision_mut().form.share_input_mode = CapacityInputMode::Exact;
+    state.provision_mut().form.share_sectors = "3999999".into();
+    assert!(!state.provision().form.format_share);
+
+    let details = state.provision_layout_editor_details();
+    assert!(details.iter().any(|detail| {
+        detail
+            .columns
+            .as_ref()
+            .is_some_and(|columns| columns[0] == "交换区" && columns[3] == "⚠ 需重建")
+    }));
+
+    let error = state
+        .provision_request()
+        .expect_err("the same preflight shown by the layout must block before background planning");
+    assert!(error.contains("交换区当前为“需重建”"), "{error}");
+    assert!(error.contains("格式化授权"), "{error}");
 }
 
 #[test]

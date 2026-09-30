@@ -125,30 +125,6 @@ impl AppState {
         self.provision_note_target_password_user_edit(domain);
     }
 
-    pub(super) fn provision_password_plan_intent(&self, mode: u8) -> Result<(bool, bool), String> {
-        use crate::provision::KeyDomainRole;
-        let check = |active: bool, domain: KeyDomainRole, label: &str, format: bool| {
-            if !active {
-                return Ok(false);
-            }
-            let intent = self.provision_password_intent(domain, format);
-            if let Some(message) = intent.blocking_message(label) {
-                return Err(message);
-            }
-            Ok(intent.target_password_requested())
-        };
-        let form = &self.provision.form;
-        Ok((
-            check(mode != 2, KeyDomainRole::Share, "交换区", form.format_share)?,
-            check(
-                mode != 3,
-                KeyDomainRole::Encrypt,
-                "保密区",
-                form.format_encrypt,
-            )?,
-        ))
-    }
-
     pub fn provision_push_char(&mut self, ch: char) {
         if ch.is_control() {
             return;

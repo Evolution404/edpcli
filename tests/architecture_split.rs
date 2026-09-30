@@ -101,6 +101,34 @@ fn tui_user_messages_must_carry_explicit_severity() {
 }
 
 #[test]
+fn provision_preview_and_submit_share_single_preflight_decision_source() {
+    let layout = fs::read_to_string("src/tui/provision/layout_presentation.rs")
+        .expect("read provision layout presentation");
+    let validation =
+        fs::read_to_string("src/tui/provision/validation.rs").expect("read provision validation");
+    let field_input =
+        fs::read_to_string("src/tui/provision/field_input.rs").expect("read provision field input");
+
+    assert!(
+        layout.contains("provision_preflight()"),
+        "right-side provision layout must consume the shared synchronous preflight"
+    );
+    assert!(
+        validation.contains("provision_preflight()?"),
+        "provision_request must consume the same synchronous preflight before background planning"
+    );
+    assert!(
+        !layout.contains("provision_password_intent(")
+            && !layout.contains("PreserveAssessment::for_partition"),
+        "layout_presentation must not re-implement password/geometry disposition rules"
+    );
+    assert!(
+        !field_input.contains("provision_password_plan_intent"),
+        "field_input must not introduce a second submit-only password planning rule"
+    );
+}
+
+#[test]
 fn soft_size_budget_warns_before_existing_hard_limits() {
     assert!(!near_hard_limit(79, 100));
     assert!(near_hard_limit(80, 100));

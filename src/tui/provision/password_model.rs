@@ -30,27 +30,6 @@ pub(crate) enum PasswordIntent {
     BlockedNeedsExplicitPassword,
 }
 
-impl PasswordIntent {
-    pub(crate) const fn target_password_requested(self) -> bool {
-        matches!(self, Self::Rewrap | Self::Rebuild)
-    }
-
-    pub(crate) fn blocking_message(self, label: &str) -> Option<String> {
-        match self {
-            Self::Waiting => Some(format!(
-                "{label}原密码正在只读验证，请稍候再生成计划"
-            )),
-            Self::BlockedNeedsFormat => Some(format!(
-                "{label}原密码未验证，不能无损改密；如需使用新密码，请主动勾选{label}格式化，或按 Space 切回透传"
-            )),
-            Self::BlockedNeedsExplicitPassword => Some(format!(
-                "{label}已选择格式化，但原密码未验证；请按 i 设置新密码，或取消格式化以继续透传"
-            )),
-            Self::Passthrough | Self::Rewrap | Self::Rebuild => None,
-        }
-    }
-}
-
 pub(crate) fn decide_password_intent(
     source_state: SourcePasswordState,
     target_mode: TargetPasswordMode,

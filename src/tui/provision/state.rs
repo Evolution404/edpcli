@@ -152,6 +152,8 @@ mod password_target_state;
 mod password_verification;
 #[path = "plain_editor.rs"]
 mod plain_editor;
+#[path = "preflight.rs"]
+mod preflight;
 #[path = "review.rs"]
 mod review;
 #[path = "run.rs"]

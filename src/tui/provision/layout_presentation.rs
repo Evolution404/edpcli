@@ -99,7 +99,7 @@ impl AppState {
                 );
             }
         } else {
-            let Ok((resolved, source)) = self.provision_resolved_prefill() else {
+            let Ok((resolved, _)) = self.provision_resolved_prefill() else {
                 return vec![
                     Detail::muted(usable_summary),
                     Detail::danger("目标布局尚未通过校验"),
@@ -125,111 +125,38 @@ impl AppState {
                     "当前草稿有冲突".to_string()
                 }
             );
+            let preflight = self.provision_preflight().ok();
             for part in &parts {
-                let assessment = crate::application::provision::PreserveAssessment::for_partition(
-                    source
-                        .as_ref()
-                        .and_then(|profile| profile.partition(part.role)),
-                    part,
-                );
-                let format_selected = match part.role {
-                    crate::provision::PartitionRole::Boot => self.provision.form.format_boot,
-                    crate::provision::PartitionRole::Share
-                    | crate::provision::PartitionRole::BootShareCombined => {
-                        self.provision.form.format_share
-                    }
-                    crate::provision::PartitionRole::Encrypt => self.provision.form.format_encrypt,
-                    crate::provision::PartitionRole::CompatibilityReserve => false,
-                };
-                let key_domain = crate::provision::KeyDomainRole::from_partition_role(part.role);
-                let (status, tone, reason) = if let Some(domain) = key_domain {
-                    use password_verification::{PasswordIntent, SourcePasswordState};
-                    let intent = self.provision_password_intent(domain, format_selected);
-                    let source_state = self.provision_source_password_state(domain);
-                    let opaque_candidate = self.provision_domain_opaque_candidate(domain);
-                    match intent {
-                        PasswordIntent::Waiting => (
-                            format!(
-                                "{} 验证中",
-                                crate::tui::animation::spinner_glyph(self.animation_frame())
+                let decision = preflight
+                    .as_ref()
+                    .and_then(|preflight| preflight.partition(part.role));
+                let (status, tone, reason) = match decision {
+                    Some(decision) => {
+                        use preflight::ProvisionPreflightKind as Kind;
+                        let (status, tone) = match decision.kind {
+                            Kind::Waiting => (
+                                format!(
+                                    "{} 验证中",
+                                    crate::tui::animation::spinner_glyph(self.animation_frame())
+                                ),
+                                Tone::Accent,
                             ),
-                            Tone::Accent,
-                            "正在只读验证原密码；验证完成前不生成密码域计划".to_string(),
-                        ),
-                        PasswordIntent::BlockedNeedsExplicitPassword => (
-                            "⚠ 需重建".to_string(),
-                            Tone::Warning,
-                            "已选择格式化，但原密码未验证且新密码仍为透传；请设置新密码后再重建"
-                                .to_string(),
-                        ),
-                        PasswordIntent::BlockedNeedsFormat => (
-                            "⚠ 改密需重建".to_string(),
-                            Tone::Warning,
-                            "原密码未验证，无法 Rewrap；未自动勾选格式化，请主动确认格式化后再生成新密钥"
-                                .to_string(),
-                        ),
-                        PasswordIntent::Rebuild => (
-                            "⚠ 重建".to_string(),
-                            Tone::Warning,
-                            "已选择重新格式化；目标区域将重建并生成新密钥".to_string(),
-                        ),
-                        PasswordIntent::Rewrap if assessment.candidate => (
-                            "✓ 改密".to_string(),
-                            Tone::Success,
-                            "来源 FileKey 已验证；仅 Rewrap 到新密码，数据区保持不变".to_string(),
-                        ),
-                        PasswordIntent::Rewrap => (
-                            "⚠ 需重建".to_string(),
-                            Tone::Warning,
-                            "当前布局不允许原位 Rewrap；需要用户明确选择重建/格式化".to_string(),
-                        ),
-                        PasswordIntent::Passthrough
-                            if source_state.is_verified() && assessment.candidate =>
-                        {
-                            (
-                                "✓ 透传".to_string(),
-                                Tone::Success,
-                                "来源密码与布局均已验证；原密码域、FileKey 与数据区透传"
-                                    .to_string(),
-                            )
-                        }
-                        PasswordIntent::Passthrough
-                            if matches!(source_state, SourcePasswordState::Failed | SourcePasswordState::Unknown)
-                                && opaque_candidate =>
-                        {
-                            (
-                                "✓ 透传".to_string(),
-                                Tone::Success,
-                                "来源密码未知但布局与 key profile 精确兼容；原 key material 与密文区域逐字节透传"
-                                    .to_string(),
-                            )
-                        }
-                        PasswordIntent::Passthrough => (
-                            "⚠ 需重建".to_string(),
-                            Tone::Warning,
-                            "当前密码域不满足透传条件；需要用户明确选择重建/格式化".to_string(),
-                        ),
+                            Kind::Passthrough => ("✓ 透传".into(), Tone::Success),
+                            Kind::Rewrap => ("✓ 改密".into(), Tone::Success),
+                            Kind::Preserve => ("✓ 候选保留".into(), Tone::Success),
+                            Kind::Rebuild => ("⚠ 重建".into(), Tone::Warning),
+                            Kind::BlockedNeedsFormat | Kind::BlockedNeedsTargetPassword => {
+                                ("⚠ 需重建".into(), Tone::Warning)
+                            }
+                            Kind::PendingBackend => ("… 待计划".into(), Tone::Accent),
+                        };
+                        (status, tone, decision.reason.clone())
                     }
-                } else if format_selected {
-                    (
-                        "⚠ 重建".to_string(),
+                    None => (
+                        "待确认".into(),
                         Tone::Warning,
-                        "已选择重新格式化；目标区域将重建".to_string(),
-                    )
-                } else {
-                    (
-                        if assessment.candidate {
-                            "✓ 候选保留".into()
-                        } else {
-                            "⚠ 需重建".into()
-                        },
-                        if assessment.candidate {
-                            Tone::Success
-                        } else {
-                            Tone::Warning
-                        },
-                        assessment.reason().to_string(),
-                    )
+                        "同步 preflight 尚未生成当前区域结论".into(),
+                    ),
                 };
                 partition_status.insert(
                     (part.start_lba, part.sector_count),
