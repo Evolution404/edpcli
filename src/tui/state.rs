@@ -524,35 +524,14 @@ impl AppState {
         }
     }
 
-    pub fn move_post_restore_selection(&mut self, delta: isize) {
-        let Some(wizard) = self.shell.wizard.as_mut() else {
-            return;
-        };
-        if wizard.stage != WizardStage::PostRestore {
-            return;
-        }
-        let Some(outcome) = wizard.restore_outcome.as_ref() else {
-            return;
-        };
-        let len = outcome.assessment.partitions.len();
-        if len == 0 {
-            wizard.post_restore_selected = 0;
-            return;
-        }
-        let current = wizard.post_restore_selected.min(len - 1) as isize;
-        wizard.post_restore_selected = (current + delta).clamp(0, len as isize - 1) as usize;
-    }
-
     fn selected_post_restore_format(
         wizard: &WizardState,
     ) -> Option<crate::application::post_restore::PartitionFormatRequest> {
         use crate::filesystem::FilesystemKind;
 
         let outcome = wizard.restore_outcome.as_ref()?;
-        let partition = outcome
-            .assessment
-            .partitions
-            .get(wizard.post_restore_selected)?;
+        let selected = wizard.active_post_restore_partition_index()?;
+        let partition = outcome.assessment.partitions.get(selected)?;
         let hint = partition.filesystem_hint.as_deref().unwrap_or_default();
         let filesystem = if hint.eq_ignore_ascii_case("fat16") {
             FilesystemKind::Fat16
@@ -616,11 +595,11 @@ impl AppState {
         let Some(outcome) = wizard.restore_outcome.as_ref() else {
             return;
         };
-        let Some(partition) = outcome
-            .assessment
-            .partitions
-            .get(wizard.post_restore_selected)
-        else {
+        let Some(selected) = wizard.active_post_restore_partition_index() else {
+            wizard.message = Some("当前激活区域不是可处理分区。".into());
+            return;
+        };
+        let Some(partition) = outcome.assessment.partitions.get(selected) else {
             return;
         };
         let state = partition.state;
@@ -1090,35 +1069,43 @@ impl AppState {
         result: Result<crate::application::post_restore::MetadataRestoreOutcome, String>,
     ) {
         self.shell.critical_operation = false;
-        let Some(wizard) = self.shell.wizard.as_mut() else {
-            return;
-        };
-        match result {
-            Ok(outcome) => {
-                wizard.stage = WizardStage::PostRestore;
-                wizard.restore_outcome = Some(outcome);
-                wizard.post_restore_selected = 0;
-                wizard.pending_format = None;
-                Self::clear_post_restore_volume_label(wizard);
-                wizard.message = Some("元数据恢复成功；文件系统状态已完成只读检查。".into());
-                self.shell.input_mode = InputMode::Normal;
-            }
-            Err(message) => {
-                wizard.stage = WizardStage::Result;
-                if let Some(run) = wizard.run.as_mut() {
-                    let mut event = crate::application::progress::ProgressEvent::started(
-                        crate::application::progress::OperationKind::Restore,
-                        crate::application::progress::Phase::Transaction,
-                        crate::application::progress::Step::RestoreWrite,
-                        message.clone(),
-                    );
-                    event.severity = crate::application::progress::Severity::Error;
-                    event.log_policy = crate::application::progress::LogPolicy::Append;
-                    run.push(event);
+        let mut initialize_workbench = false;
+        {
+            let Some(wizard) = self.shell.wizard.as_mut() else {
+                return;
+            };
+            match result {
+                Ok(outcome) => {
+                    wizard.stage = WizardStage::PostRestore;
+                    wizard.restore_outcome = Some(outcome);
+                    wizard.post_restore_selected = 0;
+                    wizard.pending_format = None;
+                    Self::clear_post_restore_volume_label(wizard);
+                    wizard.message =
+                        Some("元数据恢复成功；文件系统状态已完成只读检查。".into());
+                    self.shell.input_mode = InputMode::Normal;
+                    initialize_workbench = true;
                 }
-                wizard.message = Some(message);
-                self.shell.input_mode = InputMode::Normal;
+                Err(message) => {
+                    wizard.stage = WizardStage::Result;
+                    if let Some(run) = wizard.run.as_mut() {
+                        let mut event = crate::application::progress::ProgressEvent::started(
+                            crate::application::progress::OperationKind::Restore,
+                            crate::application::progress::Phase::Transaction,
+                            crate::application::progress::Step::RestoreWrite,
+                            message.clone(),
+                        );
+                        event.severity = crate::application::progress::Severity::Error;
+                        event.log_policy = crate::application::progress::LogPolicy::Append;
+                        run.push(event);
+                    }
+                    wizard.message = Some(message);
+                    self.shell.input_mode = InputMode::Normal;
+                }
             }
+        }
+        if initialize_workbench {
+            self.initialize_post_restore_result_workbench();
         }
     }
 
