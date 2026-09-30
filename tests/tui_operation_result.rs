@@ -274,7 +274,6 @@ fn provision_result_page_attaches_interactive_shared_full_disk_layout() {
     assert!(devices.contains("disk_region_list_lines"));
 }
 
-
 #[test]
 fn restore_post_result_uses_shared_workbench_and_typed_layout() {
     let render = include_str!("../src/tui/restore_result_render.rs");
@@ -304,8 +303,7 @@ fn restore_post_result_uses_shared_workbench_and_typed_layout() {
         "restore result rows must use the shared selected-row background"
     );
     assert!(
-        partition_layout
-            .contains("theme.table_cell(base, column == active_column, focused)"),
+        partition_layout.contains("theme.table_cell(base, column == active_column, focused)"),
         "restore result active column must use the shared bright/bold cell style"
     );
     assert!(
@@ -327,7 +325,9 @@ fn restore_post_result_uses_shared_workbench_and_typed_layout() {
     assert!(root.contains("let post_restore_overlay ="));
     assert!(root.contains("super::ui::centered_modal_rect(area, 92, 24)"));
     assert!(
-        root.matches("draw_post_restore_result(frame, area, state)").count() >= 2,
+        root.matches("draw_post_restore_result(frame, area, state)")
+            .count()
+            >= 2,
         "follow-up restore stages must retain the result workbench as their background"
     );
     assert!(
