@@ -133,6 +133,7 @@ fn fixture(dev: &mut SparseFormatDev) -> (common::FakeRunner, MetadataRestoreOut
         device_state: "plain".into(),
         device_id: String::new(),
         total_sectors: TOTAL,
+        layout: Err("fixture layout not projected".into()),
         format_target_pin: Some(
             edpcli::application::media_identity::MediaIdentityResumePin::from_pin(&pin),
         ),
@@ -315,6 +316,7 @@ fn encrypted_edp_partition_cannot_enter_plaintext_format() {
         device_state: "edp".into(),
         device_id: "disk&ven_netac&prod_onlydisk".into(),
         total_sectors: TOTAL,
+        layout: Err("fixture layout not projected".into()),
         format_target_pin: Some(
             edpcli::application::media_identity::MediaIdentityResumePin::from_pin(&pin),
         ),
@@ -445,6 +447,7 @@ fn encrypted_mode0_fixture() -> (
         device_state: "edp".into(),
         device_id,
         total_sectors: TEST_TOTAL,
+        layout: Err("fixture layout not projected".into()),
         format_target_pin: Some(
             edpcli::application::media_identity::MediaIdentityResumePin::from_pin(&pin),
         ),
