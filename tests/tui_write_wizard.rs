@@ -140,6 +140,7 @@ fn plain_needs_format_outcome() -> MetadataRestoreOutcome {
         device_state: "plain".into(),
         device_id: String::new(),
         total_sectors: 245_760_000,
+        layout: Err("fixture layout not projected".into()),
         format_target_pin: None,
     }
 }
