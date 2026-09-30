@@ -987,6 +987,7 @@ fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
     state.begin_selected_post_restore_action();
     let (label_view, _) = rendered_text(&state);
     let compact_label = label_view.replace(' ', "");
+    assert!(compact_label.contains("恢复结果"), "{label_view}");
     assert!(compact_label.contains("恢复后的卷标"), "{label_view}");
     assert!(compact_label.contains("普通卷"), "{label_view}");
     assert!(compact_label.contains("备份中的原卷标"), "{label_view}");
@@ -1020,6 +1021,10 @@ fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
         password_state.push_wizard_secret_char(ch);
     }
     let (password_view, _) = rendered_text(&password_state);
+    assert!(
+        password_view.replace(' ', "").contains("恢复结果"),
+        "{password_view}"
+    );
     assert!(!password_view.contains("visible-secret"), "{password_view}");
     assert!(
         password_view.matches('•').count() >= "visible-secret".chars().count(),
