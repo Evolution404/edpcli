@@ -520,6 +520,7 @@ pub fn prepare_target_provision(
         dept,
         label,
     )
+    .and_then(|metadata| metadata.with_lba8_identity(request.lba8_identity.clone()))
     .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘身份字段无效: {message}")))?;
     let profile = ProvisionProfile::canonical_v1().with_pass_info_policy(pass_info_policy);
     let spec = ProvisionSpec::new(target, metadata, profile)

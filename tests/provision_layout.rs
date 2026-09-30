@@ -5,13 +5,13 @@ use edpcli::protocol::{
 use edpcli::provision::{
     build_official_partition_layout, generate_official_image, official_mbr_partition_type,
     visible_mbr_partition_type, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
-    OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    Lba8Identity, OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
     OfficialProvisionPlan, OfficialProvisionValidator, OnlyId, ProvisionEntropy, ProvisionImage,
     ProvisionMetadata, ProvisionProfile, ProvisionSpec, TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS,
     OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use edpcli::{
-    crypto::{a6b0_full, crc32_bare, xor_rolling},
+    crypto::{a6b0_full, crc32_bare, lba6_decode, xor_rolling},
     platform::{HardwareProbe, InquiryInfo, NativeTransport},
 };
 
@@ -217,7 +217,7 @@ fn mode_specific_unused_size_fields_do_not_change_the_layout() {
     assert_eq!(a, b);
 }
 
-fn official_spec() -> ProvisionSpec {
+fn official_spec_with_lba8(identity: Lba8Identity) -> ProvisionSpec {
     let probe = HardwareProbe {
         vid: Some(0x0dd8),
         pid: Some(0x2005),
@@ -236,8 +236,90 @@ fn official_spec() -> ProvisionSpec {
         "江苏省电力有限公司",
         "江苏电力!SAFE6",
     )
+    .unwrap()
+    .with_lba8_identity(identity)
     .unwrap();
     ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1()).unwrap()
+}
+
+fn official_spec() -> ProvisionSpec {
+    official_spec_with_lba8(Lba8Identity::default())
+}
+
+#[test]
+fn custom_lba8_identity_is_encoded_and_validated_end_to_end() {
+    let identity = Lba8Identity {
+        glab: "CUSTOM-GLAB-001".into(),
+        indus: "POWER".into(),
+        orgcd: "ORG001".into(),
+        org: "NANJING".into(),
+        unit: "OPS".into(),
+        alarm: "A1".into(),
+        autonum: "YD900001".into(),
+        rmark: "RMARK".into(),
+        vol0: "BOOTMETA".into(),
+        vol1: "SHAREMETA".into(),
+        vol2: "ENCMETA".into(),
+        volc0: "C0".into(),
+        volc1: "C1".into(),
+        volc2: "C2".into(),
+    };
+
+    let spec = official_spec_with_lba8(identity.clone());
+    let plan = official_plan(OfficialPartitionMode::DefaultThreePartition);
+    let image = generate_official_image(&spec, &ProvisionEntropy::new([0x5a; 252]), &plan).unwrap();
+    OfficialProvisionValidator::validate(&spec, &image, &plan).unwrap();
+
+    let lba6 = lba6_decode(&image.as_bytes()[6 * 512..7 * 512]);
+    assert_eq!(&lba6[0x70..0x78], b"YD900001");
+    assert_eq!(lba6[0x78], 0);
+
+    let crc = crc32_bare(spec.target().device_id().as_bytes());
+    let wire = &image.as_bytes()[8 * 512..9 * 512];
+    let first = a6b0_full(&wire[..16], &crc.to_le_bytes(), 0);
+    let logical = u32le(&first, 4) as usize;
+    let encrypted_len = (logical / 16 + 1) * 16;
+    let plain = a6b0_full(&wire[..encrypted_len], &crc.to_le_bytes(), 0);
+    let body = String::from_utf8_lossy(&plain[0x80..logical]);
+
+    for expected in [
+        "GLab=CUSTOM-GLAB-001",
+        "Indus=POWER",
+        "Orgcd=ORG001",
+        "Org=NANJING",
+        "Unit=OPS",
+        "Dept=",
+        "User=USER06",
+        "Alarm=A1",
+        "Autonum=YD900001",
+        "Label=",
+        "Rmark=RMARK",
+        "VOL0=BOOTMETA",
+        "VOL1=SHAREMETA",
+        "VOL2=ENCMETA",
+        "VOLC0=C0",
+        "VOLC1=C1",
+        "VOLC2=C2",
+    ] {
+        assert!(body.contains(expected), "missing {expected} in {body}");
+    }
+
+    let invalid_autonum = Lba8Identity {
+        autonum: "1234567890123456".into(),
+        ..Lba8Identity::default()
+    };
+    assert!(invalid_autonum.validate().is_err());
+
+    let invalid_pipe = Lba8Identity {
+        org: "bad|value".into(),
+        ..Lba8Identity::default()
+    };
+    assert!(invalid_pipe.validate().is_err());
+    let invalid_equals = Lba8Identity {
+        org: "bad=value".into(),
+        ..Lba8Identity::default()
+    };
+    assert!(invalid_equals.validate().is_err());
 }
 
 fn legacy_key_material() -> edpcli::provision::LegacyLba7KeyMaterial {

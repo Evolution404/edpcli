@@ -85,6 +85,9 @@ pub(super) fn draw_provision_review(
                 profile: crate::tui::disk_layout::DiskLayoutProfile::EditorExact,
                 tail: state.disk_layout_tail_expansion(),
                 selected_segment: state.disk_layout_selected(),
+                map_selection: None,
+                show_map_marker: false,
+                show_linked_selection: false,
             },
         );
     }

@@ -99,6 +99,7 @@ impl AppState {
                 }
             }
             ProvisionFieldId::LabelId => ProvisionInputPolicy::OnlyId,
+            ProvisionFieldId::Lba8Identity(_) => ProvisionInputPolicy::Lba8Text,
             ProvisionFieldId::StartLba(_) => ProvisionInputPolicy::UnsignedInteger,
             ProvisionFieldId::MaxPasswordErrors(_) => ProvisionInputPolicy::U8,
             _ => ProvisionInputPolicy::Text,
@@ -121,6 +122,22 @@ impl AppState {
                     part.capacity_edited = true;
                 }
             }
+        }
+    }
+
+    pub(super) fn provision_mark_target_password_force_format(
+        &mut self,
+        id: Option<ProvisionFieldId>,
+    ) {
+        let Some(ProvisionFieldId::TargetPassword(domain)) = id else {
+            return;
+        };
+        if !self.provision_domain_opaque_candidate(domain) {
+            return;
+        }
+        match domain {
+            crate::provision::KeyDomainRole::Share => self.provision.form.format_share = true,
+            crate::provision::KeyDomainRole::Encrypt => self.provision.form.format_encrypt = true,
         }
     }
 
@@ -151,6 +168,7 @@ impl AppState {
             self.provision.field_cursor = cursor + 1;
             self.provision_mark_capacity_edit(Some(id));
             self.provision_mark_source_password_unverified(Some(id));
+            self.provision_mark_target_password_force_format(Some(id));
             self.provision.message = None;
         }
     }
@@ -169,6 +187,7 @@ impl AppState {
                 self.provision.field_cursor = cursor - 1;
                 self.provision_mark_capacity_edit(id);
                 self.provision_mark_source_password_unverified(id);
+                self.provision_mark_target_password_force_format(id);
                 self.provision.message = None;
             }
         }
@@ -184,6 +203,7 @@ impl AppState {
                 *field = chars.into_iter().collect();
                 self.provision_mark_capacity_edit(id);
                 self.provision_mark_source_password_unverified(id);
+                self.provision_mark_target_password_force_format(id);
                 self.provision.message = None;
             }
         }

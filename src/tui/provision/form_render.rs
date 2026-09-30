@@ -1,6 +1,12 @@
 use super::*;
-use crate::tui::state::ProvisionFieldSection;
+use crate::tui::state::{
+    ProvisionFieldId, ProvisionFieldSection, ProvisionPasswordVerificationState,
+};
 use std::collections::HashMap;
+
+#[path = "form_special_rows.rs"]
+mod form_special_rows;
+use form_special_rows::{advanced_settings_row, password_domain_row};
 
 const INPUT_EDITING_SLACK: usize = 2;
 
@@ -18,7 +24,7 @@ pub(super) fn draw_provision_form(
     let focused_pane = state.provision_focused_pane();
     let parameters_focused = focused_pane == crate::tui::pane::PaneId::ProvisionParameters;
     let (form_area, layout_area) = if wide {
-        let areas = Layout::horizontal([Constraint::Percentage(56), Constraint::Percentage(44)])
+        let areas = Layout::horizontal([Constraint::Percentage(44), Constraint::Percentage(56)])
             .split(main_area);
         (Some(areas[0]), Some(areas[1]))
     } else if focused_pane == crate::tui::pane::PaneId::ProvisionDiskLayout {
@@ -71,9 +77,31 @@ pub(super) fn draw_provision_form(
     let mut selected_line = 0usize;
     for (section, indexes) in rows {
         if current_section != Some(section) {
-            form_lines.push(Line::from(""));
-            form_lines.push(Line::from(Span::styled(section.label(), secondary())));
+            if section != ProvisionFieldSection::AdvancedIdentity {
+                form_lines.push(Line::from(""));
+                form_lines.push(Line::from(Span::styled(section.label(), secondary())));
+            }
             current_section = Some(section);
+        }
+        if indexes.len() == 1
+            && state.provision_field_id(indexes[0]) == Some(ProvisionFieldId::AdvancedSection)
+        {
+            if indexes[0] == provision.field_selected {
+                selected_line = form_lines.len();
+            }
+            form_lines.push(advanced_settings_row(state, indexes[0], parameters_focused));
+            continue;
+        }
+        if section == ProvisionFieldSection::PasswordDomain && indexes.len() == 2 {
+            if indexes.contains(&provision.field_selected) {
+                selected_line = form_lines.len();
+            }
+            if let Some(line) =
+                password_domain_row(state, &indexes, &fields, content_width, parameters_focused)
+            {
+                form_lines.push(line);
+                continue;
+            }
         }
         let mut spans = Vec::new();
         let row_selected = indexes.contains(&provision.field_selected);
@@ -118,6 +146,9 @@ pub(super) fn draw_provision_form(
                 .max(1);
 
             let focused_active = active && parameters_focused;
+            if section == ProvisionFieldSection::AdvancedIdentity {
+                spans.push(Span::raw("  "));
+            }
             spans.push(Span::styled(
                 if focused_active { "▌ " } else { "  " },
                 if focused_active {
@@ -179,41 +210,8 @@ pub(super) fn draw_provision_form(
             Span::styled(safe(&hint), muted()),
         ]));
     }
-    if provision.kind != ProvisionKind::Plain {
-        form_lines.push(Line::from(""));
-        form_lines.push(Line::from(Span::styled("来源状态", secondary())));
-        let source_status = |domain: &str, knowledge: crate::provision::SourcePasswordKnowledge| {
-            let (text, style) = match knowledge {
-                crate::provision::SourcePasswordKnowledge::DefaultVerified => {
-                    ("✓ 默认密码已验证", success())
-                }
-                crate::provision::SourcePasswordKnowledge::UserVerified => {
-                    ("✓ 用户密码已验证", success())
-                }
-                crate::provision::SourcePasswordKnowledge::Unknown => ("! 尚未验证", warning()),
-            };
-            Line::from(vec![
-                Span::styled(crate::ui::pad_to(domain, 10), muted()),
-                Span::styled(text, style),
-            ])
-        };
-        if matches!(provision.kind.mode(), Some(0 | 1 | 3)) {
-            form_lines.push(source_status(
-                "交换域",
-                provision.form.share_source_knowledge,
-            ));
-        }
-        if matches!(provision.kind.mode(), Some(0..=2)) {
-            form_lines.push(source_status(
-                "保密域",
-                provision.form.encrypt_source_knowledge,
-            ));
-        }
-    }
     if let Some(message) = &provision.message {
-        if !message.starts_with("来源状态:") {
-            form_lines.push(Line::from(Span::styled(safe(message), danger())));
-        }
+        form_lines.push(Line::from(Span::styled(safe(message), danger())));
     }
 
     let visible_height = form_geometry.height.saturating_sub(2) as usize;
@@ -233,6 +231,10 @@ pub(super) fn draw_provision_form(
 
     if let Some(layout_area) = layout_area {
         let layout_model = state.provision_layout_model();
+        let map_selection = parameters_focused
+            .then(|| state.provision_field_region_selection(&layout_model))
+            .flatten();
+        let show_linked_selection = parameters_focused && map_selection.is_some();
         let layout_details = state.provision_layout_editor_details();
         let layout_summary = state.selected_device().map_or_else(
             || {
@@ -269,6 +271,9 @@ pub(super) fn draw_provision_form(
                 profile: crate::tui::disk_layout::DiskLayoutProfile::EditorExact,
                 tail: state.disk_layout_tail_expansion(),
                 selected_segment: state.disk_layout_selected(),
+                map_selection,
+                show_map_marker: true,
+                show_linked_selection,
             },
         );
     }

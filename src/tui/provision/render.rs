@@ -108,6 +108,28 @@ fn draw_provision_status_modal(frame: &mut Frame, title: &str, lines: Vec<Line<'
     });
 }
 
+fn draw_provision_planning_modal(frame: &mut Frame, state: &AppState) {
+    let modal = crate::tui::ui::centered_modal_rect(frame.area(), 36, 7);
+    crate::tui::ui::render_modal(frame, modal, "", |frame, inner| {
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "正在生成制盘计划",
+                    accent().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    crate::tui::animation::spinner_glyph(state.animation_frame()).to_string(),
+                    secondary(),
+                )),
+            ])
+            .alignment(ratatui::layout::Alignment::Center),
+            inner,
+        );
+    });
+}
+
 pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let provision = state.provision();
     let sections = Layout::vertical([
@@ -174,20 +196,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
         }
         ProvisionStage::Planning => {
             draw_provision_form(frame, main_area, state);
-            draw_provision_status_modal(
-                frame,
-                "只读规划 · 生成计划",
-                vec![
-                    Line::from(safe(
-                        provision
-                            .message
-                            .as_deref()
-                            .unwrap_or("正在只读检查目标盘…"),
-                    )),
-                    Line::from("正在计算 LCE、分区边界与协议元数据。"),
-                    Line::from(Span::styled("此阶段不会写入目标介质。", muted())),
-                ],
-            );
+            draw_provision_planning_modal(frame, state);
         }
         ProvisionStage::Review => {
             draw_provision_review(frame, main_area, state);

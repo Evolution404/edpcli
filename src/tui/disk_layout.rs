@@ -186,7 +186,7 @@ impl<'a> DiskCapacityMap<'a> {
                         super::theme::current().disk_region_outline(selection.kind, true),
                     ),
                 ]));
-            } else if matches!(self.profile, DiskCapacityMapProfile::Full) {
+            } else {
                 lines.push(Line::from(""));
             }
         }
@@ -746,6 +746,9 @@ pub struct DiskLayoutPane<'a> {
     pub profile: DiskLayoutProfile,
     pub tail: TailExpansion,
     pub selected_segment: usize,
+    pub map_selection: Option<DiskCapacitySelection>,
+    pub show_map_marker: bool,
+    pub show_linked_selection: bool,
 }
 
 impl DiskLayoutModel {
@@ -791,20 +794,21 @@ impl DiskLayoutModel {
                 theme.secondary_text(),
             )));
         }
-        let selection = pane
-            .focused
-            .then(|| {
-                visible
-                    .segments
-                    .get(pane.selected_segment)
-                    .and_then(DiskCapacitySelection::from_segment)
-            })
-            .flatten();
+        let selection = pane.map_selection.or_else(|| {
+            pane.focused
+                .then(|| {
+                    visible
+                        .segments
+                        .get(pane.selected_segment)
+                        .and_then(DiskCapacitySelection::from_segment)
+                })
+                .flatten()
+        });
         lines.extend(
             DiskCapacityMap::new(self, DiskCapacityMapProfile::Compact)
                 .with_tail(pane.tail)
                 .with_selection(selection)
-                .with_marker(pane.focused)
+                .with_marker(pane.show_map_marker || pane.focused)
                 .lines(area.width.saturating_sub(4) as usize),
         );
         if !pane.details.is_empty() {
@@ -819,16 +823,14 @@ impl DiskLayoutModel {
                 DiskLayoutDetailTone::Danger => theme.danger(),
             };
             if let Some([name, capacity, range, status]) = &detail.columns {
+                let selected_visible =
+                    detail.selected && (pane.focused || pane.show_linked_selection);
                 let region_style = detail
                     .region_kind
-                    .map(|kind| theme.disk_region_tree(kind, detail.selected && pane.focused));
+                    .map(|kind| theme.disk_region_tree(kind, selected_visible));
                 let name_style = region_style.unwrap_or_else(|| theme.muted());
                 let marker_style = region_style.unwrap_or_else(|| theme.accent());
-                let marker = if detail.selected && pane.focused {
-                    "▌"
-                } else {
-                    " "
-                };
+                let marker = if selected_visible { "▌" } else { " " };
                 if compact {
                     lines.push(Line::from(vec![
                         Span::styled(marker, marker_style),
@@ -981,6 +983,9 @@ mod tests {
                             profile: DiskLayoutProfile::DetailedExact,
                             tail: TailExpansion::Collapsed,
                             selected_segment: 0,
+                            map_selection: None,
+                            show_map_marker: false,
+                            show_linked_selection: false,
                         },
                     );
                 })

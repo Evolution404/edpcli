@@ -67,6 +67,7 @@ pub struct OfficialProvisionRequest {
     pub user: String,
     pub dept: String,
     pub label: String,
+    pub lba8_identity: crate::provision::Lba8Identity,
     pub key_domains: KeyDomainSecrets,
     pub volume_label: String,
     pub format: FormatOptions,

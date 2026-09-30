@@ -43,7 +43,7 @@ impl AppState {
         }
         self.provision.stage = ProvisionStage::Planning;
         self.shell.input_mode = InputMode::Normal;
-        self.provision.message = Some("正在只读检查目标并生成精确制盘计划…".into());
+        self.provision.message = None;
     }
 
     fn provision_restore_form_snapshot(&mut self) {
@@ -70,7 +70,8 @@ impl AppState {
         self.shell.input_mode = InputMode::Normal;
         self.provision_restore_form_snapshot();
         self.provision.review_view_snapshot = None;
-        self.provision.message = Some(message);
+        self.provision.message = None;
+        self.set_notice(message);
     }
 
     pub fn provision_return_review_to_form(&mut self) {

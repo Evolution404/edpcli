@@ -21,7 +21,6 @@ pub(super) enum ActionRequest {
     ProvisionKeyProbe {
         disk: u32,
     },
-    ProvisionSourcePasswordVerify,
     ProvisionPlan,
 }
 

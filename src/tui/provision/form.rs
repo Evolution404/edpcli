@@ -25,6 +25,7 @@ pub struct ProvisionForm {
     pub user: String,
     pub dept: String,
     pub label: String,
+    pub lba8_identity: crate::provision::Lba8Identity,
     pub share_source_password: String,
     pub share_source_knowledge: crate::provision::SourcePasswordKnowledge,
     pub share_opaque_profile: bool,
@@ -188,6 +189,7 @@ pub(super) enum ProvisionInputPolicy {
     U8,
     OnlyId,
     Text,
+    Lba8Text,
 }
 
 impl ProvisionInputPolicy {
@@ -207,6 +209,9 @@ impl ProvisionInputPolicy {
                     || candidate.parse::<u32>().is_ok()
             }
             Self::Text => candidate.chars().all(|ch| !ch.is_control()),
+            Self::Lba8Text => candidate
+                .chars()
+                .all(|ch| !ch.is_control() && ch != '|' && ch != '='),
         }
     }
 
@@ -217,6 +222,7 @@ impl ProvisionInputPolicy {
             Self::U8 => "该字段仅允许 0–255",
             Self::OnlyId => "标签标识仅允许 u32 或 i32 整数",
             Self::Text => "当前字段包含不支持的字符",
+            Self::Lba8Text => "LBA8 字段不允许控制字符、| 或 =",
         }
     }
 }
@@ -269,6 +275,7 @@ impl Default for ProvisionForm {
             user: String::new(),
             dept: String::new(),
             label: crate::provision::DEFAULT_SAFE6_LABEL.into(),
+            lba8_identity: crate::provision::Lba8Identity::default(),
             share_source_password: String::new(),
             share_source_knowledge: crate::provision::SourcePasswordKnowledge::Unknown,
             share_opaque_profile: false,
@@ -295,6 +302,10 @@ impl Default for ProvisionForm {
 }
 
 impl ProvisionForm {
+    pub(crate) fn lba8_identity(&self) -> crate::provision::Lba8Identity {
+        self.lba8_identity.clone()
+    }
+
     pub(super) fn format_sector_unit_3(sectors: u64, sectors_per_unit: u64) -> String {
         let scaled =
             ((sectors as u128) * 1_000 + (sectors_per_unit as u128 / 2)) / sectors_per_unit as u128;

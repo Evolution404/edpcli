@@ -109,8 +109,8 @@ pub(super) fn apply_task_updates(
     if let Some(result) = updates.provision_key_probe {
         state.provision_finish_key_probe(result);
     }
-    if let Some((domain, result)) = updates.provision_key_verify {
-        state.provision_finish_source_password_verify(domain, result);
+    for (domain, revision, result) in updates.provision_key_verify {
+        state.provision_finish_source_password_verify(domain, revision, result);
     }
     if let Some(result) = updates.provision_plan {
         state.provision_finish_plan(result);

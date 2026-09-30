@@ -41,8 +41,9 @@ pub(super) fn handle_provision_key(
             if matches!(action, TuiAction::FocusNext | TuiAction::FocusPrevious)
                 && state.provision().stage == ProvisionStage::Form
                 && state.input_mode() == state::InputMode::Insert
+                && state.provision_end_insert()
             {
-                state.provision_end_insert();
+                crate::tui::dispatch::start_provision_source_password_verify(state, tasks);
             }
             match dispatch_tui_action(
                 state,
@@ -69,7 +70,10 @@ pub(super) fn handle_provision_key(
                     TuiAction::CursorRight => state.provision_move_cursor(1),
                     TuiAction::CursorHome => state.provision_cursor_home(),
                     TuiAction::CursorEnd => state.provision_cursor_end(),
-                    TuiAction::Submit | TuiAction::Back => state.provision_end_insert(),
+                    TuiAction::Submit | TuiAction::Back if state.provision_end_insert() => {
+                        crate::tui::dispatch::start_provision_source_password_verify(state, tasks);
+                    }
+                    TuiAction::Submit | TuiAction::Back => {}
                     _ => {}
                 }
             }

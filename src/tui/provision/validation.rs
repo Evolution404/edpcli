@@ -324,10 +324,12 @@ impl AppState {
                 .filter(|value| *value > 0)
                 .ok_or_else(|| format!("{label} 必须为正整数扇区"))
         };
-        let share_opaque =
-            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share);
-        let encrypt_opaque =
-            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt);
+        let share_opaque = self
+            .provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share)
+            && !self.provision.form.format_share;
+        let encrypt_opaque = self
+            .provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt)
+            && !self.provision.form.format_encrypt;
         let form = &self.provision.form;
         let exact = crate::provision::CapacityInputMode::Exact;
         let capacity_sectors = |active: bool,
@@ -433,6 +435,7 @@ impl AppState {
             user: self.provision.form.user.trim().to_string(),
             dept: self.provision.form.dept.trim().to_string(),
             label: self.provision.form.label.trim().to_string(),
+            lba8_identity: self.provision.form.lba8_identity(),
             key_domains: crate::provision::KeyDomainSecrets::new(
                 crate::provision::KeyDomainSecretPair::new(
                     (!self.provision.form.share_source_password.is_empty())

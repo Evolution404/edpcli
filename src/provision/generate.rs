@@ -169,7 +169,7 @@ fn build_lba6_lba9(spec: &ProvisionSpec) -> Result<([u8; SECTOR], [u8; SECTOR]),
         lba9[0x100 + continuation.len()] = 0;
     }
 
-    let serial = spec.profile().autonum().as_bytes();
+    let serial = spec.metadata().lba8_identity().autonum.as_bytes();
     if serial.len() > 15 {
         return Err("SAFE6 Autonum exceeds 15-byte on-disk slot".into());
     }
@@ -413,21 +413,7 @@ fn build_lba8(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
     plain[0x14..0x18].copy_from_slice(&spec.profile().lba4_profile_word());
     plain[0x3e..0x40].copy_from_slice(&[0x80, 0x00]);
 
-    let dept = gbk(spec.metadata().dept())?;
-    let user = gbk(spec.metadata().user())?;
-    let label = gbk(spec.metadata().label())?;
-    let mut body = Vec::new();
-    body.extend_from_slice(b"<ELABEL>GLab=");
-    body.extend_from_slice(spec.profile().glab().as_bytes());
-    body.extend_from_slice(b"||Indus=||Orgcd=||Org=||Unit=||Dept=");
-    body.extend_from_slice(&dept);
-    body.extend_from_slice(b"||User=");
-    body.extend_from_slice(&user);
-    body.extend_from_slice(b"||Alarm=||Autonum=");
-    body.extend_from_slice(spec.profile().autonum().as_bytes());
-    body.extend_from_slice(b"||Label=");
-    body.extend_from_slice(&label);
-    body.extend_from_slice(b"||Rmark=||VOL0=||VOL1=||VOL2=||VOLC0=||VOLC1=||VOLC2=||");
+    let body = super::spec::lba8_elabel_body(spec.metadata())?;
     if body.len() > SECTOR - 0x80 - 1 {
         return Err(format!("LBA8 LLGB body too large: {} bytes", body.len()));
     }

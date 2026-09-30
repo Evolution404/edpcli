@@ -229,10 +229,6 @@ fn execute_action_request(
             }
             StateEffect::None
         }
-        controller::ActionRequest::ProvisionSourcePasswordVerify => {
-            start_provision_source_password_verify(state, tasks);
-            StateEffect::None
-        }
         controller::ActionRequest::ProvisionPlan => {
             start_provision_plan(state, tasks);
             StateEffect::None
@@ -279,34 +275,29 @@ pub(super) fn open_advanced_inspect_selection(
 
 pub(super) fn start_provision_source_password_verify(state: &mut AppState, tasks: &mut TaskHub) {
     let Some(disk) = state.selected_device_disk() else {
-        state.provision_mut().message = Some("目标 USB 已不存在，请返回设备页重新选择。".into());
+        state.set_notice("目标 USB 已不存在，请返回设备页重新选择。");
         return;
     };
     match state.provision_source_password_verify_request() {
-        Ok(Some((domain, password))) => {
-            state.provision_mut().message = Some(match domain {
-                crate::provision::KeyDomainRole::Share => "正在只读验证交换域来源密码…".into(),
-                crate::provision::KeyDomainRole::Encrypt => "正在只读验证保密域来源密码…".into(),
-            });
+        Ok(Some((domain, password, revision))) => {
             if let Err(message) =
-                tasks.request_provision_source_password_verify(disk, domain, password)
+                tasks.request_provision_source_password_verify(disk, domain, password, revision)
             {
-                state.provision_finish_source_password_verify(domain, Err(message.to_string()));
+                state.provision_finish_source_password_verify(
+                    domain,
+                    revision,
+                    Err(message.to_string()),
+                );
             }
         }
-        Ok(None) => {
-            state.provision_mut().message =
-                Some("当前字段不是来源密码；v 仅验证来源密码域。".into());
-        }
-        Err(message) => {
-            state.provision_mut().message = Some(message);
-        }
+        Ok(None) => {}
+        Err(message) => state.set_notice(message),
     }
 }
 
 pub(super) fn start_provision_plan(state: &mut AppState, tasks: &mut TaskHub) {
     let Some(disk) = state.selected_device_disk() else {
-        state.provision_mut().message = Some("目标 USB 已不存在，请返回设备页重新选择。".into());
+        state.set_notice("目标 USB 已不存在，请返回设备页重新选择。");
         return;
     };
     let request = if state.provision().kind == state::ProvisionKind::Plain {
@@ -329,7 +320,7 @@ pub(super) fn start_provision_plan(state: &mut AppState, tasks: &mut TaskHub) {
                 crate::application::provision::ProvisionRequest::Plain(request)
             }
             Err(message) => {
-                state.provision_mut().message = Some(message);
+                state.set_notice(message);
                 return;
             }
         }
@@ -339,7 +330,7 @@ pub(super) fn start_provision_plan(state: &mut AppState, tasks: &mut TaskHub) {
                 crate::application::provision::ProvisionRequest::Official(Box::new(request))
             }
             Err(message) => {
-                state.provision_mut().message = Some(message);
+                state.set_notice(message);
                 return;
             }
         }

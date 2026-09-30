@@ -20,11 +20,22 @@ pub enum ProvisionBarKind {
     Compatibility,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ProvisionPasswordVerificationState {
+    #[default]
+    Idle,
+    Verifying,
+    Failed,
+}
+
+#[path = "lba8_identity_field.rs"]
+mod lba8_identity_field;
+pub(crate) use lba8_identity_field::Lba8IdentityField;
 #[path = "field_model.rs"]
 mod field_model;
 pub(crate) use field_model::{
     PlainProvisionFieldKind, ProvisionFieldCapabilities, ProvisionFieldDescriptor,
-    ProvisionFieldId, ProvisionFieldSection,
+    ProvisionFieldId, ProvisionFieldSection, ProvisionRegionFocus,
 };
 
 #[path = "result_model.rs"]
@@ -97,6 +108,8 @@ pub enum ProvisionStage {
 
 pub type ProvisionPrepared = crate::application::provision::PreparedProvision;
 
+#[path = "advanced_identity.rs"]
+mod advanced_identity;
 #[path = "editor.rs"]
 mod editor;
 #[path = "execution_state.rs"]
@@ -154,6 +167,12 @@ pub struct ProvisionState {
     pub scheme_picker_open: bool,
     pub field_selected: usize,
     pub field_cursor: usize,
+    pub advanced_identity_open: bool,
+    pub(crate) source_password_edit_dirty: bool,
+    pub(crate) share_source_password_revision: u64,
+    pub(crate) encrypt_source_password_revision: u64,
+    pub(crate) share_source_verification: ProvisionPasswordVerificationState,
+    pub(crate) encrypt_source_verification: ProvisionPasswordVerificationState,
     pub form: ProvisionForm,
     pub plain_form: PlainProvisionForm,
     pub prepared: Option<ProvisionPrepared>,
@@ -181,6 +200,12 @@ impl Default for ProvisionState {
             scheme_picker_open: false,
             field_selected: 0,
             field_cursor: 0,
+            advanced_identity_open: false,
+            source_password_edit_dirty: false,
+            share_source_password_revision: 0,
+            encrypt_source_password_revision: 0,
+            share_source_verification: ProvisionPasswordVerificationState::Idle,
+            encrypt_source_verification: ProvisionPasswordVerificationState::Idle,
             form: ProvisionForm::default(),
             plain_form: PlainProvisionForm::default(),
             prepared: None,
@@ -218,14 +243,23 @@ impl AppState {
             return false;
         }
         self.shell.input_mode = InputMode::Insert;
+        self.provision.source_password_edit_dirty = false;
         self.provision_sync_cursor_to_end();
         true
     }
 
-    pub fn provision_end_insert(&mut self) {
-        if self.shell.input_mode == InputMode::Insert {
-            self.shell.input_mode = InputMode::Normal;
+    pub fn provision_end_insert(&mut self) -> bool {
+        if self.shell.input_mode != InputMode::Insert {
+            return false;
         }
+        let source_password_dirty = self.provision.source_password_edit_dirty
+            && matches!(
+                self.provision_field_id(self.provision.field_selected),
+                Some(ProvisionFieldId::SourcePassword(_))
+            );
+        self.shell.input_mode = InputMode::Normal;
+        self.provision.source_password_edit_dirty = false;
+        source_password_dirty
     }
 
     pub fn provision_reset(&mut self) {

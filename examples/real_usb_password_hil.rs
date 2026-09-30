@@ -390,6 +390,7 @@ mod macos {
             user: "TEST".into(),
             dept: "TEST".into(),
             label: DEFAULT_SAFE6_LABEL.into(),
+            lba8_identity: edpcli::provision::Lba8Identity::default(),
             key_domains: KeyDomainSecrets::new(
                 KeyDomainSecretPair::new(share_source, Some(share_target)),
                 KeyDomainSecretPair::new(encrypt_source, Some(encrypt_target)),

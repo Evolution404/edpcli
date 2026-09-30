@@ -39,6 +39,7 @@ fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::
                     user: opts.user.clone(),
                     dept: opts.dept.clone(),
                     label: opts.label.clone(),
+                    lba8_identity: crate::provision::Lba8Identity::default(),
                     key_domains: crate::provision::KeyDomainSecrets::new(
                         crate::provision::KeyDomainSecretPair::new(
                             (!opts.share_source_password.is_empty())

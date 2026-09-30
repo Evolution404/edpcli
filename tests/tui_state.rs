@@ -735,7 +735,7 @@ fn editing_source_password_invalidates_cached_verification_state() {
     let index = state
         .provision_visible_fields()
         .iter()
-        .position(|(label, _, _)| label.contains("交换区来源密码"))
+        .position(|(label, _, _)| label == "原密码")
         .unwrap();
     state.provision_mut().field_selected = index;
     state.provision_push_char('x');
@@ -747,7 +747,7 @@ fn editing_source_password_invalidates_cached_verification_state() {
 }
 
 #[test]
-fn mode0_to_mode1_unknown_encrypt_disables_only_encrypt_target_password() {
+fn mode0_to_mode1_unknown_encrypt_keeps_target_password_editable_and_forces_format_on_edit() {
     use edpcli::provision::{DiskProvisionKind, SourcePasswordKnowledge};
     use edpcli::sectors::EdpfPartition;
 
@@ -792,20 +792,30 @@ fn mode0_to_mode1_unknown_encrypt_disables_only_encrypt_target_password() {
     let fields = state.provision_visible_fields();
     let share_target = fields
         .iter()
-        .position(|(label, _, _)| label.contains("二合一区目标密码"))
+        .position(|(label, _, _)| label == "新密码")
         .unwrap();
     let encrypt_target = fields
         .iter()
-        .position(|(label, _, _)| label == "保密区目标密码")
+        .enumerate()
+        .filter(|(_, (label, _, _))| label == "新密码")
+        .nth(1)
+        .map(|(index, _)| index)
         .unwrap();
 
     assert_eq!(fields[share_target].1, "0000aaaa");
     assert!(fields[share_target].2);
-    assert_eq!(fields[encrypt_target].1, "— PreserveOpaque 禁用");
-    assert!(!fields[encrypt_target].2);
+    assert_eq!(fields[encrypt_target].1, "0000aaaa");
+    assert!(fields[encrypt_target].2);
 
     state.provision_mut().field_selected = encrypt_target;
-    assert!(!state.provision_selected_field_is_editable());
+    assert!(state.provision_selected_field_is_editable());
+    assert!(!state.provision().form.format_encrypt);
+    state.provision_cursor_end();
+    state.provision_push_char('x');
+    assert!(
+        state.provision().form.format_encrypt,
+        "editing a new password with unknown source credentials must switch that domain to rebuild/format"
+    );
     state.provision_mut().field_selected = share_target;
     assert!(state.provision_selected_field_is_editable());
 }
@@ -820,7 +830,10 @@ fn source_password_verify_request_is_scoped_to_selected_domain() {
     let index = state
         .provision_visible_fields()
         .iter()
-        .position(|(label, _, _)| label.contains("保密区来源密码"))
+        .enumerate()
+        .filter(|(_, (label, _, _))| label == "原密码")
+        .nth(1)
+        .map(|(index, _)| index)
         .unwrap();
     state.provision_mut().field_selected = index;
     let request = state

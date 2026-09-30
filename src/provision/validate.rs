@@ -275,7 +275,7 @@ fn expected_lba6_lba9(spec: &ProvisionSpec) -> Result<([u8; SECTOR], [u8; SECTOR
         lba9[0x100 + continuation.len()] = 0;
     }
 
-    let autonum = spec.profile().autonum().as_bytes();
+    let autonum = spec.metadata().lba8_identity().autonum.as_bytes();
     if autonum.len() > 15 {
         return Err("SAFE6 Autonum exceeds 15-byte on-disk slot".into());
     }
@@ -388,18 +388,7 @@ fn expected_lba8_plain(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
     expected[0x14..0x18].copy_from_slice(&spec.profile().lba4_profile_word());
     expected[0x3e..0x40].copy_from_slice(&[0x80, 0x00]);
 
-    let mut body = Vec::new();
-    body.extend_from_slice(b"<ELABEL>GLab=");
-    body.extend_from_slice(spec.profile().glab().as_bytes());
-    body.extend_from_slice(b"||Indus=||Orgcd=||Org=||Unit=||Dept=");
-    body.extend_from_slice(&gbk(spec.metadata().dept())?);
-    body.extend_from_slice(b"||User=");
-    body.extend_from_slice(&gbk(spec.metadata().user())?);
-    body.extend_from_slice(b"||Alarm=||Autonum=");
-    body.extend_from_slice(spec.profile().autonum().as_bytes());
-    body.extend_from_slice(b"||Label=");
-    body.extend_from_slice(&gbk(spec.metadata().label())?);
-    body.extend_from_slice(b"||Rmark=||VOL0=||VOL1=||VOL2=||VOLC0=||VOLC1=||VOLC2=||");
+    let body = super::spec::lba8_elabel_body(spec.metadata())?;
     if body.len() > SECTOR - 0x80 - 1 {
         return Err(format!("LBA8 LLGB body too large: {} bytes", body.len()));
     }
@@ -426,11 +415,11 @@ fn validate_lba8(
         return Err("LBA8 LLGB/profile bytes mismatch".into());
     }
     let ownership = ownership_from_lba8(raw, context).ok_or("LBA8 ownership decoder failed")?;
-    if ownership.glab.as_deref() != Some(spec.profile().glab())
+    if ownership.glab.as_deref() != Some(spec.metadata().lba8_identity().glab.as_str())
         || ownership.user.as_deref() != Some(spec.metadata().user())
         || ownership.dept.as_deref() != Some(spec.metadata().dept())
         || ownership.label.as_deref() != Some(spec.metadata().label())
-        || ownership.autonum.as_deref() != Some(spec.profile().autonum())
+        || ownership.autonum.as_deref() != Some(spec.metadata().lba8_identity().autonum.as_str())
     {
         return Err("LBA8 ownership round-trip mismatch".into());
     }

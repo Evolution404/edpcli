@@ -66,7 +66,7 @@ pub use reprovision::{
     RegionDisposition, TargetGeometryOverrides, TargetPartitionGeometry, TargetPartitionPlan,
     TargetProvisionPlan,
 };
-pub use spec::{OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
+pub use spec::{Lba8Identity, OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
 pub use validate::{
     OfficialProvisionValidation, OfficialProvisionValidator, ProvisionValidation,
     ProvisionValidator,

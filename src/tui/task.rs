@@ -114,7 +114,7 @@ enum WorkerResult {
         result: Result<crate::application::provision::ProvisionKeyProbe, String>,
     },
     ProvisionKeyVerify {
-        generation: u64,
+        revision: u64,
         domain: crate::provision::KeyDomainRole,
         result: Result<crate::provision::SourcePasswordKnowledge, String>,
     },
@@ -174,8 +174,9 @@ pub struct TaskUpdates {
     pub backup_prune_execute: Option<(OperationId, Result<usize, String>)>,
     pub provision_key_probe:
         Option<Result<crate::application::provision::ProvisionKeyProbe, String>>,
-    pub provision_key_verify: Option<(
+    pub provision_key_verify: Vec<(
         crate::provision::KeyDomainRole,
+        u64,
         Result<crate::provision::SourcePasswordKnowledge, String>,
     )>,
     pub provision_plan: Option<Result<crate::tui::state::ProvisionPrepared, String>>,
@@ -208,7 +209,7 @@ impl TaskUpdates {
             || self.backup_prune_plan.is_some()
             || self.backup_prune_execute.is_some()
             || self.provision_key_probe.is_some()
-            || self.provision_key_verify.is_some()
+            || !self.provision_key_verify.is_empty()
             || self.provision_plan.is_some()
             || !self.provision_progress.is_empty()
             || self.provision_write.is_some()
@@ -534,13 +535,13 @@ impl TaskHub {
                     }
                 }
                 WorkerResult::ProvisionKeyVerify {
-                    generation,
+                    revision,
                     domain,
                     result,
                 } => {
-                    if self.provision_key_probe_slot.finish(generation) {
-                        updates.provision_key_verify = Some((domain, result));
-                    }
+                    updates
+                        .provision_key_verify
+                        .push((domain, revision, result));
                 }
                 WorkerResult::ProvisionPlan { generation, result } => {
                     if self.provision_slot.finish(generation) {

@@ -1,6 +1,30 @@
 use super::*;
 
 impl AppState {
+    pub(crate) fn provision_field_region_selection(
+        &self,
+        model: &crate::tui::disk_layout::DiskLayoutModel,
+    ) -> Option<crate::tui::disk_layout::DiskCapacitySelection> {
+        use crate::tui::disk_layout::{DiskCapacitySelection, DiskRegionKind};
+
+        let focus = self
+            .provision_field_id(self.provision.field_selected)
+            .map(ProvisionFieldId::region_focus)
+            .unwrap_or(ProvisionRegionFocus::None);
+        let segment = model.segments.iter().find(|segment| match focus {
+            ProvisionRegionFocus::None => false,
+            ProvisionRegionFocus::Boot => segment.kind == DiskRegionKind::Boot,
+            ProvisionRegionFocus::Share => {
+                matches!(
+                    segment.kind,
+                    DiskRegionKind::Share | DiskRegionKind::Combined
+                )
+            }
+            ProvisionRegionFocus::Encrypt => segment.kind == DiskRegionKind::Encrypt,
+        })?;
+        DiskCapacitySelection::from_segment(segment)
+    }
+
     pub fn provision_layout_editor_details(
         &self,
     ) -> Vec<crate::tui::disk_layout::DiskLayoutDetail> {
@@ -23,11 +47,16 @@ impl AppState {
         let selected =
             if self.provision_focused_pane() == crate::tui::pane::PaneId::ProvisionDiskLayout {
                 layout_selected
-            } else if let Ok(Some((role, ..))) = self.provision_selected_capacity_limit() {
+            } else if let Some(selection) = self.provision_field_region_selection(&visible) {
                 visible
                     .segments
                     .iter()
-                    .position(|segment| segment.kind == DiskRegionKind::from_partition_role(role))
+                    .position(|segment| {
+                        segment.start_lba == selection.start_lba
+                            && segment
+                                .end_exclusive()
+                                .is_ok_and(|end| end == selection.end_exclusive)
+                    })
                     .unwrap_or(layout_selected)
             } else {
                 layout_selected

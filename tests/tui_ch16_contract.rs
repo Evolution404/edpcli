@@ -149,14 +149,94 @@ fn ch16_provision_form_is_two_pane_without_protection_or_shortcut_footer() {
 }
 
 #[test]
+fn provision_lba8_advanced_identity_expands_edits_and_collapses_with_o_contract() {
+    let mut state = provision_state();
+    let base_count = state.provision_visible_fields().len();
+    assert!(!state.provision().advanced_identity_open);
+    let fields = state.provision_visible_fields();
+    assert!(fields
+        .iter()
+        .any(|(label, value, _)| label == "高级设置" && value.contains("o 展开")));
+    assert!(!fields.iter().any(|(label, _, _)| label == "GLab"));
+
+    assert!(
+        !state.provision_toggle_advanced_identity(),
+        "o must only toggle while the Advanced Settings row is focused"
+    );
+    let advanced_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "高级设置")
+        .expect("advanced settings row");
+    state.provision_mut().field_selected = advanced_index;
+    assert!(state.provision_toggle_advanced_identity());
+    assert!(state.provision().advanced_identity_open);
+    let fields = state.provision_visible_fields();
+    assert_eq!(fields.len(), base_count + 14);
+    assert_eq!(fields[state.provision().field_selected].0, "高级设置");
+    assert!(fields[state.provision().field_selected]
+        .1
+        .contains("o 收起"));
+    assert!(fields
+        .iter()
+        .any(|(label, value, _)| label == "Autonum" && *value == "YD000001"));
+
+    let screen = rendered_lines(&state, 160, 60).join("\n").replace(' ', "");
+    assert!(screen.contains("高级设置"), "{screen}");
+    assert!(screen.contains("o收起"), "{screen}");
+    assert!(!screen.contains("LBA8高级身份"), "{screen}");
+    assert!(screen.contains("GLab"), "{screen}");
+
+    let glab_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "GLab")
+        .expect("GLab row");
+    state.provision_mut().field_selected = glab_index;
+    assert!(state.provision_selected_field_is_editable());
+    let before = state.provision().form.lba8_identity.glab.clone();
+    state.provision_cursor_end();
+    state.provision_push_char('|');
+    assert_eq!(state.provision().form.lba8_identity.glab, before);
+    assert!(state
+        .provision()
+        .message
+        .as_deref()
+        .is_some_and(|message| message.contains("LBA8")));
+    state.provision_push_char('X');
+    assert_eq!(
+        state.provision().form.lba8_identity.glab,
+        format!("{before}X")
+    );
+    assert!(state.provision().message.is_none());
+
+    let advanced_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "高级设置")
+        .expect("advanced settings row");
+    state.provision_mut().field_selected = advanced_index;
+    assert!(state.provision_toggle_advanced_identity());
+    assert!(!state.provision().advanced_identity_open);
+    assert_eq!(state.provision_visible_fields().len(), base_count);
+    assert_eq!(
+        state.provision_visible_fields()[state.provision().field_selected].0,
+        "高级设置"
+    );
+    assert!(
+        state.provision_visible_fields()[state.provision().field_selected]
+            .1
+            .contains("o 展开")
+    );
+}
+
+#[test]
 fn provision_verified_source_status_is_success_and_normal_values_have_no_input_fill() {
     use edpcli::provision::SourcePasswordKnowledge;
 
     let mut state = provision_state();
     state.provision_mut().form.share_source_knowledge = SourcePasswordKnowledge::DefaultVerified;
     state.provision_mut().form.encrypt_source_knowledge = SourcePasswordKnowledge::DefaultVerified;
-    state.provision_mut().message =
-        Some("来源状态: mode0 · 交换域:默认密码已验证 · 保密域:默认密码已验证".into());
     state.provision_mut().field_selected = 1;
     state.provision_mut().form.label_id = "ZTESTONLY".into();
 
@@ -175,16 +255,33 @@ fn provision_verified_source_status_is_success_and_normal_values_have_no_input_f
         .iter()
         .map(|line| line.replace(' ', ""))
         .collect::<Vec<_>>();
+    assert!(
+        !compact.iter().any(|line| line.contains("来源状态")),
+        "source status must be merged into the password rows"
+    );
     let success_fg = edpcli::tui::theme::current().success().fg.unwrap();
-    for domain in ["交换域", "保密域"] {
+    let exchange_row = compact
+        .iter()
+        .find(|line| line.contains("交换区") && line.contains("原密码") && line.contains("新密码"))
+        .expect("exchange password row");
+    let separator = exchange_row.find('│').expect("password column separator");
+    let verified = exchange_row.find('✓').expect("source verification status");
+    let target = exchange_row.find("新密码").expect("target password column");
+    assert!(
+        verified < separator && separator < target,
+        "password row must be 原密码 + 状态 │ 新密码: {exchange_row}"
+    );
+    for domain in ["交换区", "保密区"] {
         let y = compact
             .iter()
-            .position(|line| line.contains(domain) && line.contains("默认密码已验证"))
+            .position(|line| {
+                line.contains(domain) && line.contains("原密码") && line.contains("新密码")
+            })
             .unwrap_or_else(|| panic!("missing verified status for {domain}"))
             as u16;
         let x = (0..width)
             .find(|x| buffer[(*x, y)].symbol() == "✓")
-            .expect("verified mark");
+            .unwrap_or_else(|| panic!("verified mark missing on row: {}", lines[y as usize]));
         assert_eq!(buffer[(x, y)].fg, success_fg, "{domain}");
     }
 
@@ -209,6 +306,246 @@ fn provision_verified_source_status_is_success_and_normal_values_have_no_input_f
         buffer[(x, y)].fg,
         edpcli::tui::theme::current().secondary_text().fg.unwrap(),
         "normal value should use lightweight body text styling"
+    );
+}
+
+#[test]
+fn provision_form_capacity_indicator_tracks_boot_share_encrypt_without_vertical_jitter() {
+    let mut state = provision_state();
+    let field_index = |state: &AppState, prefix: &str| {
+        state
+            .provision_visible_fields()
+            .iter()
+            .position(|(label, _, _)| label.starts_with(prefix))
+            .unwrap_or_else(|| panic!("missing field prefix {prefix}"))
+    };
+
+    let identity = field_index(&state, "标签标识");
+    state.provision_mut().field_selected = identity;
+    let identity_lines = rendered_lines(&state, 160, 45);
+    assert!(
+        !identity_lines.iter().any(|line| line.contains('▲')),
+        "identity fields must hide the capacity-map indicator"
+    );
+    let identity_header_y = identity_lines
+        .iter()
+        .position(|line| {
+            let compact = line.replace(' ', "");
+            compact.contains("区域") && compact.contains("LBA范围")
+        })
+        .expect("layout table header");
+
+    let mut arrow_x = Vec::new();
+    for (prefix, region) in [
+        ("启动区容量", "启动区"),
+        ("交换区容量", "交换区"),
+        ("保密区容量", "保密区"),
+    ] {
+        let index = field_index(&state, prefix);
+        state.provision_mut().field_selected = index;
+        let lines = rendered_lines(&state, 160, 45);
+        let (y, line) = lines
+            .iter()
+            .enumerate()
+            .find(|(_, line)| line.contains('▲'))
+            .unwrap_or_else(|| panic!("missing capacity indicator for {prefix}"));
+        let x = line
+            .chars()
+            .position(|symbol| symbol == '▲')
+            .expect("capacity indicator x");
+        arrow_x.push(x);
+        let header_y = lines
+            .iter()
+            .position(|line| {
+                let compact = line.replace(' ', "");
+                compact.contains("区域") && compact.contains("LBA范围")
+            })
+            .expect("layout table header");
+        assert_eq!(
+            header_y, identity_header_y,
+            "indicator row must keep the layout table at a stable y position"
+        );
+        assert!(
+            y < header_y,
+            "capacity indicator must stay directly below the map and above the region table"
+        );
+        let linked_row = lines
+            .iter()
+            .find(|line| {
+                let right = line.chars().skip(70).collect::<String>();
+                let compact = right.replace(' ', "");
+                compact.contains(region) && compact.contains("LBA")
+            })
+            .unwrap_or_else(|| panic!("missing linked region row for {region}"));
+        assert!(
+            linked_row.chars().skip(70).any(|symbol| symbol == '▌'),
+            "left field focus must visibly activate the matching right-side region row: {linked_row}"
+        );
+    }
+    assert!(
+        arrow_x[0] < arrow_x[1] && arrow_x[1] < arrow_x[2],
+        "indicator must move with the real map segments: {arrow_x:?}"
+    );
+}
+
+#[test]
+fn provision_source_password_edit_auto_verify_contract_is_revision_safe() {
+    use edpcli::provision::{KeyDomainRole, SourcePasswordKnowledge};
+
+    let mut state = provision_state();
+    let source_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "原密码")
+        .expect("share source password");
+    let target_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "新密码")
+        .expect("share target password");
+
+    state.provision_mut().field_selected = source_index;
+    assert!(state.provision_begin_insert());
+    state.provision_cursor_end();
+    state.provision_push_char('A');
+    assert!(
+        state.provision_end_insert(),
+        "dirty source password must request automatic verification on Insert exit"
+    );
+    let (domain, _, revision_a) = state
+        .provision_source_password_verify_request()
+        .expect("verification request")
+        .expect("source password request");
+    assert_eq!(domain, KeyDomainRole::Share);
+
+    let spinner_a = rendered_lines(&state, 160, 45)
+        .into_iter()
+        .find(|line| {
+            let compact = line.replace(' ', "");
+            compact.contains("交换区") && compact.contains("原密码")
+        })
+        .expect("share password row");
+    assert!(
+        ["◐", "◓", "◑", "◒"]
+            .iter()
+            .any(|glyph| spinner_a.contains(glyph)),
+        "verifying state must use the shared spinner: {spinner_a}"
+    );
+    state.advance_animation();
+    state.advance_animation();
+    let spinner_b = rendered_lines(&state, 160, 45)
+        .into_iter()
+        .find(|line| {
+            let compact = line.replace(' ', "");
+            compact.contains("交换区") && compact.contains("原密码")
+        })
+        .expect("share password row after animation");
+    assert_ne!(spinner_a, spinner_b, "spinner frame must visibly advance");
+
+    assert!(state.provision_begin_insert());
+    state.provision_cursor_end();
+    state.provision_push_char('B');
+    assert!(state.provision_end_insert());
+    let (_, _, revision_b) = state
+        .provision_source_password_verify_request()
+        .expect("second verification request")
+        .expect("second source password request");
+    assert!(revision_b > revision_a);
+
+    state.provision_finish_source_password_verify(
+        KeyDomainRole::Share,
+        revision_a,
+        Ok(SourcePasswordKnowledge::UserVerified),
+    );
+    assert_eq!(
+        state.provision().form.share_source_knowledge,
+        SourcePasswordKnowledge::Unknown,
+        "stale verification result must not overwrite the newer password"
+    );
+    state.provision_finish_source_password_verify(
+        KeyDomainRole::Share,
+        revision_b,
+        Ok(SourcePasswordKnowledge::UserVerified),
+    );
+    assert_eq!(
+        state.provision().form.share_source_knowledge,
+        SourcePasswordKnowledge::UserVerified
+    );
+
+    state.provision_mut().field_selected = target_index;
+    assert!(state.provision_begin_insert());
+    state.provision_cursor_end();
+    state.provision_push_char('C');
+    assert!(
+        !state.provision_end_insert(),
+        "editing the new password must not verify the source password"
+    );
+}
+
+#[test]
+fn provision_source_password_failure_uses_red_cross_and_no_manual_v_path() {
+    use edpcli::provision::KeyDomainRole;
+
+    let mut state = provision_state();
+    let source_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "原密码")
+        .expect("share source password");
+    state.provision_mut().field_selected = source_index;
+    assert!(state.provision_begin_insert());
+    state.provision_cursor_end();
+    state.provision_push_char('X');
+    assert!(state.provision_end_insert());
+    let (_, _, revision) = state
+        .provision_source_password_verify_request()
+        .expect("verification request")
+        .expect("source password request");
+    state.provision_finish_source_password_verify(
+        KeyDomainRole::Share,
+        revision,
+        Err("来源密码验证失败".into()),
+    );
+
+    let (width, height) = (160, 45);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let row_y = (0..height)
+        .find(|y| {
+            let line = (0..width)
+                .map(|x| buffer[(x, *y)].symbol())
+                .collect::<String>();
+            line.replace(' ', "").contains("交换区") && line.contains('✗')
+        })
+        .expect("failed share password row");
+    let cross_x = (0..width)
+        .find(|x| buffer[(*x, row_y)].symbol() == "✗")
+        .expect("failed verification cross");
+    assert_eq!(
+        buffer[(cross_x, row_y)].fg,
+        edpcli::tui::theme::current().danger().fg.unwrap()
+    );
+    let failed_row = (0..width)
+        .map(|x| buffer[(x, row_y)].symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    let separator = failed_row.find('│').expect("password column separator");
+    let failed = failed_row.find('✗').expect("failed source status");
+    let target = failed_row.find("新密码").expect("target password column");
+    assert!(
+        failed < separator && separator < target,
+        "failure status must stay beside 原密码 and must not replace/disable 新密码: {failed_row}"
+    );
+
+    let provision_controller = include_str!("../src/tui/controller/provision.rs");
+    assert!(
+        !provision_controller.contains("ViewOrVerify"),
+        "Provision must not expose the old manual v verification action"
+    );
+    assert!(
+        !provision_controller.contains("ProvisionSourcePasswordVerify"),
+        "Provision must not expose a manual verification request"
     );
 }
 
@@ -258,7 +595,7 @@ fn provision_planning_modal_is_centered_on_the_full_terminal_viewport() {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal.draw(|frame| render::draw(frame, &state)).unwrap();
 
-        let expected = edpcli::tui::ui::centered_modal_rect(Rect::new(0, 0, width, height), 76, 5);
+        let expected = edpcli::tui::ui::centered_modal_rect(Rect::new(0, 0, width, height), 36, 7);
         let buffer = terminal.backend().buffer();
         assert_eq!(
             buffer[(expected.x, expected.y)].symbol(),
@@ -273,6 +610,27 @@ fn provision_planning_modal_is_centered_on_the_full_terminal_viewport() {
                 .symbol(),
             "┘",
             "{width}x{height}: planning modal bottom-right corner mismatch"
+        );
+        let text = (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replace(' ', "");
+        assert!(text.contains("正在生成制盘计划"), "{text}");
+        assert!(
+            !text.contains("正在只读检查目标并生成精确制盘计划"),
+            "{text}"
+        );
+        assert!(!text.contains("只读规划"), "{text}");
+        assert!(
+            ["◐", "◓", "◑", "◒"]
+                .iter()
+                .any(|glyph| text.contains(glyph)),
+            "planning modal must render the shared spinner: {text}"
         );
     }
 }

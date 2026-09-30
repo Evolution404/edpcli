@@ -55,45 +55,46 @@ impl AppState {
                 false,
             ),
         ]);
-        if matches!(mode, 0 | 1 | 3) {
-            let domain = if mode == 1 {
-                "二合一区"
+        out.push((
+            "高级设置".into(),
+            if self.provision.advanced_identity_open {
+                "▾  o 收起"
             } else {
-                "交换区"
-            };
+                "▸  o 展开"
+            },
+            false,
+        ));
+        if self.provision.advanced_identity_open {
+            for field in Lba8IdentityField::ALL {
+                out.push((
+                    field.label().into(),
+                    field.value(&self.provision.form.lba8_identity),
+                    false,
+                ));
+            }
+        }
+        if matches!(mode, 0 | 1 | 3) {
             out.push((
-                format!("{domain}来源密码（可空）"),
+                "原密码".into(),
                 self.provision.form.share_source_password.as_str(),
                 true,
             ));
-            let share_opaque =
-                self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share);
             out.push((
-                format!("{domain}目标密码"),
-                if share_opaque {
-                    "— PreserveOpaque 禁用"
-                } else {
-                    self.provision.form.share_target_password.as_str()
-                },
-                !share_opaque,
+                "新密码".into(),
+                self.provision.form.share_target_password.as_str(),
+                true,
             ));
         }
         if matches!(mode, 0..=2) {
             out.push((
-                "保密区来源密码（可空）".into(),
+                "原密码".into(),
                 self.provision.form.encrypt_source_password.as_str(),
                 true,
             ));
-            let encrypt_opaque =
-                self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt);
             out.push((
-                "保密区目标密码".into(),
-                if encrypt_opaque {
-                    "— PreserveOpaque 禁用"
-                } else {
-                    self.provision.form.encrypt_target_password.as_str()
-                },
-                !encrypt_opaque,
+                "新密码".into(),
+                self.provision.form.encrypt_target_password.as_str(),
+                true,
             ));
         }
         if matches!(mode, 0 | 3) {

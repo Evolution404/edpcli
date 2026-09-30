@@ -34,14 +34,14 @@ impl AppState {
             .copied()
     }
 
-    pub(super) fn provision_field_id(&self, display_index: usize) -> Option<ProvisionFieldId> {
+    pub(crate) fn provision_field_id(&self, display_index: usize) -> Option<ProvisionFieldId> {
         self.provision_field_descriptor(display_index)
             .map(|descriptor| descriptor.id)
     }
 
-    fn provision_field_descriptors(&self) -> Vec<ProvisionFieldDescriptor> {
+    pub(super) fn provision_field_descriptors(&self) -> Vec<ProvisionFieldDescriptor> {
         let descriptor =
-            |id, section, editable, secret, toggle, fill_capacity, verify_source_password| {
+            |id, section, editable, secret, toggle, fill_capacity, _verification_removed| {
                 ProvisionFieldDescriptor {
                     id,
                     section,
@@ -50,7 +50,6 @@ impl AppState {
                         secret,
                         toggle,
                         fill_capacity,
-                        verify_source_password,
                     },
                 }
             };
@@ -114,7 +113,7 @@ impl AppState {
         let Some(mode) = self.provision.kind.mode() else {
             return Vec::new();
         };
-        let mut fields = Vec::with_capacity(34);
+        let mut fields = Vec::with_capacity(48);
         for id in [
             ProvisionFieldId::LabelId,
             ProvisionFieldId::User,
@@ -131,9 +130,30 @@ impl AppState {
                 false,
             ));
         }
+        fields.push(descriptor(
+            ProvisionFieldId::AdvancedSection,
+            ProvisionFieldSection::Identity,
+            false,
+            false,
+            false,
+            false,
+            false,
+        ));
+        if self.provision.advanced_identity_open {
+            for field in Lba8IdentityField::ALL {
+                fields.push(descriptor(
+                    ProvisionFieldId::Lba8Identity(field),
+                    ProvisionFieldSection::AdvancedIdentity,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                ));
+            }
+        }
         if matches!(mode, 0 | 1 | 3) {
             let domain = crate::provision::KeyDomainRole::Share;
-            let opaque = self.provision_domain_opaque_candidate(domain);
             fields.push(descriptor(
                 ProvisionFieldId::SourcePassword(domain),
                 ProvisionFieldSection::PasswordDomain,
@@ -146,8 +166,8 @@ impl AppState {
             fields.push(descriptor(
                 ProvisionFieldId::TargetPassword(domain),
                 ProvisionFieldSection::PasswordDomain,
-                !opaque,
-                !opaque,
+                true,
+                true,
                 false,
                 false,
                 false,
@@ -155,7 +175,6 @@ impl AppState {
         }
         if matches!(mode, 0..=2) {
             let domain = crate::provision::KeyDomainRole::Encrypt;
-            let opaque = self.provision_domain_opaque_candidate(domain);
             fields.push(descriptor(
                 ProvisionFieldId::SourcePassword(domain),
                 ProvisionFieldSection::PasswordDomain,
@@ -168,8 +187,8 @@ impl AppState {
             fields.push(descriptor(
                 ProvisionFieldId::TargetPassword(domain),
                 ProvisionFieldSection::PasswordDomain,
-                !opaque,
-                !opaque,
+                true,
+                true,
                 false,
                 false,
                 false,

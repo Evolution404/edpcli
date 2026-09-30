@@ -347,8 +347,19 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     };
     let identity_separator = internal_separator_x("标签标识");
     assert_eq!(identity_separator, internal_separator_x("部门"));
-    let key_domain_separator = internal_separator_x("交换区来源密码");
-    assert_eq!(key_domain_separator, internal_separator_x("交换区目标密码"));
+    assert!(
+        compact_rows
+            .iter()
+            .any(|row| row.contains("交换区原密码") && row.contains("新密码")),
+        "{text}"
+    );
+    assert!(
+        compact_rows
+            .iter()
+            .any(|row| row.contains("保密区原密码") && row.contains("新密码")),
+        "{text}"
+    );
+    assert!(!compact_text.contains("来源状态"), "{text}");
     for row_name in ["启动区容量", "交换区容量", "保密区容量"] {
         let separator = internal_separator_x(row_name);
         assert!(separator > 8 && separator < 80, "{row_name}");
@@ -363,7 +374,6 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     );
     let distinct = [
         identity_separator,
-        key_domain_separator,
         internal_separator_x("启动区容量"),
         format_separator,
         password_separator,
@@ -517,7 +527,7 @@ fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
         .map(|cell| cell.symbol())
         .collect::<String>();
     let compact = text.replace(' ', "");
-    assert!(compact.contains("密码〈请输入〉"), "{text}");
+    assert!(compact.contains("新密码〈空〉"), "{text}");
 }
 
 #[test]

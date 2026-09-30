@@ -74,6 +74,10 @@ pub(super) fn dispatch_provision(
     let stage = state.provision().stage;
     Some(match stage {
         ProvisionStage::Form if state.input_mode() == InputMode::Normal => match action {
+            TuiAction::Open if state.provision_focused_pane() == PaneId::ProvisionParameters => {
+                state.provision_toggle_advanced_identity();
+                ActionOutcome::handled()
+            }
             TuiAction::Open if state.provision_focused_pane() == PaneId::ProvisionDiskLayout => {
                 state.toggle_disk_layout_tail();
                 ActionOutcome::handled()
@@ -155,11 +159,6 @@ pub(super) fn dispatch_provision(
             TuiAction::Delete if state.provision_focused_pane() == PaneId::ProvisionParameters => {
                 state.provision_plain_delete_selected_partition();
                 ActionOutcome::handled()
-            }
-            TuiAction::ViewOrVerify
-                if state.provision_focused_pane() == PaneId::ProvisionParameters =>
-            {
-                ActionOutcome::request(ActionRequest::ProvisionSourcePasswordVerify)
             }
             TuiAction::Activate => ActionOutcome::request(ActionRequest::ProvisionPlan),
             TuiAction::Export => {

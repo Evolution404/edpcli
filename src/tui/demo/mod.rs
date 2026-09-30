@@ -338,8 +338,7 @@ fn execute_demo_request(
                 Some("演示模式使用固定制盘夹具，不探测真实介质密钥。".into());
             crate::tui::state::StateEffect::None
         }
-        super::controller::ActionRequest::ProvisionSourcePasswordVerify
-        | super::controller::ActionRequest::ProvisionPlan => {
+        super::controller::ActionRequest::ProvisionPlan => {
             state.set_notice("演示模式不会启动真实后台任务");
             crate::tui::state::StateEffect::None
         }

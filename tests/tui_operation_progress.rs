@@ -212,7 +212,7 @@ fn provision_waiting_states_are_overlays_not_full_pages() {
         .next()
         .expect("planning render boundary");
     assert!(planning.contains("draw_provision_form(frame, main_area, state)"));
-    assert!(planning.contains("draw_provision_status_modal"));
+    assert!(planning.contains("draw_provision_planning_modal"));
     assert!(!planning.contains(".block(crate::tui::ui::card"));
 
     let exporting = stage_render
@@ -228,6 +228,10 @@ fn provision_waiting_states_are_overlays_not_full_pages() {
     assert!(
         provision.contains("centered_modal_rect(frame.area(), 76, height)"),
         "Provision waiting overlays must be centered from the full terminal viewport"
+    );
+    assert!(
+        provision.contains("centered_modal_rect(frame.area(), 36, 7)"),
+        "Planning overlay must use the compact globally centered modal"
     );
 
     let backups = include_str!("../src/tui/backups/render.rs");

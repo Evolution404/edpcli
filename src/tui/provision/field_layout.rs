@@ -26,7 +26,9 @@ impl AppState {
             };
             let section = descriptor.section;
             let width = match (section, descriptor.id) {
+                (ProvisionFieldSection::Identity, ProvisionFieldId::AdvancedSection) => 1,
                 (ProvisionFieldSection::Identity, _) => 2,
+                (ProvisionFieldSection::AdvancedIdentity, _) => 1,
                 (ProvisionFieldSection::PartitionLayout, ProvisionFieldId::Capacity(_)) => 2,
                 (ProvisionFieldSection::PartitionLayout, _) => 1,
                 (
@@ -76,24 +78,20 @@ impl AppState {
             };
         }
         match id {
+            ProvisionFieldId::AdvancedSection => None,
+            ProvisionFieldId::Lba8Identity(_) => Some("高级身份字段".into()),
             ProvisionFieldId::Capacity(_) => Some("Space 切换 MiB / GiB / sector · f 填满".into()),
             ProvisionFieldId::SourcePassword(_) => {
-                Some("来源密码可留空表示 Unknown · v 验证当前域旧密码".into())
+                Some("修改原密码后，Enter / Esc 结束输入会自动只读验证".into())
             }
-            ProvisionFieldId::TargetPassword(domain) => {
-                Some(if self.provision_domain_opaque_candidate(domain) {
-                    "PreserveOpaque：目标密码禁用；先验证旧密码才能改密".into()
-                } else {
-                    match domain {
-                        crate::provision::KeyDomainRole::Share => {
-                            "目标密码只作用于交换密钥域，不会同步到保密域".into()
-                        }
-                        crate::provision::KeyDomainRole::Encrypt => {
-                            "目标密码只作用于保密密钥域，不会同步到交换域".into()
-                        }
-                    }
-                })
-            }
+            ProvisionFieldId::TargetPassword(domain) => Some(match domain {
+                crate::provision::KeyDomainRole::Share => {
+                    "新密码只作用于交换密钥域；旧密码未知时修改会自动启用交换区重新格式化".into()
+                }
+                crate::provision::KeyDomainRole::Encrypt => {
+                    "新密码只作用于保密密钥域；旧密码未知时修改会自动启用保密区重新格式化".into()
+                }
+            }),
             ProvisionFieldId::ForceChangePassword
             | ProvisionFieldId::CancelPasswordComplexityCheck
             | ProvisionFieldId::FormatEnabled(_)
