@@ -49,7 +49,6 @@ impl AppState {
         let Some(outcome) = wizard.restore_outcome.as_ref() else {
             wizard.post_restore_workbench =
                 crate::tui::result_workbench::ResultWorkbenchState::default();
-            wizard.post_restore_selected = 0;
             return;
         };
 
@@ -62,7 +61,6 @@ impl AppState {
                 let _ = workbench.select_region_geometry(model, &selection, 8);
             }
         }
-        wizard.post_restore_selected = workbench.selected_partition.unwrap_or(0);
         wizard.post_restore_workbench = workbench;
     }
 
@@ -125,7 +123,6 @@ impl AppState {
                 let len = outcome.assessment.partitions.len();
                 if len == 0 {
                     wizard.post_restore_workbench.selected_partition = None;
-                    wizard.post_restore_selected = 0;
                     return;
                 }
                 let current = wizard
@@ -140,7 +137,6 @@ impl AppState {
                 }
                 .min(len - 1);
                 wizard.post_restore_workbench.selected_partition = Some(next);
-                wizard.post_restore_selected = next;
                 if let (Ok(model), Some(selection)) =
                     (outcome.layout.as_ref(), partition_selection(outcome, next))
                 {
@@ -166,9 +162,6 @@ impl AppState {
                         .as_ref()
                         .and_then(|selection| partition_index_for_selection(outcome, selection));
                     wizard.post_restore_workbench.selected_partition = selected;
-                    if let Some(index) = selected {
-                        wizard.post_restore_selected = index;
-                    }
                 }
             }
             crate::tui::pane::PaneId::ResultVerification => {
