@@ -18,6 +18,9 @@ pub enum PaneId {
     ProvisionSummary,
     ProvisionChanges,
     ProvisionRunLog,
+    ResultPartitions,
+    ResultDiskLayout,
+    ResultVerification,
 }
 
 impl PaneId {
@@ -36,6 +39,11 @@ impl PaneId {
         Self::ProvisionSummary,
         Self::ProvisionDiskLayout,
         Self::ProvisionChanges,
+    ];
+    pub const RESULT_ORDER: [Self; 3] = [
+        Self::ResultPartitions,
+        Self::ResultDiskLayout,
+        Self::ResultVerification,
     ];
 
     pub const fn is_inspect(self) -> bool {
@@ -67,6 +75,13 @@ impl PaneId {
         matches!(
             self,
             Self::BackupsList | Self::BackupSummary | Self::BackupCoverage
+        )
+    }
+
+    pub const fn is_result(self) -> bool {
+        matches!(
+            self,
+            Self::ResultPartitions | Self::ResultDiskLayout | Self::ResultVerification
         )
     }
 }
@@ -173,6 +188,10 @@ impl PaneFocus {
 
     pub fn provision_running() -> Self {
         Self::new(PaneId::ProvisionRunLog, [PaneId::ProvisionRunLog])
+    }
+
+    pub fn result_workbench() -> Self {
+        Self::new(PaneId::ResultPartitions, PaneId::RESULT_ORDER)
     }
 
     pub const fn focused(&self) -> PaneId {
