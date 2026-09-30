@@ -45,18 +45,14 @@ pub(super) fn draw_post_restore_result(frame: &mut Frame, area: Rect, state: &Ap
             crate::tui::ui::ResultTone::Warning,
         )
     } else {
-        (
-            "✓ 元数据恢复成功",
-            crate::tui::ui::ResultTone::Success,
-        )
+        ("✓ 元数据恢复成功", crate::tui::ui::ResultTone::Success)
     };
     let detail = format!(
         "disk{} · {} 个分区 · 文件数据未恢复 · Esc 完成",
         wizard.disk,
         outcome.assessment.partitions.len()
     );
-    let hero =
-        crate::tui::result_workbench::ResultHero::new("恢复结果", status, detail, tone);
+    let hero = crate::tui::result_workbench::ResultHero::new("恢复结果", status, detail, tone);
     let slots = crate::tui::result_workbench::render_result_workbench_shell(
         frame,
         area,
@@ -69,9 +65,7 @@ pub(super) fn draw_post_restore_result(frame: &mut Frame, area: Rect, state: &Ap
             PaneId::ResultPartitions => {
                 render_partition_pane(frame, slot.area, state, slot.focused)
             }
-            PaneId::ResultDiskLayout => {
-                render_layout_pane(frame, slot.area, state, slot.focused)
-            }
+            PaneId::ResultDiskLayout => render_layout_pane(frame, slot.area, state, slot.focused),
             PaneId::ResultVerification => {
                 render_verification_pane(frame, slot.area, state, slot.focused)
             }
