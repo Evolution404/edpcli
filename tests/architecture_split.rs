@@ -373,6 +373,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/runtime_input/backup_batch.rs",
         "src/tui/runtime_input/backup_prune.rs",
         "src/tui/runtime_input/backup_wizard.rs",
+        "src/tui/runtime_input/post_restore_wizard.rs",
         "src/tui/runtime_input/shell.rs",
     ] {
         assert!(
@@ -484,6 +485,10 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(
         lines("src/tui/provision/editor.rs") < 300,
         "Provision edit actions must stay bounded"
+    );
+    assert!(
+        lines("src/tui/provision/option_editor.rs") < 240,
+        "Provision option edit actions must stay bounded"
     );
     let editor_source = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/editor.rs"),
@@ -1812,8 +1817,11 @@ fn passive_capacity_display_uses_one_global_unit_system() {
     ] {
         let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
             .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        let routes_through_global_capacity = source.contains("fmt_capacity")
+            || (path == "src/tui/restore_result_partition_layout.rs"
+                && source.contains("result_partition_table_view"));
         assert!(
-            source.contains("fmt_capacity"),
+            routes_through_global_capacity,
             "{path} must route passive capacity text through the global formatter"
         );
         for forbidden in [
@@ -1827,6 +1835,15 @@ fn passive_capacity_display_uses_one_global_unit_system() {
             );
         }
     }
+}
+
+#[test]
+fn restore_result_capacity_is_formatted_by_shared_result_projection() {
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/result_partition_table_state.rs"),
+    )
+    .expect("read shared result partition projection");
+    assert!(source.contains("fmt_capacity"));
 }
 
 #[test]

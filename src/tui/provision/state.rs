@@ -115,6 +115,8 @@ mod fields_access;
 mod form;
 #[path = "key_domains.rs"]
 mod key_domains;
+#[path = "option_editor.rs"]
+mod option_editor;
 #[path = "transitions.rs"]
 mod transitions;
 use transitions::{ProvisionFormViewSnapshot, ProvisionReviewViewSnapshot};
