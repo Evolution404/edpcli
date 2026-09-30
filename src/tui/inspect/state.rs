@@ -163,7 +163,7 @@ pub struct AdvancedInspectState {
     tree_view_model: std::cell::RefCell<Option<InspectTreeViewModel>>,
     pub yank_register: Option<String>,
     pub prompt: Option<AdvancedInspectPrompt>,
-    pub message: Option<String>,
+    pub message: Option<crate::tui::ui::UiMessage>,
     search_query: String,
     search_matches: Vec<search_state::AdvancedInspectSearchTarget>,
     search_cursor: usize,

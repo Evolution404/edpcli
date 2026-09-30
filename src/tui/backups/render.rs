@@ -490,6 +490,22 @@ fn draw_backup_status_modal(frame: &mut Frame, title: &str, lines: Vec<Line<'sta
     });
 }
 
+fn backup_status_message(
+    message: Option<&crate::tui::ui::UiMessage>,
+    fallback: &'static str,
+) -> Line<'static> {
+    match message {
+        Some(message) => Line::from(Span::styled(
+            format!("{} {}", message.marker(), safe(message.text())),
+            message.style(),
+        )),
+        None => Line::from(Span::styled(
+            format!("◌ {fallback}"),
+            crate::tui::theme::current().secondary_accent(),
+        )),
+    }
+}
+
 pub(super) fn draw_backup_delete(frame: &mut Frame, state: &AppState) {
     let Some(delete) = state.backup_delete() else {
         return;
@@ -525,13 +541,7 @@ pub(super) fn draw_backup_delete(frame: &mut Frame, state: &AppState) {
                     "文件  {}",
                     safe(&delete.path.display().to_string())
                 )),
-                Line::from(
-                    delete
-                        .message
-                        .as_deref()
-                        .map(safe)
-                        .unwrap_or_else(|| "正在复核并删除备份…".into()),
-                ),
+                backup_status_message(delete.message.as_ref(), "正在复核并删除备份…"),
                 Line::from(Span::styled(
                     "q / Esc / Ctrl-C 将延迟到安全结束点。",
                     warning(),
@@ -588,13 +598,7 @@ pub(super) fn draw_backup_batch_delete(frame: &mut Frame, state: &AppState) {
                 "批量删除 · 执行中",
                 vec![
                     Line::from(format!("固定目标  {planned} 份")),
-                    Line::from(
-                        batch
-                            .message
-                            .as_deref()
-                            .map(safe)
-                            .unwrap_or_else(|| "正在按固定计划逐条复核并删除…".into()),
-                    ),
+                    backup_status_message(batch.message.as_ref(), "正在按固定计划逐条复核并删除…"),
                     Line::from(Span::styled("退出请求会延迟到安全结束点。", warning())),
                 ],
             );
@@ -677,12 +681,9 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, state: &AppState) {
                 "备份清理 · 执行中",
                 vec![
                     Line::from(format!("固定目标  {count} 份")),
-                    Line::from(
-                        prune
-                            .message
-                            .as_deref()
-                            .map(safe)
-                            .unwrap_or_else(|| "正在逐条复核摘要并清理固定候选…".into()),
+                    backup_status_message(
+                        prune.message.as_ref(),
+                        "正在逐条复核摘要并清理固定候选…",
                     ),
                     Line::from(Span::styled("退出请求会延迟到安全结束点。", warning())),
                 ],

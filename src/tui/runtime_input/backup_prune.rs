@@ -28,7 +28,8 @@ pub(super) fn handle_backup_prune_key(
                             }
                             Err(message) => {
                                 if let Some(prune) = state.backup_prune_mut() {
-                                    prune.message = Some(message);
+                                    prune.message =
+                                        Some(crate::tui::ui::UiMessage::warning(message));
                                 }
                             }
                         },
@@ -40,7 +41,7 @@ pub(super) fn handle_backup_prune_key(
             }
             BackupPruneStage::Planning => {
                 if keys.map(state::InputMode::Normal, key) == Some(keymap::TuiAction::Back) {
-                    state.set_notice("清理计划正在后台生成，请等待完成。");
+                    state.set_progress_notice("清理计划正在后台生成，请等待完成。");
                 }
                 return Some(KeyOutcome::NextIteration);
             }

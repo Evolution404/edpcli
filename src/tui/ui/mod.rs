@@ -4,6 +4,7 @@ pub mod badge;
 pub mod banner;
 pub mod card;
 pub mod confirmation;
+pub mod message;
 pub mod modal;
 pub mod operation_result;
 pub mod panel;
@@ -20,6 +21,7 @@ pub use confirmation::{
     render_action_confirmation_modal, render_write_confirmation_modal, ActionConfirmationSpec,
     ConfirmationTone, MediaWriteConfirmationKind, WriteConfirmationSpec,
 };
+pub use message::{UiMessage, UiMessageTone};
 pub use modal::{centered_modal_rect, render_modal};
 pub use operation_result::{
     render_operation_result, OperationResultSpec, ResultCard, ResultField, ResultTone, ResultValue,

@@ -661,7 +661,7 @@ fn provision_disk_layout_tail_starts_collapsed_and_expands_without_changing_geom
     assert!(state
         .disk_layout_detail(&canonical)
         .unwrap()
-        .contains("空闲区域"));
+        .contains("保留区域"));
     assert_eq!(state.provision_layout_model().segments, canonical.segments);
     state.toggle_disk_layout_tail();
     assert_eq!(
@@ -685,6 +685,7 @@ fn official_provision_disk_layout_covers_the_whole_physical_disk() {
         .map(|segment| segment.kind)
         .collect::<Vec<_>>();
     assert!(kinds.contains(&DiskRegionKind::Protocol));
+    assert!(kinds.contains(&DiskRegionKind::Reserved));
     assert!(kinds.contains(&DiskRegionKind::Free));
     assert!(kinds.contains(&DiskRegionKind::Lce));
     assert!(kinds.contains(&DiskRegionKind::BackupMirror));

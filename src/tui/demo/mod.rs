@@ -114,7 +114,8 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
                 state.provision_mut().result_status =
                     Some(crate::application::provision::ProvisionExecutionStatus::FatalFailure);
             }
-            state.provision_mut().message = Some("演示模式不会执行真实操作".into());
+            state.provision_mut().message =
+                Some(crate::tui::ui::UiMessage::info("演示模式不会执行真实操作"));
             if name == "provision-running-long" {
                 let tick = timeline::DemoTimeline::LONG_INITIAL_TICK;
                 state.provision_mut().run = Some(timeline::DemoTimeline::long_at_tick(
@@ -147,7 +148,7 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
                 state.set_notice("演示模式不会执行真实操作");
             }
         }
-        "error-state" => state.set_notice("DEMO 错误：模拟读取失败，不访问真实介质"),
+        "error-state" => state.set_error_notice("DEMO 错误：模拟读取失败，不访问真实介质"),
         _ => {}
     }
     Ok(state)
@@ -334,8 +335,9 @@ fn execute_demo_request(
             crate::tui::state::StateEffect::None
         }
         super::controller::ActionRequest::ProvisionKeyProbe { .. } => {
-            state.provision_mut().message =
-                Some("演示模式使用固定制盘夹具，不探测真实介质密钥。".into());
+            state.provision_mut().message = Some(crate::tui::ui::UiMessage::info(
+                "演示模式使用固定制盘夹具，不探测真实介质密钥。",
+            ));
             crate::tui::state::StateEffect::None
         }
         super::controller::ActionRequest::ProvisionPlan => {

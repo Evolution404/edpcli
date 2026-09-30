@@ -210,7 +210,7 @@ pub(super) fn draw_restore_write_confirmation(frame: &mut Frame, state: &AppStat
             warning: format!("确认后将直接开始向 disk{} 写入", wizard.disk),
             details,
             confirmation: &wizard.confirmation,
-            message: wizard.message.as_deref(),
+            message: wizard.message.as_ref(),
         },
     );
 }

@@ -107,7 +107,7 @@ pub struct WizardState {
     pub backup: Option<std::path::PathBuf>,
     pub expected_identity: Option<ExpectedIdentity>,
     pub confirmation: String,
-    pub message: Option<String>,
+    pub message: Option<crate::tui::ui::UiMessage>,
     pub detail_expanded: bool,
     pub restore_outcome: Option<crate::application::post_restore::MetadataRestoreOutcome>,
     pub post_restore_workbench: crate::tui::result_workbench::ResultWorkbenchState,
@@ -428,8 +428,35 @@ impl AppState {
             .and(self.shell.notice.as_deref())
     }
 
+    pub fn notice_message(&self) -> Option<&crate::tui::ui::UiMessage> {
+        self.shell
+            .notice_at
+            .filter(|at| at.elapsed() < std::time::Duration::from_secs(4))
+            .and(self.shell.notice.as_ref())
+    }
+
     pub fn set_notice(&mut self, message: impl Into<String>) {
-        self.shell.notice = Some(message.into());
+        self.shell.notice = Some(crate::tui::ui::UiMessage::info(message));
+        self.shell.notice_at = Some(std::time::Instant::now());
+    }
+
+    pub fn set_progress_notice(&mut self, message: impl Into<String>) {
+        self.shell.notice = Some(crate::tui::ui::UiMessage::progress(message));
+        self.shell.notice_at = Some(std::time::Instant::now());
+    }
+
+    pub fn set_success_notice(&mut self, message: impl Into<String>) {
+        self.shell.notice = Some(crate::tui::ui::UiMessage::success(message));
+        self.shell.notice_at = Some(std::time::Instant::now());
+    }
+
+    pub fn set_warning_notice(&mut self, message: impl Into<String>) {
+        self.shell.notice = Some(crate::tui::ui::UiMessage::warning(message));
+        self.shell.notice_at = Some(std::time::Instant::now());
+    }
+
+    pub fn set_error_notice(&mut self, message: impl Into<String>) {
+        self.shell.notice = Some(crate::tui::ui::UiMessage::error(message));
         self.shell.notice_at = Some(std::time::Instant::now());
     }
 
@@ -459,7 +486,7 @@ impl AppState {
         expected_identity: Option<ExpectedIdentity>,
     ) -> bool {
         if self.shell.critical_operation {
-            self.set_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
+            self.set_warning_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
             return false;
         }
         let stage = WizardStage::Confirm;
@@ -501,7 +528,9 @@ impl AppState {
             expected_identity: wizard.expected_identity.clone(),
         };
         wizard.stage = WizardStage::Running;
-        wizard.message = Some("正在只读采集并创建元数据备份。".into());
+        wizard.message = Some(crate::tui::ui::UiMessage::progress(
+            "正在只读采集并创建元数据备份。",
+        ));
         let mut run = crate::application::progress::OperationRunState::new(
             crate::application::progress::OperationKind::Backup,
             format!("disk{}", wizard.disk),
@@ -596,7 +625,9 @@ impl AppState {
             return;
         };
         let Some(selected) = wizard.active_post_restore_partition_index() else {
-            wizard.message = Some("当前激活区域不是可处理分区。".into());
+            wizard.message = Some(crate::tui::ui::UiMessage::warning(
+                "当前激活区域不是可处理分区。",
+            ));
             return;
         };
         let Some(partition) = outcome.assessment.partitions.get(selected) else {
@@ -608,7 +639,9 @@ impl AppState {
         match state {
             PostRestorePartitionState::NeedsFormat if !requires_original_key => {
                 let Some(request) = Self::selected_post_restore_format(wizard) else {
-                    wizard.message = Some("当前便携格式化器尚不支持该文件系统。".into());
+                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
+                        "当前便携格式化器尚不支持该文件系统。",
+                    ));
                     return;
                 };
                 Self::begin_volume_label_input(
@@ -620,7 +653,9 @@ impl AppState {
             }
             PostRestorePartitionState::NeedsFormat => {
                 let Some(request) = Self::selected_post_restore_format(wizard) else {
-                    wizard.message = Some("当前便携格式化器尚不支持该文件系统。".into());
+                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
+                        "当前便携格式化器尚不支持该文件系统。",
+                    ));
                     return;
                 };
                 wizard.secret_input = crate::provision::SecretBytes::default();
@@ -629,12 +664,16 @@ impl AppState {
                     PostRestoreLabelTarget::EncryptedFormat,
                     request,
                 );
-                wizard.message = Some("原密钥域已验证；可确认或修改恢复后的卷标。".into());
+                wizard.message = Some(crate::tui::ui::UiMessage::success(
+                    "原密钥域已验证；可确认或修改恢复后的卷标。",
+                ));
                 self.shell.input_mode = InputMode::Insert;
             }
             PostRestorePartitionState::PasswordRequired => {
                 let Some(request) = Self::selected_post_restore_format(wizard) else {
-                    wizard.message = Some("当前便携格式化器尚不支持该文件系统。".into());
+                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
+                        "当前便携格式化器尚不支持该文件系统。",
+                    ));
                     return;
                 };
                 wizard.volume_label_input =
@@ -649,7 +688,9 @@ impl AppState {
             }
             PostRestorePartitionState::CryptoMetadataInvalid => {
                 let Some(request) = Self::selected_post_restore_format(wizard) else {
-                    wizard.message = Some("当前便携格式化器尚不支持该文件系统。".into());
+                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
+                        "当前便携格式化器尚不支持该文件系统。",
+                    ));
                     return;
                 };
                 wizard.volume_label_input =
@@ -658,15 +699,21 @@ impl AppState {
                 wizard.pending_format = Some(request);
                 wizard.secret_input = crate::provision::SecretBytes::default();
                 wizard.secret_first = crate::provision::SecretBytes::default();
-                wizard.message = Some("将清空并重建该加密分区：旧 FileKey 与旧密码会失效。".into());
+                wizard.message = Some(crate::tui::ui::UiMessage::warning(
+                    "将清空并重建该加密分区：旧 FileKey 与旧密码会失效。",
+                ));
                 wizard.stage = WizardStage::ReinitializePassword;
                 self.shell.input_mode = InputMode::Insert;
             }
             PostRestorePartitionState::Usable => {
-                wizard.message = Some("该分区已经可用，不需要执行破坏性操作。".into());
+                wizard.message = Some(crate::tui::ui::UiMessage::info(
+                    "该分区已经可用，不需要执行破坏性操作。",
+                ));
             }
             PostRestorePartitionState::Unsupported => {
-                wizard.message = Some("当前状态无法可靠处理，拒绝猜测执行。".into());
+                wizard.message = Some(crate::tui::ui::UiMessage::warning(
+                    "当前状态无法可靠处理，拒绝猜测执行。",
+                ));
             }
         }
     }
@@ -738,7 +785,7 @@ impl AppState {
             return;
         };
         if wizard.secret_input.is_empty() {
-            wizard.message = Some("密码不能为空。".into());
+            wizard.message = Some(crate::tui::ui::UiMessage::warning("密码不能为空。"));
             return;
         }
         match wizard.stage {
@@ -759,7 +806,9 @@ impl AppState {
                 if wizard.secret_first != wizard.secret_input {
                     wizard.secret_first = crate::provision::SecretBytes::default();
                     wizard.secret_input = crate::provision::SecretBytes::default();
-                    wizard.message = Some("两次输入的新密码不一致，请重新输入。".into());
+                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
+                        "两次输入的新密码不一致，请重新输入。",
+                    ));
                     wizard.stage = WizardStage::ReinitializePassword;
                     self.shell.input_mode = InputMode::Insert;
                     return;
@@ -805,13 +854,13 @@ impl AppState {
             return;
         }
         let Some(request) = wizard.pending_format.as_ref() else {
-            wizard.message = Some("缺少恢复后格式化请求。".into());
+            wizard.message = Some(crate::tui::ui::UiMessage::error("缺少恢复后格式化请求。"));
             return;
         };
         if let Err(message) =
             crate::filesystem::validate_volume_label(request.filesystem, &wizard.volume_label_input)
         {
-            wizard.message = Some(message);
+            wizard.message = Some(crate::tui::ui::UiMessage::error(message));
             return;
         }
         wizard.confirmation.clear();
@@ -821,7 +870,7 @@ impl AppState {
             Some(PostRestoreLabelTarget::EncryptedFormat) => WizardStage::EncryptedFormatConfirm,
             Some(PostRestoreLabelTarget::Reinitialize) => WizardStage::ReinitializeConfirm,
             None => {
-                wizard.message = Some("缺少卷标输入目标。".into());
+                wizard.message = Some(crate::tui::ui::UiMessage::error("缺少卷标输入目标。"));
                 return;
             }
         };
@@ -875,7 +924,9 @@ impl AppState {
             return None;
         }
         if wizard.confirmation != "YES" {
-            wizard.message = Some("开始加密格式化写入前必须独立输入 YES。".into());
+            wizard.message = Some(crate::tui::ui::UiMessage::warning(
+                "开始加密格式化写入前必须独立输入 YES。",
+            ));
             return None;
         }
         let outcome = wizard.restore_outcome.clone()?;
@@ -890,7 +941,9 @@ impl AppState {
         wizard.secret_input = crate::provision::SecretBytes::default();
         wizard.secret_first = crate::provision::SecretBytes::default();
         wizard.stage = WizardStage::Formatting;
-        wizard.message = Some("正在使用原 FileKey 创建新的空加密文件系统。".into());
+        wizard.message = Some(crate::tui::ui::UiMessage::progress(
+            "正在使用原 FileKey 创建新的空加密文件系统。",
+        ));
         self.shell.input_mode = InputMode::Normal;
         self.shell.critical_operation = true;
         Some(EncryptedPostRestoreFormatIntent {
@@ -908,7 +961,9 @@ impl AppState {
             return None;
         }
         if wizard.confirmation != "YES" {
-            wizard.message = Some("开始重建加密分区写入前必须独立输入 YES。".into());
+            wizard.message = Some(crate::tui::ui::UiMessage::warning(
+                "开始重建加密分区写入前必须独立输入 YES。",
+            ));
             return None;
         }
         let outcome = wizard.restore_outcome.clone()?;
@@ -924,7 +979,9 @@ impl AppState {
         wizard.secret_input = crate::provision::SecretBytes::default();
         wizard.secret_first = crate::provision::SecretBytes::default();
         wizard.stage = WizardStage::Reinitializing;
-        wizard.message = Some("正在生成新 FileKey、更新密钥记录并创建新的空加密文件系统。".into());
+        wizard.message = Some(crate::tui::ui::UiMessage::progress(
+            "正在生成新 FileKey、更新密钥记录并创建新的空加密文件系统。",
+        ));
         self.shell.input_mode = InputMode::Normal;
         self.shell.critical_operation = true;
         Some(PostRestoreReinitializeIntent {
@@ -955,7 +1012,9 @@ impl AppState {
             return None;
         }
         if wizard.confirmation != "YES" {
-            wizard.message = Some("开始格式化写入前必须再次精确输入 YES。".into());
+            wizard.message = Some(crate::tui::ui::UiMessage::warning(
+                "开始格式化写入前必须再次精确输入 YES。",
+            ));
             return None;
         }
         let outcome = wizard.restore_outcome.clone()?;
@@ -963,7 +1022,9 @@ impl AppState {
         let volume_label = wizard.volume_label_input.clone();
         wizard.stage = WizardStage::Formatting;
         wizard.confirmation.clear();
-        wizard.message = Some("正在创建新的空文件系统；元数据恢复结果保持成功。".into());
+        wizard.message = Some(crate::tui::ui::UiMessage::progress(
+            "正在创建新的空文件系统；元数据恢复结果保持成功。",
+        ));
         self.shell.input_mode = InputMode::Normal;
         self.shell.critical_operation = true;
         Some(PostRestoreFormatIntent {
@@ -1019,7 +1080,9 @@ impl AppState {
             return None;
         }
         if wizard.confirmation != "YES" {
-            wizard.message = Some("必须精确输入 YES 才会开始向目标设备写入".to_string());
+            wizard.message = Some(crate::tui::ui::UiMessage::warning(
+                "必须精确输入 YES 才会开始向目标设备写入",
+            ));
             return None;
         }
         let intent = WriteIntent {
@@ -1029,7 +1092,9 @@ impl AppState {
             expected_identity: wizard.expected_identity.clone(),
         };
         wizard.stage = WizardStage::Running;
-        wizard.message = Some("关键写盘阶段进行中，不可中断".to_string());
+        wizard.message = Some(crate::tui::ui::UiMessage::progress(
+            "关键写盘阶段进行中，不可中断",
+        ));
         let mut run = crate::application::progress::OperationRunState::new(
             crate::application::progress::OperationKind::Restore,
             format!("disk{}", wizard.disk),
@@ -1080,7 +1145,9 @@ impl AppState {
                     wizard.restore_outcome = Some(outcome);
                     wizard.pending_format = None;
                     Self::clear_post_restore_volume_label(wizard);
-                    wizard.message = Some("元数据恢复成功；文件系统状态已完成只读检查。".into());
+                    wizard.message = Some(crate::tui::ui::UiMessage::success(
+                        "元数据恢复成功；文件系统状态已完成只读检查。",
+                    ));
                     self.shell.input_mode = InputMode::Normal;
                     initialize_workbench = true;
                 }
@@ -1097,7 +1164,7 @@ impl AppState {
                         event.log_policy = crate::application::progress::LogPolicy::Append;
                         run.push(event);
                     }
-                    wizard.message = Some(message);
+                    wizard.message = Some(crate::tui::ui::UiMessage::error(message));
                     self.shell.input_mode = InputMode::Normal;
                 }
             }
@@ -1113,7 +1180,7 @@ impl AppState {
             wizard.stage = WizardStage::PostRestore;
             wizard.pending_format = None;
             Self::clear_post_restore_volume_label(wizard);
-            wizard.message = Some(message.into());
+            wizard.message = Some(crate::tui::ui::UiMessage::error(message));
             self.shell.input_mode = InputMode::Normal;
         }
     }
@@ -1144,16 +1211,16 @@ impl AppState {
                         partition.detail = "格式化完成并通过读回重新评估".into();
                     }
                 }
-                wizard.message = Some(format!(
+                wizard.message = Some(crate::tui::ui::UiMessage::success(format!(
                     "分区 {} 格式化完成并重新评估为可用。",
                     result.partition_index
-                ));
+                )));
             }
             Err(message) => {
-                wizard.message = Some(format!(
+                wizard.message = Some(crate::tui::ui::UiMessage::error(format!(
                     "分区 {} 格式化失败：{}；元数据恢复仍保持成功。",
                     result.partition_index, message
-                ));
+                )));
             }
         }
         self.shell.input_mode = InputMode::Normal;
@@ -1191,10 +1258,10 @@ impl AppState {
                 }
                 wizard.stage = WizardStage::PostRestore;
                 Self::clear_post_restore_volume_label(wizard);
-                wizard.message = Some(format!(
+                wizard.message = Some(crate::tui::ui::UiMessage::success(format!(
                     "分区 {} 已使用原密钥域格式化并重新评估为可用。",
                     result.partition_index
-                ));
+                )));
                 self.shell.input_mode = InputMode::Normal;
             }
             Err(EncryptedPostRestoreError::FileKey(
@@ -1216,7 +1283,9 @@ impl AppState {
                         filesystem: result.filesystem,
                     });
                 wizard.stage = WizardStage::PasswordInput;
-                wizard.message = Some("原密码验证失败，请重新输入原密码。".into());
+                wizard.message = Some(crate::tui::ui::UiMessage::warning(
+                    "原密码验证失败，请重新输入原密码。",
+                ));
                 self.shell.input_mode = InputMode::Insert;
             }
             Err(EncryptedPostRestoreError::FileKey(
@@ -1235,18 +1304,18 @@ impl AppState {
                     }
                 }
                 wizard.stage = WizardStage::PostRestore;
-                wizard.message = Some(
-                    "密钥记录无法可靠验证；已转为“加密元数据异常”，可选择重建加密分区。".into(),
-                );
+                wizard.message = Some(crate::tui::ui::UiMessage::error(
+                    "密钥记录无法可靠验证；已转为“加密元数据异常”，可选择重建加密分区。",
+                ));
                 self.shell.input_mode = InputMode::Normal;
             }
             Err(EncryptedPostRestoreError::Operation(message)) => {
                 wizard.stage = WizardStage::PostRestore;
                 Self::clear_post_restore_volume_label(wizard);
-                wizard.message = Some(format!(
+                wizard.message = Some(crate::tui::ui::UiMessage::error(format!(
                     "分区 {} 加密格式化失败：{}；元数据恢复仍保持成功。",
                     result.partition_index, message
-                ));
+                )));
                 self.shell.input_mode = InputMode::Normal;
             }
         }
@@ -1260,7 +1329,7 @@ impl AppState {
             Self::clear_post_restore_volume_label(wizard);
             wizard.secret_input = crate::provision::SecretBytes::default();
             wizard.secret_first = crate::provision::SecretBytes::default();
-            wizard.message = Some(message.into());
+            wizard.message = Some(crate::tui::ui::UiMessage::error(message));
             self.shell.input_mode = InputMode::Normal;
         }
     }
@@ -1295,16 +1364,16 @@ impl AppState {
                         partition.detail = "新密钥域与新空文件系统已通过读回验证".into();
                     }
                 }
-                wizard.message = Some(format!(
+                wizard.message = Some(crate::tui::ui::UiMessage::success(format!(
                     "分区 {} 已重建密钥域并重新评估为可用。",
                     result.partition_index
-                ));
+                )));
             }
             Err(message) => {
-                wizard.message = Some(format!(
+                wizard.message = Some(crate::tui::ui::UiMessage::error(format!(
                     "分区 {} 重建失败：{}；元数据恢复仍保持成功。",
                     result.partition_index, message
-                ));
+                )));
             }
         }
     }
@@ -1328,10 +1397,10 @@ impl AppState {
             }
             wizard.message = Some(match result {
                 Ok(()) if wizard.kind == WriteKind::BackupCreate => {
-                    "备份创建完成；备份列表已刷新".to_string()
+                    crate::tui::ui::UiMessage::success("备份创建完成；备份列表已刷新")
                 }
-                Ok(()) => "操作完成，安全链全部通过".to_string(),
-                Err(message) => message,
+                Ok(()) => crate::tui::ui::UiMessage::success("操作完成，安全链全部通过"),
+                Err(message) => crate::tui::ui::UiMessage::error(message),
             });
         }
     }
@@ -1392,7 +1461,7 @@ impl AppState {
             self.shell.pinned_disk = None;
             self.provision_reset();
             self.restore_workspace_frame();
-            self.set_notice("制盘目标设备已断开，已安全返回设备列表。");
+            self.set_warning_notice("制盘目标设备已断开，已安全返回设备列表。");
         }
         if self.shell.workspace == Workspace::Devices {
             self.rebuild_workspace_filter();
@@ -1665,12 +1734,14 @@ impl AppState {
             self.shell.exit_pending = true;
             Some(StateEffect::ExitDeferred)
         } else if command == NavCommand::Escape {
-            self.set_notice(
+            self.set_warning_notice(
                 "关键操作仍在执行，当前不能返回；操作完成后再按 Esc 返回。".to_string(),
             );
             Some(StateEffect::None)
         } else {
-            self.set_notice("关键操作仍在执行，完成前不能执行该命令或启动其他任务。".to_string());
+            self.set_warning_notice(
+                "关键操作仍在执行，完成前不能执行该命令或启动其他任务。".to_string(),
+            );
             Some(StateEffect::None)
         }
     }
@@ -1722,7 +1793,7 @@ impl AppState {
                     WizardStage::Running
                     | WizardStage::Formatting
                     | WizardStage::Reinitializing => {
-                        self.set_notice("关键操作正在执行，当前不能关闭。".to_string());
+                        self.set_warning_notice("关键操作正在执行，当前不能关闭。".to_string());
                     }
                 }
                 return StateEffect::None;
@@ -1734,7 +1805,7 @@ impl AppState {
                 .filter(|_| self.shell.workspace == Workspace::Inspect)
             {
                 if advanced.stage == AdvancedInspectStage::Running {
-                    self.set_notice("全盘检查正在后台读取结构，请等待完成。");
+                    self.set_progress_notice("全盘检查正在后台读取结构，请等待完成。");
                 } else if advanced.prompt.is_some() {
                     self.advanced_inspect_cancel_prompt();
                 } else if advanced.view_mode == InspectViewMode::Hex
@@ -1748,7 +1819,7 @@ impl AppState {
             if self.shell.workspace == Workspace::Provision {
                 match self.provision.stage {
                     ProvisionStage::Running => {
-                        self.set_notice("制盘安全事务正在执行，当前不能返回。");
+                        self.set_warning_notice("制盘安全事务正在执行，当前不能返回。");
                     }
                     ProvisionStage::Confirm => {
                         self.provision_transition_return_to_review();
@@ -1757,14 +1828,14 @@ impl AppState {
                     ProvisionStage::Review => self.provision_return_review_to_form(),
                     ProvisionStage::ExportPath => self.provision_cancel_export(),
                     ProvisionStage::Exporting => {
-                        self.set_notice("镜像正在后台导出，请等待完成。");
+                        self.set_progress_notice("镜像正在后台导出，请等待完成。");
                     }
                     ProvisionStage::Form | ProvisionStage::Result => {
                         self.provision_reset();
                         self.restore_workspace_frame();
                     }
                     ProvisionStage::Planning => {
-                        self.set_notice("制盘计划正在后台生成，请等待完成。");
+                        self.set_progress_notice("制盘计划正在后台生成，请等待完成。");
                     }
                 }
                 return StateEffect::None;

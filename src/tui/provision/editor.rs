@@ -14,14 +14,14 @@ impl AppState {
             let (resolved, _) = match self.provision_resolved_prefill() {
                 Ok(value) => value,
                 Err(message) => {
-                    self.provision.message = Some(message);
+                    self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
                     return true;
                 }
             };
             let parts = match resolved.draft_partitions(crate::common::SECTOR as u64) {
                 Ok(parts) => parts,
                 Err(message) => {
-                    self.provision.message = Some(message);
+                    self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
                     return true;
                 }
             };
@@ -45,7 +45,7 @@ impl AppState {
                 match part.end_lba() {
                     Ok(end) => cursor = cursor.max(end),
                     Err(message) => {
-                        self.provision.message = Some(message);
+                        self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
                         return true;
                     }
                 }
@@ -54,10 +54,10 @@ impl AppState {
                 found = Some(cursor);
             }
             let Some(start) = found else {
-                self.provision.message = Some(format!(
+                self.provision.message = Some(crate::tui::ui::UiMessage::warning(format!(
                     "无法为{}找到可容纳当前容量的最小可用起点",
                     role.label()
-                ));
+                )));
                 return true;
             };
             match role {
@@ -73,11 +73,11 @@ impl AppState {
                 }
                 crate::provision::PartitionRole::CompatibilityReserve => return false,
             }
-            self.provision.message = Some(format!(
+            self.provision.message = Some(crate::tui::ui::UiMessage::success(format!(
                 "{}起点已自动填入最小可用位置 LBA {}",
                 role.label(),
                 start
-            ));
+            )));
             self.provision_sync_cursor_to_end();
             return true;
         }
@@ -87,7 +87,8 @@ impl AppState {
         } = id
         {
             let Some(total_sectors) = self.provision_total_sectors() else {
-                self.provision.message = Some("目标 USB 已不存在".into());
+                self.provision.message =
+                    Some(crate::tui::ui::UiMessage::error("目标 USB 已不存在"));
                 return true;
             };
             match self
@@ -99,7 +100,9 @@ impl AppState {
                     self.provision.message = None;
                     self.provision_sync_cursor_to_end();
                 }
-                Err(message) => self.provision.message = Some(message),
+                Err(message) => {
+                    self.provision.message = Some(crate::tui::ui::UiMessage::error(message))
+                }
             }
             return true;
         }
@@ -109,7 +112,8 @@ impl AppState {
         } = id
         {
             let Some(total_sectors) = self.provision_total_sectors() else {
-                self.provision.message = Some("目标 USB 已不存在".into());
+                self.provision.message =
+                    Some(crate::tui::ui::UiMessage::error("目标 USB 已不存在"));
                 return true;
             };
             match self
@@ -121,7 +125,9 @@ impl AppState {
                     self.provision.message = None;
                     self.provision_sync_cursor_to_end();
                 }
-                Err(message) => self.provision.message = Some(message),
+                Err(message) => {
+                    self.provision.message = Some(crate::tui::ui::UiMessage::error(message))
+                }
             }
             return true;
         }
@@ -153,14 +159,14 @@ impl AppState {
         let (resolved, _) = match resolved_result {
             Ok(value) => value,
             Err(message) => {
-                self.provision.message = Some(message);
+                self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
                 return true;
             }
         };
         let parts = match resolved.draft_partitions(crate::common::SECTOR as u64) {
             Ok(parts) => parts,
             Err(message) => {
-                self.provision.message = Some(message);
+                self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
                 return true;
             }
         };
@@ -173,7 +179,7 @@ impl AppState {
             let end = match other.end_lba() {
                 Ok(end) => end,
                 Err(message) => {
-                    self.provision.message = Some(message);
+                    self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
                     return true;
                 }
             };
@@ -187,7 +193,9 @@ impl AppState {
         }
         let max_sectors = boundary.saturating_sub(start);
         if max_sectors == 0 {
-            self.provision.message = Some("当前起点没有可用连续空间".into());
+            self.provision.message = Some(crate::tui::ui::UiMessage::warning(
+                "当前起点没有可用连续空间",
+            ));
             return true;
         }
 
@@ -251,7 +259,7 @@ impl AppState {
                 self.provision_sync_cursor_to_end();
             }
             Err(message) => {
-                self.provision.message = Some(message);
+                self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
             }
         }
         true
@@ -274,19 +282,10 @@ impl AppState {
                 self.provision_sync_cursor_to_end();
             }
             Ok(false) => {}
-            Err(message) => self.provision.message = Some(message),
+            Err(message) => {
+                self.provision.message = Some(crate::tui::ui::UiMessage::error(message))
+            }
         }
-        true
-    }
-
-    pub fn provision_toggle_force_change_password(&mut self) -> bool {
-        if self.provision_field_id(self.provision.field_selected)
-            != Some(ProvisionFieldId::ForceChangePassword)
-        {
-            return false;
-        }
-        self.provision.form.force_change_password = !self.provision.form.force_change_password;
-        self.provision.message = None;
         true
     }
 }

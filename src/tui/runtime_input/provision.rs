@@ -93,7 +93,7 @@ pub(super) fn handle_provision_key(
             }
             ProvisionStage::Planning => {
                 if action == TuiAction::Back {
-                    state.set_notice("制盘计划正在后台生成，请等待完成。");
+                    state.set_progress_notice("制盘计划正在后台生成，请等待完成。");
                 }
             }
             ProvisionStage::Review => {
@@ -125,7 +125,7 @@ pub(super) fn handle_provision_key(
             },
             ProvisionStage::Exporting => {
                 if action == TuiAction::Back {
-                    state.set_notice("镜像正在后台导出，请等待完成。");
+                    state.set_progress_notice("镜像正在后台导出，请等待完成。");
                 }
             }
             ProvisionStage::Confirm => match action {
@@ -144,7 +144,7 @@ pub(super) fn handle_provision_key(
                     let _ = state.navigate(NavCommand::Escape, viewport_height);
                 }
                 TuiAction::Confirm => {
-                    state.set_notice("写入目标介质前必须精确输入大写 YES 后按 Enter。")
+                    state.set_warning_notice("写入目标介质前必须精确输入大写 YES 后按 Enter。")
                 }
                 _ => {}
             },

@@ -78,6 +78,29 @@ fn tui_modals_must_not_center_against_local_content_rects() {
 }
 
 #[test]
+fn tui_user_messages_must_carry_explicit_severity() {
+    for path in rust_sources_under("src/tui") {
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !source.contains("message: Option<String>"),
+            "{} introduces an untyped user-facing message; use UiMessage so color follows semantic severity",
+            path.display()
+        );
+        assert!(
+            !source.contains("notice: Option<String>"),
+            "{} introduces an untyped notice; use UiMessage so normal feedback cannot inherit warning/error color",
+            path.display()
+        );
+        assert!(
+            !source.contains(r#"starts_with("错误")"#),
+            "{} infers severity from message text; use UiMessageTone instead",
+            path.display()
+        );
+    }
+}
+
+#[test]
 fn soft_size_budget_warns_before_existing_hard_limits() {
     assert!(!near_hard_limit(79, 100));
     assert!(near_hard_limit(80, 100));
@@ -1631,7 +1654,7 @@ fn app_state_owns_global_shell_state_through_shell_substate() {
         "critical_operation: bool",
         "exit_pending: bool",
         "navigation: NavigationStack",
-        "notice: Option<String>",
+        "notice: Option<crate::tui::ui::UiMessage>",
         "notice_at: Option<std::time::Instant>",
         "animation_frame: u64",
         "selected: usize",

@@ -168,7 +168,9 @@ impl AppState {
         let candidate = chars.into_iter().collect::<String>();
         let policy = self.provision_input_policy(id);
         if !policy.accepts(&candidate) {
-            self.provision.message = Some(policy.rejection_message().into());
+            self.provision.message = Some(crate::tui::ui::UiMessage::warning(
+                policy.rejection_message(),
+            ));
             return;
         }
         if let Some(field) = self.provision_selected_field_mut() {

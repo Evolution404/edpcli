@@ -260,7 +260,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                         )),
                     ],
                     confirmation: &provision.confirmation,
-                    message: provision.message.as_deref(),
+                    message: provision.message.as_ref(),
                 },
             );
         }

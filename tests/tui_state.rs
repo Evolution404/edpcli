@@ -1750,6 +1750,37 @@ fn provision_fill_start_finds_minimum_gap_without_mutating_other_form_fields() {
         encrypt_start_before
     );
     assert_eq!(state.provision().form.boot_sectors, boot_capacity_before);
+    assert_eq!(
+        state
+            .provision()
+            .message
+            .as_ref()
+            .map(|message| message.tone()),
+        Some(edpcli::tui::ui::UiMessageTone::Success),
+        "successful f auto-fill feedback must be a success message, never an error-red message"
+    );
+
+    let layout = state.provision_layout_model();
+    let reserved = layout
+        .segments
+        .iter()
+        .find(|segment| segment.start_lba == 13)
+        .expect("EDP reserved header range must be present in provision capacity map");
+    assert_eq!(
+        reserved.kind,
+        edpcli::tui::disk_layout::DiskRegionKind::Reserved
+    );
+    assert_eq!(reserved.label, "保留区域");
+    assert_eq!(reserved.end_exclusive().unwrap(), 63);
+    assert!(state
+        .provision_layout_editor_details()
+        .iter()
+        .any(|detail| {
+            detail.region_kind == Some(edpcli::tui::disk_layout::DiskRegionKind::Reserved)
+                && detail.columns.as_ref().is_some_and(|columns| {
+                    columns[0] == "保留区域" && columns[2] == "LBA 13–62" && columns[3] == "保留"
+                })
+        }));
 }
 
 #[test]

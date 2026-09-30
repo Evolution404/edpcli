@@ -71,7 +71,7 @@ impl AppState {
         self.provision_restore_form_snapshot();
         self.provision.review_view_snapshot = None;
         self.provision.message = None;
-        self.set_notice(message);
+        self.set_error_notice(message);
     }
 
     pub fn provision_return_review_to_form(&mut self) {

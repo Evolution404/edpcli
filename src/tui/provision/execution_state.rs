@@ -40,21 +40,27 @@ impl AppState {
         }
         let path = self.provision.export_path.trim();
         if path.is_empty() {
-            self.provision.message = Some("镜像导出路径不能为空".into());
+            self.provision.message =
+                Some(crate::tui::ui::UiMessage::warning("镜像导出路径不能为空"));
             return None;
         }
         let prepared = self.provision.prepared.as_ref()?.clone();
         let path = std::path::PathBuf::from(path);
         self.provision_transition_begin_exporting();
-        self.provision.message = Some(format!("正在后台导出 {}…", path.display()));
+        self.provision.message = Some(crate::tui::ui::UiMessage::progress(format!(
+            "正在后台导出 {}…",
+            path.display()
+        )));
         Some((prepared, path))
     }
 
     pub fn provision_finish_export(&mut self, result: Result<std::path::PathBuf, String>) {
         self.provision_transition_return_to_review();
         self.provision.message = Some(match result {
-            Ok(path) => format!("镜像导出完成：{}", path.display()),
-            Err(message) => message,
+            Ok(path) => {
+                crate::tui::ui::UiMessage::success(format!("镜像导出完成：{}", path.display()))
+            }
+            Err(message) => crate::tui::ui::UiMessage::error(message),
         });
     }
 
@@ -91,7 +97,9 @@ impl AppState {
             return None;
         }
         if self.provision.confirmation != "YES" {
-            self.provision.message = Some("必须精确输入 YES 才会开始向目标设备写入".into());
+            self.provision.message = Some(crate::tui::ui::UiMessage::warning(
+                "必须精确输入 YES 才会开始向目标设备写入",
+            ));
             return None;
         }
         let total_bytes = self
@@ -104,7 +112,9 @@ impl AppState {
             total_bytes,
         ));
         self.provision_transition_begin_running();
-        self.provision.message = Some("事务写盘进行中；退出请求会延迟到安全检查点".into());
+        self.provision.message = Some(crate::tui::ui::UiMessage::progress(
+            "事务写盘进行中；退出请求会延迟到安全检查点",
+        ));
         self.provision.result_status = None;
         self.provision.result_outcome = None;
         self.provision.run = Some(crate::application::progress::OperationRunState::new(
@@ -131,7 +141,7 @@ impl AppState {
                 self.provision.result_status =
                     Some(crate::application::provision::ProvisionExecutionStatus::FatalFailure);
                 self.provision.result_outcome = None;
-                self.provision.message = Some(message);
+                self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
             }
         }
         self.provision_initialize_result_workbench();

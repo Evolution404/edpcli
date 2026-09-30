@@ -102,7 +102,8 @@ fn verification_lines(state: &AppState) -> Vec<(String, crate::tui::ui::ResultTo
             state
                 .provision()
                 .message
-                .clone()
+                .as_ref()
+                .map(|message| message.text().to_string())
                 .unwrap_or_else(|| "写入未完成".into()),
             crate::tui::ui::ResultTone::Danger,
         ));

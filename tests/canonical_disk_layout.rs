@@ -44,8 +44,12 @@ fn canonical_edp_layout_is_complete_disjoint_and_groups_tail_from_lce() {
             .iter()
             .find(|segment| segment.start_lba == 13)
             .map(|segment| (segment.kind, segment.end_exclusive().unwrap())),
-        Some((DiskRegionKind::Free, 63))
+        Some((DiskRegionKind::Reserved, 63))
     );
+    assert!(!model.segments.iter().any(|segment| {
+        segment.kind == DiskRegionKind::Free
+            && segment.start_lba < edpcli::provision::OFFICIAL_PARTITION_START_SECTOR
+    }));
 
     let tail = model.tail_group().expect("EDP LCE must anchor tail group");
     assert_eq!(tail.start_lba, 6_000);
@@ -71,6 +75,32 @@ fn canonical_edp_layout_is_complete_disjoint_and_groups_tail_from_lce() {
             .sum::<u64>(),
         4_000
     );
+}
+
+#[test]
+fn draft_edp_marks_partition_overlap_with_reserved_header_as_conflict() {
+    let model = DiskLayoutModel::draft_edp(
+        10_000,
+        vec![segment("启动区", 60, 10, DiskRegionKind::Boot)],
+        6_000,
+        6,
+    );
+
+    let reserved = model
+        .segments
+        .iter()
+        .find(|segment| segment.kind == DiskRegionKind::Reserved)
+        .expect("LBA13-62 must remain explicitly reserved");
+    assert_eq!(reserved.start_lba, 13);
+    assert_eq!(reserved.end_exclusive().unwrap(), 60);
+
+    let conflict = model
+        .segments
+        .iter()
+        .find(|segment| segment.kind == DiskRegionKind::Conflict)
+        .expect("partition entering the reserved header must render as a conflict");
+    assert_eq!(conflict.start_lba, 60);
+    assert_eq!(conflict.end_exclusive().unwrap(), 63);
 }
 
 #[test]

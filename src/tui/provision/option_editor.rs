@@ -1,6 +1,17 @@
 use super::*;
 
 impl AppState {
+    pub fn provision_toggle_force_change_password(&mut self) -> bool {
+        if self.provision_field_id(self.provision.field_selected)
+            != Some(ProvisionFieldId::ForceChangePassword)
+        {
+            return false;
+        }
+        self.provision.form.force_change_password = !self.provision.form.force_change_password;
+        self.provision.message = None;
+        true
+    }
+
     pub fn provision_toggle_selected_option(&mut self) -> bool {
         let descriptor = self.provision_field_descriptor(self.provision.field_selected);
         if descriptor.is_some_and(|descriptor| !descriptor.capabilities.toggle) {
@@ -24,7 +35,7 @@ impl AppState {
                 }
                 Ok(false) => return false,
                 Err(message) => {
-                    self.provision.message = Some(message);
+                    self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
                     if kind == PlainProvisionFieldKind::Capacity {
                         self.provision_sync_cursor_to_end();
                     }
@@ -39,7 +50,9 @@ impl AppState {
                         self.provision.message = None;
                         self.provision_sync_cursor_to_end();
                     }
-                    Err(message) => self.provision.message = Some(message),
+                    Err(message) => {
+                        self.provision.message = Some(crate::tui::ui::UiMessage::error(message))
+                    }
                 }
                 true
             }
@@ -122,7 +135,7 @@ impl AppState {
                 }
                 Ok(false) => return false,
                 Err(message) => {
-                    self.provision.message = Some(message);
+                    self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
                     if kind == PlainProvisionFieldKind::Capacity {
                         self.provision_sync_cursor_to_end();
                     }
@@ -137,7 +150,9 @@ impl AppState {
                         self.provision.message = None;
                         self.provision_sync_cursor_to_end();
                     }
-                    Err(message) => self.provision.message = Some(message),
+                    Err(message) => {
+                        self.provision.message = Some(crate::tui::ui::UiMessage::error(message))
+                    }
                 }
                 true
             }

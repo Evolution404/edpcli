@@ -246,9 +246,12 @@ pub(super) fn draw_inspect_object_panes(
         detail_lines.push(Line::from("Enter 定位 · Esc 取消"));
     }
 
-    if let Some(message) = advanced.message.as_deref() {
+    if let Some(message) = advanced.message.as_ref() {
         detail_lines.push(Line::from(""));
-        detail_lines.push(Line::from(Span::styled(safe(message), danger())));
+        detail_lines.push(Line::from(Span::styled(
+            format!("{} {}", message.marker(), safe(message.text())),
+            message.style(),
+        )));
     }
 
     if let Some(overview_area) = overview_area {

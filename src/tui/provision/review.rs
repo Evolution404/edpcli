@@ -15,6 +15,7 @@ pub(crate) enum ProvisionReviewTone {
     Accent,
     Success,
     Warning,
+    Danger,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,7 +62,21 @@ impl AppState {
                 let (kind, tone) = if index == 0 {
                     (ProvisionReviewRowKind::Status, ProvisionReviewTone::Success)
                 } else if Some(index) == message_index {
-                    (ProvisionReviewRowKind::Notice, ProvisionReviewTone::Warning)
+                    let tone = self
+                        .provision
+                        .message
+                        .as_ref()
+                        .map(|message| match message.tone() {
+                            crate::tui::ui::UiMessageTone::Info
+                            | crate::tui::ui::UiMessageTone::Progress => {
+                                ProvisionReviewTone::Accent
+                            }
+                            crate::tui::ui::UiMessageTone::Success => ProvisionReviewTone::Success,
+                            crate::tui::ui::UiMessageTone::Warning => ProvisionReviewTone::Warning,
+                            crate::tui::ui::UiMessageTone::Error => ProvisionReviewTone::Danger,
+                        })
+                        .unwrap_or(ProvisionReviewTone::Muted);
+                    (ProvisionReviewRowKind::Notice, tone)
                 } else if index >= last_action_start {
                     (ProvisionReviewRowKind::Action, ProvisionReviewTone::Accent)
                 } else {
@@ -294,7 +309,7 @@ impl AppState {
             None => lines.push("计划对象尚未准备。".into()),
         }
         if let Some(message) = &self.provision.message {
-            lines.push(message.clone());
+            lines.push(message.text().to_string());
         }
         lines.extend([
             "Enter 打开写入确认".into(),

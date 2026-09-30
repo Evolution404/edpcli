@@ -31,7 +31,7 @@ pub struct WriteConfirmationSpec<'a> {
     pub warning: String,
     pub details: Vec<Line<'a>>,
     pub confirmation: &'a str,
-    pub message: Option<&'a str>,
+    pub message: Option<&'a super::UiMessage>,
 }
 
 pub struct ActionConfirmationSpec<'a> {
@@ -70,7 +70,10 @@ pub fn render_write_confirmation_modal(frame: &mut Frame, spec: WriteConfirmatio
             )),
         ]);
         if let Some(message) = spec.message {
-            lines.push(Line::from(Span::styled(message, theme.danger())));
+            lines.push(Line::from(Span::styled(
+                format!("{} {}", message.marker(), message.text()),
+                message.style(),
+            )));
         }
         lines.push(Line::from(""));
         lines.push(Line::from(vec![

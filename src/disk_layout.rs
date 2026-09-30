@@ -7,7 +7,7 @@ use crate::backup_metadata::{
 use crate::inspect_target::InspectDiskContext;
 use crate::partition_table::PartitionTableSnapshot;
 use crate::protocol::edpf::EdpPartitionType;
-use crate::provision::PartitionRole;
+use crate::provision::{PartitionRole, OFFICIAL_PARTITION_START_SECTOR};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DiskRegionKind {
@@ -233,6 +233,14 @@ impl DiskLayoutModel {
             sector_count: 13,
             kind: DiskRegionKind::Protocol,
         });
+        if total_sectors > 13 {
+            known.push(DiskLayoutSegment {
+                label: "保留区域".into(),
+                start_lba: 13,
+                sector_count: total_sectors.min(OFFICIAL_PARTITION_START_SECTOR) - 13,
+                kind: DiskRegionKind::Reserved,
+            });
+        }
         known.append(&mut partitions);
         known.push(DiskLayoutSegment {
             label: "LCE".into(),
@@ -275,6 +283,14 @@ impl DiskLayoutModel {
             sector_count: 13.min(total_sectors),
             kind: DiskRegionKind::Protocol,
         });
+        if total_sectors > 13 {
+            known.push(DiskLayoutSegment {
+                label: "保留区域".into(),
+                start_lba: 13,
+                sector_count: total_sectors.min(OFFICIAL_PARTITION_START_SECTOR) - 13,
+                kind: DiskRegionKind::Reserved,
+            });
+        }
         known.append(&mut partitions);
         known.push(DiskLayoutSegment {
             label: "LCE".into(),

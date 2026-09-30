@@ -147,6 +147,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
                 Some(InspectDecoderKind::Protocol),
                 DiskRegionSemantic::Protocol,
             ),
+            DiskRegionKind::Reserved => (None, DiskRegionSemantic::Reserved),
             DiskRegionKind::Free => (None, DiskRegionSemantic::Unallocated),
             DiskRegionKind::Lce => (Some(InspectDecoderKind::Lce), DiskRegionSemantic::Lce),
             DiskRegionKind::BackupMirror => (None, DiskRegionSemantic::TailMetadataMirror),
@@ -183,6 +184,7 @@ pub fn build_inspect_topology(context: &InspectDiskContext) -> InspectTopology {
         let (decoder, semantic) = properties(context, segment);
         let id = match segment.kind {
             crate::application::disk_layout::DiskRegionKind::Protocol => "region.protocol".into(),
+            crate::application::disk_layout::DiskRegionKind::Reserved => "region.reserved".into(),
             crate::application::disk_layout::DiskRegionKind::Free => {
                 let id = format!("region.unallocated.{free_index}");
                 free_index += 1;

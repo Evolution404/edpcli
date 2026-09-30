@@ -467,7 +467,10 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 muted(),
             )));
             if let Some(message) = &wizard.message {
-                lines.push(Line::from(Span::styled(safe(message), warning())));
+                lines.push(Line::from(Span::styled(
+                    format!("{} {}", message.marker(), safe(message.text())),
+                    message.style(),
+                )));
             }
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
@@ -492,7 +495,10 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 super::theme::current().input_focused(),
             )));
             if let Some(message) = &wizard.message {
-                lines.push(Line::from(Span::styled(safe(message), warning())));
+                lines.push(Line::from(Span::styled(
+                    format!("{} {}", message.marker(), safe(message.text())),
+                    message.style(),
+                )));
             }
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
@@ -574,7 +580,10 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 super::theme::current().input_focused(),
             )));
             if let Some(message) = &wizard.message {
-                lines.push(Line::from(Span::styled(safe(message), warning())));
+                lines.push(Line::from(Span::styled(
+                    format!("{} {}", message.marker(), safe(message.text())),
+                    message.style(),
+                )));
             }
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
@@ -630,10 +639,17 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 "生成新 FileKey → 更新密钥记录 → 创建空加密文件系统 → 读回 → 使用新密码重新评估。",
             ));
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("● ", danger()),
-                Span::raw(wizard.message.as_deref().unwrap_or("正在执行密钥域重建…")),
-            ]));
+            if let Some(message) = wizard.message.as_ref() {
+                lines.push(Line::from(Span::styled(
+                    format!("{} {}", message.marker(), safe(message.text())),
+                    message.style(),
+                )));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "◌ 正在执行密钥域重建…",
+                    super::theme::current().secondary_accent(),
+                )));
+            }
             lines.push(Line::from(Span::styled(
                 "q / Esc / Ctrl-C 将延迟到安全结束点。",
                 muted(),
@@ -769,7 +785,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                         Line::from("该分区原有文件系统内容不会被恢复。"),
                     ],
                     confirmation: &wizard.confirmation,
-                    message: wizard.message.as_deref(),
+                    message: wizard.message.as_ref(),
                 },
             );
         }
@@ -797,7 +813,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                         Line::from("原文件系统内容不会恢复。"),
                     ],
                     confirmation: &wizard.confirmation,
-                    message: wizard.message.as_deref(),
+                    message: wizard.message.as_ref(),
                 },
             );
         }
@@ -825,7 +841,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                         Line::from("该操作不能恢复旧密钥域中的文件内容。"),
                     ],
                     confirmation: &wizard.confirmation,
-                    message: wizard.message.as_deref(),
+                    message: wizard.message.as_ref(),
                 },
             );
         }
@@ -851,7 +867,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         CoreMode::Stable
     };
 
-    let notice = state.notice();
+    let notice = state.notice_message();
     let status = super::status::dynamic_status(state);
     let operation_progress_running = state.provision().stage == ProvisionStage::Running
         || state

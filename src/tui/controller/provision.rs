@@ -20,7 +20,7 @@ fn move_provision(state: &mut AppState, delta: isize, viewport_height: usize) ->
 
 fn activate_scheme(state: &mut AppState) -> ActionOutcome {
     let Some(disk) = state.selected_device_disk() else {
-        state.set_notice("物理制盘需要先在设备列表明确选择 USB 目标。");
+        state.set_warning_notice("物理制盘需要先在设备列表明确选择 USB 目标。");
         return ActionOutcome::handled();
     };
     let kind = state.provision_begin_selected();
@@ -162,7 +162,7 @@ pub(super) fn dispatch_provision(
             }
             TuiAction::Activate => ActionOutcome::request(ActionRequest::ProvisionPlan),
             TuiAction::Export => {
-                state.set_notice("请先按 Enter 生成只读计划，再从计划页导出镜像。");
+                state.set_warning_notice("请先按 Enter 生成只读计划，再从计划页导出镜像。");
                 ActionOutcome::handled()
             }
             TuiAction::Back => {

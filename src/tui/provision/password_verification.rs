@@ -117,7 +117,7 @@ impl AppState {
                     self.provision.encrypt_source_verification =
                         ProvisionPasswordVerificationState::Idle;
                 }
-                self.set_notice(format!("来源密码域只读探测失败: {message}"));
+                self.set_warning_notice(format!("来源密码域只读探测失败: {message}"));
             }
         }
     }
@@ -161,7 +161,7 @@ impl AppState {
                     crate::provision::SourcePasswordKnowledge::Unknown;
                 self.provision.share_source_verification =
                     ProvisionPasswordVerificationState::Failed;
-                self.set_notice(format!(
+                self.set_warning_notice(format!(
                     "{message}；未自动启用格式化。可保持兼容布局透传；如需改密请主动勾选交换区格式化"
                 ));
             }
@@ -170,7 +170,7 @@ impl AppState {
                     crate::provision::SourcePasswordKnowledge::Unknown;
                 self.provision.encrypt_source_verification =
                     ProvisionPasswordVerificationState::Failed;
-                self.set_notice(format!(
+                self.set_warning_notice(format!(
                     "{message}；未自动启用格式化。可保持兼容布局透传；如需改密请主动勾选保密区格式化"
                 ));
             }

@@ -156,7 +156,7 @@ fn dispatch_inspect(
             if let Err(message) =
                 state.advanced_inspect_search_next(action == TuiAction::PreviousMatch)
             {
-                state.set_notice(message);
+                state.set_warning_notice(message);
             }
             ActionOutcome::handled()
         }
@@ -373,7 +373,7 @@ pub(super) fn dispatch_action(
                     state.device_info_focus_detail();
                 } else if state.devices_focused_pane() == PaneId::DevicesList {
                     if let Err(message) = state.activate_device_for_viewport(viewport_width) {
-                        state.set_notice(message);
+                        state.set_warning_notice(message);
                     }
                 }
                 ActionOutcome::handled()
@@ -385,9 +385,9 @@ pub(super) fn dispatch_action(
         },
         TuiAction::Provision if state.workspace() == Workspace::Devices => {
             if state.devices_focused_pane() != PaneId::DevicesList {
-                state.set_notice("请先回到设备列表，再按 p 选择制盘方案。");
+                state.set_warning_notice("请先回到设备列表，再按 p 选择制盘方案。");
             } else if let Err(message) = state.begin_provision_for_selected_device() {
-                state.set_notice(message);
+                state.set_warning_notice(message);
             }
             ActionOutcome::handled()
         }

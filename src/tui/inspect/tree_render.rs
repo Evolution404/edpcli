@@ -7,6 +7,7 @@ use crate::tui::state::AdvancedInspectTreeRow;
 fn region_kind(semantic: Option<DiskRegionSemantic>) -> Option<DiskRegionKind> {
     match semantic? {
         DiskRegionSemantic::Protocol => Some(DiskRegionKind::Protocol),
+        DiskRegionSemantic::Reserved => Some(DiskRegionKind::Reserved),
         DiskRegionSemantic::PartitionTable => Some(DiskRegionKind::Metadata),
         DiskRegionSemantic::PlainPartition | DiskRegionSemantic::MbrPartition { .. } => {
             Some(DiskRegionKind::Plain)
@@ -135,6 +136,10 @@ mod tests {
         assert_eq!(
             region_kind(Some(DiskRegionSemantic::Protocol)),
             Some(DiskRegionKind::Protocol)
+        );
+        assert_eq!(
+            region_kind(Some(DiskRegionSemantic::Reserved)),
+            Some(DiskRegionKind::Reserved)
         );
         assert_eq!(
             region_kind(Some(DiskRegionSemantic::Unallocated)),

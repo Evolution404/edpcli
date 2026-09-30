@@ -42,6 +42,7 @@ pub(super) fn draw_provision_review(
                     ProvisionReviewTone::Accent => accent(),
                     ProvisionReviewTone::Success => success(),
                     ProvisionReviewTone::Warning => warning(),
+                    ProvisionReviewTone::Danger => danger(),
                 };
                 Line::from(Span::styled(safe(&row.text), style))
             })
@@ -102,12 +103,14 @@ pub(super) fn draw_provision_review(
                     ProvisionReviewTone::Accent => accent(),
                     ProvisionReviewTone::Success => success(),
                     ProvisionReviewTone::Warning => warning(),
+                    ProvisionReviewTone::Danger => danger(),
                 };
                 let mut line = Line::from(Span::styled(safe(&row.text), style));
                 if let Some(label) = row.badge {
                     let tone = match row.tone {
                         ProvisionReviewTone::Success => crate::tui::ui::BadgeTone::Success,
                         ProvisionReviewTone::Warning => crate::tui::ui::BadgeTone::Warning,
+                        ProvisionReviewTone::Danger => crate::tui::ui::BadgeTone::Danger,
                         ProvisionReviewTone::Accent => crate::tui::ui::BadgeTone::Accent,
                         ProvisionReviewTone::Muted => crate::tui::ui::BadgeTone::Neutral,
                     };

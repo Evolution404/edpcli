@@ -18,10 +18,10 @@ pub(super) fn handle_inspect_key(
             AdvancedInspectStage::Running => {
                 match key.code {
                     ct_event::KeyCode::Esc => {
-                        state.set_notice("全盘检查正在后台读取结构，请等待完成。");
+                        state.set_progress_notice("全盘检查正在后台读取结构，请等待完成。");
                     }
                     ct_event::KeyCode::Char('J') => {
-                        state.set_notice("全盘检查数据尚未准备好，完成后才能跳转 LBA。");
+                        state.set_warning_notice("全盘检查数据尚未准备好，完成后才能跳转 LBA。");
                     }
                     _ => {}
                 }
@@ -67,7 +67,7 @@ pub(super) fn handle_inspect_key(
                                             Some(state::AdvancedInspectPrompt::Jump { .. })
                                         ) =>
                                     {
-                                        state.set_notice(message);
+                                        state.set_warning_notice(message);
                                     }
                                     Err(_) => {}
                                 }
@@ -183,7 +183,7 @@ pub(super) fn handle_inspect_key(
                             if let Err(message) = state
                                 .advanced_inspect_search_next(action == TuiAction::PreviousMatch)
                             {
-                                state.set_notice(message);
+                                state.set_warning_notice(message);
                             }
                         }
                         _ => {}

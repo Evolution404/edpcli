@@ -91,9 +91,8 @@ pub(super) fn handle_backup_wizard_key(
                         keymap::TuiAction::Cancel | keymap::TuiAction::Back => {
                             let _ = state.navigate(NavCommand::Escape, 1);
                         }
-                        keymap::TuiAction::Confirm => {
-                            state.set_notice("写入目标介质前必须精确输入大写 YES 后按 Enter。")
-                        }
+                        keymap::TuiAction::Confirm => state
+                            .set_warning_notice("写入目标介质前必须精确输入大写 YES 后按 Enter。"),
                         _ => {}
                     }
                 }

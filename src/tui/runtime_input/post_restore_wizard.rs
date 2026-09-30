@@ -126,7 +126,7 @@ pub(super) fn handle_post_restore_wizard_key(
                         state.cancel_post_restore_secret_flow();
                     }
                     keymap::TuiAction::Confirm => {
-                        state.set_notice("加密格式化需要独立输入大写 YES 后按 Enter。")
+                        state.set_warning_notice("加密格式化需要独立输入大写 YES 后按 Enter。")
                     }
                     _ => {}
                 }
@@ -149,7 +149,7 @@ pub(super) fn handle_post_restore_wizard_key(
                         state.cancel_post_restore_secret_flow();
                     }
                     keymap::TuiAction::Confirm => {
-                        state.set_notice("重建密钥域需要独立输入大写 YES 后按 Enter。")
+                        state.set_warning_notice("重建密钥域需要独立输入大写 YES 后按 Enter。")
                     }
                     _ => {}
                 }
@@ -172,7 +172,7 @@ pub(super) fn handle_post_restore_wizard_key(
                         state.cancel_post_restore_format();
                     }
                     keymap::TuiAction::Confirm => {
-                        state.set_notice("格式化需要第二次独立输入大写 YES 后按 Enter。")
+                        state.set_warning_notice("格式化需要第二次独立输入大写 YES 后按 Enter。")
                     }
                     _ => {}
                 }

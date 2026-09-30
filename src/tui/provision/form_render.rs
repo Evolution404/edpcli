@@ -218,7 +218,10 @@ pub(super) fn draw_provision_form(
         ]));
     }
     if let Some(message) = &provision.message {
-        form_lines.push(Line::from(Span::styled(safe(message), danger())));
+        form_lines.push(Line::from(Span::styled(
+            format!("{} {}", message.marker(), safe(message.text())),
+            message.style(),
+        )));
     }
 
     let visible_height = form_geometry.height.saturating_sub(2) as usize;

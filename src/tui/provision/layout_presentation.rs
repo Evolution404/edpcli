@@ -275,6 +275,7 @@ impl AppState {
                         None,
                         "当前草稿有多个区域覆盖同一 LBA 范围".into(),
                     ),
+                    DiskRegionKind::Reserved => ("保留".into(), Tone::Muted, None, String::new()),
                     DiskRegionKind::Free => ("空闲".into(), Tone::Muted, None, String::new()),
                     DiskRegionKind::Unknown => {
                         ("待确认".into(), Tone::Warning, None, String::new())
@@ -307,6 +308,7 @@ impl AppState {
                 .get(&(segment.start_lba, segment.sector_count))
                 .cloned()
                 .unwrap_or_else(|| match segment.kind {
+                    DiskRegionKind::Reserved => ("保留".into(), Tone::Muted, None, String::new()),
                     DiskRegionKind::Free => ("空闲".into(), Tone::Muted, None, String::new()),
                     DiskRegionKind::Unknown => {
                         ("待确认".into(), Tone::Warning, None, String::new())

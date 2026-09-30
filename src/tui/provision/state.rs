@@ -187,7 +187,7 @@ pub struct ProvisionState {
     pub prepared: Option<ProvisionPrepared>,
     pub confirmation: String,
     pub export_path: String,
-    pub message: Option<String>,
+    pub message: Option<crate::tui::ui::UiMessage>,
     pub result_status: Option<crate::application::provision::ProvisionExecutionStatus>,
     pub result_outcome: Option<crate::application::provision::ProvisionWriteOutcome>,
     pub result_plan: Option<ProvisionResultSnapshot>,
@@ -271,7 +271,9 @@ impl AppState {
             .min(ProvisionKind::ALL.len() - 1);
         let kind = ProvisionKind::ALL[index];
         if self.selected_device().is_none() {
-            self.provision.message = Some("目标 USB 已不存在，请返回设备列表重新选择。".into());
+            self.provision.message = Some(crate::tui::ui::UiMessage::error(
+                "目标 USB 已不存在，请返回设备列表重新选择。",
+            ));
             return kind;
         }
         self.provision.scheme_selected = index;
@@ -312,7 +314,7 @@ impl AppState {
                 Err(message) => {
                     self.provision.plain_form = PlainProvisionForm::default();
                     self.provision_transition_enter_form();
-                    self.provision.message = Some(message);
+                    self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
                 }
             }
             return kind;
