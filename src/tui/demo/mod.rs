@@ -45,6 +45,7 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
         return Ok(state);
     }
     let edp = fixtures::disk(6, crate::provision::DiskProvisionKind::Mode0);
+    let provision_result = fixtures::provision_result_snapshot(&edp);
     let edp_mode1 = fixtures::disk(7, crate::provision::DiskProvisionKind::Mode1);
     let plain = fixtures::disk(8, crate::provision::DiskProvisionKind::Plain);
     let inspect_fixture = fixtures::inspect_workspace(&edp);
@@ -93,6 +94,10 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
                 _ => ProvisionStage::Result,
             };
             let stage = state.provision().stage;
+            if stage == ProvisionStage::Result {
+                state.provision_mut().result_plan = Some(provision_result.clone());
+                state.provision_initialize_result_workbench();
+            }
             state.provision_mut().pane_focus = match stage {
                 ProvisionStage::Review => crate::tui::pane::PaneFocus::provision_review(),
                 ProvisionStage::Running => crate::tui::pane::PaneFocus::provision_running(),

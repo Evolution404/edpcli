@@ -97,6 +97,30 @@ fn demo_fixtures_expose_typed_inspect_layout_backups_and_running_progress() {
 }
 
 #[test]
+fn provision_result_demo_uses_real_result_workbench_state() {
+    let state = demo::build_scene("provision-result-success").unwrap();
+    assert!(state.provision().result_plan.is_some());
+    assert_eq!(
+        state.provision().result_workbench.selected_partition,
+        Some(0)
+    );
+    assert!(state
+        .provision()
+        .result_workbench
+        .region_selection()
+        .is_some());
+
+    let screen = screen_text("provision-result-success");
+    let compact = screen.replace(' ', "");
+    for expected in ["制盘结果", "分区结果", "全盘布局", "验收与执行", "▲"] {
+        assert!(
+            compact.contains(expected),
+            "missing {expected} in result demo"
+        );
+    }
+}
+
+#[test]
 fn demo_timeline_is_deterministic_at_a_frozen_tick() {
     let base = std::time::Instant::now();
     let first = demo::timeline::DemoTimeline::at_tick(3, base);
