@@ -147,9 +147,7 @@ fn plain_needs_format_outcome() -> MetadataRestoreOutcome {
 
 #[test]
 fn post_restore_disk_layout_free_region_clears_partition_action_target() {
-    use edpcli::application::disk_layout::{
-        DiskLayoutModel, DiskLayoutSegment, DiskRegionKind,
-    };
+    use edpcli::application::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
     use edpcli::tui::pane::PaneId;
 
     let mut outcome = plain_needs_format_outcome();
