@@ -146,6 +146,63 @@ fn plain_needs_format_outcome() -> MetadataRestoreOutcome {
 }
 
 #[test]
+fn post_restore_disk_layout_free_region_clears_partition_action_target() {
+    use edpcli::application::disk_layout::{
+        DiskLayoutModel, DiskLayoutSegment, DiskRegionKind,
+    };
+    use edpcli::tui::pane::PaneId;
+
+    let mut outcome = plain_needs_format_outcome();
+    outcome.layout = DiskLayoutModel::canonical_plain_plan(
+        outcome.total_sectors,
+        vec![DiskLayoutSegment {
+            label: "普通分区".into(),
+            start_lba: outcome.assessment.partitions[0].start_lba,
+            sector_count: outcome.assessment.partitions[0].sector_count,
+            kind: DiskRegionKind::Plain,
+        }],
+    );
+
+    let mut state = AppState::new();
+    begin_post_restore(&mut state, outcome);
+    assert_eq!(
+        state.post_restore_result_focused_pane(),
+        PaneId::ResultPartitions
+    );
+    assert_eq!(
+        state
+            .wizard()
+            .unwrap()
+            .post_restore_workbench
+            .selected_partition,
+        Some(0)
+    );
+
+    state.post_restore_result_shift_pane(false);
+    assert_eq!(
+        state.post_restore_result_focused_pane(),
+        PaneId::ResultDiskLayout
+    );
+    state.move_post_restore_result_selection(-1, 8);
+    assert_eq!(
+        state
+            .wizard()
+            .unwrap()
+            .post_restore_workbench
+            .selected_partition,
+        None
+    );
+
+    state.begin_selected_post_restore_action();
+    let wizard = state.wizard().unwrap();
+    assert_eq!(wizard.stage, WizardStage::PostRestore);
+    assert_eq!(
+        wizard.message.as_deref(),
+        Some("当前激活区域不是可处理分区。")
+    );
+}
+
+#[test]
 fn restore_post_processing_requires_a_second_yes_before_plain_format() {
     let mut state = AppState::new();
     state.begin_write_wizard(WriteKind::Restore, 4, Some("plain.edpb".into()));
