@@ -214,6 +214,10 @@ fn muted() -> Style {
     super::theme::current().muted()
 }
 
+fn selection_marker() -> Style {
+    super::theme::current().selection_marker()
+}
+
 fn tab() -> Style {
     super::theme::current().tab()
 }
