@@ -183,10 +183,12 @@ fn provision_stage_writes_are_centralized_in_transitions() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for path in rust_sources_under("src/tui") {
         let relative = path.strip_prefix(root).unwrap_or(&path);
-        let relative = relative.to_string_lossy();
-        if relative == "src/tui/provision/transitions.rs" || relative == "src/tui/demo/mod.rs" {
+        if relative == Path::new("src/tui/provision/transitions.rs")
+            || relative == Path::new("src/tui/demo/mod.rs")
+        {
             continue;
         }
+        let relative = relative.to_string_lossy();
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
         assert!(
