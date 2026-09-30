@@ -861,11 +861,17 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
     let notice = state.notice();
     let status = super::status::dynamic_status(state);
+    let operation_progress_running = state.provision().stage == ProvisionStage::Running
+        || state
+            .wizard()
+            .is_some_and(|wizard| wizard.stage == WizardStage::Running);
+    let footer_height =
+        u16::from(!operation_progress_running || notice.is_some() || status.is_some());
     let constraints = vec![
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(1),
-        Constraint::Length(1),
+        Constraint::Length(footer_height),
     ];
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -916,7 +922,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         draw_wizard(frame, content_area, state);
     }
 
-    super::shell::message_bar(frame, chunks[3], notice, status.as_deref());
+    if footer_height > 0 {
+        super::shell::message_bar(frame, chunks[3], notice, status.as_deref());
+    }
 }
 
 #[cfg(test)]

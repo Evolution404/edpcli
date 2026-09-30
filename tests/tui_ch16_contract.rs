@@ -237,29 +237,33 @@ fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
     for value in [
         "总体进度",
         "70%",
-        "当前阶段",
+        "当前任务",
+        "阶段",
         "2/7",
         "事务写入",
         "当前步骤",
         "协议读回校验",
-        "运行日志",
+        "工作进度",
+        "75/100sector·75%",
+        "动态描述",
+        "正在写入文件系统结构",
+        "最近活动",
+        "运行记录",
         "安全提示",
     ] {
         assert!(text.contains(value), "missing {value}");
     }
-    let phase_row = lines
-        .iter()
-        .position(|line| line.replace(' ', "").contains("当前阶段2/7"))
-        .expect("current-stage content row");
-    assert!(
-        lines[phase_row + 2].contains("75 / 100 sector · 75%"),
-        "work gauge label must occupy exactly the final content row: {:?}",
-        &lines[phase_row.saturating_sub(1)..=phase_row + 3]
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.replace(' ', "").contains("安全提示"))
+            .count(),
+        1,
+        "Operation Running must expose exactly one safety footer"
     );
-    assert!(
-        !lines[phase_row + 3].contains("75 / 100 sector · 75%"),
-        "work gauge must never overwrite the current-status bottom border"
-    );
+    assert!(!text.contains("扇区活动"), "{text}");
+    assert!(!text.contains("安全写盘事务执行中"), "{text}");
+    assert!(!text.contains("就绪"), "{text}");
     for (width, height) in [(40, 10), (80, 24), (120, 36), (240, 60)] {
         let compact = rendered_lines(&state, width, height)
             .join("\n")

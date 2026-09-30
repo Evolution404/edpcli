@@ -185,9 +185,10 @@ fn long_provision_scene_opens_running_page_with_nested_activity_visible() {
     let run = state.provision().run.as_ref().expect("long demo progress");
     assert!(run.log.len() > 5);
     let screen = screen_text("provision-running-long").replace(' ', "");
-    for expected in ["扇区活动", "DEMO慢盘", "%", "运行日志"] {
+    for expected in ["当前任务", "DEMO慢盘", "%", "运行记录"] {
         assert!(screen.contains(expected), "{expected}");
     }
+    assert!(!screen.contains("扇区活动"), "{screen}");
 }
 
 #[test]
@@ -200,7 +201,8 @@ fn demo_scenes_show_real_workspace_content_and_safety_header() {
         assert!(screen.contains("DEMO"), "{scene}");
     }
     let running = screen_text("provision-running").replace(' ', "");
-    for expected in ["阶段", "步骤", "日志", "演示模式不会执行真实操作"] {
+    for expected in ["阶段", "当前步骤", "运行记录", "演示模式不会执行真实操作"]
+    {
         assert!(running.contains(expected), "{expected}");
     }
     let backup_verify = screen_text("backup-verify-running").replace(' ', "");

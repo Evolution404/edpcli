@@ -113,6 +113,34 @@ fn overall_and_work_gauges_share_high_contrast_progress_labels() {
 }
 
 #[test]
+fn running_progress_uses_four_layers_one_line_safety_and_no_duplicate_global_status() {
+    let progress = include_str!("../src/tui/operation_progress_render.rs");
+    let current = include_str!("../src/tui/operation_progress_status.rs");
+    let root = include_str!("../src/tui/render.rs");
+    let status = include_str!("../src/tui/status.rs");
+
+    for required in ["总体进度", "运行记录", "Constraint::Length(1)"] {
+        assert!(progress.contains(required), "missing {required}");
+    }
+    assert!(current.contains("当前任务"));
+    assert!(current.contains("工作进度"));
+    assert!(current.contains("动态描述"));
+    assert!(current.contains("最近活动"));
+    assert!(!progress.contains("运行日志 · 最近语义活动"));
+    assert!(!current.contains("当前状态"));
+    assert!(!progress.contains("扇区活动"));
+    assert!(!current.contains("扇区活动"));
+    assert!(
+        root.contains("let footer_height =")
+            && root.contains("!operation_progress_running || notice.is_some() || status.is_some()")
+    );
+    assert!(
+        status.contains("if operation_progress_running") && status.contains("return None;"),
+        "Running must not emit a duplicate dynamic safety status"
+    );
+}
+
+#[test]
 fn result_report_pages_keep_static_primitive_and_provision_uses_interactive_workbench() {
     let shared = include_str!("../src/tui/ui/operation_result.rs");
     let workbench = include_str!("../src/tui/result_workbench.rs");
