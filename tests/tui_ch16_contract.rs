@@ -135,10 +135,45 @@ fn provision_state() -> AppState {
 fn ch16_provision_has_shared_stepper_and_card_surfaces() {
     let state = provision_state();
     let text = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
-    for value in ["制盘配置", "分区预览", "计划确认", "执行", "完成"] {
+    for value in ["制盘配置", "生成计划", "计划确认", "执行", "完成"] {
         assert!(text.contains(value), "missing {value}");
     }
     assert!(text.contains("固定目标"));
+}
+
+#[test]
+fn provision_breadcrumb_tracks_page_surface_not_overlay_stage() {
+    use edpcli::tui::state::ProvisionStage;
+
+    let mut state = provision_state();
+    let form = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
+    assert!(form.contains("设备/disk6>制盘/mode0>制盘配置"), "{form}");
+    assert!(form.contains("Esc返回：设备列表"), "{form}");
+
+    state.provision_mut().stage = ProvisionStage::Planning;
+    let planning = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
+    assert!(
+        planning.contains("设备/disk6>制盘/mode0>制盘配置"),
+        "{planning}"
+    );
+    assert!(planning.contains("2生成计划"), "{planning}");
+
+    state.provision_mut().stage = ProvisionStage::Review;
+    state.provision_mut().pane_focus = edpcli::tui::pane::PaneFocus::provision_review();
+    let review = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
+    assert!(
+        review.contains("设备/disk6>制盘/mode0>计划确认"),
+        "{review}"
+    );
+    assert!(review.contains("Esc返回：制盘配置"), "{review}");
+
+    state.provision_mut().stage = ProvisionStage::Confirm;
+    let confirm = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
+    assert!(
+        confirm.contains("设备/disk6>制盘/mode0>计划确认"),
+        "{confirm}"
+    );
+    assert!(confirm.contains("Esc返回：制盘配置"), "{confirm}");
 }
 
 #[test]

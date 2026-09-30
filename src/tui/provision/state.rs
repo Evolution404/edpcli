@@ -118,6 +118,9 @@ use transitions::{ProvisionFormViewSnapshot, ProvisionReviewViewSnapshot};
 mod layout;
 #[path = "layout_presentation.rs"]
 mod layout_presentation;
+#[path = "navigation_model.rs"]
+mod navigation_model;
+pub use navigation_model::ProvisionSurface;
 #[path = "pane.rs"]
 mod pane;
 #[path = "password_verification.rs"]

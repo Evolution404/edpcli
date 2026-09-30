@@ -46,18 +46,31 @@ fn provision_content_layout(
     }
 }
 
-fn draw_provision_stepper(frame: &mut Frame, area: ratatui::layout::Rect, stage: ProvisionStage) {
-    let current = match stage {
-        ProvisionStage::Form => 0,
-        ProvisionStage::Planning => 1,
-        ProvisionStage::Review
-        | ProvisionStage::ExportPath
-        | ProvisionStage::Exporting
-        | ProvisionStage::Confirm => 2,
-        ProvisionStage::Running => 3,
-        ProvisionStage::Result => 4,
-    };
-    let names = ["制盘配置", "分区预览", "计划确认", "执行", "完成"];
+fn draw_provision_breadcrumb(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let class = crate::tui::ui::ViewportClass::for_width(area.width);
+    if class == crate::tui::ui::ViewportClass::Compact {
+        frame.render_widget(
+            Paragraph::new(safe(&state.provision_breadcrumb())).style(muted()),
+            area,
+        );
+        return;
+    }
+    let parts = Layout::horizontal([Constraint::Min(0), Constraint::Length(30)]).split(area);
+    frame.render_widget(
+        Paragraph::new(safe(&state.provision_breadcrumb())).style(muted()),
+        parts[0],
+    );
+    frame.render_widget(
+        Paragraph::new(state.provision_escape_hint())
+            .alignment(ratatui::layout::Alignment::Right)
+            .style(accent()),
+        parts[1],
+    );
+}
+
+fn draw_provision_stepper(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    let current = state.provision_step_index();
+    let names = ["制盘配置", "生成计划", "计划确认", "执行", "完成"];
     let class = crate::tui::ui::ViewportClass::for_width(area.width);
     let line = if class == crate::tui::ui::ViewportClass::Compact {
         Line::from(format!("{}/5  {}", current + 1, names[current]))
@@ -102,9 +115,15 @@ fn draw_provision_status_modal(
 
 pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let provision = state.provision();
-    let sections = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
-    draw_provision_stepper(frame, sections[0], provision.stage);
-    let (main_area, sidebar) = provision_content_layout(sections[1], provision.stage);
+    let sections = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(1),
+    ])
+    .split(area);
+    draw_provision_breadcrumb(frame, sections[0], state);
+    draw_provision_stepper(frame, sections[1], state);
+    let (main_area, sidebar) = provision_content_layout(sections[2], provision.stage);
 
     let target_lines = if let Some(row) = state.selected_device() {
         vec![
