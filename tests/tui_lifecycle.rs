@@ -943,6 +943,7 @@ fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
         device_state: "plain".into(),
         device_id: String::new(),
         total_sectors: 245_760_000,
+        layout: Err("fixture layout not projected".into()),
         format_target_pin: None,
     }));
 
