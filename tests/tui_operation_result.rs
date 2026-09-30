@@ -236,6 +236,7 @@ fn provision_result_page_attaches_shared_full_disk_layout() {
     assert!(source.contains("新盘全局布局"));
     assert!(supplement.contains("DiskCapacityMapProfile::Full"));
     assert!(supplement.contains("TailExpansion::Collapsed"));
-    assert!(supplement.contains("disk_region_list_lines"));
+    assert!(supplement.contains("render_disk_region_list"));
+    assert!(supplement.contains("DiskRegionListMode::Readonly"));
     assert!(devices.contains("disk_region_list_lines"));
 }

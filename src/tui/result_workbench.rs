@@ -9,6 +9,8 @@ use ratatui::{
     Frame,
 };
 
+use super::disk_layout::{DiskCapacitySelection, DiskLayoutModel};
+use super::disk_region_list::{DiskRegionListMode, DiskRegionListState};
 use super::pane::{PaneFocus, PaneId};
 use super::ui::{ResultTone, ViewportClass};
 
@@ -39,14 +41,16 @@ impl ResultHero {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResultWorkbenchState {
     pane_focus: PaneFocus,
-    pub selected_partition: usize,
+    pub selected_partition: Option<usize>,
+    region_list: DiskRegionListState,
 }
 
 impl Default for ResultWorkbenchState {
     fn default() -> Self {
         Self {
             pane_focus: PaneFocus::result_workbench(),
-            selected_partition: 0,
+            selected_partition: None,
+            region_list: DiskRegionListState::default(),
         }
     }
 }
@@ -72,6 +76,41 @@ impl ResultWorkbenchState {
 
     pub fn viewport_mut(&mut self, pane: PaneId) -> &mut super::pane::PaneViewport {
         self.pane_focus.viewport_mut(pane)
+    }
+
+    pub fn region_selection(&self) -> Option<DiskCapacitySelection> {
+        self.region_list.selection()
+    }
+
+    pub fn selected_region_index(&self, model: &DiskLayoutModel) -> Option<usize> {
+        self.region_list.selected_index(model)
+    }
+
+    pub fn reconcile_regions(&mut self, model: &DiskLayoutModel, visible_rows: usize) {
+        self.region_list.reconcile(model, visible_rows);
+    }
+
+    pub fn move_region_selection(
+        &mut self,
+        model: &DiskLayoutModel,
+        delta: isize,
+        visible_rows: usize,
+    ) -> bool {
+        self.region_list.move_selection(model, delta, visible_rows)
+    }
+
+    pub fn select_region_geometry(
+        &mut self,
+        model: &DiskLayoutModel,
+        selection: &DiskCapacitySelection,
+        visible_rows: usize,
+    ) -> bool {
+        self.region_list
+            .select_geometry(model, selection, visible_rows)
+    }
+
+    pub(crate) fn region_list_state(&self) -> &DiskRegionListState {
+        &self.region_list
     }
 }
 
@@ -119,6 +158,22 @@ pub fn render_result_hero(frame: &mut Frame, area: Rect, hero: &ResultHero) {
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true }),
         inner,
+    );
+}
+
+pub fn render_result_region_list(
+    frame: &mut Frame,
+    area: Rect,
+    state: &ResultWorkbenchState,
+    model: &DiskLayoutModel,
+    focused: bool,
+) {
+    super::disk_region_list::render_disk_region_list(
+        frame,
+        area,
+        model,
+        state.region_list_state(),
+        DiskRegionListMode::Interactive { focused },
     );
 }
 

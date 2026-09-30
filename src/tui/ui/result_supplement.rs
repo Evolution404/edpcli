@@ -1,6 +1,6 @@
 use ratatui::{
-    layout::Rect,
-    widgets::{Paragraph, Wrap},
+    layout::{Constraint, Layout, Rect},
+    widgets::Paragraph,
     Frame,
 };
 
@@ -35,14 +35,32 @@ pub(super) fn render_result_supplement(
             } else {
                 crate::tui::disk_layout::DiskCapacityMapProfile::Compact
             };
-            let mut lines = crate::tui::disk_layout::DiskCapacityMap::new(model, profile)
+            let map_height = match profile {
+                crate::tui::disk_layout::DiskCapacityMapProfile::Full => 6,
+                crate::tui::disk_layout::DiskCapacityMapProfile::Compact => 3,
+                crate::tui::disk_layout::DiskCapacityMapProfile::Mini => 1,
+            };
+            let parts = Layout::vertical([
+                Constraint::Length(map_height),
+                Constraint::Length(1),
+                Constraint::Min(3),
+            ])
+            .split(inner);
+            let lines = crate::tui::disk_layout::DiskCapacityMap::new(model, profile)
                 .with_tail(crate::tui::disk_layout::TailExpansion::Collapsed)
                 .with_selection(None)
                 .with_marker(false)
-                .lines(inner.width as usize);
-            lines.push(ratatui::text::Line::from(""));
-            lines.extend(crate::tui::disk_region_list::disk_region_list_lines(model));
-            frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+                .lines(parts[0].width as usize);
+            frame.render_widget(Paragraph::new(lines), parts[0]);
+
+            let state = crate::tui::disk_region_list::DiskRegionListState::default();
+            crate::tui::disk_region_list::render_disk_region_list(
+                frame,
+                parts[2],
+                model,
+                &state,
+                crate::tui::disk_region_list::DiskRegionListMode::Readonly,
+            );
         }
     }
 }
