@@ -343,10 +343,12 @@ fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
 }
 
 #[test]
-fn operation_log_table_aligns_columns_and_marks_history_vs_current_with_color() {
+fn operation_log_table_aligns_milestones_and_animates_current_snapshot() {
     use edpcli::application::progress::{
-        OperationKind, OperationRunState, Phase, ProgressEvent, Severity, Step,
+        LogPolicy, OperationKind, OperationRunState, Phase, ProgressEvent, Severity, Step,
+        TransactionActivityPhase, Unit, WorkProgress,
     };
+    use edpcli::provision::PartitionRole;
     use edpcli::tui::state::ProvisionStage;
     use std::time::Duration;
 
@@ -356,14 +358,14 @@ fn operation_log_table_aligns_columns_and_marks_history_vs_current_with_color() 
     let now = std::time::Instant::now();
     let mut run = OperationRunState::new(OperationKind::Provision, "disk6");
     run.started_at = now;
-    let mut events = Vec::new();
+
     for (offset, phase, step, current, total, severity) in [
         (
             0,
             Phase::Backup,
             Step::MandatoryBackup,
-            0,
-            5,
+            1,
+            8,
             Severity::Info,
         ),
         (
@@ -371,56 +373,72 @@ fn operation_log_table_aligns_columns_and_marks_history_vs_current_with_color() 
             Phase::Identity,
             Step::BackupVerification,
             2,
-            5,
+            8,
             Severity::Info,
         ),
         (
             2,
-            Phase::Identity,
-            Step::LockAndReopen,
-            2,
-            5,
+            Phase::Transaction,
+            Step::ProtocolWrite,
+            3,
+            8,
             Severity::Warning,
         ),
         (
             3,
-            Phase::Transaction,
-            Step::ProtocolWrite,
-            3,
-            5,
-            Severity::Error,
-        ),
-        (
-            4,
             Phase::Readback,
             Step::ProtocolReadback,
             4,
-            5,
-            Severity::Info,
+            8,
+            Severity::Error,
         ),
     ] {
         let mut event = ProgressEvent::new(phase, step, current, total);
         event.severity = severity;
         event.emitted_at = now + Duration::from_secs(offset);
-        events.push(event);
+        event.log_policy = LogPolicy::Append;
+        run.push(event);
     }
-    run.last_activity_at = events.last().unwrap().emitted_at;
-    run.latest = events.last().cloned();
-    run.log.extend(events);
+
+    let mut current = ProgressEvent::new(
+        Phase::Format,
+        Step::PartitionFormat(PartitionRole::Boot),
+        5,
+        8,
+    )
+    .with_work(WorkProgress {
+        current: 128,
+        total: 512,
+        unit: Unit::Sectors,
+        activity: Some(TransactionActivityPhase::FormatWrite),
+    });
+    current.log_policy = LogPolicy::SnapshotOnly;
+    current.emitted_at = now + Duration::from_secs(4);
+    run.push(current);
+    assert_eq!(
+        run.log.len(),
+        4,
+        "current snapshot must not become a history row"
+    );
     state.provision_mut().run = Some(run);
 
     let (width, height) = (160, 45);
-    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
-    let buffer = terminal.backend().buffer();
-    let lines = (0..height)
-        .map(|y| {
-            (0..width)
-                .map(|x| buffer[(x, y)].symbol())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>();
+    let render_frame = |state: &edpcli::tui::state::AppState| {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| render::draw(frame, state)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let lines = (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        (terminal, lines)
+    };
 
+    let (terminal, lines) = render_frame(&state);
+    let buffer = terminal.backend().buffer();
     let compact_lines = lines
         .iter()
         .map(|line| line.replace(' ', ""))
@@ -440,11 +458,11 @@ fn operation_log_table_aligns_columns_and_marks_history_vs_current_with_color() 
     let rows = [
         row_for("制盘前元数据备份"),
         row_for("备份身份校验"),
-        row_for("锁定并重开设备"),
         row_for("协议事务写盘"),
         row_for("协议读回校验"),
+        row_for("启动区格式化与读回"),
     ];
-    let symbols = ["✓", "✓", "!", "✗", "●"];
+    let symbols = ["✓", "✓", "!", "✗", "◐"];
     let mut status_x = None;
     for (row, symbol) in rows.into_iter().zip(symbols) {
         let x = (0..width)
@@ -472,6 +490,62 @@ fn operation_log_table_aligns_columns_and_marks_history_vs_current_with_color() 
         x, header_status_x,
         "header and status cells must share one column"
     );
+
+    state.advance_animation();
+    state.advance_animation();
+    let (terminal, lines) = render_frame(&state);
+    let buffer = terminal.backend().buffer();
+    let spinner_row = lines
+        .iter()
+        .enumerate()
+        .find_map(|(y, line)| {
+            line.replace(' ', "")
+                .contains("启动区格式化与读回")
+                .then_some(y as u16)
+        })
+        .expect("animated current row");
+    assert_eq!(buffer[(x, spinner_row)].symbol(), "◓");
+}
+
+#[test]
+fn operation_log_started_event_spins_until_a_later_milestone_arrives() {
+    use edpcli::application::progress::{
+        OperationKind, OperationRunState, Phase, ProgressEvent, Step,
+    };
+    use edpcli::tui::state::ProvisionStage;
+
+    let mut state = provision_state();
+    state.provision_mut().stage = ProvisionStage::Running;
+    state.provision_mut().pane_focus = edpcli::tui::pane::PaneFocus::provision_running();
+    let mut run = OperationRunState::new(OperationKind::Provision, "disk6");
+    run.push(ProgressEvent::started(
+        OperationKind::Provision,
+        Phase::Backup,
+        Step::MandatoryBackup,
+        "正在创建制盘前元数据备份",
+    ));
+    state.provision_mut().run = Some(run);
+
+    let screen = rendered_lines(&state, 120, 36)
+        .join(
+            "
+",
+        )
+        .replace(' ', "");
+    assert!(screen.contains("◐"), "{screen}");
+    assert!(screen.contains("制盘前元数据备份"), "{screen}");
+
+    let mut next = ProgressEvent::new(Phase::Identity, Step::BackupVerification, 2, 8);
+    next.detail = Some("备份身份校验完成".into());
+    state.provision_push_progress(next);
+    let screen = rendered_lines(&state, 120, 36)
+        .join(
+            "
+",
+        )
+        .replace(' ', "");
+    assert!(screen.contains("✓"), "{screen}");
+    assert!(screen.contains("制盘前元数据备份"), "{screen}");
 }
 
 #[test]

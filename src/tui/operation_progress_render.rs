@@ -1,5 +1,5 @@
 use crate::application::progress::{
-    OperationKind, OperationRunState, Phase, ProgressEvent, Severity, Step,
+    LogPolicy, OperationKind, OperationRunState, ProgressEvent, Severity, Step,
 };
 use crate::tui::operation_progress_status::{draw_current_status, phase_label, unit_label};
 use ratatui::{
@@ -26,17 +26,33 @@ fn overall_label(basis_points: u16) -> String {
     }
 }
 
-fn log_status_symbol(event: &ProgressEvent, is_latest: bool) -> &'static str {
+fn milestone_status_symbol(event: &ProgressEvent) -> &'static str {
     match event.severity {
         Severity::Error => "✗",
         Severity::Warning => "!",
-        Severity::Info if event.phase == Phase::Complete || event.step == Step::Completed => "✓",
-        Severity::Info if is_latest => "●",
         Severity::Info => "✓",
     }
 }
 
-pub(crate) fn draw_operation_progress(frame: &mut Frame, area: Rect, run: &OperationRunState) {
+fn log_event_label(event: &ProgressEvent) -> String {
+    match event.step {
+        Step::PartitionFormat(role) => format!("{}格式化与读回", role.label()),
+        _ => event.step.label().to_string(),
+    }
+}
+
+fn current_snapshot(run: &OperationRunState) -> Option<&ProgressEvent> {
+    run.latest.as_ref().filter(|event| {
+        event.severity == Severity::Info && event.log_policy == LogPolicy::SnapshotOnly
+    })
+}
+
+pub(crate) fn draw_operation_progress(
+    frame: &mut Frame,
+    area: Rect,
+    run: &OperationRunState,
+    animation_frame: u64,
+) {
     let theme = crate::tui::theme::current();
     let latest = run.latest.as_ref();
     if area.height < 18 {
@@ -116,54 +132,89 @@ pub(crate) fn draw_operation_progress(frame: &mut Frame, area: Rect, run: &Opera
         Cell::from("事件"),
     ])
     .style(theme.muted());
-    let rows = if run.log.is_empty() {
-        vec![Row::new([
+    let current = current_snapshot(run);
+    let logged_current_index = if current.is_none()
+        && run.latest.as_ref().is_some_and(|latest| {
+            latest.severity == Severity::Info
+                && latest.step != Step::Completed
+                && run.log.back().is_some_and(|event| event == latest)
+        }) {
+        run.log.len().checked_sub(1)
+    } else {
+        None
+    };
+    let history_capacity = visible_log_rows.saturating_sub(usize::from(current.is_some()));
+    let mut rows = run
+        .log
+        .iter()
+        .enumerate()
+        .rev()
+        .take(history_capacity)
+        .rev()
+        .map(|(index, event)| {
+            let is_running = logged_current_index == Some(index);
+            let status = if is_running {
+                crate::tui::animation::spinner_glyph(animation_frame)
+            } else {
+                milestone_status_symbol(event)
+            };
+            let status_style = match event.severity {
+                Severity::Error => theme.danger(),
+                Severity::Warning => theme.warning(),
+                Severity::Info if is_running => theme.accent(),
+                Severity::Info => theme.success(),
+            };
+            let elapsed = event
+                .emitted_at
+                .saturating_duration_since(run.started_at)
+                .as_secs();
+            let stage = event
+                .stage
+                .map(|stage| format!("{}/{} {}", stage.current, stage.total, event.phase.label()))
+                .unwrap_or_else(|| event.phase.label().to_string());
+            let detail = event
+                .detail
+                .as_deref()
+                .map(|detail| format!(" · {detail}"))
+                .unwrap_or_default();
+            Row::new([
+                Cell::from(format!("+{elapsed}s")).style(theme.secondary_text()),
+                Cell::from(status).style(status_style),
+                Cell::from(stage).style(theme.secondary_text()),
+                Cell::from(format!("{}{detail}", log_event_label(event)))
+                    .style(theme.secondary_text()),
+            ])
+        })
+        .collect::<Vec<_>>();
+    if let Some(event) = current {
+        let elapsed = event
+            .emitted_at
+            .saturating_duration_since(run.started_at)
+            .as_secs();
+        let stage = event
+            .stage
+            .map(|stage| format!("{}/{} {}", stage.current, stage.total, event.phase.label()))
+            .unwrap_or_else(|| event.phase.label().to_string());
+        let detail = event
+            .detail
+            .as_deref()
+            .map(|detail| format!(" · {detail}"))
+            .unwrap_or_default();
+        rows.push(Row::new([
+            Cell::from(format!("+{elapsed}s")).style(theme.secondary_text()),
+            Cell::from(crate::tui::animation::spinner_glyph(animation_frame)).style(theme.accent()),
+            Cell::from(stage).style(theme.secondary_text()),
+            Cell::from(format!("{}{detail}", log_event_label(event))).style(theme.secondary_text()),
+        ]));
+    }
+    if rows.is_empty() {
+        rows.push(Row::new([
             Cell::from("—").style(theme.muted()),
             Cell::from("—").style(theme.muted()),
             Cell::from("—").style(theme.muted()),
             Cell::from("暂无运行记录").style(theme.muted()),
-        ])]
-    } else {
-        run.log
-            .iter()
-            .enumerate()
-            .rev()
-            .take(visible_log_rows)
-            .rev()
-            .map(|(index, event)| {
-                let is_latest = index + 1 == run.log.len();
-                let status = log_status_symbol(event, is_latest);
-                let status_style = match event.severity {
-                    Severity::Error => theme.danger(),
-                    Severity::Warning => theme.warning(),
-                    Severity::Info if status == "✓" => theme.success(),
-                    Severity::Info => theme.accent(),
-                };
-                let elapsed = event
-                    .emitted_at
-                    .saturating_duration_since(run.started_at)
-                    .as_secs();
-                let stage = event
-                    .stage
-                    .map(|stage| {
-                        format!("{}/{} {}", stage.current, stage.total, event.phase.label())
-                    })
-                    .unwrap_or_else(|| event.phase.label().to_string());
-                let detail = event
-                    .detail
-                    .as_deref()
-                    .map(|detail| format!(" · {detail}"))
-                    .unwrap_or_default();
-                Row::new([
-                    Cell::from(format!("+{elapsed}s")).style(theme.secondary_text()),
-                    Cell::from(status).style(status_style),
-                    Cell::from(stage).style(theme.secondary_text()),
-                    Cell::from(format!("{}{detail}", event.step.label()))
-                        .style(theme.secondary_text()),
-                ])
-            })
-            .collect::<Vec<_>>()
-    };
+        ]));
+    }
     frame.render_widget(
         Table::new(
             rows,

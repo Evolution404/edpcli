@@ -26,7 +26,7 @@ pub(super) fn commit_event(
         };
         event.overall = work_span.interpolate(work.current, work.total);
         event.work = Some(work);
-        event.log_policy = LogPolicy::AppendOnChange;
+        event.log_policy = LogPolicy::SnapshotOnly;
         if matches!(
             activity.phase,
             TransactionActivityPhase::RollbackWrite | TransactionActivityPhase::RollbackReadback
@@ -37,4 +37,55 @@ pub(super) fn commit_event(
         event.log_policy = LogPolicy::AppendOnChange;
     }
     event
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diskio::TransactionActivity;
+
+    #[test]
+    fn transaction_activity_is_snapshot_only_but_step_completion_is_a_milestone() {
+        let activity = TransactionActivity {
+            phase: TransactionActivityPhase::FormatWrite,
+            current: 128,
+            total: 512,
+        };
+        let snapshot = commit_event(
+            Phase::Format,
+            Step::PartitionFormat(crate::provision::PartitionRole::Boot),
+            4,
+            8,
+            Some(activity),
+        );
+        assert_eq!(snapshot.log_policy, LogPolicy::SnapshotOnly);
+        assert!(snapshot.work.is_some());
+
+        let milestone = commit_event(
+            Phase::Format,
+            Step::PartitionFormat(crate::provision::PartitionRole::Boot),
+            5,
+            8,
+            None,
+        );
+        assert_eq!(milestone.log_policy, LogPolicy::AppendOnChange);
+        assert!(milestone.work.is_none());
+    }
+
+    #[test]
+    fn rollback_snapshot_keeps_warning_severity_for_safety_log() {
+        let rollback = commit_event(
+            Phase::Transaction,
+            Step::ProtocolWrite,
+            3,
+            8,
+            Some(TransactionActivity {
+                phase: TransactionActivityPhase::RollbackWrite,
+                current: 1,
+                total: 13,
+            }),
+        );
+        assert_eq!(rollback.log_policy, LogPolicy::SnapshotOnly);
+        assert_eq!(rollback.severity, Severity::Warning);
+    }
 }

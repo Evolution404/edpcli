@@ -188,33 +188,36 @@ fn long_provision_demo_exercises_slow_protocol_and_partition_progress() {
         demo::timeline::DemoTimeline::LONG_LAST_TICK,
         base,
     );
-    assert!(run.log.len() >= 40);
-    assert!(run.log.iter().any(|event| {
-        event.step == Step::ProtocolWrite
-            && event.work.is_some_and(|work| {
-                work.activity == Some(TransactionActivityPhase::Write)
-                    && work.current > 0
-                    && work.current < work.total
-            })
-    }));
+    assert_eq!(
+        run.log.len(),
+        11,
+        "demo history should contain milestones only"
+    );
+    assert!(
+        run.log.iter().all(|event| event.work.is_none()),
+        "high-frequency work snapshots must stay out of history"
+    );
     for role in [
         PartitionRole::Boot,
         PartitionRole::Share,
         PartitionRole::Encrypt,
     ] {
-        assert!(run.log.iter().any(|event| {
-            event.step == Step::PartitionFormat(role)
-                && event.work.is_some_and(|work| {
-                    work.activity == Some(TransactionActivityPhase::FormatWrite)
-                })
-        }));
-        assert!(run.log.iter().any(|event| {
-            event.step == Step::PartitionFormat(role)
-                && event.work.is_some_and(|work| {
-                    work.activity == Some(TransactionActivityPhase::FormatReadback)
-                })
-        }));
+        assert!(run
+            .log
+            .iter()
+            .any(|event| event.step == Step::PartitionFormat(role)));
     }
+    let running = demo::timeline::DemoTimeline::long_at_tick(
+        demo::timeline::DemoTimeline::LONG_INITIAL_TICK,
+        base,
+    );
+    assert_eq!(running.log.len(), 6);
+    assert!(running.latest.is_some_and(|event| {
+        event.step == Step::PartitionFormat(PartitionRole::Boot)
+            && event
+                .work
+                .is_some_and(|work| work.activity == Some(TransactionActivityPhase::FormatWrite))
+    }));
     assert!(run
         .log
         .iter()

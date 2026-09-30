@@ -273,7 +273,12 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
         }
         ProvisionStage::Running => {
             if let Some(run) = provision.run.as_ref() {
-                super::operation_progress_render::draw_operation_progress(frame, main_area, run);
+                super::operation_progress_render::draw_operation_progress(
+                    frame,
+                    main_area,
+                    run,
+                    state.animation_frame(),
+                );
             }
         }
         ProvisionStage::Result => {

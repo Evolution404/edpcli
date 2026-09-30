@@ -326,7 +326,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     }
     if wizard.stage == WizardStage::Running {
         if let Some(run) = wizard.run.as_ref() {
-            draw_operation_progress(frame, area, run);
+            draw_operation_progress(frame, area, run, state.animation_frame());
         }
         return;
     }

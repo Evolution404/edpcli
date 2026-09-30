@@ -19,6 +19,15 @@ use super::theme::{self, AnimationTone};
 pub const TICK_INTERVAL_MS: u64 = 80;
 pub const REDUCED_TICK_INTERVAL_MS: u64 = 240;
 
+pub const fn spinner_glyph(tick: u64) -> &'static str {
+    match (tick / 2) % 4 {
+        0 => "◐",
+        1 => "◓",
+        2 => "◑",
+        _ => "◒",
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MotionMode {
     Full,
@@ -326,6 +335,15 @@ mod tests {
         assert!(compact_indicator(0, CoreMode::Guard)
             .content
             .contains("GUARDED"));
+    }
+
+    #[test]
+    fn spinner_cycles_through_four_rotation_frames() {
+        assert_eq!(spinner_glyph(0), "◐");
+        assert_eq!(spinner_glyph(2), "◓");
+        assert_eq!(spinner_glyph(4), "◑");
+        assert_eq!(spinner_glyph(6), "◒");
+        assert_eq!(spinner_glyph(8), "◐");
     }
 
     #[test]
