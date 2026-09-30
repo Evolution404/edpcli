@@ -194,12 +194,18 @@ pub(super) fn handle_provision_key(
                         .provision_result_move(viewport_height.max(1) as isize, viewport_height),
                     TuiAction::Top => state.provision_result_top(viewport_height),
                     TuiAction::Bottom => state.provision_result_bottom(viewport_height),
-                    TuiAction::MoveLeft | TuiAction::PanelPrevious => {
-                        state.provision_result_shift_pane(true)
+                    TuiAction::MoveLeft => {
+                        if !state.provision_result_shift_partition_column(true) {
+                            state.provision_result_shift_pane(true);
+                        }
                     }
-                    TuiAction::MoveRight | TuiAction::PanelNext => {
-                        state.provision_result_shift_pane(false)
+                    TuiAction::MoveRight => {
+                        if !state.provision_result_shift_partition_column(false) {
+                            state.provision_result_shift_pane(false);
+                        }
                     }
+                    TuiAction::PanelPrevious => state.provision_result_shift_pane(true),
+                    TuiAction::PanelNext => state.provision_result_shift_pane(false),
                     TuiAction::Activate | TuiAction::Submit | TuiAction::Back => {
                         let _ = state.navigate(NavCommand::Escape, viewport_height);
                     }
