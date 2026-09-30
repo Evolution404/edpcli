@@ -17,12 +17,12 @@ mod navigation;
 mod navigation_state;
 #[path = "provision/state.rs"]
 mod provision_state;
+#[path = "restore_result_state.rs"]
+mod restore_result_state;
 #[path = "shell/state.rs"]
 mod shell_state;
 #[path = "table_state.rs"]
 mod table_state;
-#[path = "restore_result_state.rs"]
-mod restore_result_state;
 
 pub use backups_state::*;
 pub use devices_state::*;
@@ -1078,8 +1078,7 @@ impl AppState {
                     wizard.restore_outcome = Some(outcome);
                     wizard.pending_format = None;
                     Self::clear_post_restore_volume_label(wizard);
-                    wizard.message =
-                        Some("元数据恢复成功；文件系统状态已完成只读检查。".into());
+                    wizard.message = Some("元数据恢复成功；文件系统状态已完成只读检查。".into());
                     self.shell.input_mode = InputMode::Normal;
                     initialize_workbench = true;
                 }
