@@ -71,6 +71,14 @@ impl AppState {
         }
     }
 
+    pub fn post_restore_result_spatial_focus(&mut self, dx: i8, dy: i8) {
+        if let Some(wizard) = self.shell.wizard.as_mut() {
+            if wizard.stage == WizardStage::PostRestore {
+                wizard.post_restore_workbench.spatial_pane(dx, dy);
+            }
+        }
+    }
+
     pub fn post_restore_result_shift_partition_column(&mut self, reverse: bool) -> bool {
         let Some(wizard) = self.shell.wizard.as_mut() else {
             return false;

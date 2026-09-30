@@ -119,19 +119,27 @@ pub(super) fn handle_backup_wizard_key(
                         keymap::TuiAction::Top => state.post_restore_result_top(visible_rows),
                         keymap::TuiAction::Bottom => state.post_restore_result_bottom(visible_rows),
                         keymap::TuiAction::MoveLeft => {
-                            if !state.post_restore_result_shift_partition_column(true) {
-                                state.post_restore_result_shift_pane(true);
-                            }
+                            let _ = state.post_restore_result_shift_partition_column(true);
                         }
                         keymap::TuiAction::MoveRight => {
-                            if !state.post_restore_result_shift_partition_column(false) {
-                                state.post_restore_result_shift_pane(false);
-                            }
+                            let _ = state.post_restore_result_shift_partition_column(false);
                         }
                         keymap::TuiAction::PanelPrevious => {
                             state.post_restore_result_shift_pane(true)
                         }
                         keymap::TuiAction::PanelNext => state.post_restore_result_shift_pane(false),
+                        keymap::TuiAction::PanelLeft => {
+                            state.post_restore_result_spatial_focus(-1, 0)
+                        }
+                        keymap::TuiAction::PanelRight => {
+                            state.post_restore_result_spatial_focus(1, 0)
+                        }
+                        keymap::TuiAction::PanelUp => {
+                            state.post_restore_result_spatial_focus(0, -1)
+                        }
+                        keymap::TuiAction::PanelDown => {
+                            state.post_restore_result_spatial_focus(0, 1)
+                        }
                         keymap::TuiAction::Activate => {
                             if state.post_restore_result_focused_pane()
                                 == crate::tui::pane::PaneId::ResultPartitions

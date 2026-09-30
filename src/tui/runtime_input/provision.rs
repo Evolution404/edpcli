@@ -195,17 +195,17 @@ pub(super) fn handle_provision_key(
                     TuiAction::Top => state.provision_result_top(viewport_height),
                     TuiAction::Bottom => state.provision_result_bottom(viewport_height),
                     TuiAction::MoveLeft => {
-                        if !state.provision_result_shift_partition_column(true) {
-                            state.provision_result_shift_pane(true);
-                        }
+                        let _ = state.provision_result_shift_partition_column(true);
                     }
                     TuiAction::MoveRight => {
-                        if !state.provision_result_shift_partition_column(false) {
-                            state.provision_result_shift_pane(false);
-                        }
+                        let _ = state.provision_result_shift_partition_column(false);
                     }
                     TuiAction::PanelPrevious => state.provision_result_shift_pane(true),
                     TuiAction::PanelNext => state.provision_result_shift_pane(false),
+                    TuiAction::PanelLeft => state.provision_result_spatial_focus(-1, 0),
+                    TuiAction::PanelRight => state.provision_result_spatial_focus(1, 0),
+                    TuiAction::PanelUp => state.provision_result_spatial_focus(0, -1),
+                    TuiAction::PanelDown => state.provision_result_spatial_focus(0, 1),
                     TuiAction::Activate | TuiAction::Submit | TuiAction::Back => {
                         let _ = state.navigate(NavCommand::Escape, viewport_height);
                     }

@@ -9,6 +9,10 @@ impl AppState {
         self.provision.result_workbench.cycle_pane(reverse);
     }
 
+    pub fn provision_result_spatial_focus(&mut self, dx: i8, dy: i8) {
+        self.provision.result_workbench.spatial_pane(dx, dy);
+    }
+
     pub fn provision_result_shift_partition_column(&mut self, reverse: bool) -> bool {
         if self.provision.result_workbench.focused_pane()
             != crate::tui::pane::PaneId::ResultPartitions

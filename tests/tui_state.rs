@@ -178,6 +178,19 @@ fn provision_result_cycles_only_result_workbench_panes() {
             .partition_active_column(edpcli::tui::result_workbench::RESULT_PARTITION_COLUMN_COUNT),
         1
     );
+    for _ in 0..20 {
+        let _ = state.provision_result_shift_partition_column(false);
+    }
+    assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
+    assert!(!state.provision_result_shift_partition_column(false));
+    assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
+
+    state.provision_result_spatial_focus(1, 0);
+    assert_eq!(state.provision_focused_pane(), PaneId::ResultDiskLayout);
+    state.provision_result_spatial_focus(0, 1);
+    assert_eq!(state.provision_focused_pane(), PaneId::ResultVerification);
+    state.provision_result_spatial_focus(-1, 0);
+    assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
 
     state.provision_tab_focus(false);
     assert_eq!(state.provision_focused_pane(), PaneId::ResultDiskLayout);

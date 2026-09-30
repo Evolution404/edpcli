@@ -75,6 +75,20 @@ impl ResultWorkbenchState {
         self.pane_focus.cycle(&PaneId::RESULT_ORDER, reverse);
     }
 
+    pub fn spatial_pane(&mut self, dx: i8, dy: i8) {
+        use PaneId::*;
+        let next = match (self.focused_pane(), dx.signum(), dy.signum()) {
+            (ResultPartitions, 1, _) => Some(ResultDiskLayout),
+            (ResultDiskLayout, -1, _) | (ResultVerification, -1, _) => Some(ResultPartitions),
+            (ResultDiskLayout, _, 1) => Some(ResultVerification),
+            (ResultVerification, _, -1) => Some(ResultDiskLayout),
+            _ => None,
+        };
+        if let Some(next) = next {
+            self.focus(next);
+        }
+    }
+
     pub fn partition_active_column(&self, column_count: usize) -> usize {
         self.partition_active_column
             .min(column_count.saturating_sub(1))
@@ -267,6 +281,25 @@ mod tests {
         assert_eq!(state.focused_pane(), PaneId::ResultPartitions);
         state.focus(PaneId::DevicesList);
         assert_eq!(state.focused_pane(), PaneId::ResultPartitions);
+    }
+
+    #[test]
+    fn workbench_spatial_navigation_matches_wide_layout() {
+        let mut state = ResultWorkbenchState::default();
+        state.spatial_pane(1, 0);
+        assert_eq!(state.focused_pane(), PaneId::ResultDiskLayout);
+        state.spatial_pane(0, 1);
+        assert_eq!(state.focused_pane(), PaneId::ResultVerification);
+        state.spatial_pane(0, -1);
+        assert_eq!(state.focused_pane(), PaneId::ResultDiskLayout);
+        state.spatial_pane(-1, 0);
+        assert_eq!(state.focused_pane(), PaneId::ResultPartitions);
+        state.spatial_pane(0, 1);
+        assert_eq!(
+            state.focused_pane(),
+            PaneId::ResultPartitions,
+            "down from a full-height left pane must not invent a new focus target"
+        );
     }
 
     #[test]

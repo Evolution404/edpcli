@@ -309,6 +309,24 @@ fn tab_focus_actions_are_distinct_from_top_level_workspace_actions() {
 }
 
 #[test]
+fn result_workbenches_keep_content_navigation_separate_from_panel_navigation() {
+    let provision = include_str!("../src/tui/runtime_input/provision.rs");
+    let restore = include_str!("../src/tui/runtime_input/backup_wizard.rs");
+
+    for source in [provision, restore] {
+        assert!(source.contains("PanelLeft"));
+        assert!(source.contains("PanelRight"));
+        assert!(source.contains("PanelUp"));
+        assert!(source.contains("PanelDown"));
+        assert!(
+            !source.contains("if !state.provision_result_shift_partition_column")
+                && !source.contains("if !state.post_restore_result_shift_partition_column"),
+            "h/l must never fall back to changing Result Workbench panes"
+        );
+    }
+}
+
+#[test]
 fn table_role_maps_y_to_cell_copy_and_shift_y_to_row_copy() {
     let mut mapper = KeyMapper::new();
     assert_eq!(

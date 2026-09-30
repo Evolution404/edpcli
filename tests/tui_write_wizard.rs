@@ -176,6 +176,27 @@ fn post_restore_disk_layout_free_region_clears_partition_action_target() {
         Some(0)
     );
 
+    assert!(!state.post_restore_result_shift_partition_column(true));
+    assert_eq!(
+        state.post_restore_result_focused_pane(),
+        PaneId::ResultPartitions
+    );
+    state.post_restore_result_spatial_focus(1, 0);
+    assert_eq!(
+        state.post_restore_result_focused_pane(),
+        PaneId::ResultDiskLayout
+    );
+    state.post_restore_result_spatial_focus(0, 1);
+    assert_eq!(
+        state.post_restore_result_focused_pane(),
+        PaneId::ResultVerification
+    );
+    state.post_restore_result_spatial_focus(-1, 0);
+    assert_eq!(
+        state.post_restore_result_focused_pane(),
+        PaneId::ResultPartitions
+    );
+
     state.post_restore_result_shift_pane(false);
     assert_eq!(
         state.post_restore_result_focused_pane(),
