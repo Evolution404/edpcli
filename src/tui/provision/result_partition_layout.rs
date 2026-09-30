@@ -98,7 +98,7 @@ pub(super) fn render_partition_pane(
     let active_column = state
         .provision()
         .result_workbench
-        .partition_active_column(7);
+        .partition_active_column(crate::tui::result_workbench::RESULT_PARTITION_COLUMN_COUNT);
     let header = Row::new(
         [
             "分区",
