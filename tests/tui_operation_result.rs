@@ -245,11 +245,11 @@ fn provision_result_page_attaches_interactive_shared_full_disk_layout() {
     assert!(!layout.contains(".with_marker(false)"));
 
     assert!(
-        layout.contains("theme.apply_selection(theme.table_text(), selected_row, focused)"),
+        layout.contains("theme.apply_selection(style, selected_row, focused)"),
         "result rows must use the shared table selection background"
     );
     assert!(
-        layout.contains("theme.table_cell(base, column == active_column, focused)"),
+        layout.contains("column.index == interaction.active_column()"),
         "only the active result column may receive bright/bold table-cell emphasis"
     );
     assert!(
@@ -265,8 +265,9 @@ fn provision_result_page_attaches_interactive_shared_full_disk_layout() {
         "full disk layout must remain one top-level pane without a nested focused card"
     );
     assert!(
-        input.contains("provision_result_shift_partition_column"),
-        "result h/l semantics must keep partition-column navigation"
+        input.contains("TuiAction::TableColumnLeft")
+            && layout.contains("TableKind::ResultPartitions"),
+        "result h/l semantics must use the shared table contract"
     );
 
     assert!(supplement.contains("render_disk_region_list"));
@@ -298,13 +299,16 @@ fn restore_post_result_uses_shared_workbench_and_typed_layout() {
     }
     assert!(partition_layout.contains(".with_marker(true)"));
     assert!(
-        partition_layout
-            .contains("theme.apply_selection(theme.table_text(), selected_row, focused)"),
+        partition_layout.contains("theme.apply_selection(style, selected_row, focused)"),
         "restore result rows must use the shared selected-row background"
     );
     assert!(
-        partition_layout.contains("theme.table_cell(base, column == active_column, focused)"),
+        partition_layout.contains("column.index == interaction.active_column()"),
         "restore result active column must use the shared bright/bold cell style"
+    );
+    assert!(
+        input.contains("map_for_role") && partition_layout.contains("TableKind::ResultPartitions"),
+        "restore result must route table keys through the shared table role"
     );
     assert!(
         !render_sources.contains("row.style(theme.accent"),

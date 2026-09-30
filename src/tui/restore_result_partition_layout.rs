@@ -45,88 +45,88 @@ pub(super) fn render_partition_pane(
         return;
     };
 
+    use crate::tui::table_layout::{
+        render_table_scrollbars, table_heading, visible_cell, TableKind,
+    };
     let theme = crate::tui::theme::current();
-    let active_column = state.post_restore_result_active_column();
-    let header = Row::new(
-        [
-            "分区",
-            "状态",
-            "文件系统",
-            "LBA 范围",
-            "容量",
-            "密钥",
-            "说明",
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(column, label)| {
-            Cell::from(label).style(theme.table_header(column == active_column, focused))
-        }),
+    let kind = TableKind::ResultPartitions;
+    let headings = [
+        "分区",
+        "状态",
+        "文件系统",
+        "LBA 范围",
+        "容量",
+        "密钥",
+        "说明",
+    ];
+    let Some(view) = state.result_partition_table_view() else {
+        return;
+    };
+    let order = state.table_column_order(kind);
+    let layout = state.table_visual_layout(kind);
+    let visual_widths = state.table_visual_widths(kind, &view.content_widths);
+    let interaction = state.table_interaction(kind);
+    let viewport = layout.layout_with_active(
+        inner.width.saturating_sub(1),
+        &visual_widths,
+        interaction.viewport_offset(),
+        Some(interaction.active_column()),
     );
-
+    let header = Row::new(viewport.columns.iter().map(|column| {
+        let logical = order[column.index];
+        let label = table_heading(headings[logical], logical, interaction);
+        Cell::from(visible_cell(&label, column))
+            .style(theme.table_header(column.index == interaction.active_column(), focused))
+    }));
     let selected = wizard.post_restore_workbench.selected_partition;
-    let rows = outcome
-        .assessment
-        .partitions
-        .iter()
-        .enumerate()
-        .map(|(index, partition)| {
+    let visible_sources = state.visible_result_partition_indices();
+    let rows = visible_sources.iter().filter_map(|index| {
+        outcome.assessment.partitions.get(*index).map(|partition| {
             let (status, status_tone) = partition_status(partition);
-            let filesystem = partition
-                .detected_filesystem
-                .map(|value| value.label().to_string())
-                .or_else(|| partition.filesystem_hint.clone())
-                .unwrap_or_else(|| "—".into());
-            let end = partition
-                .start_lba
-                .saturating_add(partition.sector_count)
-                .saturating_sub(1);
-            let capacity = crate::common::fmt_capacity(
-                partition
-                    .sector_count
-                    .saturating_mul(crate::common::SECTOR as u64),
-            );
-            let key_state = if partition.requires_original_key {
-                "需要原密钥域"
-            } else {
-                "无需原密钥"
-            };
-            let selected_row = selected == Some(index);
-            let cell_style = |base: Style, column: usize| {
-                theme.table_cell(base, column == active_column, focused)
-            };
-
-            Row::new(vec![
-                Cell::from(format!("P{}", partition.index))
-                    .style(cell_style(theme.table_text(), 0)),
-                Cell::from(status).style(cell_style(tone_style(status_tone), 1)),
-                Cell::from(filesystem).style(cell_style(theme.table_text(), 2)),
-                Cell::from(format!("{}..={end}", partition.start_lba))
-                    .style(cell_style(theme.table_text(), 3)),
-                Cell::from(capacity).style(cell_style(theme.table_text(), 4)),
-                Cell::from(key_state).style(cell_style(theme.table_text_muted(), 5)),
-                Cell::from(crate::ui::sanitize_terminal_text(&partition.detail))
-                    .style(cell_style(theme.table_text_muted(), 6)),
-            ])
-            .style(theme.apply_selection(theme.table_text(), selected_row, focused))
-        });
+            let selected_row = selected == Some(*index);
+            Row::new(
+                viewport
+                    .columns
+                    .iter()
+                    .map(|column| {
+                        let logical = order[column.index];
+                        let value = view.rows[*index].get(logical).cloned().unwrap_or_default();
+                        let base = match logical {
+                            1 => {
+                                let _ = status;
+                                tone_style(status_tone)
+                            }
+                            5 | 6 => theme.table_text_muted(),
+                            _ => theme.table_text(),
+                        };
+                        let style = theme.table_cell(
+                            base,
+                            column.index == interaction.active_column(),
+                            focused,
+                        );
+                        let style = theme.apply_selection(style, selected_row, focused);
+                        Cell::from(visible_cell(&value, column)).style(style)
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+    });
 
     frame.render_widget(
-        Table::new(
-            rows,
-            [
-                Constraint::Length(6),
-                Constraint::Length(14),
-                Constraint::Length(12),
-                Constraint::Length(22),
-                Constraint::Length(12),
-                Constraint::Length(14),
-                Constraint::Min(18),
-            ],
-        )
-        .header(header)
-        .column_spacing(1),
+        Table::new(rows, viewport.widths())
+            .header(header)
+            .column_spacing(1),
         inner,
+    );
+    render_table_scrollbars(
+        frame,
+        area,
+        &viewport,
+        visible_sources.len(),
+        0,
+        visible_sources
+            .len()
+            .min(inner.height.saturating_sub(1) as usize),
     );
 }
 

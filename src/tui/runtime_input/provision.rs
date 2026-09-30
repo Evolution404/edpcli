@@ -192,12 +192,6 @@ pub(super) fn handle_provision_key(
                         .provision_result_move(viewport_height.max(1) as isize, viewport_height),
                     TuiAction::Top => state.provision_result_top(viewport_height),
                     TuiAction::Bottom => state.provision_result_bottom(viewport_height),
-                    TuiAction::MoveLeft => {
-                        let _ = state.provision_result_shift_partition_column(true);
-                    }
-                    TuiAction::MoveRight => {
-                        let _ = state.provision_result_shift_partition_column(false);
-                    }
                     TuiAction::PanelPrevious => state.provision_result_shift_pane(true),
                     TuiAction::PanelNext => state.provision_result_shift_pane(false),
                     TuiAction::PanelLeft => state.provision_result_spatial_focus(-1, 0),

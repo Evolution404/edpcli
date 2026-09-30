@@ -544,6 +544,7 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
     state.advanced_inspect_finish(Ok(workspace(vec![entry])));
     select_protocol_lba0(&mut state);
+    state.advanced_inspect_set_view_mode(InspectViewMode::RawFields);
     state.advanced_inspect_focus_pane(PaneId::InspectDetail);
     state
         .pane_viewport_mut(PaneId::InspectDetail)

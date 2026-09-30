@@ -162,27 +162,17 @@ fn provision_result_cycles_only_result_workbench_panes() {
     state.provision_mut().stage = ProvisionStage::Result;
 
     assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
-    assert_eq!(
-        state
-            .provision()
-            .result_workbench
-            .partition_active_column(edpcli::tui::result_workbench::RESULT_PARTITION_COLUMN_COUNT),
-        0
-    );
-    assert!(state.provision_result_shift_partition_column(false));
+    let kind = edpcli::tui::table_layout::TableKind::ResultPartitions;
+    assert_eq!(state.table_active_column(kind), 0);
+    assert!(state.move_table_column_for_viewport(kind, false, 160, 30));
     assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
-    assert_eq!(
-        state
-            .provision()
-            .result_workbench
-            .partition_active_column(edpcli::tui::result_workbench::RESULT_PARTITION_COLUMN_COUNT),
-        1
-    );
+    assert_eq!(state.table_active_column(kind), 1);
     for _ in 0..20 {
-        let _ = state.provision_result_shift_partition_column(false);
+        let _ = state.move_table_column_for_viewport(kind, false, 160, 30);
     }
     assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
-    assert!(!state.provision_result_shift_partition_column(false));
+    assert_eq!(state.table_active_column(kind), 6);
+    assert!(!state.move_table_column_for_viewport(kind, false, 160, 30));
     assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
 
     state.provision_result_spatial_focus(1, 0);

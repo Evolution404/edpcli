@@ -1,7 +1,5 @@
 use super::*;
 
-const RESTORE_RESULT_COLUMN_COUNT: usize = 7;
-
 fn partition_selection(
     outcome: &crate::application::post_restore::MetadataRestoreOutcome,
     index: usize,
@@ -79,34 +77,8 @@ impl AppState {
         }
     }
 
-    pub fn post_restore_result_shift_partition_column(&mut self, reverse: bool) -> bool {
-        let Some(wizard) = self.shell.wizard.as_mut() else {
-            return false;
-        };
-        if wizard.stage != WizardStage::PostRestore
-            || wizard.post_restore_workbench.focused_pane()
-                != crate::tui::pane::PaneId::ResultPartitions
-        {
-            return false;
-        }
-        wizard
-            .post_restore_workbench
-            .move_partition_active_column(reverse, RESTORE_RESULT_COLUMN_COUNT)
-    }
-
-    pub fn post_restore_result_active_column(&self) -> usize {
-        self.shell
-            .wizard
-            .as_ref()
-            .map(|wizard| {
-                wizard
-                    .post_restore_workbench
-                    .partition_active_column(RESTORE_RESULT_COLUMN_COUNT)
-            })
-            .unwrap_or(0)
-    }
-
     pub fn move_post_restore_result_selection(&mut self, delta: isize, visible_rows: usize) {
+        let sorted_partitions = self.visible_result_partition_indices();
         let Some(wizard) = self.shell.wizard.as_mut() else {
             return;
         };
@@ -129,12 +101,19 @@ impl AppState {
                     .selected_partition
                     .unwrap_or(0)
                     .min(len - 1);
-                let next = if delta < 0 {
-                    current.saturating_sub(delta.unsigned_abs())
+                let current_position = sorted_partitions
+                    .iter()
+                    .position(|source| *source == current)
+                    .unwrap_or(0);
+                let next_position = if delta < 0 {
+                    current_position.saturating_sub(delta.unsigned_abs())
                 } else {
-                    current.saturating_add(delta as usize)
+                    current_position.saturating_add(delta as usize)
                 }
-                .min(len - 1);
+                .min(sorted_partitions.len().saturating_sub(1));
+                let Some(next) = sorted_partitions.get(next_position).copied() else {
+                    return;
+                };
                 wizard.post_restore_workbench.selected_partition = Some(next);
                 if let (Ok(model), Some(selection)) =
                     (outcome.layout.as_ref(), partition_selection(outcome, next))

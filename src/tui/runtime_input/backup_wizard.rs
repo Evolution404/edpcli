@@ -99,8 +99,38 @@ pub(super) fn handle_backup_wizard_key(
                 return Some(KeyOutcome::NextIteration);
             }
             state::WizardStage::PostRestore => {
-                if let Some(action) = keys.map(state::InputMode::Normal, key) {
+                let role = controller::active_widget_role(state);
+                if let Some(action) = keys.map_for_role(state::InputMode::Normal, role, key) {
                     let visible_rows = usize::from(terminal_size.height.saturating_sub(12)).max(1);
+                    if matches!(
+                        action,
+                        keymap::TuiAction::TableColumnLeft
+                            | keymap::TuiAction::TableColumnRight
+                            | keymap::TuiAction::TableMoveColumnLeft
+                            | keymap::TuiAction::TableMoveColumnRight
+                            | keymap::TuiAction::TableColumnFirst
+                            | keymap::TuiAction::TableColumnLast
+                            | keymap::TuiAction::TableScrollLeft
+                            | keymap::TuiAction::TableScrollRight
+                            | keymap::TuiAction::TableSortToggle
+                            | keymap::TuiAction::TableSortClear
+                            | keymap::TuiAction::TableCopyCell
+                            | keymap::TuiAction::TableCopyRow
+                    ) {
+                        match dispatch_tui_action(
+                            state,
+                            tasks,
+                            action,
+                            role,
+                            backup_dir,
+                            visible_rows,
+                            terminal_size.width,
+                        ) {
+                            StateEffect::ExitRequested => return Some(KeyOutcome::Exit),
+                            StateEffect::ExitDeferred | StateEffect::None => {}
+                        }
+                        return Some(KeyOutcome::NextIteration);
+                    }
                     match action {
                         keymap::TuiAction::MoveDown => {
                             state.move_post_restore_result_selection(1, visible_rows)
@@ -118,12 +148,6 @@ pub(super) fn handle_backup_wizard_key(
                         ),
                         keymap::TuiAction::Top => state.post_restore_result_top(visible_rows),
                         keymap::TuiAction::Bottom => state.post_restore_result_bottom(visible_rows),
-                        keymap::TuiAction::MoveLeft => {
-                            let _ = state.post_restore_result_shift_partition_column(true);
-                        }
-                        keymap::TuiAction::MoveRight => {
-                            let _ = state.post_restore_result_shift_partition_column(false);
-                        }
                         keymap::TuiAction::PanelPrevious => {
                             state.post_restore_result_shift_pane(true)
                         }

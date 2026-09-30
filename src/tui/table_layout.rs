@@ -15,6 +15,7 @@ pub enum TableKind {
     Backups,
     RelatedBackups,
     InspectFields,
+    ResultPartitions,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +39,12 @@ pub enum ColumnId {
     State,
     Backups,
     Health,
+    Partition,
+    RoleOrState,
+    Filesystem,
+    LbaRange,
+    ActionOrKey,
+    FinalState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,6 +144,15 @@ pub fn table_column_schema(kind: TableKind) -> Option<Vec<TableColumnSpec>> {
             table_column(VidPid, "VID:PID", column(9, 9, 12, 75, 1, false)),
             table_column(Onlyid, "onlyid", column(8, 12, 20, 72, 1, false)),
             table_column(Name, "名称", column(12, 24, 48, 70, 3, false)),
+        ]),
+        TableKind::ResultPartitions => Some(vec![
+            table_column(Partition, "分区", column(5, 6, 8, 100, 1, true)),
+            table_column(RoleOrState, "角色/状态", column(8, 14, 18, 96, 1, true)),
+            table_column(Filesystem, "文件系统", column(8, 12, 16, 90, 1, true)),
+            table_column(LbaRange, "LBA 范围", column(14, 22, 28, 88, 2, true)),
+            table_column(Capacity, "容量", column(8, 12, 16, 86, 1, true)),
+            table_column(ActionOrKey, "处理/密钥", column(10, 16, 24, 78, 1, false)),
+            table_column(FinalState, "结果/说明", column(12, 24, 48, 72, 3, false)),
         ]),
         _ => None,
     }
@@ -374,7 +390,11 @@ pub struct TableViewData {
 }
 
 impl TableViewData {
-    fn from_rows(generation: u64, columns: &[TableColumnSpec], rows: Vec<Vec<String>>) -> Self {
+    pub(crate) fn from_rows(
+        generation: u64,
+        columns: &[TableColumnSpec],
+        rows: Vec<Vec<String>>,
+    ) -> Self {
         let mut content_widths = columns
             .iter()
             .map(|column| display_width(column.heading))
@@ -656,7 +676,7 @@ fn column(
 pub fn layout_for(kind: TableKind) -> AdaptiveTableLayout {
     use TableKind::*;
     let specs = match kind {
-        Devices | Backups | RelatedBackups => table_column_schema(kind)
+        Devices | Backups | RelatedBackups | ResultPartitions => table_column_schema(kind)
             .expect("workspace tables have a column schema")
             .into_iter()
             .map(|column| column.layout)
