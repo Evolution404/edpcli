@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row as TableRow, Table, TableState, Tabs, Wrap},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row as TableRow, Table, TableState, Tabs, Wrap},
     Frame,
 };
 
@@ -330,6 +330,27 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         draw_post_restore_result(frame, area, state);
         return;
     }
+
+    let post_restore_overlay = wizard.kind == WriteKind::Restore
+        && wizard.restore_outcome.is_some()
+        && matches!(
+            wizard.stage,
+            WizardStage::VolumeLabelInput
+                | WizardStage::PasswordInput
+                | WizardStage::EncryptedFormatConfirm
+                | WizardStage::FormatConfirm
+                | WizardStage::Formatting
+                | WizardStage::ReinitializePassword
+                | WizardStage::ReinitializePasswordConfirm
+                | WizardStage::ReinitializeConfirm
+                | WizardStage::Reinitializing
+        );
+    let content_area = if post_restore_overlay {
+        draw_post_restore_result(frame, area, state);
+        super::ui::centered_modal_rect(area, 92, 24)
+    } else {
+        area
+    };
 
     if wizard.stage == WizardStage::Result {
         draw_wizard_result(frame, area, wizard);
@@ -715,9 +736,12 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
             },
         )
         .title(title);
+    if post_restore_overlay {
+        frame.render_widget(Clear, content_area);
+    }
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
-        area,
+        content_area,
     );
 
     match wizard.stage {
