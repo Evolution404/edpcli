@@ -506,22 +506,34 @@ fn provision_parameters_jk_changes_field_selection() {
 }
 
 #[test]
-fn provision_disk_layout_jk_scrolls_without_changing_field_selection() {
+fn provision_disk_layout_jk_moves_selection_before_viewport_scrolls() {
     let mut state = provision_state();
     state.provision_focus_pane(PaneId::ProvisionDiskLayout);
-    let selected = state.provision().field_selected;
-    let before = state
-        .pane_viewport(PaneId::ProvisionDiskLayout)
-        .scroll_y
-        .offset;
-    state.provision_move_focused_vertical(1, 8, 100);
-    assert_eq!(state.provision().field_selected, selected);
+    let field_selected = state.provision().field_selected;
+    let first_region = state.disk_layout_selected();
+
+    state.provision_move_focused_vertical(1, 20, 100);
+    assert_eq!(state.provision().field_selected, field_selected);
+    assert!(state.disk_layout_selected() > first_region);
     assert_eq!(
         state
             .pane_viewport(PaneId::ProvisionDiskLayout)
             .scroll_y
             .offset,
-        before + 1
+        0,
+        "selection that remains visible must not move the whole layout page"
+    );
+
+    for _ in 0..8 {
+        state.provision_move_focused_vertical(1, 7, 100);
+    }
+    assert!(
+        state
+            .pane_viewport(PaneId::ProvisionDiskLayout)
+            .scroll_y
+            .offset
+            > 0,
+        "viewport should follow only after the selected row reaches the visible edge"
     );
 }
 
@@ -539,29 +551,23 @@ fn provision_form_tab_changes_focus_without_changing_field_selection() {
 }
 
 #[test]
-fn provision_context_tab_walks_fields_then_layout_and_wraps() {
+fn provision_context_tab_cycles_panes_without_touching_field_selection() {
     let mut state = provision_state();
-    let count = state.provision_visible_fields().len();
-    assert!(count > 1);
+    state.provision_move_field(3);
+    let selected = state.provision().field_selected;
     assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
-    assert_eq!(state.provision().field_selected, 0);
 
-    for expected in 1..count {
-        state.provision_tab_focus(false);
-        assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
-        assert_eq!(state.provision().field_selected, expected);
-    }
     state.provision_tab_focus(false);
     assert_eq!(state.provision_focused_pane(), PaneId::ProvisionDiskLayout);
+    assert_eq!(state.provision().field_selected, selected);
+
     state.provision_tab_focus(false);
     assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
-    assert_eq!(state.provision().field_selected, 0);
+    assert_eq!(state.provision().field_selected, selected);
 
     state.provision_tab_focus(true);
     assert_eq!(state.provision_focused_pane(), PaneId::ProvisionDiskLayout);
-    state.provision_tab_focus(true);
-    assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
-    assert_eq!(state.provision().field_selected, count - 1);
+    assert_eq!(state.provision().field_selected, selected);
 }
 
 fn assert_complete_layout(model: &DiskLayoutModel) {

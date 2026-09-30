@@ -349,9 +349,10 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     assert_eq!(identity_separator, internal_separator_x("部门"));
     let key_domain_separator = internal_separator_x("交换区来源密码");
     assert_eq!(key_domain_separator, internal_separator_x("交换区目标密码"));
-    let layout_separator = internal_separator_x("启动区容量");
-    assert_eq!(layout_separator, internal_separator_x("交换区容量"));
-    assert_eq!(layout_separator, internal_separator_x("保密区容量"));
+    for row_name in ["启动区容量", "交换区容量", "保密区容量"] {
+        let separator = internal_separator_x(row_name);
+        assert!(separator > 8 && separator < 80, "{row_name}");
+    }
     let format_separator = internal_separator_x("启动区格式化");
     assert_eq!(format_separator, internal_separator_x("交换区格式化"));
     assert_eq!(format_separator, internal_separator_x("保密区格式化"));
@@ -363,7 +364,7 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     let distinct = [
         identity_separator,
         key_domain_separator,
-        layout_separator,
+        internal_separator_x("启动区容量"),
         format_separator,
         password_separator,
     ]
@@ -419,22 +420,22 @@ fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor(
                 .contains("标签标识")
         })
         .expect("label id row");
-    let selection = edpcli::tui::theme::current().palette().selection;
+    let theme = edpcli::tui::theme::current();
     let label_cell = row
         .iter()
         .find(|cell| cell.symbol() == "标")
         .expect("label cell");
-    assert_ne!(label_cell.style().bg, Some(selection));
-    let highlighted = row
+    assert_ne!(label_cell.style().fg, theme.accent().fg);
+    let value_cell = row
         .iter()
-        .filter(|cell| cell.style().bg == Some(selection))
-        .map(|cell| cell.symbol())
-        .collect::<String>();
-    assert!(
-        highlighted.chars().any(|ch| ch.is_ascii_digit()),
-        "selected value should contain highlighted input content: {highlighted}"
+        .find(|cell| cell.symbol().chars().any(|ch| ch.is_ascii_digit()))
+        .expect("selected value cell");
+    assert_eq!(
+        value_cell.style().fg,
+        theme.accent().fg,
+        "Normal focus should emphasize the value without a full-width selection fill"
     );
-    assert!(!highlighted.contains('标'));
+    assert_eq!(value_cell.style().bg, label_cell.style().bg);
 
     let dept_index = state
         .provision_visible_fields()

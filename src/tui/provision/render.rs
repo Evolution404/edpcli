@@ -25,7 +25,13 @@ fn provision_content_layout(
     ratatui::layout::Rect,
     Option<(ratatui::layout::Rect, Option<ratatui::layout::Rect>)>,
 ) {
-    if matches!(stage, ProvisionStage::Running | ProvisionStage::Result) {
+    if matches!(
+        stage,
+        ProvisionStage::Form
+            | ProvisionStage::Planning
+            | ProvisionStage::Running
+            | ProvisionStage::Result
+    ) {
         return (area, None);
     }
     let class = crate::tui::ui::ViewportClass::for_width(area.width);
@@ -37,13 +43,7 @@ fn provision_content_layout(
         return (area, None);
     }
     let columns = Layout::horizontal([Constraint::Min(68), Constraint::Length(40)]).split(area);
-    if columns[1].height >= 18 {
-        let context =
-            Layout::vertical([Constraint::Min(8), Constraint::Length(10)]).split(columns[1]);
-        (columns[0], Some((context[0], Some(context[1]))))
-    } else {
-        (columns[0], Some((columns[1], None)))
-    }
+    (columns[0], Some((columns[1], None)))
 }
 
 fn draw_provision_breadcrumb(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
@@ -159,29 +159,13 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
         ]
     };
 
-    if let Some((side_top, side_bottom)) = sidebar {
+    if let Some((side_top, _)) = sidebar {
         frame.render_widget(
             Paragraph::new(target_lines)
                 .block(crate::tui::ui::card("固定目标", false))
                 .wrap(Wrap { trim: true }),
             side_top,
         );
-        if let Some(side_bottom) = side_bottom {
-            frame.render_widget(
-                Paragraph::new(vec![
-                    Line::from(Span::styled("安全不变量", warning())),
-                    Line::from("• 仅允许 USB 整盘目标"),
-                    Line::from("• LBA3 厂商数据原样保留"),
-                    Line::from("• 写前固定硬件身份/容量"),
-                    Line::from("• MBR 最后提交"),
-                    Line::from("• 协议写入失败回滚；格式化失败保留制盘"),
-                    Line::from("• 保留分区保持原位置与密钥材料"),
-                ])
-                .block(crate::tui::ui::card("写盘保护", false))
-                .wrap(Wrap { trim: true }),
-                side_bottom,
-            );
-        }
     }
 
     match provision.stage {

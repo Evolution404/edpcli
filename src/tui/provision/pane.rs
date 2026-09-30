@@ -30,37 +30,8 @@ impl AppState {
     }
 
     pub fn provision_tab_focus(&mut self, reverse: bool) {
-        use crate::tui::pane::PaneId;
-
         match self.provision.stage {
-            ProvisionStage::Form => {
-                let count = self.provision_field_count();
-                if count == 0 {
-                    return;
-                }
-                match self.provision.pane_focus.focused() {
-                    PaneId::ProvisionParameters if reverse => {
-                        if self.provision.field_selected > 0 {
-                            self.provision_move_field(-1);
-                        } else {
-                            self.provision.pane_focus.focus(PaneId::ProvisionDiskLayout);
-                        }
-                    }
-                    PaneId::ProvisionParameters => {
-                        if self.provision.field_selected + 1 < count {
-                            self.provision_move_field(1);
-                        } else {
-                            self.provision.pane_focus.focus(PaneId::ProvisionDiskLayout);
-                        }
-                    }
-                    PaneId::ProvisionDiskLayout => {
-                        self.provision.pane_focus.focus(PaneId::ProvisionParameters);
-                        self.provision.field_selected = if reverse { count - 1 } else { 0 };
-                    }
-                    _ => {}
-                }
-            }
-            ProvisionStage::Review => self.provision_shift_pane(reverse),
+            ProvisionStage::Form | ProvisionStage::Review => self.provision_shift_pane(reverse),
             ProvisionStage::Result => self.provision_result_shift_pane(reverse),
             _ => {}
         }
@@ -108,7 +79,7 @@ impl AppState {
         }
     }
 
-    pub fn provision_focused_bottom(&mut self, _visible_len: usize) {
+    pub fn provision_focused_bottom(&mut self, visible_len: usize) {
         let pane = self.provision.pane_focus.focused();
         if pane == crate::tui::pane::PaneId::ProvisionParameters {
             let count = self.provision_field_count();
@@ -123,37 +94,54 @@ impl AppState {
                 .pane_focus
                 .viewport_mut(pane)
                 .scroll_y
-                .bottom(content_len, 1);
+                .bottom(content_len, visible_len.max(1));
         }
     }
 
     pub fn provision_move_focused_vertical(
         &mut self,
         delta: isize,
-        _visible_len: usize,
+        visible_len: usize,
         content_len: usize,
     ) {
         let pane = self.provision.pane_focus.focused();
         if pane == crate::tui::pane::PaneId::ProvisionParameters {
             self.provision_move_field(delta);
-        } else {
-            if pane == crate::tui::pane::PaneId::ProvisionDiskLayout {
-                let model = self.provision_layout_model();
-                let count = crate::tui::disk_layout::DiskLayoutPresentation::new(
-                    &model,
-                    crate::tui::disk_layout::DiskLayoutProfile::EditorExact,
-                    self.disk_layout_tail_expansion(),
-                )
-                .visible_model()
-                .segments
-                .len();
-                self.disk_layout_move_selection(delta, count);
+        } else if pane == crate::tui::pane::PaneId::ProvisionDiskLayout
+            && self.provision.stage == ProvisionStage::Form
+        {
+            let model = self.provision_layout_model();
+            let count = crate::tui::disk_layout::DiskLayoutPresentation::new(
+                &model,
+                crate::tui::disk_layout::DiskLayoutProfile::EditorExact,
+                self.disk_layout_tail_expansion(),
+            )
+            .visible_model()
+            .segments
+            .len();
+            self.disk_layout_move_selection(delta, count);
+
+            let details = self.provision_layout_editor_details();
+            let selected_detail = details
+                .iter()
+                .position(|detail| detail.selected && detail.columns.is_some())
+                .unwrap_or(0);
+            // Summary + compact capacity map + separating blank precede the detail rows.
+            let selected_line = 5usize.saturating_add(selected_detail);
+            let visible = visible_len.max(1);
+            let viewport = &mut self.provision.pane_focus.viewport_mut(pane).scroll_y;
+            if selected_line < viewport.offset {
+                viewport.offset = selected_line;
+            } else if selected_line >= viewport.offset.saturating_add(visible) {
+                viewport.offset = selected_line.saturating_add(1).saturating_sub(visible);
             }
+            viewport.clamp(content_len, visible);
+        } else {
             self.provision
                 .pane_focus
                 .viewport_mut(pane)
                 .scroll_y
-                .move_lines(delta, content_len, 1);
+                .move_lines(delta, content_len, visible_len.max(1));
         }
     }
 }

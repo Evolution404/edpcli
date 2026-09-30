@@ -43,11 +43,7 @@ impl AppState {
                 String,
             ),
         >::new();
-        let mut usable_summary = format!(
-            "disk{} · 整盘 {}",
-            device.disk,
-            Self::format_sector_size(total)
-        );
+        let mut usable_summary = format!("整盘 {}", Self::format_sector_size(total));
 
         if self.provision.kind == ProvisionKind::Plain {
             let Ok(plan) = self.provision.plain_form.plan(total) else {
@@ -58,8 +54,7 @@ impl AppState {
             };
             let free = plan.gaps.iter().map(|gap| gap.sector_count).sum::<u64>();
             usable_summary = format!(
-                "disk{} · 整盘 {} · 空闲 {}",
-                device.disk,
+                "整盘 {} · 空闲 {}",
                 Self::format_sector_size(total),
                 Self::format_sector_size(free)
             );
@@ -92,8 +87,7 @@ impl AppState {
                 crate::provision::validate_target_geometry(&parts, resolved.usable_end_lba)
                     .unwrap_or_default();
             usable_summary = format!(
-                "disk{} · 可分区 LBA {}–{} · 剩余 {}",
-                device.disk,
+                "可分区 LBA {}–{} · 剩余 {}",
                 crate::provision::OFFICIAL_PARTITION_START_SECTOR,
                 resolved.usable_end_lba.saturating_sub(1),
                 Self::format_sector_size(unallocated)
@@ -163,7 +157,7 @@ impl AppState {
         }
 
         if let Some(segment) = visible.segments.get(selected) {
-            let (status, tone, role, reason) = partition_status
+            let (status, tone, role, _) = partition_status
                 .get(&(segment.start_lba, segment.sector_count))
                 .cloned()
                 .unwrap_or_else(|| match segment.kind {
@@ -174,7 +168,7 @@ impl AppState {
                     _ => ("固定".into(), Tone::Muted, None, String::new()),
                 });
             rows.push(Detail::muted(""));
-            let title = format!("当前区域  {}    {}", segment.label, status);
+            let title = format!("当前区域  {} · {}", segment.label, status);
             rows.push(match tone {
                 Tone::Warning => Detail::warning(title),
                 Tone::Danger => Detail::danger(title),
@@ -183,40 +177,21 @@ impl AppState {
                 Tone::Muted => Detail::accent(title),
             });
             rows.push(Detail::muted(format!(
-                "范围      LBA {}–{} · {} sector",
+                "LBA {}–{} · {}",
                 segment.start_lba,
                 segment.end_exclusive().unwrap_or(segment.start_lba + 1) - 1,
-                segment.sector_count
+                Self::format_sector_size(segment.sector_count)
             )));
-            if !reason.is_empty() {
-                rows.push(Detail::muted(format!("原因      {reason}")));
-            }
 
-            if let (Some(role), Ok(Some((limit_role, current, max, limiter, end)))) =
+            if let (Some(role), Ok(Some((limit_role, current, max, ..)))) =
                 (role, self.provision_selected_capacity_limit())
             {
                 if role == limit_role {
                     rows.push(Detail::muted(format!(
-                        "大小      {} · {} sector",
+                        "当前容量 {} · 最大 {}",
                         Self::format_sector_size(current),
-                        current
+                        Self::format_sector_size(max)
                     )));
-                    rows.push(Detail::muted(format!(
-                        "最大可设  {} · {} sector",
-                        Self::format_sector_size(max),
-                        max
-                    )));
-                    rows.push(Detail::muted(format!(
-                        "还能增加  {}",
-                        Self::format_sector_size(max.saturating_sub(current))
-                    )));
-                    rows.push(Detail::muted(match limiter {
-                        Some((next_role, next_start)) => format!(
-                            "限制      后续{}固定起点 LBA {next_start}",
-                            next_role.label()
-                        ),
-                        None => format!("限制      可分区末端 LBA {}", end.saturating_sub(1)),
-                    }));
                 }
             }
         }

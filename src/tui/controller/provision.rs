@@ -161,14 +161,7 @@ pub(super) fn dispatch_provision(
             {
                 ActionOutcome::request(ActionRequest::ProvisionSourcePasswordVerify)
             }
-            TuiAction::Activate => {
-                if state.provision_focused_pane() == PaneId::ProvisionDiskLayout {
-                    show_provision_layout_detail(state);
-                    ActionOutcome::handled()
-                } else {
-                    ActionOutcome::request(ActionRequest::ProvisionPlan)
-                }
-            }
+            TuiAction::Activate => ActionOutcome::request(ActionRequest::ProvisionPlan),
             TuiAction::Export => {
                 state.set_notice("请先按 Enter 生成只读计划，再从计划页导出镜像。");
                 ActionOutcome::handled()

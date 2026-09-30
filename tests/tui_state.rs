@@ -338,7 +338,7 @@ fn enter_provision_kind(state: &mut AppState, index: usize) -> ProvisionKind {
 }
 
 #[test]
-fn ch14_partition_layout_has_typed_status_column_and_reason() {
+fn ch14_partition_layout_has_typed_status_and_concise_selection_summary() {
     use edpcli::tui::disk_layout::DiskLayoutDetailTone;
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
@@ -357,7 +357,9 @@ fn ch14_partition_layout_has_typed_status_column_and_reason() {
         .collect::<Vec<_>>();
     assert_eq!(partitions.len(), 3);
     assert!(partitions.iter().all(|columns| columns[3] == "⚠ 需重建"));
-    assert!(details.iter().any(|row| row.text.starts_with("原因      ")));
+    assert!(details.iter().any(|row| row.text.starts_with("当前区域  ")));
+    assert!(details.iter().any(|row| row.text.starts_with("LBA ")));
+    assert!(!details.iter().any(|row| row.text.starts_with("原因      ")));
     assert!(details
         .iter()
         .any(|row| row.tone == DiskLayoutDetailTone::Success));

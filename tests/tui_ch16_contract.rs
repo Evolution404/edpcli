@@ -132,13 +132,84 @@ fn provision_state() -> AppState {
 }
 
 #[test]
-fn ch16_provision_has_shared_stepper_and_card_surfaces() {
+fn ch16_provision_form_is_two_pane_without_protection_or_shortcut_footer() {
     let state = provision_state();
     let text = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
     for value in ["制盘配置", "生成计划", "计划确认", "执行", "完成"] {
         assert!(text.contains(value), "missing {value}");
     }
-    assert!(text.contains("固定目标"));
+    assert!(text.contains("参数"), "{text}");
+    assert!(text.contains("目标与磁盘布局"), "{text}");
+    assert!(!text.contains("固定目标"), "{text}");
+    assert!(!text.contains("写盘保护"), "{text}");
+    assert!(
+        !text.contains("↑/↓字段"),
+        "form must not render a shortcut footer"
+    );
+}
+
+#[test]
+fn provision_verified_source_status_is_success_and_normal_values_have_no_input_fill() {
+    use edpcli::provision::SourcePasswordKnowledge;
+
+    let mut state = provision_state();
+    state.provision_mut().form.share_source_knowledge = SourcePasswordKnowledge::DefaultVerified;
+    state.provision_mut().form.encrypt_source_knowledge = SourcePasswordKnowledge::DefaultVerified;
+    state.provision_mut().message =
+        Some("来源状态: mode0 · 交换域:默认密码已验证 · 保密域:默认密码已验证".into());
+    state.provision_mut().field_selected = 1;
+    state.provision_mut().form.label_id = "ZTESTONLY".into();
+
+    let (width, height) = (160, 45);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let lines = (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    let compact = lines
+        .iter()
+        .map(|line| line.replace(' ', ""))
+        .collect::<Vec<_>>();
+    let success_fg = edpcli::tui::theme::current().success().fg.unwrap();
+    for domain in ["交换域", "保密域"] {
+        let y = compact
+            .iter()
+            .position(|line| line.contains(domain) && line.contains("默认密码已验证"))
+            .unwrap_or_else(|| panic!("missing verified status for {domain}"))
+            as u16;
+        let x = (0..width)
+            .find(|x| buffer[(*x, y)].symbol() == "✓")
+            .expect("verified mark");
+        assert_eq!(buffer[(x, y)].fg, success_fg, "{domain}");
+    }
+
+    let value = state.provision().form.label_id.clone();
+    let needle = value.chars().next().expect("label id").to_string();
+    let y = compact
+        .iter()
+        .position(|line| line.contains("标签标识") && line.contains(&value))
+        .expect("normal identity row") as u16;
+    let x = (0..80)
+        .find(|x| buffer[(*x, y)].symbol() == needle)
+        .expect("normal field value");
+    let label_x = (0..x)
+        .find(|label_x| buffer[(*label_x, y)].symbol() == "标")
+        .expect("identity label");
+    assert_eq!(
+        buffer[(x, y)].bg,
+        buffer[(label_x, y)].bg,
+        "normal value must share the pane background instead of painting a separate input strip"
+    );
+    assert_eq!(
+        buffer[(x, y)].fg,
+        edpcli::tui::theme::current().secondary_text().fg.unwrap(),
+        "normal value should use lightweight body text styling"
+    );
 }
 
 #[test]

@@ -228,10 +228,6 @@ fn active_tab() -> Style {
     super::theme::current().active_tab()
 }
 
-fn input() -> Style {
-    super::theme::current().input()
-}
-
 fn input_focused() -> Style {
     super::theme::current().input_focused()
 }

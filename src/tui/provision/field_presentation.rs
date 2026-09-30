@@ -41,12 +41,6 @@ impl AppState {
             Some(value) => value,
             None => return out,
         };
-        let knowledge_suffix =
-            |knowledge: crate::provision::SourcePasswordKnowledge| match knowledge {
-                crate::provision::SourcePasswordKnowledge::DefaultVerified => "✓ 默认已验证",
-                crate::provision::SourcePasswordKnowledge::UserVerified => "✓ 用户已验证",
-                crate::provision::SourcePasswordKnowledge::Unknown => "⚠ Unknown",
-            };
         out.extend([
             (
                 "标签标识".into(),
@@ -68,10 +62,7 @@ impl AppState {
                 "交换区"
             };
             out.push((
-                format!(
-                    "{domain}来源密码（可空） {}",
-                    knowledge_suffix(self.provision.form.share_source_knowledge)
-                ),
+                format!("{domain}来源密码（可空）"),
                 self.provision.form.share_source_password.as_str(),
                 true,
             ));
@@ -89,10 +80,7 @@ impl AppState {
         }
         if matches!(mode, 0..=2) {
             out.push((
-                format!(
-                    "保密区来源密码（可空） {}",
-                    knowledge_suffix(self.provision.form.encrypt_source_knowledge)
-                ),
+                "保密区来源密码（可空）".into(),
                 self.provision.form.encrypt_source_password.as_str(),
                 true,
             ));

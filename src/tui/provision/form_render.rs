@@ -132,27 +132,42 @@ pub(super) fn draw_provision_form(
             let editable_active = active && state.provision_selected_field_is_editable();
             let editing_active = editable_active && state.input_mode() == InputMode::Insert;
             let shown = if editing_active {
-                input_value_window(value, state.provision_field_cursor(), value_width, *secret)
+                input_value_window(
+                    value,
+                    state.provision_field_cursor(),
+                    value_width.saturating_sub(2),
+                    *secret,
+                )
             } else if value.is_empty() {
-                fit_display_width("〈请输入〉", value_width)
+                "〈请输入〉".to_string()
             } else if *secret {
-                fit_display_width(&"•".repeat(value.chars().count()), value_width)
+                "•".repeat(value.chars().count())
             } else {
-                fit_display_width(value, value_width)
+                fit_display_width(value, value_width).trim_end().to_string()
             };
-            let shown_width = crate::ui::disp_width(&shown).min(value_width);
-            spans.push(Span::styled(
-                shown,
-                if editing_active {
-                    input_focused()
-                } else if active {
-                    crate::tui::theme::current().apply_selection(input(), true, parameters_focused)
-                } else {
-                    input()
-                },
-            ));
-            if editing_active && shown_width < value_width {
-                spans.push(Span::raw(" ".repeat(value_width - shown_width)));
+            if editing_active {
+                let occupied = crate::ui::disp_width(&shown)
+                    .saturating_add(2)
+                    .min(value_width);
+                spans.push(Span::styled("[", accent()));
+                spans.push(Span::styled(shown, input_focused()));
+                spans.push(Span::styled("]", accent()));
+                if occupied < value_width {
+                    spans.push(Span::raw(" ".repeat(value_width - occupied)));
+                }
+            } else {
+                let occupied = crate::ui::disp_width(&shown).min(value_width);
+                spans.push(Span::styled(
+                    shown,
+                    if focused_active {
+                        accent().add_modifier(Modifier::BOLD)
+                    } else {
+                        crate::tui::theme::current().secondary_text()
+                    },
+                ));
+                if occupied < value_width {
+                    spans.push(Span::raw(" ".repeat(value_width - occupied)));
+                }
             }
         }
         form_lines.push(Line::from(spans));
@@ -164,37 +179,41 @@ pub(super) fn draw_provision_form(
             Span::styled(safe(&hint), muted()),
         ]));
     }
-    form_lines.push(Line::from(""));
-    let mut shortcuts = Vec::new();
-    if state.input_mode() == InputMode::Insert {
-        shortcuts.extend([
-            Span::styled("INSERT", accent().add_modifier(Modifier::BOLD)),
-            Span::raw("   "),
-            Span::styled("←/→", accent()),
-            Span::raw(" 光标   "),
-            Span::styled("输入/Backspace", secondary()),
-            Span::raw(" 编辑   "),
-            Span::styled("Enter/Esc", success()),
-            Span::raw(" 完成编辑"),
-        ]);
-    } else {
-        shortcuts.extend([Span::styled("NORMAL", muted()), Span::raw("   ")]);
-        shortcuts.extend([Span::styled("↑/↓", accent()), Span::raw(" 字段   ")]);
-        if state.provision_selected_field_is_editable() {
-            shortcuts.extend([Span::styled("i", secondary()), Span::raw(" 编辑   ")]);
-        } else {
-            shortcuts.extend([Span::styled("Space", secondary()), Span::raw(" 切换   ")]);
+    if provision.kind != ProvisionKind::Plain {
+        form_lines.push(Line::from(""));
+        form_lines.push(Line::from(Span::styled("来源状态", secondary())));
+        let source_status = |domain: &str, knowledge: crate::provision::SourcePasswordKnowledge| {
+            let (text, style) = match knowledge {
+                crate::provision::SourcePasswordKnowledge::DefaultVerified => {
+                    ("✓ 默认密码已验证", success())
+                }
+                crate::provision::SourcePasswordKnowledge::UserVerified => {
+                    ("✓ 用户密码已验证", success())
+                }
+                crate::provision::SourcePasswordKnowledge::Unknown => ("! 尚未验证", warning()),
+            };
+            Line::from(vec![
+                Span::styled(crate::ui::pad_to(domain, 10), muted()),
+                Span::styled(text, style),
+            ])
+        };
+        if matches!(provision.kind.mode(), Some(0 | 1 | 3)) {
+            form_lines.push(source_status(
+                "交换域",
+                provision.form.share_source_knowledge,
+            ));
         }
-        shortcuts.extend([
-            Span::styled("Enter", success()),
-            Span::raw(" 生成计划   "),
-            Span::styled("Esc", warning()),
-            Span::raw(" 返回"),
-        ]);
+        if matches!(provision.kind.mode(), Some(0..=2)) {
+            form_lines.push(source_status(
+                "保密域",
+                provision.form.encrypt_source_knowledge,
+            ));
+        }
     }
-    form_lines.push(Line::from(shortcuts));
     if let Some(message) = &provision.message {
-        form_lines.push(Line::from(Span::styled(safe(message), danger())));
+        if !message.starts_with("来源状态:") {
+            form_lines.push(Line::from(Span::styled(safe(message), danger())));
+        }
     }
 
     let visible_height = form_geometry.height.saturating_sub(2) as usize;
@@ -215,16 +234,31 @@ pub(super) fn draw_provision_form(
     if let Some(layout_area) = layout_area {
         let layout_model = state.provision_layout_model();
         let layout_details = state.provision_layout_editor_details();
-        let layout_summary = format!(
-            "{} · {}",
-            provision.kind.title(),
-            AppState::format_sector_size(layout_model.total_sectors)
+        let layout_summary = state.selected_device().map_or_else(
+            || {
+                format!(
+                    "{} · {}",
+                    provision.kind.title(),
+                    AppState::format_sector_size(layout_model.total_sectors)
+                )
+            },
+            |device| {
+                format!(
+                    "disk{} · {} · {} · {}:{} · {}",
+                    device.disk,
+                    crate::common::fmt_capacity(device.size),
+                    safe(&device.proto),
+                    safe(&device.vid),
+                    safe(&device.pid),
+                    provision.kind.title()
+                )
+            },
         );
         layout_model.render_pane(
             frame,
             layout_area,
             crate::tui::disk_layout::DiskLayoutPane {
-                title: "磁盘布局",
+                title: "目标与磁盘布局",
                 summary: &layout_summary,
                 details: &layout_details,
                 focused: focused_pane == crate::tui::pane::PaneId::ProvisionDiskLayout,
