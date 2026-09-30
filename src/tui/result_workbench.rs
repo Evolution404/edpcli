@@ -196,7 +196,7 @@ pub fn render_result_region_list(
     model: &DiskLayoutModel,
     focused: bool,
 ) {
-    super::disk_region_list::render_disk_region_list(
+    super::disk_region_list::render_disk_region_list_body(
         frame,
         area,
         model,
