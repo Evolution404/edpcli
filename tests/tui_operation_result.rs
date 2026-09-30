@@ -273,3 +273,47 @@ fn provision_result_page_attaches_interactive_shared_full_disk_layout() {
     assert!(supplement.contains("DiskRegionListMode::Readonly"));
     assert!(devices.contains("disk_region_list_lines"));
 }
+
+
+#[test]
+fn restore_post_result_uses_shared_workbench_and_typed_layout() {
+    let render = include_str!("../src/tui/restore_result_render.rs");
+    let state = include_str!("../src/tui/restore_result_state.rs");
+    let input = include_str!("../src/tui/runtime_input/backup_wizard.rs");
+    let root = include_str!("../src/tui/render.rs");
+    let state_prod = state.split("#[cfg(test)]").next().unwrap_or(state);
+
+    assert!(root.contains("draw_post_restore_result(frame, area, state)"));
+    assert!(root.contains(
+        "WizardStage::PostRestore => unreachable!(\"post-restore uses shared result workbench\")"
+    ));
+    assert!(render.contains("render_result_workbench_shell"));
+    for pane in ["分区结果", "全盘布局", "验收与执行"] {
+        assert!(render.contains(pane), "missing restore result pane {pane}");
+    }
+    assert!(render.contains(".with_marker(true)"));
+    assert!(
+        render.contains("theme.apply_selection(theme.table_text(), selected_row, focused)"),
+        "restore result rows must use the shared selected-row background"
+    );
+    assert!(
+        render.contains("theme.table_cell(base, column == active_column, focused)"),
+        "restore result active column must use the shared bright/bold cell style"
+    );
+    assert!(
+        !render.contains("row.style(theme.accent"),
+        "restore result must never use accent/blue whole-row activation"
+    );
+
+    assert!(state_prod.contains("outcome.layout.as_ref()"));
+    assert!(state_prod.contains("partition_index_for_selection"));
+    assert!(
+        !state_prod.contains(".role"),
+        "TUI result geometry must not parse or infer string partition roles"
+    );
+    assert!(
+        input.contains("post_restore_result_focused_pane")
+            && input.contains("PaneId::ResultPartitions"),
+        "post-restore actions must only activate from the partition pane"
+    );
+}
