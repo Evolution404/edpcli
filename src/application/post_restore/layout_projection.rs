@@ -93,9 +93,11 @@ mod tests {
         let partitions = vec![ManifestPartition {
             index: 1,
             role: None,
+            partition_type: Some("mbr:0x07".into()),
             start_lba: 2_048,
             sector_count: 4_096,
             filesystem_hint: Some("exfat".into()),
+            volume_label_hint: None,
         }];
         let model = plain_layout(20_000, &partitions).expect("plain layout");
 
