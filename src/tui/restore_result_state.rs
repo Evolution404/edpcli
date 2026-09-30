@@ -22,17 +22,9 @@ fn partition_index_for_selection(
     outcome: &crate::application::post_restore::MetadataRestoreOutcome,
     selection: &crate::tui::disk_layout::DiskCapacitySelection,
 ) -> Option<usize> {
-    outcome
-        .assessment
-        .partitions
-        .iter()
-        .position(|partition| {
-            partition.start_lba == selection.start_lba
-                && partition
-                    .start_lba
-                    .checked_add(partition.sector_count)
-                    == Some(selection.end_exclusive)
-        })
+    (0..outcome.assessment.partitions.len()).find(|index| {
+        partition_selection(outcome, *index).as_ref() == Some(selection)
+    })
 }
 
 impl WizardState {
