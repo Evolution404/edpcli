@@ -6,14 +6,14 @@
 
 当前基线：
 - main 基线：`bec1835cd4797cf57171c7c969048fbe5f8a6782`
-- 已完成：Provision/Restore Result Workbench 的 `h/l` 不再越界切 Pane；`Ctrl-w h/j/k/l` 已有空间导航入口。
+- 已完成：`Provision/Restore Result Workbench` 的 `h/l` 不再越界切 Pane；`Ctrl-w h/j/k/l` 已有空间导航入口。
 - 本计划执行期间禁止 `git reset` / `git clean`，保留 stash 和其他用户数据。
 - 小步提交，阶段完成即测试、提交、push。
 
 最终原则：
 1. Workspace、Pane、Widget、Table 四种导航职责分离。
 2. Result 表格必须真正接入共享 Table Interaction，不允许视觉像表格、交互却自建。
-3. Inspect 的 LBA Jump 是 workspace 级能力，由单键 `J` 触发居中模态框。
+3. `Inspect` 的 LBA Jump 是 workspace 级能力，由单键 `J` 触发居中模态框。
 4. 长任务页只回答“整体到哪、当前干什么、发生过什么、是否安全”，不重复信息。
 5. Modal 必须基于全终端 viewport 居中，不能以局部 Pane 为坐标系。
 6. Keymap、Help、底部提示和测试必须尽量由同一套元数据约束。
@@ -38,28 +38,28 @@
 
 `NavCommand::NextWorkspace / PreviousWorkspace` 如仍被 Tab 的既有设备/备份流程使用，可保留；不得为了删除 `gt/gT` 误删其它合法调用。
 
-### 2.2 Inspect Jump 改为 J
+### 2.2 `Inspect Jump` 改为 J
 
-`J` 是 Inspect Browser 的 workspace 级“跳转到 LBA”命令。
+`J` 是 `Inspect Browser` 的 workspace 级“跳转到 LBA”命令。
 
 适用范围：
 - 结构树
 - 节点概览
 - 节点详情
 - 字段表
-- Hex / Sector Inspector
+- `Hex / Sector Inspector`
 
 行为：
-1. 当前在 Inspect Browser 任意 Pane 按 `J`。
+1. 当前在 `Inspect Browser` 任意 Pane 按 `J`。
 2. 背景页面、当前 Pane、当前选择不改变。
 3. 屏幕中央打开独立 Modal。
 4. Modal 仅输入扇区号（LBA）；允许十进制或 `0x` 前缀十六进制。
 5. Enter 校验并跳转；Esc 关闭并恢复原上下文。
-6. 输入错误直接在 Modal 内显示，不污染全局 message bar。
-7. Inspect Running 阶段不执行 Jump，并给出明确提示。
+6. 输入错误直接在 Modal 内显示，不污染全局 `message bar`。
+7. `Inspect Running` 阶段不执行 Jump，并给出明确提示。
 8. 删除 Jump 中原有的 byte offset / Space 切换语义；`J` 专门代表 Jump to LBA。
 
-### 2.3 Inspect 视图模式与 Pane 焦点解耦
+### 2.3 `Inspect` 视图模式与 Pane 焦点解耦
 
 当前 `1/2/3` 的显示语义不能继续依赖 Pane focus / scroll_x / sector 是否打开间接表达。
 
@@ -75,7 +75,7 @@ enum InspectViewMode {
 职责：
 - `1` -> Business
 - `2` -> RawFields
-- `3` -> Hex
+- `3` -> `Hex`
 
 Pane focus 仍独立维护：
 - Tree
@@ -87,7 +87,7 @@ Jump 提交时保存 `origin_view` 和必要的 origin pane 上下文。
 跳转结果：
 - Business：定位目标 LBA 后继续显示业务语义/Decode 页面。
 - RawFields：定位目标 LBA 后继续显示原始字段表。
-- Hex：读取目标 sector 后继续显示 Sector Inspector/Hex，并保留 Raw/Decode/Mixed 子模式，不强制重置。
+- `Hex`：读取目标 sector 后继续显示 `Sector Inspector/Hex`，并保留 Raw/Decode/Mixed 子模式，不强制重置。
 - 不允许 Jump 强制把用户切回 Tree 视图。
 
 ### 2.4 Jump Modal 必须全局居中
@@ -105,7 +105,7 @@ Jump Modal 使用整个 `frame.area()` / 全终端 viewport 计算居中矩形�
 
 ### 3.1 当前问题
 
-Provision Result / Restore Result 的“分区结果”视觉上是表格，但没有真正进入共享 `TableInteractionState`，导致：
+`Provision Result / Restore Result` 的“分区结果”视觉上是表格，但没有真正进入共享 `TableInteractionState`，导致：
 - `0/$` 不生效；
 - `y/Y` 不生效；
 - `H/L`、`</>`、`s/S` 容易继续分叉；
@@ -113,7 +113,7 @@ Provision Result / Restore Result 的“分区结果”视觉上是表格，但�
 
 ### 3.2 目标
 
-将 Provision/Restore Result 分区表正式接入共享 Table 层。
+将 `Provision/Restore Result` 分区表正式接入共享 Table 层。
 
 统一行为：
 - `j/k`：行选择；
@@ -131,7 +131,7 @@ Provision Result / Restore Result 的“分区结果”视觉上是表格，但�
 - Result 页面独立的 copy 分支；
 - content navigation 到边界时 fallback 成 Pane navigation 的任何逻辑。
 
-Provision Result 与 Restore Result 必须共用同一交互模型。
+`Provision Result` 与 `Restore Result` 必须共用同一交互模型。
 
 ---
 
@@ -155,7 +155,7 @@ Provision Result 与 Restore Result 必须共用同一交互模型。
 - `Ctrl-w w/W`：顺序 Pane 导航。
 
 ### Level 3 — Workspace command
-- Inspect：`J`、`1/2/3`、`/`、`n/N` 等。
+- `Inspect`：`J`、`1/2/3`、`/`、`n/N` 等。
 - Provision/Devices/Backups 使用各自业务动作。
 
 ### Level 4 — Widget / Table
@@ -187,7 +187,7 @@ Provision Result 与 Restore Result 必须共用同一交互模型。
 - Exporting
 - 其它同类 waiting/modal surface
 
-统一使用全局 overlay：
+统一使用全局 `overlay`：
 - 基于整个 `frame.area()` 居中；
 - 背景页面保留可见；
 - modal 自身不改变底层 pane focus；
@@ -201,7 +201,7 @@ Provision Result 与 Restore Result 必须共用同一交互模型。
 
 ## 7. OperationProgress 信息架构统一
 
-Provision / Backup / Restore 共用同一个 OperationProgress Contract。
+`Provision / Backup / Restore` 共用同一个 OperationProgress Contract。
 
 页面分四层：
 
@@ -255,14 +255,14 @@ Provision / Backup / Restore 共用同一个 OperationProgress Contract。
 - 删除 `Constraint::Length(2)` 但只渲染一行造成的空行；
 - Running 阶段不再重复显示等价的 global dynamic status；
 - notice/warning 只有真实事件发生时才显示；
-- Backup/Restore/Provision 共用同一规则。
+- `Backup/Restore/Provision` 共用同一规则。
 
 ---
 
 ## 8. Help / 文档 / 快捷键真相源
 
 立即修正已知过期内容：
-- Inspect Help 中 `1/2/3/4` 改为 `1/2/3`；
+- `Inspect Help` 中 `1/2/3/4` 改为 `1/2/3`；
 - 删除 `gt/gT`；
 - 删除 `gl`；
 - 新增 `J = 跳转到 LBA`；
@@ -280,9 +280,9 @@ Provision / Backup / Restore 共用同一个 OperationProgress Contract。
 
 1. `g + t` / `g + T` / `g + l` 均无绑定。
 2. `J -> InspectJump`。
-3. Inspect Browser 各 Pane/Hex 都能打开 Jump Modal。
+3. `Inspect Browser` 各 Pane/`Hex` 都能打开 Jump Modal。
 4. Jump Modal 基于全 viewport 居中。
-5. Jump Business/RawFields/Hex 后仍保持原 ViewMode。
+5. Jump `Business/RawFields/Hex` 后仍保持原 ViewMode。
 6. Result 分区表必须报告为共享 Table。
 7. Result 支持 `0/$`。
 8. Result 支持 `y/Y`，复制内容与当前视觉列顺序一致。
@@ -290,7 +290,7 @@ Provision / Backup / Restore 共用同一个 OperationProgress Contract。
 10. Insert/Search/Command 中 `q` 是字符，不是 Quit。
 11. Operation Progress safety footer 只占一行。
 12. Running 页面不重复 dynamic safety status。
-13. Inspect Help 不得再出现 `4` / `gl` / `gt/gT`。
+13. `Inspect Help` 不得再出现 `4` / `gl` / `gt/gT`。
 14. Planning/Exporting Modal 中心以全 viewport 为基准。
 
 ---
@@ -304,15 +304,15 @@ Provision / Backup / Restore 共用同一个 OperationProgress Contract。
 - 更新 Help/docs/tests。
 - 独立提交。
 
-### G1 — Inspect ViewMode + Jump Modal
+### G1 — `Inspect ViewMode` + Jump Modal
 - 建 `InspectViewMode`；
-- Jump state 改为真正 overlay modal；
+- Jump `state` 改为真正 `overlay modal`；
 - 取消 begin_jump 时强制清 sector/切 Tree；
-- 实现 Business/RawFields/Hex 的跳转后呈现；
+- 实现 `Business/RawFields/Hex` 的跳转后呈现；
 - 独立提交。
 
 ### G2 — Result Table Contract
-- Provision/Restore Result 接入共享 Table；
+- `Provision/Restore Result` 接入共享 Table；
 - 完成 `0/$ H/L </> s/S y/Y`；
 - 删除专用 active-column 状态；
 - 独立提交。
@@ -324,7 +324,7 @@ Provision / Backup / Restore 共用同一个 OperationProgress Contract。
 - 独立提交。
 
 ### G4 — Modal 全局居中
-- Planning/Exporting/等待 Modal 统一 overlay helper；
+- Planning/Exporting/等待 Modal 统一 `overlay helper`；
 - 以 `frame.area()` 居中；
 - 独立提交。
 
@@ -333,10 +333,10 @@ Provision / Backup / Restore 共用同一个 OperationProgress Contract。
 - 运行记录；
 - Footer Contract；
 - 删除重复安全状态与黑空行；
-- Provision/Backup/Restore 同步；
+- `Provision/Backup/Restore` 同步；
 - 独立提交。
 
-### G6 — Help / Shortcut metadata / architecture gates
+### G6 — Help / Shortcut `metadata` / architecture gates
 - 收口统一元数据；
 - 补全部回归门禁；
 - 更新 `docs/ui/TUI.md`；
@@ -361,7 +361,7 @@ Provision / Backup / Restore 共用同一个 OperationProgress Contract。
 6. 校验 `target/release/edpcli` 与 `~/.local/bin/edpcli` SHA-256 一致
 7. PTY/TUI 人工验收：
    - Result 表 `0/$ y/Y H/L </>`
-   - Inspect `J` 各 ViewMode
+   - `Inspect` `J` 各 ViewMode
    - Planning Modal 全局居中
    - Progress 页“总体进度 / 当前任务 / 运行记录 / 一行安全提示”
    - q/Ctrl-C/Tab/Ctrl-w
