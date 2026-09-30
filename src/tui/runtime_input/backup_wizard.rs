@@ -6,7 +6,7 @@ pub(super) fn handle_backup_wizard_key(
     keys: &mut KeyMapper,
     key: ct_event::KeyEvent,
     backup_dir: &Path,
-    _terminal_size: ratatui::layout::Size,
+    terminal_size: ratatui::layout::Size,
 ) -> Option<KeyOutcome> {
     if let Some(stage) = state.backup_delete().map(|delete| delete.stage) {
         match stage {
@@ -100,10 +100,49 @@ pub(super) fn handle_backup_wizard_key(
             }
             state::WizardStage::PostRestore => {
                 if let Some(action) = keys.map(state::InputMode::Normal, key) {
+                    let visible_rows = usize::from(terminal_size.height.saturating_sub(12)).max(1);
                     match action {
-                        keymap::TuiAction::MoveDown => state.move_post_restore_selection(1),
-                        keymap::TuiAction::MoveUp => state.move_post_restore_selection(-1),
-                        keymap::TuiAction::Activate => state.begin_selected_post_restore_action(),
+                        keymap::TuiAction::MoveDown => {
+                            state.move_post_restore_result_selection(1, visible_rows)
+                        }
+                        keymap::TuiAction::MoveUp => {
+                            state.move_post_restore_result_selection(-1, visible_rows)
+                        }
+                        keymap::TuiAction::PageUp => state
+                            .move_post_restore_result_selection(
+                                -(visible_rows as isize),
+                                visible_rows,
+                            ),
+                        keymap::TuiAction::PageDown => state
+                            .move_post_restore_result_selection(
+                                visible_rows as isize,
+                                visible_rows,
+                            ),
+                        keymap::TuiAction::Top => state.post_restore_result_top(visible_rows),
+                        keymap::TuiAction::Bottom => state.post_restore_result_bottom(visible_rows),
+                        keymap::TuiAction::MoveLeft => {
+                            if !state.post_restore_result_shift_partition_column(true) {
+                                state.post_restore_result_shift_pane(true);
+                            }
+                        }
+                        keymap::TuiAction::MoveRight => {
+                            if !state.post_restore_result_shift_partition_column(false) {
+                                state.post_restore_result_shift_pane(false);
+                            }
+                        }
+                        keymap::TuiAction::PanelPrevious => {
+                            state.post_restore_result_shift_pane(true)
+                        }
+                        keymap::TuiAction::PanelNext => {
+                            state.post_restore_result_shift_pane(false)
+                        }
+                        keymap::TuiAction::Activate => {
+                            if state.post_restore_result_focused_pane()
+                                == crate::tui::pane::PaneId::ResultPartitions
+                            {
+                                state.begin_selected_post_restore_action();
+                            }
+                        }
                         keymap::TuiAction::Open => state.toggle_wizard_detail(),
                         keymap::TuiAction::Back => {
                             let _ = state.navigate(NavCommand::Escape, 1);
