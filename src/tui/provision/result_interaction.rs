@@ -17,7 +17,10 @@ impl AppState {
         }
         self.provision
             .result_workbench
-            .move_partition_active_column(reverse, 7)
+            .move_partition_active_column(
+                reverse,
+                crate::tui::result_workbench::RESULT_PARTITION_COLUMN_COUNT,
+            )
     }
 
     pub fn provision_initialize_result_workbench(&mut self) {
