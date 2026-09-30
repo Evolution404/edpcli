@@ -232,7 +232,6 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/provision/layout.rs",
         "src/tui/provision/editor.rs",
         "src/tui/provision/render.rs",
-        "src/tui/provision/selection_render.rs",
         "src/tui/provision/scheme_picker_render.rs",
         "src/tui/provision/form_render.rs",
         "src/tui/provision/review_render.rs",
@@ -484,7 +483,6 @@ fn large_modules_are_split_by_domain_boundary() {
         lines("src/tui/provision/render.rs") < 400,
         "Provision root renderer must stay layout/orchestration-oriented"
     );
-    assert!(lines("src/tui/provision/selection_render.rs") < 260);
     assert!(lines("src/tui/provision/form_render.rs") < 300);
     assert!(lines("src/tui/provision/review_render.rs") < 170);
     assert!(lines("src/tui/provision/result_render.rs") < 340);
@@ -1399,7 +1397,6 @@ fn provision_stage_renderers_are_split_from_workspace_root() {
     let render = fs::read_to_string(root.join("src/tui/provision/render.rs"))
         .expect("read provision renderer");
     for (path, marker) in [
-        ("selection_render.rs", "fn draw_provision_selection"),
         ("form_render.rs", "fn draw_provision_form"),
         ("review_render.rs", "fn draw_provision_review"),
     ] {
@@ -1412,6 +1409,25 @@ fn provision_stage_renderers_are_split_from_workspace_root() {
         .expect("read shared operation progress renderer");
     assert!(shared.contains("fn draw_operation_progress"));
     assert!(!root.join("src/tui/provision/running_render.rs").exists());
+    assert!(!root.join("src/tui/provision/selection_render.rs").exists());
+    let provision_state =
+        fs::read_to_string(root.join("src/tui/provision/state.rs")).expect("read provision state");
+    let table_state =
+        fs::read_to_string(root.join("src/tui/table_state.rs")).expect("read table state");
+    let table_layout =
+        fs::read_to_string(root.join("src/tui/table_layout.rs")).expect("read table layout");
+    for forbidden in [
+        "ProvisionStage::SelectDisk",
+        "provision_select_disk",
+        "ProvisionDevices",
+    ] {
+        assert!(
+            !provision_state.contains(forbidden)
+                && !table_state.contains(forbidden)
+                && !table_layout.contains(forbidden),
+            "redundant provision device-selection surface returned: {forbidden}"
+        );
+    }
     assert!(!root.join("src/tui/runtime_input/backup_choice.rs").exists());
 }
 
@@ -1743,13 +1759,11 @@ fn passive_capacity_display_uses_one_global_unit_system() {
         "src/metainfo.rs",
         "src/inspect/model.rs",
         "src/tui/render.rs",
-        "src/tui/table_state.rs",
         "src/tui/devices/state.rs",
         "src/tui/devices/presentation.rs",
         "src/tui/disk_layout.rs",
         "src/tui/provision/layout.rs",
         "src/tui/provision/render.rs",
-        "src/tui/provision/selection_render.rs",
         "src/tui/provision/scheme_picker_render.rs",
     ] {
         let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))

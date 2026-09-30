@@ -14,7 +14,6 @@ pub enum TableKind {
     Devices,
     Backups,
     RelatedBackups,
-    ProvisionDevices,
     InspectFields,
 }
 
@@ -662,13 +661,6 @@ pub fn layout_for(kind: TableKind) -> AdaptiveTableLayout {
             .into_iter()
             .map(|column| column.layout)
             .collect(),
-        ProvisionDevices => vec![
-            column(7, 9, 12, 100, 1, true),
-            column(8, 12, 14, 80, 1, false),
-            column(9, 13, 20, 50, 1, false),
-            column(12, 18, 25, 95, 1, true),
-            column(8, 15, 24, 35, 1, false),
-        ],
         InspectFields => vec![
             column(7, 7, 12, 100, 1, true),
             column(3, 4, 8, 95, 1, true),

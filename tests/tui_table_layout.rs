@@ -320,11 +320,6 @@ fn every_interactive_table_renderer_uses_unified_active_column_layout() {
             1usize,
         ),
         (
-            "provision",
-            include_str!("../src/tui/provision/selection_render.rs"),
-            1usize,
-        ),
-        (
             "inspect",
             include_str!("../src/tui/inspect/field_table_render.rs"),
             1usize,

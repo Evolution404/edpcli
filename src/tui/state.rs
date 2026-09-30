@@ -1396,15 +1396,14 @@ impl AppState {
             self.devices.table_view.generation.wrapping_add(1),
         );
         self.devices.scan_pending = false;
-        if self.shell.workspace == Workspace::Provision {
-            if self.shell.pinned_disk.is_none() {
-                self.provision.stage = ProvisionStage::SelectDisk;
-                self.set_item_count(self.provision_selectable_devices().count());
-            } else if self.selected_device().is_none() {
-                self.shell.pinned_disk = None;
-                self.provision.stage = ProvisionStage::SelectDisk;
-                self.set_item_count(self.provision_selectable_devices().count());
-            }
+        if self.shell.workspace == Workspace::Provision
+            && (self.provision.target_disk.is_none() || self.selected_device().is_none())
+        {
+            self.provision.target_disk = None;
+            self.shell.pinned_disk = None;
+            self.provision_reset();
+            self.restore_workspace_frame();
+            self.set_notice("制盘目标设备已断开，已安全返回设备列表。");
         }
         if self.shell.workspace == Workspace::Devices {
             self.rebuild_workspace_filter();
@@ -1516,77 +1515,6 @@ impl AppState {
         }
     }
 
-    fn provision_selectable_device_indices(&self) -> Vec<usize> {
-        let mut indices = self
-            .devices
-            .rows
-            .iter()
-            .enumerate()
-            .filter_map(|(index, row)| {
-                (row.proto == "USB"
-                    && !row.denied
-                    && row.probe_error.is_none()
-                    && row.confirmed_provision_kind().is_some())
-                .then_some(index)
-            })
-            .collect::<Vec<_>>();
-        if let Some(sort) = self.table_sort(super::table_layout::TableKind::ProvisionDevices) {
-            indices.sort_by(|left, right| {
-                let a = &self.devices.rows[*left];
-                let b = &self.devices.rows[*right];
-                let value = |row: &crate::disk_scan::Row| match sort.column {
-                    0 => format!("disk{}", row.disk),
-                    1 => row.size.to_string(),
-                    2 => format!("{}:{}", row.vid, row.pid),
-                    3 => row
-                        .confirmed_provision_kind()
-                        .map(|kind| kind.full_name().to_string())
-                        .unwrap_or_default(),
-                    4 => row.onlyid.clone().unwrap_or_default(),
-                    _ => String::new(),
-                };
-                let ordering = super::table_layout::smart_cell_cmp(&value(a), &value(b))
-                    .then_with(|| left.cmp(right));
-                match sort.direction {
-                    super::table_layout::SortDirection::Ascending => ordering,
-                    super::table_layout::SortDirection::Descending => ordering.reverse(),
-                }
-            });
-        }
-        indices
-    }
-
-    fn provision_selectable_devices(&self) -> impl Iterator<Item = &crate::disk_scan::Row> {
-        self.provision_selectable_device_indices()
-            .into_iter()
-            .filter_map(|index| self.devices.rows.get(index))
-    }
-
-    pub fn provision_device_at(&self, index: usize) -> Option<&crate::disk_scan::Row> {
-        let source = *self.provision_selectable_device_indices().get(index)?;
-        self.devices.rows.get(source)
-    }
-
-    pub(super) fn provision_visible_device_position(&self, disk: u32) -> Option<usize> {
-        self.provision_selectable_device_indices()
-            .iter()
-            .position(|index| self.devices.rows[*index].disk == disk)
-    }
-
-    pub fn provision_select_disk(&mut self) -> Option<u32> {
-        if self.shell.workspace != Workspace::Provision
-            || self.provision.stage != ProvisionStage::SelectDisk
-        {
-            return None;
-        }
-        let disk = self.provision_device_at(self.shell.selected)?.disk;
-        self.shell.pinned_disk = Some(disk);
-        self.provision.target_disk = Some(disk);
-        self.provision.message = None;
-        self.provision.scheme_picker_open = true;
-        Some(disk)
-    }
-
     pub fn begin_provision_for_selected_device(&mut self) -> Result<u32, String> {
         if self.shell.workspace != Workspace::Devices
             || self.devices_focused_pane() != crate::tui::pane::PaneId::DevicesList
@@ -1604,7 +1532,7 @@ impl AppState {
         }
         let disk = row.disk;
         self.provision.target_disk = Some(disk);
-        self.provision.stage = ProvisionStage::SelectDisk;
+        self.provision.stage = ProvisionStage::Form;
         self.shell.pinned_disk = Some(disk);
         self.provision.message = None;
         self.provision.scheme_picker_open = true;
@@ -1827,9 +1755,6 @@ impl AppState {
             }
             if self.shell.workspace == Workspace::Provision {
                 match self.provision.stage {
-                    ProvisionStage::SelectDisk => {
-                        self.restore_workspace_frame();
-                    }
                     ProvisionStage::Running => {
                         self.set_notice("制盘安全事务正在执行，当前不能返回。");
                     }

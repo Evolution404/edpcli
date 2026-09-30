@@ -901,8 +901,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     } else if (state.workspace() == Workspace::Inspect && state.advanced_inspect().is_some())
         || state.active_scan_pending()
         || state.wizard().is_some()
-        || (state.workspace() == Workspace::Provision
-            && state.provision().stage != ProvisionStage::SelectDisk)
+        || state.workspace() == Workspace::Provision
     {
         CoreMode::Busy
     } else {

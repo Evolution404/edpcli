@@ -81,7 +81,6 @@ impl ProvisionKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionStage {
-    SelectDisk,
     Form,
     Planning,
     Review,
@@ -161,7 +160,7 @@ pub struct ProvisionState {
 impl Default for ProvisionState {
     fn default() -> Self {
         Self {
-            stage: ProvisionStage::SelectDisk,
+            stage: ProvisionStage::Form,
             kind: ProvisionKind::Mode0,
             scheme_selected: 0,
             scheme_picker_open: false,
@@ -224,12 +223,9 @@ impl AppState {
         self.provision.target_disk = target_disk;
         self.shell.pinned_disk = target_disk;
         if self.shell.workspace == Workspace::Provision {
-            self.provision.stage = ProvisionStage::SelectDisk;
+            self.provision.stage = ProvisionStage::Form;
             self.provision.scheme_picker_open = false;
-            self.set_item_count(self.provision_selectable_devices().count());
-            self.shell.selected = target_disk
-                .and_then(|disk| self.provision_visible_device_position(disk))
-                .unwrap_or(0);
+            self.set_item_count(0);
         }
     }
 
@@ -240,9 +236,7 @@ impl AppState {
             .min(ProvisionKind::ALL.len() - 1);
         let kind = ProvisionKind::ALL[index];
         if self.selected_device().is_none() {
-            self.provision.stage = ProvisionStage::SelectDisk;
-            self.provision.message = Some("请先在设备列表明确选择 USB 目标盘。".into());
-            self.set_item_count(self.provision_selectable_devices().count());
+            self.provision.message = Some("目标 USB 已不存在，请返回设备列表重新选择。".into());
             return kind;
         }
         self.provision.scheme_selected = index;

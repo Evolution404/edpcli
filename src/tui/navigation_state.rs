@@ -11,13 +11,11 @@ impl AppState {
             self.shell.pinned_disk = self.selected_device().map(|row| row.disk);
         }
         if workspace == Workspace::Provision {
-            if let Some(disk) = self.provision.target_disk {
-                self.shell.pinned_disk = Some(disk);
-            } else {
-                self.shell.pinned_disk = None;
-                self.provision.stage = ProvisionStage::SelectDisk;
-                self.provision.message = None;
-            }
+            let Some(disk) = self.provision.target_disk else {
+                self.set_notice("请先在设备列表选定 USB 盘后按 p 选择制盘方案。");
+                return;
+            };
+            self.shell.pinned_disk = Some(disk);
         }
         self.clear_search_matches();
         self.shell.search_query.clear();
@@ -41,17 +39,7 @@ impl AppState {
             Workspace::Devices => self.devices.rows.len(),
             Workspace::Backups => self.backups.rows.len(),
             Workspace::Inspect => 0,
-            Workspace::Provision => match self.provision.stage {
-                ProvisionStage::SelectDisk => self.provision_selectable_devices().count(),
-                ProvisionStage::Form
-                | ProvisionStage::Planning
-                | ProvisionStage::Review
-                | ProvisionStage::ExportPath
-                | ProvisionStage::Exporting
-                | ProvisionStage::Confirm
-                | ProvisionStage::Running
-                | ProvisionStage::Result => 0,
-            },
+            Workspace::Provision => 0,
         };
         self.set_item_count(count);
     }
@@ -169,9 +157,7 @@ impl AppState {
         let table_kind = match location {
             NavigationLocation::Devices => Some(crate::tui::table_layout::TableKind::Devices),
             NavigationLocation::Backups => Some(crate::tui::table_layout::TableKind::Backups),
-            NavigationLocation::Provision => {
-                Some(crate::tui::table_layout::TableKind::ProvisionDevices)
-            }
+            NavigationLocation::Provision => None,
             NavigationLocation::Inspect | NavigationLocation::SectorInspector => None,
         };
         let table_scroll = table_kind.map(|kind| (kind, self.table_scroll_offset(kind)));

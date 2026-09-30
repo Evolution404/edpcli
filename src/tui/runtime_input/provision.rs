@@ -62,20 +62,6 @@ pub(super) fn handle_provision_key(
         }
 
         match state.provision().stage {
-            ProvisionStage::SelectDisk => {
-                match dispatch_tui_action(
-                    state,
-                    tasks,
-                    action,
-                    role,
-                    backup_dir,
-                    viewport_height,
-                    terminal_size.width,
-                ) {
-                    StateEffect::ExitRequested => return Some(KeyOutcome::Exit),
-                    StateEffect::ExitDeferred | StateEffect::None => {}
-                }
-            }
             ProvisionStage::Form if state.input_mode() == state::InputMode::Insert => {
                 match action {
                     TuiAction::Text(ch) => state.provision_push_char(ch),
@@ -200,7 +186,7 @@ pub(super) fn handle_provision_key(
             }
             ProvisionStage::Result => {
                 if matches!(action, TuiAction::Activate | TuiAction::Back) {
-                    state.provision_reset();
+                    let _ = state.navigate(NavCommand::Escape, viewport_height);
                 }
             }
         }

@@ -1,8 +1,4 @@
 use super::*;
-#[path = "selection_render.rs"]
-mod selection_render;
-use selection_render::draw_provision_selection;
-
 #[path = "scheme_picker_render.rs"]
 mod scheme_picker_render;
 
@@ -52,27 +48,19 @@ fn provision_content_layout(
 
 fn draw_provision_stepper(frame: &mut Frame, area: ratatui::layout::Rect, stage: ProvisionStage) {
     let current = match stage {
-        ProvisionStage::SelectDisk => 0,
-        ProvisionStage::Form => 1,
-        ProvisionStage::Planning => 2,
+        ProvisionStage::Form => 0,
+        ProvisionStage::Planning => 1,
         ProvisionStage::Review
         | ProvisionStage::ExportPath
         | ProvisionStage::Exporting
-        | ProvisionStage::Confirm => 3,
-        ProvisionStage::Running => 4,
-        ProvisionStage::Result => 5,
+        | ProvisionStage::Confirm => 2,
+        ProvisionStage::Running => 3,
+        ProvisionStage::Result => 4,
     };
-    let names = [
-        "选择设备",
-        "制盘配置",
-        "分区预览",
-        "计划确认",
-        "执行",
-        "完成",
-    ];
+    let names = ["制盘配置", "分区预览", "计划确认", "执行", "完成"];
     let class = crate::tui::ui::ViewportClass::for_width(area.width);
     let line = if class == crate::tui::ui::ViewportClass::Compact {
-        Line::from(format!("{}/6  {}", current + 1, names[current]))
+        Line::from(format!("{}/5  {}", current + 1, names[current]))
     } else {
         Line::from(
             names
@@ -105,11 +93,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
     draw_provision_stepper(frame, sections[0], provision.stage);
     let (main_area, sidebar) = provision_content_layout(sections[1], provision.stage);
 
-    let target_lines = if let Some(row) = if provision.stage == ProvisionStage::SelectDisk {
-        state.provision_device_at(state.selected())
-    } else {
-        state.selected_device()
-    } {
+    let target_lines = if let Some(row) = state.selected_device() {
         vec![
             Line::from(vec![
                 Span::styled(format!("disk{}", row.disk), accent()),
@@ -174,9 +158,6 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
     }
 
     match provision.stage {
-        ProvisionStage::SelectDisk => {
-            draw_provision_selection(frame, main_area, state);
-        }
         ProvisionStage::Form => {
             draw_provision_form(frame, main_area, state);
         }

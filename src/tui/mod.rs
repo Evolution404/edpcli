@@ -272,11 +272,57 @@ pub fn run() -> i32 {
 mod tests {
     use super::*;
 
+    fn provision_test_device() -> crate::disk_scan::Row {
+        use crate::application::media_identity::{MediaIdentityPin, MediaIdentitySnapshot};
+        use crate::common::{METADATA_IMAGE_LEN, SECTOR};
+        use crate::provision::DiskProvisionKind;
+
+        let mut row = crate::disk_scan::Row {
+            disk: 6,
+            size: 64_000_000_000,
+            vid: "1234".into(),
+            pid: "5678".into(),
+            proto: "USB".into(),
+            serial: None,
+            hardware_model: None,
+            device_id: Some("disk&ven_test&prod_test".into()),
+            identity_pin: None,
+            onlyid: None,
+            dept: None,
+            user: None,
+            label: None,
+            force_change_password: None,
+            cancel_password_complexity_check: None,
+            max_share_password_errors: None,
+            max_encrypt_password_errors: None,
+            n_baks: 0,
+            n_possible_baks: 0,
+            denied: false,
+            probe_error: None,
+            provision_kind: DiskProvisionKind::Plain,
+            partitions: None,
+            partition_table: None,
+            partition_table_error: None,
+            lce: None,
+        };
+        let mut snapshot = MediaIdentitySnapshot::default();
+        snapshot.hardware.total_sectors = Some(row.size / SECTOR as u64);
+        snapshot.hardware.logical_sector_size = Some(SECTOR as u32);
+        snapshot.protocol.provision_kind = Some(row.provision_kind);
+        row.identity_pin = Some(MediaIdentityPin::new(
+            snapshot,
+            &vec![0; METADATA_IMAGE_LEN],
+        ));
+        row
+    }
+
     #[test]
     fn provision_form_uses_explicit_insert_mode_for_text_editing() {
         let mut state = AppState::new();
-        state.navigate(NavCommand::WorkspaceProvision, 20);
-        state.provision_mut().stage = state::ProvisionStage::Form;
+        state.replace_devices(vec![provision_test_device()]);
+        assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+        state.provision_begin_selected();
+        state.provision_enter_form_workspace();
         state.provision_mut().field_selected = 0;
         state.provision_mut().form.label_id = "12345".into();
 

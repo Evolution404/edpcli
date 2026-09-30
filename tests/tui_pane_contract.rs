@@ -173,19 +173,19 @@ fn inspect_state() -> AppState {
 fn provision_state() -> AppState {
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    assert_eq!(state.provision_select_disk(), Some(6));
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    state.provision_enter_form_workspace();
     state
 }
 
 fn plain_provision_state() -> AppState {
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    assert_eq!(state.provision_select_disk(), Some(6));
-    state.navigate(NavCommand::Bottom, 20);
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    assert!(state.provision_select_scheme_index(4));
     assert_eq!(state.provision_begin_selected(), ProvisionKind::Plain);
+    state.provision_enter_form_workspace();
     state
 }
 
@@ -552,8 +552,7 @@ fn same_edp_fixture_has_identical_devices_inspect_and_provision_source_geometry(
 
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    assert_eq!(state.provision_select_disk(), Some(6));
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     let provision_source = state.selected_device().unwrap().canonical_layout().unwrap();
     assert_eq!(provision_source, inspect_layout);
     assert_complete_layout(&provision_source);

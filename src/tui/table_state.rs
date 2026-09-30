@@ -22,10 +22,7 @@ impl AppState {
             Workspace::Backups if self.backups_focused_pane() == PaneId::BackupsList => {
                 Some(TableKind::Backups)
             }
-            Workspace::Provision => match self.provision.stage {
-                ProvisionStage::SelectDisk => Some(TableKind::ProvisionDevices),
-                _ => None,
-            },
+            Workspace::Provision => None,
             Workspace::Inspect
                 if self.advanced_inspect_focused_pane() == Some(PaneId::InspectDetail)
                     && !self.advanced_inspect_detail_rows().is_empty() =>
@@ -100,23 +97,6 @@ impl AppState {
                 .rows
                 .get(self.device_related_backup_selected_index()?)
                 .cloned(),
-            TableKind::ProvisionDevices => {
-                let row = self.provision_device_at(self.shell.selected)?;
-                Some(
-                    vec![
-                        format!("disk{}", row.disk),
-                        crate::common::fmt_capacity(row.size),
-                        format!("{}:{}", row.vid, row.pid),
-                        row.confirmed_provision_kind()
-                            .map(|kind| kind.full_name().to_string())
-                            .unwrap_or_else(|| "未知 / 未确认".into()),
-                        row.onlyid.clone().unwrap_or_else(|| "—".into()),
-                    ]
-                    .into_iter()
-                    .map(sanitize)
-                    .collect(),
-                )
-            }
             TableKind::InspectFields => {
                 let row = self.advanced_inspect_detail_selected_row()?;
                 Some(row.cells.iter().cloned().map(sanitize).collect::<Vec<_>>())
@@ -194,28 +174,6 @@ impl AppState {
             TableKind::Devices => self.devices.table_view.content_widths.clone(),
             TableKind::Backups => self.backups.table_view.content_widths.clone(),
             TableKind::RelatedBackups => self.device_related_backup_table_view().content_widths,
-            TableKind::ProvisionDevices => {
-                let headings = ["设备", "容量", "USB 身份", "盘型", "onlyid"];
-                let mut widths = headings
-                    .iter()
-                    .map(|value| display_width(value))
-                    .collect::<Vec<_>>();
-                for row in self.provision_selectable_devices() {
-                    let values = [
-                        format!("disk{}", row.disk),
-                        crate::common::fmt_capacity(row.size),
-                        format!("{}:{}", row.vid, row.pid),
-                        row.confirmed_provision_kind()
-                            .map(|kind| kind.full_name().to_string())
-                            .unwrap_or_else(|| "未知 / 未确认".into()),
-                        row.onlyid.clone().unwrap_or_else(|| "—".into()),
-                    ];
-                    for (index, value) in values.iter().enumerate() {
-                        widths[index] = widths[index].max(display_width(value));
-                    }
-                }
-                widths
-            }
             TableKind::InspectFields => {
                 let mut widths = INSPECT_DETAIL_HEADINGS
                     .iter()
@@ -235,7 +193,7 @@ impl AppState {
         &self,
         kind: crate::tui::table_layout::TableKind,
         terminal_width: u16,
-        terminal_height: usize,
+        _terminal_height: usize,
     ) -> u16 {
         use crate::tui::table_layout::TableKind;
         match kind {
@@ -245,20 +203,6 @@ impl AppState {
                 .saturating_div(10)
                 .saturating_sub(6),
             TableKind::InspectFields => terminal_width.saturating_sub(3),
-            TableKind::ProvisionDevices => {
-                let class = crate::tui::ui::ViewportClass::for_width(terminal_width);
-                let content_height = terminal_height.saturating_sub(5);
-                let main_width = if matches!(
-                    class,
-                    crate::tui::ui::ViewportClass::Wide | crate::tui::ui::ViewportClass::UltraWide
-                ) && content_height >= 12
-                {
-                    terminal_width.saturating_sub(40)
-                } else {
-                    terminal_width
-                };
-                main_width.saturating_sub(4)
-            }
         }
         .max(1)
     }
@@ -385,12 +329,6 @@ impl AppState {
                     .map(|row| row.path.clone())
             })
             .flatten();
-        let provision_disk = (kind == crate::tui::table_layout::TableKind::ProvisionDevices)
-            .then(|| {
-                self.provision_device_at(self.shell.selected)
-                    .map(|row| row.disk)
-            })
-            .flatten();
         let inspect_key = (kind == crate::tui::table_layout::TableKind::InspectFields)
             .then(|| {
                 self.advanced_inspect_detail_selected_row()
@@ -436,15 +374,6 @@ impl AppState {
                 })
             {
                 self.devices.related_backup_selected = position;
-            }
-        }
-        if let Some(disk) = provision_disk {
-            if let Some(position) = self
-                .provision_selectable_device_indices()
-                .iter()
-                .position(|index| self.devices.rows[*index].disk == disk)
-            {
-                self.shell.selected = position;
             }
         }
         if let Some(key) = inspect_key {

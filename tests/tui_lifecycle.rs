@@ -282,9 +282,9 @@ fn two_top_level_tabs_and_nested_provision_render_at_all_terminal_sizes() {
 fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     let mut state = AppState::new();
     state.replace_devices(vec![usb_device()]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     state.provision_begin_selected();
+    state.provision_enter_form_workspace();
     let encrypt = state
         .provision_visible_fields()
         .iter()
@@ -397,9 +397,9 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
 fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor() {
     let mut state = AppState::new();
     state.replace_devices(vec![usb_device()]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     state.provision_begin_selected();
+    state.provision_enter_form_workspace();
     state.provision_mut().form.label_id = "3164177653".into();
     state.provision_mut().field_selected = 0;
     state.provision_cursor_end();
@@ -500,9 +500,9 @@ fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor(
 fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
     let mut state = AppState::new();
     state.replace_devices(vec![usb_device()]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     state.provision_begin_selected();
+    state.provision_enter_form_workspace();
     state.provision_mut().form.share_target_password.clear();
 
     let backend = TestBackend::new(100, 28);

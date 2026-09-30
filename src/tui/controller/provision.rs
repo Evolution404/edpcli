@@ -73,30 +73,6 @@ pub(super) fn dispatch_provision(
 
     let stage = state.provision().stage;
     Some(match stage {
-        ProvisionStage::SelectDisk => match action {
-            TuiAction::MoveUp => {
-                ActionOutcome::effect(state.navigate(NavCommand::Up, viewport_height))
-            }
-            TuiAction::MoveDown => {
-                ActionOutcome::effect(state.navigate(NavCommand::Down, viewport_height))
-            }
-            TuiAction::Top => {
-                ActionOutcome::effect(state.navigate(NavCommand::Top, viewport_height))
-            }
-            TuiAction::Bottom => {
-                ActionOutcome::effect(state.navigate(NavCommand::Bottom, viewport_height))
-            }
-            TuiAction::Activate => {
-                if state.provision_select_disk().is_none() {
-                    state.set_notice("请选择可读取的 USB 整盘目标。");
-                }
-                ActionOutcome::handled()
-            }
-            TuiAction::Back => {
-                ActionOutcome::effect(state.navigate(NavCommand::Escape, viewport_height))
-            }
-            _ => return None,
-        },
         ProvisionStage::Form if state.input_mode() == InputMode::Normal => match action {
             TuiAction::Open if state.provision_focused_pane() == PaneId::ProvisionDiskLayout => {
                 state.toggle_disk_layout_tail();

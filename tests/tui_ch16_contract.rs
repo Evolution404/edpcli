@@ -123,12 +123,11 @@ fn device() -> edpcli::disk_scan::Row {
 }
 
 fn provision_state() -> AppState {
-    use edpcli::tui::state::NavCommand;
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    assert_eq!(state.provision_select_disk(), Some(6));
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     state.provision_begin_selected();
+    state.provision_enter_form_workspace();
     state
 }
 
@@ -136,14 +135,7 @@ fn provision_state() -> AppState {
 fn ch16_provision_has_shared_stepper_and_card_surfaces() {
     let state = provision_state();
     let text = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
-    for value in [
-        "选择设备",
-        "制盘配置",
-        "分区预览",
-        "计划确认",
-        "执行",
-        "完成",
-    ] {
+    for value in ["制盘配置", "分区预览", "计划确认", "执行", "完成"] {
         assert!(text.contains(value), "missing {value}");
     }
     assert!(text.contains("固定目标"));

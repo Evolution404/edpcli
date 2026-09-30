@@ -34,6 +34,19 @@ fn chapter_11_provision_escape_restores_device_selection() {
     assert_eq!(state.navigation().depth(), 0);
 }
 
+#[test]
+fn provision_result_escape_returns_directly_to_originating_devices_workspace() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_mut().stage = ProvisionStage::Result;
+    assert_eq!(state.workspace(), Workspace::Provision);
+    assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
+    assert_eq!(state.workspace(), Workspace::Devices);
+    assert_eq!(state.selected_device_disk(), Some(6));
+    assert_eq!(state.navigation().depth(), 0);
+}
+
 fn device(size: u64) -> edpcli::disk_scan::Row {
     let mut row = edpcli::disk_scan::Row {
         disk: 6,
@@ -67,14 +80,27 @@ fn device(size: u64) -> edpcli::disk_scan::Row {
     row
 }
 
+fn enter_provision(state: &mut AppState) -> ProvisionKind {
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    let kind = state.provision_begin_selected();
+    state.provision_enter_form_workspace();
+    kind
+}
+
+fn enter_provision_kind(state: &mut AppState, index: usize) -> ProvisionKind {
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    assert!(state.provision_select_scheme_index(index));
+    let kind = state.provision_begin_selected();
+    state.provision_enter_form_workspace();
+    kind
+}
+
 #[test]
 fn ch14_partition_layout_has_typed_status_column_and_reason() {
     use edpcli::tui::disk_layout::DiskLayoutDetailTone;
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
     let encrypt = state
         .provision_visible_fields()
         .iter()
@@ -152,10 +178,7 @@ fn registered_mode0_to_mode1_form_keeps_exact_encrypt_geometry() {
     ]);
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    state.navigate(NavCommand::Down, 20);
-    state.provision_begin_selected();
+    assert_eq!(enter_provision_kind(&mut state, 1), ProvisionKind::Mode1);
     let form = &state.provision().form;
     assert_eq!(form.share_input_mode, CapacityInputMode::Exact);
     assert_eq!(form.encrypt_input_mode, CapacityInputMode::Exact);
@@ -206,9 +229,7 @@ fn registered_identity_prefills_custom_label_and_force_policy_but_remains_editab
 
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
     assert_eq!(state.provision().form.label, "来源自定义!SAFE6");
     assert!(state.provision().form.force_change_password);
     assert!(state.provision().form.cancel_password_complexity_check);
@@ -266,19 +287,17 @@ fn provision_has_four_official_modes_plus_plain_after_explicit_disk_selection() 
 }
 
 #[test]
-fn provision_requires_a_new_explicit_usb_selection_after_other_workspace_selection() {
+fn provision_cannot_enter_an_empty_target_workspace() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    assert_eq!(state.selected_device_disk(), Some(6));
     state.navigate(NavCommand::WorkspaceProvision, 20);
-    assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
-    assert!(state.selected_device_disk().is_none());
-    state.provision_begin_selected();
-    assert_eq!(state.provision().stage, ProvisionStage::SelectDisk);
-    assert_eq!(state.provision_select_disk(), Some(6));
+    assert_eq!(state.workspace(), Workspace::Devices);
+    assert!(state
+        .notice()
+        .is_some_and(|message| message.contains("请先在设备列表")));
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    assert_eq!(state.workspace(), Workspace::Devices);
     assert!(state.provision_scheme_picker_open());
-    state.provision_begin_selected();
-    assert_eq!(state.provision().stage, ProvisionStage::Form);
 }
 
 #[test]
@@ -304,9 +323,7 @@ fn provision_escape_walks_back_one_level_without_exiting() {
 fn provision_flow_is_nested_and_explicit_reentry_preserves_state() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    assert_eq!(state.provision_select_disk(), Some(6));
-    state.provision_begin_selected();
+    enter_provision(&mut state);
     state.provision_mut().form.label = "保持当前制盘状态!SAFE6".into();
     assert_eq!(state.provision().stage, ProvisionStage::Form);
 
@@ -340,7 +357,8 @@ fn provision_flow_is_nested_and_explicit_reentry_preserves_state() {
 #[test]
 fn critical_provision_cannot_leave_nested_workflow_and_blocks_other_commands() {
     let mut state = AppState::new();
-    state.navigate(NavCommand::WorkspaceProvision, 20);
+    state.replace_devices(vec![device(64_000_000_000)]);
+    enter_provision(&mut state);
     state.set_critical_operation(true);
 
     assert_eq!(
@@ -414,9 +432,7 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
 fn provision_key_probe_prefills_only_verified_default_domains() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    state.provision_begin_selected();
+    enter_provision(&mut state);
 
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
         source_kind: edpcli::provision::DiskProvisionKind::Mode0,
@@ -442,9 +458,7 @@ fn provision_key_probe_prefills_only_verified_default_domains() {
 fn provision_key_probe_never_overwrites_user_entered_source_password() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    state.provision_begin_selected();
+    enter_provision(&mut state);
     state.provision_mut().form.share_source_password = "ManualOldPass!".into();
 
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
@@ -469,9 +483,7 @@ fn provision_key_probe_never_overwrites_user_entered_source_password() {
 fn editing_source_password_invalidates_cached_verification_state() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    state.provision_begin_selected();
+    enter_provision(&mut state);
     state.provision_mut().form.share_source_password = "0000aaaa".into();
     state.provision_mut().form.share_source_knowledge =
         edpcli::provision::SourcePasswordKnowledge::DefaultVerified;
@@ -524,10 +536,7 @@ fn mode0_to_mode1_unknown_encrypt_disables_only_encrypt_target_password() {
 
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    state.navigate(NavCommand::Down, 20);
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode1);
+    assert_eq!(enter_provision_kind(&mut state, 1), ProvisionKind::Mode1);
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
         source_kind: DiskProvisionKind::Mode0,
         share: Some(SourcePasswordKnowledge::Unknown),
@@ -561,9 +570,7 @@ fn mode0_to_mode1_unknown_encrypt_disables_only_encrypt_target_password() {
 fn source_password_verify_request_is_scoped_to_selected_domain() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    state.provision_begin_selected();
+    enter_provision(&mut state);
     state.provision_mut().form.encrypt_source_password = "EncryptOld1!".into();
 
     let index = state
@@ -626,9 +633,7 @@ fn provision_format_controls_follow_current_mode_targets() {
 fn provision_prefers_scanned_onlyid_and_generates_candidate_only_when_missing() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    state.provision_begin_selected();
+    enter_provision(&mut state);
     assert_eq!(state.provision().form.label_id, "1402259934");
 
     let mut missing = device(64_000_000_000);
@@ -645,9 +650,7 @@ fn provision_uses_only_per_partition_quick_exact_inputs() {
     use edpcli::provision::CapacityInputMode;
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
 
     let fields = state.provision_visible_fields();
     assert!(!fields.iter().any(|(label, _, _)| label == "分配方式"));
@@ -681,9 +684,7 @@ fn provision_uses_only_per_partition_quick_exact_inputs() {
 fn provision_text_field_cursor_edits_in_place() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
 
     state.provision_mut().form.user = "ABCDE".into();
     state.provision_mut().field_selected = 1;
@@ -709,9 +710,7 @@ fn provision_capacity_unit_cycles_mib_gib_sector_without_geometry_change() {
 
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
 
     state.provision_mut().form.share_input_mode = CapacityInputMode::Quick;
     state.provision_mut().form.share_quick_unit = QuickCapacityUnit::MiB;
@@ -762,9 +761,7 @@ fn editing_generated_gib_text_uses_user_value_even_if_display_text_is_identical(
 
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    state.provision_begin_selected();
+    enter_provision(&mut state);
     state.provision_mut().form.share_input_mode = CapacityInputMode::Exact;
     state.provision_mut().form.share_sectors = "13606912".into();
     state.provision_mut().field_selected = state
@@ -802,9 +799,7 @@ fn provision_exact_sector_capacity_cycles_through_decimal_mib_and_gib_losslessly
 
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
 
     state.provision_mut().form.boot_input_mode = CapacityInputMode::Exact;
     state.provision_mut().form.boot_sectors = "20417".into();
@@ -855,9 +850,7 @@ fn provision_exact_sector_capacity_cycles_through_decimal_mib_and_gib_losslessly
 fn provision_capacity_hints_match_each_partition() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
 
     let fields = state.provision_visible_fields();
     let hint_for = |label: &str| {
@@ -882,9 +875,7 @@ fn provision_input_policy_filters_invalid_characters_and_ranges() {
 
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
 
     let field_index = |state: &AppState, prefix: &str| {
         state
@@ -939,12 +930,7 @@ fn provision_input_policy_filters_invalid_characters_and_ranges() {
 
 fn enter_plain_form(state: &mut AppState) {
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    for _ in 0..4 {
-        state.navigate(NavCommand::Down, 20);
-    }
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Plain);
+    assert_eq!(enter_provision_kind(state, 4), ProvisionKind::Plain);
     assert_eq!(state.provision().stage, ProvisionStage::Form);
 }
 
@@ -1039,9 +1025,7 @@ fn plain_plan_rejects_overlap_and_fill_produces_valid_layout() {
 fn provision_fill_selected_capacity_uses_same_maximum_as_layout_and_text_f_is_literal() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
 
     let encrypt = state
         .provision_visible_fields()
@@ -1083,9 +1067,7 @@ fn provision_fill_selected_capacity_uses_same_maximum_as_layout_and_text_f_is_li
 fn provision_fill_selected_capacity_recovers_from_empty_capacity_input() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
 
     let encrypt = state
         .provision_visible_fields()
@@ -1106,9 +1088,7 @@ fn provision_fill_selected_capacity_recovers_from_empty_capacity_input() {
 fn provision_form_sections_are_compact_and_user_facing() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
 
     let fields = state.provision_visible_fields();
     let mut sections = Vec::new();
@@ -1143,9 +1123,7 @@ fn provision_form_sections_are_compact_and_user_facing() {
 fn provision_layout_editor_reports_total_space_and_selected_partition_limits() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
 
     let encrypt = state
         .provision_visible_fields()
@@ -1191,9 +1169,7 @@ fn provision_layout_editor_reports_total_space_and_selected_partition_limits() {
 fn provision_compact_rows_keep_partition_capacity_and_start_together() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
 
     let fields = state.provision_visible_fields();
     let rows = state.provision_compact_field_rows();
@@ -1221,9 +1197,7 @@ fn provision_layout_rows_are_sorted_by_start_lba_including_free_space() {
 
     let mut state = AppState::new();
     state.replace_devices(vec![device(8_053_063_680)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
 
     state.provision_mut().form.boot_input_mode = CapacityInputMode::Exact;
     state.provision_mut().form.boot_sectors = "20417".into();
@@ -1296,10 +1270,7 @@ fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
     ]);
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    state.navigate(NavCommand::Down, 20);
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode1);
+    assert_eq!(enter_provision_kind(&mut state, 1), ProvisionKind::Mode1);
     assert_eq!(
         state.provision().form.share_input_mode,
         CapacityInputMode::Exact
@@ -1346,9 +1317,7 @@ fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
 fn plain_mode0_preview_reflows_unanchored_share_after_boot_edit() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
     state.provision_mut().form.boot_sectors = "10000".into();
     state.provision_mut().form.label_id = "1402259934".into();
     state.provision_mut().form.user = "测试用户".into();
@@ -1379,9 +1348,7 @@ fn plain_mode0_preview_reflows_unanchored_share_after_boot_edit() {
 fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
 
     let total_sectors = 64_000_000_000u64 / 512;
     let lce =
@@ -1440,9 +1407,7 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
 fn mode0_live_layout_reports_invalid_geometry_without_rebalancing_other_fields() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    state.provision_select_disk();
-    state.provision_begin_selected();
+    enter_provision(&mut state);
     let original_encrypt = state.provision().form.encrypt_mib.clone();
     state.provision_mut().form.share_mib = "999999999".into();
 
@@ -1817,7 +1782,6 @@ fn every_table_kind_supports_shared_whole_column_reordering() {
     for kind in [
         TableKind::Devices,
         TableKind::Backups,
-        TableKind::ProvisionDevices,
         TableKind::InspectFields,
     ] {
         let mut state = AppState::new();
@@ -1890,27 +1854,4 @@ fn table_copy_follows_logical_column_after_runtime_reorder() {
     assert!(state.move_table_column_edge_for_viewport(TableKind::Devices, false, 160, 30));
     let first = state.table_copy_payload(TableKind::Devices, false).unwrap();
     assert_ne!(first, last);
-}
-
-#[test]
-fn provision_select_copy_uses_active_column_and_current_order() {
-    use edpcli::tui::table_layout::TableKind;
-
-    let mut state = AppState::new();
-    state.replace_devices(vec![device(64_000_000_000)]);
-    state.navigate(NavCommand::WorkspaceProvision, 20);
-    let kind = TableKind::ProvisionDevices;
-    assert_eq!(state.active_table_kind(), Some(kind));
-    let first = state.table_copy_payload(kind, false).unwrap();
-    assert!(state.move_table_column_for_viewport(kind, false, 160, 30));
-    let second = state.table_copy_payload(kind, false).unwrap();
-    assert_ne!(first, second);
-    assert!(state.reorder_table_column_for_viewport(kind, true, 160, 30));
-    assert_eq!(state.table_copy_payload(kind, false).unwrap(), second);
-    let row = state.table_copy_payload(kind, true).unwrap();
-    assert_eq!(row.split('\t').next(), Some(second.as_str()));
-
-    assert_eq!(state.provision_select_disk(), Some(6));
-    assert!(state.provision_scheme_picker_open());
-    assert_eq!(state.active_table_kind(), Some(TableKind::ProvisionDevices));
 }

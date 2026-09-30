@@ -80,12 +80,12 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
             }
         }
         "provision-select" => {
-            state.navigate(NavCommand::WorkspaceProvision, 20);
+            let _ = state.begin_provision_for_selected_device();
         }
         name if name.starts_with("provision-") => {
-            state.navigate(NavCommand::WorkspaceProvision, 20);
-            state.provision_select_disk();
+            let _ = state.begin_provision_for_selected_device();
             state.provision_begin_selected();
+            state.provision_enter_form_workspace();
             state.provision_mut().stage = match name {
                 "provision-form" => ProvisionStage::Form,
                 "provision-review" => ProvisionStage::Review,

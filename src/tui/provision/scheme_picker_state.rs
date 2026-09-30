@@ -10,12 +10,7 @@ impl AppState {
     }
 
     pub fn provision_open_scheme_picker(&mut self) -> bool {
-        if !matches!(
-            self.shell.workspace,
-            Workspace::Devices | Workspace::Provision
-        ) || self.provision.stage != ProvisionStage::SelectDisk
-            || self.provision.target_disk.is_none()
-        {
+        if self.shell.workspace != Workspace::Devices || self.provision.target_disk.is_none() {
             return false;
         }
         self.provision.scheme_selected = self

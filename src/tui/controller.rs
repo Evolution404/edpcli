@@ -5,7 +5,7 @@ use super::keymap::{TuiAction, WidgetRole};
 use super::pane::PaneId;
 use super::state::{
     AdvancedInspectSource, AdvancedInspectStage, AppState, DeviceInfoNodeKey, NavCommand,
-    ProvisionStage, StateEffect, Workspace,
+    StateEffect, Workspace,
 };
 
 #[derive(Debug, Clone)]
@@ -272,12 +272,6 @@ pub(super) fn active_widget_role(state: &AppState) -> WidgetRole {
 
     if state.provision_scheme_picker_open() {
         return WidgetRole::Picker;
-    }
-
-    if state.workspace() == Workspace::Provision
-        && state.provision().stage == ProvisionStage::SelectDisk
-    {
-        return WidgetRole::Table;
     }
 
     if state.active_table_kind().is_some() {
