@@ -70,17 +70,28 @@ pub(crate) fn render_disk_region_list(
     let block = crate::tui::ui::card("区域列表", focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    if inner.width == 0 || inner.height == 0 {
+    render_disk_region_list_body(frame, inner, model, state, mode);
+}
+
+pub(crate) fn render_disk_region_list_body(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    model: &DiskLayoutModel,
+    state: &DiskRegionListState,
+    mode: DiskRegionListMode,
+) {
+    if area.width == 0 || area.height == 0 {
         return;
     }
 
+    let focused = matches!(mode, DiskRegionListMode::Interactive { focused: true });
     let visible = model.collapsed_tail_model();
     let selection = state.selection();
     let selected = match mode {
         DiskRegionListMode::Readonly => None,
         DiskRegionListMode::Interactive { .. } => selection.as_ref(),
     };
-    let row_capacity = inner.height.saturating_sub(1) as usize;
+    let row_capacity = area.height.saturating_sub(1) as usize;
     let start = state.viewport.offset.min(visible.segments.len());
     let end = start
         .saturating_add(row_capacity)
@@ -93,17 +104,13 @@ pub(crate) fn render_disk_region_list(
     lines.extend(visible.segments[start..end].iter().map(|segment| {
         let active =
             selected.is_some_and(|selection| segment_matches_selection(segment, selection));
-        let style = theme.apply_selection(
-            theme.disk_region(segment.kind),
-            active,
-            focused,
-        );
+        let style = theme.apply_selection(theme.disk_region(segment.kind), active, focused);
         Line::from(Span::styled(
             region_row(segment, model.total_sectors),
             style,
         ))
     }));
-    frame.render_widget(Paragraph::new(lines), inner);
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 fn percentage(sectors: u64, total: u64) -> String {
