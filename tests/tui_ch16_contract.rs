@@ -343,6 +343,138 @@ fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
 }
 
 #[test]
+fn operation_log_table_aligns_columns_and_marks_history_vs_current_with_color() {
+    use edpcli::application::progress::{
+        OperationKind, OperationRunState, Phase, ProgressEvent, Severity, Step,
+    };
+    use edpcli::tui::state::ProvisionStage;
+    use std::time::Duration;
+
+    let mut state = provision_state();
+    state.provision_mut().stage = ProvisionStage::Running;
+    state.provision_mut().pane_focus = edpcli::tui::pane::PaneFocus::provision_running();
+    let now = std::time::Instant::now();
+    let mut run = OperationRunState::new(OperationKind::Provision, "disk6");
+    run.started_at = now;
+    let mut events = Vec::new();
+    for (offset, phase, step, current, total, severity) in [
+        (
+            0,
+            Phase::Backup,
+            Step::MandatoryBackup,
+            0,
+            5,
+            Severity::Info,
+        ),
+        (
+            1,
+            Phase::Identity,
+            Step::BackupVerification,
+            2,
+            5,
+            Severity::Info,
+        ),
+        (
+            2,
+            Phase::Identity,
+            Step::LockAndReopen,
+            2,
+            5,
+            Severity::Warning,
+        ),
+        (
+            3,
+            Phase::Transaction,
+            Step::ProtocolWrite,
+            3,
+            5,
+            Severity::Error,
+        ),
+        (
+            4,
+            Phase::Readback,
+            Step::ProtocolReadback,
+            4,
+            5,
+            Severity::Info,
+        ),
+    ] {
+        let mut event = ProgressEvent::new(phase, step, current, total);
+        event.severity = severity;
+        event.emitted_at = now + Duration::from_secs(offset);
+        events.push(event);
+    }
+    run.last_activity_at = events.last().unwrap().emitted_at;
+    run.latest = events.last().cloned();
+    run.log.extend(events);
+    state.provision_mut().run = Some(run);
+
+    let (width, height) = (160, 45);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let lines = (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+
+    let compact_lines = lines
+        .iter()
+        .map(|line| line.replace(' ', ""))
+        .collect::<Vec<_>>();
+    let header_y = compact_lines
+        .iter()
+        .position(|line| line.contains("时间") && line.contains("状态") && line.contains("阶段"))
+        .expect("operation log header") as u16;
+    let row_for = |needle: &str| {
+        compact_lines
+            .iter()
+            .enumerate()
+            .skip(header_y as usize + 1)
+            .find_map(|(y, line)| line.contains(needle).then_some(y as u16))
+            .unwrap_or_else(|| panic!("missing log row {needle}"))
+    };
+    let rows = [
+        row_for("制盘前元数据备份"),
+        row_for("备份身份校验"),
+        row_for("锁定并重开设备"),
+        row_for("协议事务写盘"),
+        row_for("协议读回校验"),
+    ];
+    let symbols = ["✓", "✓", "!", "✗", "●"];
+    let mut status_x = None;
+    for (row, symbol) in rows.into_iter().zip(symbols) {
+        let x = (0..width)
+            .find(|x| buffer[(*x, row)].symbol() == symbol)
+            .unwrap_or_else(|| panic!("missing status {symbol} on row {row}"));
+        if let Some(expected) = status_x {
+            assert_eq!(x, expected, "status column must stay aligned");
+        } else {
+            status_x = Some(x);
+        }
+    }
+
+    let x = status_x.unwrap();
+    let theme = edpcli::tui::theme::current();
+    assert_eq!(buffer[(x, rows[0])].fg, theme.success().fg.unwrap());
+    assert_eq!(buffer[(x, rows[1])].fg, theme.success().fg.unwrap());
+    assert_eq!(buffer[(x, rows[2])].fg, theme.warning().fg.unwrap());
+    assert_eq!(buffer[(x, rows[3])].fg, theme.danger().fg.unwrap());
+    assert_eq!(buffer[(x, rows[4])].fg, theme.accent().fg.unwrap());
+
+    let header_status_x = (0..width)
+        .find(|x| buffer[(*x, header_y)].symbol() == "状")
+        .expect("status header");
+    assert_eq!(
+        x, header_status_x,
+        "header and status cells must share one column"
+    );
+}
+
+#[test]
 fn ch16_provision_result_uses_workbench_hero_and_panes() {
     use edpcli::application::provision::ProvisionExecutionStatus as Status;
     use edpcli::tui::state::ProvisionStage;

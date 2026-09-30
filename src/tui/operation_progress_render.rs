@@ -1,10 +1,12 @@
-use crate::application::progress::{OperationKind, OperationRunState, Phase, Severity, Step};
+use crate::application::progress::{
+    OperationKind, OperationRunState, Phase, ProgressEvent, Severity, Step,
+};
 use crate::tui::operation_progress_status::{draw_current_status, phase_label, unit_label};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Modifier,
     text::{Line, Span},
-    widgets::{Gauge, Paragraph, Wrap},
+    widgets::{Cell, Gauge, Paragraph, Row, Table, Wrap},
     Frame,
 };
 
@@ -21,6 +23,16 @@ fn overall_label(basis_points: u16) -> String {
         format!("{}%", basis_points / 100)
     } else {
         format!("{:.2}%", f64::from(basis_points) / 100.0)
+    }
+}
+
+fn log_status_symbol(event: &ProgressEvent, is_latest: bool) -> &'static str {
+    match event.severity {
+        Severity::Error => "✗",
+        Severity::Warning => "!",
+        Severity::Info if event.phase == Phase::Complete || event.step == Step::Completed => "✓",
+        Severity::Info if is_latest => "●",
+        Severity::Info => "✓",
     }
 }
 
@@ -97,64 +109,74 @@ pub(crate) fn draw_operation_progress(frame: &mut Frame, area: Rect, run: &Opera
     draw_current_status(frame, chunks[1], run);
 
     let visible_log_rows = chunks[2].height.saturating_sub(3) as usize;
-    let mut log_lines = vec![Line::from(Span::styled(
-        "时间       状态  阶段        事件",
-        theme.muted(),
-    ))];
-    if run.log.is_empty() {
-        log_lines.push(Line::from(Span::styled("暂无运行记录", theme.muted())));
+    let header = Row::new([
+        Cell::from("时间"),
+        Cell::from("状态"),
+        Cell::from("阶段"),
+        Cell::from("事件"),
+    ])
+    .style(theme.muted());
+    let rows = if run.log.is_empty() {
+        vec![Row::new([
+            Cell::from("—").style(theme.muted()),
+            Cell::from("—").style(theme.muted()),
+            Cell::from("—").style(theme.muted()),
+            Cell::from("暂无运行记录").style(theme.muted()),
+        ])]
     } else {
-        log_lines.extend(
-            run.log
-                .iter()
-                .rev()
-                .take(visible_log_rows)
-                .rev()
-                .map(|event| {
-                    let style = match event.severity {
-                        Severity::Info => theme.secondary_text(),
-                        Severity::Warning => theme.warning(),
-                        Severity::Error => theme.danger(),
-                    };
-                    let status = match event.severity {
-                        Severity::Error => "✗",
-                        Severity::Warning => "!",
-                        Severity::Info
-                            if event.phase == Phase::Complete || event.step == Step::Completed =>
-                        {
-                            "✓"
-                        }
-                        Severity::Info => "•",
-                    };
-                    let elapsed = event
-                        .emitted_at
-                        .saturating_duration_since(run.started_at)
-                        .as_secs();
-                    let stage = event
-                        .stage
-                        .map(|stage| {
-                            format!("{}/{} {}", stage.current, stage.total, event.phase.label())
-                        })
-                        .unwrap_or_else(|| event.phase.label().to_string());
-                    let detail = event
-                        .detail
-                        .as_deref()
-                        .map(|detail| format!(" · {detail}"))
-                        .unwrap_or_default();
-                    Line::from(Span::styled(
-                        format!(
-                            "+{elapsed:<8}s {status:<4} {stage:<10} {}{detail}",
-                            event.step.label()
-                        ),
-                        style,
-                    ))
-                }),
-        );
-    }
+        run.log
+            .iter()
+            .enumerate()
+            .rev()
+            .take(visible_log_rows)
+            .rev()
+            .map(|(index, event)| {
+                let is_latest = index + 1 == run.log.len();
+                let status = log_status_symbol(event, is_latest);
+                let status_style = match event.severity {
+                    Severity::Error => theme.danger(),
+                    Severity::Warning => theme.warning(),
+                    Severity::Info if status == "✓" => theme.success(),
+                    Severity::Info => theme.accent(),
+                };
+                let elapsed = event
+                    .emitted_at
+                    .saturating_duration_since(run.started_at)
+                    .as_secs();
+                let stage = event
+                    .stage
+                    .map(|stage| {
+                        format!("{}/{} {}", stage.current, stage.total, event.phase.label())
+                    })
+                    .unwrap_or_else(|| event.phase.label().to_string());
+                let detail = event
+                    .detail
+                    .as_deref()
+                    .map(|detail| format!(" · {detail}"))
+                    .unwrap_or_default();
+                Row::new([
+                    Cell::from(format!("+{elapsed}s")).style(theme.secondary_text()),
+                    Cell::from(status).style(status_style),
+                    Cell::from(stage).style(theme.secondary_text()),
+                    Cell::from(format!("{}{detail}", event.step.label()))
+                        .style(theme.secondary_text()),
+                ])
+            })
+            .collect::<Vec<_>>()
+    };
     frame.render_widget(
-        Paragraph::new(log_lines)
-            .block(crate::tui::ui::card("运行记录", true))
-            .wrap(Wrap { trim: false }),
+        Table::new(
+            rows,
+            [
+                Constraint::Length(8),
+                Constraint::Length(6),
+                Constraint::Length(16),
+                Constraint::Min(1),
+            ],
+        )
+        .header(header)
+        .column_spacing(1)
+        .block(crate::tui::ui::card("运行记录", true)),
         chunks[2],
     );
 
