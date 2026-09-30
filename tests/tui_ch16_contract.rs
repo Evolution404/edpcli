@@ -235,8 +235,13 @@ fn provision_verified_source_status_is_success_and_normal_values_have_no_input_f
     use edpcli::provision::SourcePasswordKnowledge;
 
     let mut state = provision_state();
-    state.provision_mut().form.share_source_knowledge = SourcePasswordKnowledge::DefaultVerified;
-    state.provision_mut().form.encrypt_source_knowledge = SourcePasswordKnowledge::DefaultVerified;
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+        share: Some(SourcePasswordKnowledge::DefaultVerified),
+        share_opaque_profile: true,
+        encrypt: Some(SourcePasswordKnowledge::DefaultVerified),
+        encrypt_opaque_profile: true,
+    }));
     state.provision_mut().field_selected = 1;
     state.provision_mut().form.label_id = "ZTESTONLY".into();
 
@@ -270,6 +275,18 @@ fn provision_verified_source_status_is_success_and_normal_values_have_no_input_f
     assert!(
         verified < separator && separator < target,
         "password row must be 原密码 + 状态 │ 新密码: {exchange_row}"
+    );
+    let exchange_y = compact
+        .iter()
+        .position(|line| line == exchange_row)
+        .expect("exchange password row index") as u16;
+    let separator_x = (0..70)
+        .find(|x| buffer[(*x, exchange_y)].symbol() == "│")
+        .expect("password column separator x");
+    assert!(
+        separator_x < 34,
+        "password row must use compact content-driven column sizing instead of a 50/50 split: x={separator_x}, row={}",
+        lines[exchange_y as usize]
     );
     for domain in ["交换区", "保密区"] {
         let y = compact
@@ -389,6 +406,60 @@ fn provision_form_capacity_indicator_tracks_boot_share_encrypt_without_vertical_
 }
 
 #[test]
+fn provision_default_source_password_is_visible_while_verifying_and_separator_never_moves() {
+    use edpcli::provision::SourcePasswordKnowledge;
+
+    let mut state = provision_state();
+    assert_eq!(state.provision().form.share_source_password, "0000aaaa");
+    assert_eq!(state.provision().form.encrypt_source_password, "0000aaaa");
+
+    let render_separator = |state: &AppState| {
+        let (width, height) = (160, 45);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| render::draw(frame, state)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let row_y = (0..height)
+            .find(|y| {
+                let line = (0..width)
+                    .map(|x| buffer[(x, *y)].symbol())
+                    .collect::<String>()
+                    .replace(' ', "");
+                line.contains("交换区") && line.contains("原密码") && line.contains("新密码")
+            })
+            .expect("exchange password row");
+        let row = (0..width)
+            .map(|x| buffer[(x, row_y)].symbol())
+            .collect::<String>();
+        let separator = (0..width)
+            .find(|x| buffer[(*x, row_y)].symbol() == "│")
+            .expect("password separator");
+        (separator, row)
+    };
+
+    let (before, initial_row) = render_separator(&state);
+    assert!(
+        ["◐", "◓", "◑", "◒"]
+            .iter()
+            .any(|glyph| initial_row.contains(glyph)),
+        "initial source-password candidate must show the shared verification spinner: {initial_row}"
+    );
+
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+        share: Some(SourcePasswordKnowledge::DefaultVerified),
+        share_opaque_profile: true,
+        encrypt: Some(SourcePasswordKnowledge::DefaultVerified),
+        encrypt_opaque_profile: true,
+    }));
+    let (after, verified_row) = render_separator(&state);
+    assert!(verified_row.contains('✓'), "{verified_row}");
+    assert_eq!(
+        before, after,
+        "spinner → verified transition must never move the password-column separator"
+    );
+}
+
+#[test]
 fn provision_source_password_edit_auto_verify_contract_is_revision_safe() {
     use edpcli::provision::{KeyDomainRole, SourcePasswordKnowledge};
 
@@ -483,10 +554,47 @@ fn provision_source_password_edit_auto_verify_contract_is_revision_safe() {
 }
 
 #[test]
-fn provision_source_password_failure_uses_red_cross_and_no_manual_v_path() {
+fn provision_source_password_failure_uses_red_cross_and_keeps_opaque_passthrough() {
     use edpcli::provision::KeyDomainRole;
+    use edpcli::sectors::EdpfPartition;
 
-    let mut state = provision_state();
+    let mut row = device();
+    row.partitions = Some(vec![
+        EdpfPartition {
+            ptype: 1,
+            active: 1,
+            enc: 0,
+            start_lba: 63,
+            size_bytes: 20_417 * 512,
+        },
+        EdpfPartition {
+            ptype: 2,
+            active: 1,
+            enc: 1,
+            start_lba: 20_480,
+            size_bytes: 4_000_000 * 512,
+        },
+        EdpfPartition {
+            ptype: 4,
+            active: 1,
+            enc: 1,
+            start_lba: 4_020_480,
+            size_bytes: 2_097_153 * 512,
+        },
+    ]);
+    crate::common::confirm_row_identity(&mut row);
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    state.provision_begin_selected();
+    state.provision_enter_form_workspace();
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+        share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
+        share_opaque_profile: true,
+        encrypt: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
+        encrypt_opaque_profile: true,
+    }));
     let source_index = state
         .provision_visible_fields()
         .iter()
@@ -505,6 +613,21 @@ fn provision_source_password_failure_uses_red_cross_and_no_manual_v_path() {
         KeyDomainRole::Share,
         revision,
         Err("来源密码验证失败".into()),
+    );
+    assert!(
+        !state.provision().form.format_share,
+        "failed source-password verification must never auto-enable destructive formatting"
+    );
+    let request = state.provision_request().expect(
+        "failed verification with unchanged target password should still allow opaque passthrough",
+    );
+    assert!(!request.format.share);
+    assert_eq!(
+        request
+            .key_domains
+            .target_password(edpcli::provision::PartitionRole::Share),
+        None,
+        "opaque passthrough must not reinterpret the default target candidate as a password-change request"
     );
 
     let (width, height) = (160, 45);
@@ -537,16 +660,21 @@ fn provision_source_password_failure_uses_red_cross_and_no_manual_v_path() {
         failed < separator && separator < target,
         "failure status must stay beside 原密码 and must not replace/disable 新密码: {failed_row}"
     );
+    let right_passthrough = (0..height).any(|y| {
+        let right = (70..width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+            .replace(' ', "");
+        right.contains("交换区") && right.contains("透传")
+    });
+    assert!(
+        right_passthrough,
+        "failed source-password verification with unchanged target password must keep an exact-compatible domain on opaque passthrough"
+    );
 
     let provision_controller = include_str!("../src/tui/controller/provision.rs");
-    assert!(
-        !provision_controller.contains("ViewOrVerify"),
-        "Provision must not expose the old manual v verification action"
-    );
-    assert!(
-        !provision_controller.contains("ProvisionSourcePasswordVerify"),
-        "Provision must not expose a manual verification request"
-    );
+    assert!(!provision_controller.contains("ViewOrVerify"));
+    assert!(!provision_controller.contains("ProvisionSourcePasswordVerify"));
 }
 
 #[test]

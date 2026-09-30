@@ -86,10 +86,10 @@ impl AppState {
             }
             ProvisionFieldId::TargetPassword(domain) => Some(match domain {
                 crate::provision::KeyDomainRole::Share => {
-                    "新密码只作用于交换密钥域；旧密码未知时修改会自动启用交换区重新格式化".into()
+                    "新密码只作用于交换密钥域；原密码未验证时修改不会自动格式化，需用户主动勾选交换区格式化".into()
                 }
                 crate::provision::KeyDomainRole::Encrypt => {
-                    "新密码只作用于保密密钥域；旧密码未知时修改会自动启用保密区重新格式化".into()
+                    "新密码只作用于保密密钥域；原密码未验证时修改不会自动格式化，需用户主动勾选保密区格式化".into()
                 }
             }),
             ProvisionFieldId::ForceChangePassword

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 #[path = "form_special_rows.rs"]
 mod form_special_rows;
-use form_special_rows::{advanced_settings_row, password_domain_row};
+use form_special_rows::{advanced_settings_row, password_domain_row, two_column_widths};
 
 const INPUT_EDITING_SLACK: usize = 2;
 
@@ -96,9 +96,18 @@ pub(super) fn draw_provision_form(
             if indexes.contains(&provision.field_selected) {
                 selected_line = form_lines.len();
             }
-            if let Some(line) =
-                password_domain_row(state, &indexes, &fields, content_width, parameters_focused)
-            {
+            let metrics = section_metrics
+                .get(&section)
+                .copied()
+                .unwrap_or((0, 0, 8, 8));
+            if let Some(line) = password_domain_row(
+                state,
+                &indexes,
+                &fields,
+                content_width,
+                parameters_focused,
+                metrics,
+            ) {
                 form_lines.push(line);
                 continue;
             }
@@ -119,20 +128,13 @@ pub(super) fn draw_provision_form(
                 .get(&section)
                 .copied()
                 .unwrap_or((0, 0, 8, 8));
-            let min_right_width = 2 + metrics.1 + 1 + metrics.3.max(8);
-            let desired_left_width = 2 + metrics.0 + 1 + metrics.2.max(8);
-            let max_left_width = content_width
-                .saturating_sub(separator_width)
-                .saturating_sub(min_right_width)
-                .max(8);
-            let section_left_width = desired_left_width.min(max_left_width);
+            let (section_left_width, section_right_width) =
+                two_column_widths(content_width, separator_width, metrics);
             let cell_width = if two_columns {
                 if position == 0 {
                     section_left_width
                 } else {
-                    content_width
-                        .saturating_sub(section_left_width)
-                        .saturating_sub(separator_width)
+                    section_right_width
                 }
             } else {
                 content_width

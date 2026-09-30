@@ -1,5 +1,11 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct TargetPasswordEditState {
+    pub(super) share: bool,
+    pub(super) encrypt: bool,
+}
+
 impl AppState {
     pub(super) fn provision_mark_source_password_unverified(
         &mut self,
@@ -88,22 +94,36 @@ impl AppState {
                 self.provision.form.share_opaque_profile = probe.share_opaque_profile;
                 self.provision.form.encrypt_opaque_profile = probe.encrypt_opaque_profile;
                 if let Some(knowledge) = probe.share {
-                    if self.provision.form.share_source_password.is_empty() {
+                    if self.provision.share_source_password_revision == 0
+                        && self.provision.form.share_source_password.as_bytes()
+                            == crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD
+                    {
                         self.provision.form.share_source_knowledge = knowledge;
-                        if knowledge == crate::provision::SourcePasswordKnowledge::DefaultVerified {
-                            self.provision.form.share_source_password = "0000aaaa".into();
-                        }
+                        self.provision.share_source_verification =
+                            if knowledge == crate::provision::SourcePasswordKnowledge::Unknown {
+                                ProvisionPasswordVerificationState::Failed
+                            } else {
+                                ProvisionPasswordVerificationState::Idle
+                            };
                     }
+                } else if self.provision.share_source_password_revision == 0 {
                     self.provision.share_source_verification =
                         ProvisionPasswordVerificationState::Idle;
                 }
                 if let Some(knowledge) = probe.encrypt {
-                    if self.provision.form.encrypt_source_password.is_empty() {
+                    if self.provision.encrypt_source_password_revision == 0
+                        && self.provision.form.encrypt_source_password.as_bytes()
+                            == crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD
+                    {
                         self.provision.form.encrypt_source_knowledge = knowledge;
-                        if knowledge == crate::provision::SourcePasswordKnowledge::DefaultVerified {
-                            self.provision.form.encrypt_source_password = "0000aaaa".into();
-                        }
+                        self.provision.encrypt_source_verification =
+                            if knowledge == crate::provision::SourcePasswordKnowledge::Unknown {
+                                ProvisionPasswordVerificationState::Failed
+                            } else {
+                                ProvisionPasswordVerificationState::Idle
+                            };
                     }
+                } else if self.provision.encrypt_source_password_revision == 0 {
                     self.provision.encrypt_source_verification =
                         ProvisionPasswordVerificationState::Idle;
                 }
@@ -111,6 +131,18 @@ impl AppState {
                 self.provision_sync_cursor_to_end();
             }
             Err(message) => {
+                if self.provision.share_source_verification
+                    == ProvisionPasswordVerificationState::Verifying
+                {
+                    self.provision.share_source_verification =
+                        ProvisionPasswordVerificationState::Idle;
+                }
+                if self.provision.encrypt_source_verification
+                    == ProvisionPasswordVerificationState::Verifying
+                {
+                    self.provision.encrypt_source_verification =
+                        ProvisionPasswordVerificationState::Idle;
+                }
                 self.set_notice(format!("来源密码域只读探测失败: {message}"));
             }
         }
@@ -149,14 +181,18 @@ impl AppState {
                     crate::provision::SourcePasswordKnowledge::Unknown;
                 self.provision.share_source_verification =
                     ProvisionPasswordVerificationState::Failed;
-                self.set_notice(message);
+                self.set_notice(format!(
+                    "{message}；未自动启用格式化。可保持兼容布局透传；如需改密请主动勾选交换区格式化"
+                ));
             }
             (crate::provision::KeyDomainRole::Encrypt, Err(message)) => {
                 self.provision.form.encrypt_source_knowledge =
                     crate::provision::SourcePasswordKnowledge::Unknown;
                 self.provision.encrypt_source_verification =
                     ProvisionPasswordVerificationState::Failed;
-                self.set_notice(message);
+                self.set_notice(format!(
+                    "{message}；未自动启用格式化。可保持兼容布局透传；如需改密请主动勾选保密区格式化"
+                ));
             }
         }
     }

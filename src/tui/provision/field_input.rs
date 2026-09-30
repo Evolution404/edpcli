@@ -125,20 +125,58 @@ impl AppState {
         }
     }
 
-    pub(super) fn provision_mark_target_password_force_format(
-        &mut self,
-        id: Option<ProvisionFieldId>,
-    ) {
+    pub(super) fn provision_mark_target_password_edited(&mut self, id: Option<ProvisionFieldId>) {
         let Some(ProvisionFieldId::TargetPassword(domain)) = id else {
             return;
         };
-        if !self.provision_domain_opaque_candidate(domain) {
-            return;
-        }
         match domain {
-            crate::provision::KeyDomainRole::Share => self.provision.form.format_share = true,
-            crate::provision::KeyDomainRole::Encrypt => self.provision.form.format_encrypt = true,
+            crate::provision::KeyDomainRole::Share => {
+                self.provision.target_password_edits.share = true;
+            }
+            crate::provision::KeyDomainRole::Encrypt => {
+                self.provision.target_password_edits.encrypt = true;
+            }
         }
+    }
+
+    pub(super) fn provision_password_plan_intent(&self, mode: u8) -> Result<(bool, bool), String> {
+        use crate::provision::{KeyDomainRole, SourcePasswordKnowledge};
+        let check = |active: bool, domain: KeyDomainRole, label: &str, format: bool| {
+            if !active {
+                return Ok(false);
+            }
+            let (verification, edited, knowledge) = match domain {
+                KeyDomainRole::Share => (
+                    self.provision.share_source_verification,
+                    self.provision.target_password_edits.share,
+                    self.provision.form.share_source_knowledge,
+                ),
+                KeyDomainRole::Encrypt => (
+                    self.provision.encrypt_source_verification,
+                    self.provision.target_password_edits.encrypt,
+                    self.provision.form.encrypt_source_knowledge,
+                ),
+            };
+            if verification == ProvisionPasswordVerificationState::Verifying {
+                return Err(format!("{label}原密码正在只读验证，请稍候再生成计划"));
+            }
+            if edited && knowledge == SourcePasswordKnowledge::Unknown && !format {
+                return Err(format!(
+                    "{label}原密码未验证，不能无损改密；如需使用新密码，请主动勾选{label}格式化，否则保持新密码未修改以透传原密钥域"
+                ));
+            }
+            Ok(edited || format || knowledge != SourcePasswordKnowledge::Unknown)
+        };
+        let form = &self.provision.form;
+        Ok((
+            check(mode != 2, KeyDomainRole::Share, "交换区", form.format_share)?,
+            check(
+                mode != 3,
+                KeyDomainRole::Encrypt,
+                "保密区",
+                form.format_encrypt,
+            )?,
+        ))
     }
 
     pub fn provision_push_char(&mut self, ch: char) {
@@ -168,7 +206,7 @@ impl AppState {
             self.provision.field_cursor = cursor + 1;
             self.provision_mark_capacity_edit(Some(id));
             self.provision_mark_source_password_unverified(Some(id));
-            self.provision_mark_target_password_force_format(Some(id));
+            self.provision_mark_target_password_edited(Some(id));
             self.provision.message = None;
         }
     }
@@ -187,7 +225,7 @@ impl AppState {
                 self.provision.field_cursor = cursor - 1;
                 self.provision_mark_capacity_edit(id);
                 self.provision_mark_source_password_unverified(id);
-                self.provision_mark_target_password_force_format(id);
+                self.provision_mark_target_password_edited(id);
                 self.provision.message = None;
             }
         }
@@ -203,7 +241,7 @@ impl AppState {
                 *field = chars.into_iter().collect();
                 self.provision_mark_capacity_edit(id);
                 self.provision_mark_source_password_unverified(id);
-                self.provision_mark_target_password_force_format(id);
+                self.provision_mark_target_password_edited(id);
                 self.provision.message = None;
             }
         }

@@ -330,6 +330,8 @@ impl AppState {
         let encrypt_opaque = self
             .provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt)
             && !self.provision.form.format_encrypt;
+        let (share_target_requested, encrypt_target_requested) =
+            self.provision_password_plan_intent(mode)?;
         let form = &self.provision.form;
         let exact = crate::provision::CapacityInputMode::Exact;
         let capacity_sectors = |active: bool,
@@ -440,13 +442,13 @@ impl AppState {
                 crate::provision::KeyDomainSecretPair::new(
                     (!self.provision.form.share_source_password.is_empty())
                         .then_some(self.provision.form.share_source_password.as_bytes()),
-                    (matches!(mode, 0 | 1 | 3) && !share_opaque)
+                    (share_target_requested && !share_opaque)
                         .then_some(self.provision.form.share_target_password.as_bytes()),
                 ),
                 crate::provision::KeyDomainSecretPair::new(
                     (!self.provision.form.encrypt_source_password.is_empty())
                         .then_some(self.provision.form.encrypt_source_password.as_bytes()),
-                    (matches!(mode, 0..=2) && !encrypt_opaque)
+                    (encrypt_target_requested && !encrypt_opaque)
                         .then_some(self.provision.form.encrypt_target_password.as_bytes()),
                 ),
             ),

@@ -173,6 +173,7 @@ pub struct ProvisionState {
     pub(crate) encrypt_source_password_revision: u64,
     pub(crate) share_source_verification: ProvisionPasswordVerificationState,
     pub(crate) encrypt_source_verification: ProvisionPasswordVerificationState,
+    pub(super) target_password_edits: password_verification::TargetPasswordEditState,
     pub form: ProvisionForm,
     pub plain_form: PlainProvisionForm,
     pub prepared: Option<ProvisionPrepared>,
@@ -206,6 +207,7 @@ impl Default for ProvisionState {
             encrypt_source_password_revision: 0,
             share_source_verification: ProvisionPasswordVerificationState::Idle,
             encrypt_source_verification: ProvisionPasswordVerificationState::Idle,
+            target_password_edits: password_verification::TargetPasswordEditState::default(),
             form: ProvisionForm::default(),
             plain_form: PlainProvisionForm::default(),
             prepared: None,
@@ -335,6 +337,7 @@ impl AppState {
             return kind;
         }
         self.provision.form = ProvisionForm::default();
+        self.provision_initialize_password_candidates(kind);
         let defaults = self.selected_device().map(|row| {
             (
                 row.onlyid.clone(),

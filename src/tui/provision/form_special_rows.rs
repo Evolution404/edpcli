@@ -1,5 +1,23 @@
 use super::*;
 
+pub(super) fn two_column_widths(
+    content_width: usize,
+    separator_width: usize,
+    metrics: (usize, usize, usize, usize),
+) -> (usize, usize) {
+    let min_right_width = 2 + metrics.1 + 1 + metrics.3.max(8);
+    let desired_left_width = 2 + metrics.0 + 1 + metrics.2.max(8);
+    let max_left_width = content_width
+        .saturating_sub(separator_width)
+        .saturating_sub(min_right_width)
+        .max(8);
+    let left = desired_left_width.min(max_left_width);
+    let right = content_width
+        .saturating_sub(left)
+        .saturating_sub(separator_width);
+    (left, right)
+}
+
 pub(super) fn advanced_settings_row(
     state: &AppState,
     index: usize,
@@ -53,6 +71,7 @@ pub(super) fn password_domain_row(
     fields: &[(String, &str, bool)],
     content_width: usize,
     parameters_focused: bool,
+    metrics: (usize, usize, usize, usize),
 ) -> Option<Line<'static>> {
     if indexes.len() != 2 {
         return None;
@@ -92,9 +111,17 @@ pub(super) fn password_domain_row(
     };
 
     let separator = " │ ";
-    let available = content_width.saturating_sub(crate::ui::disp_width(separator));
-    let left_width = available / 2;
-    let right_width = available.saturating_sub(left_width);
+    let separator_width = crate::ui::disp_width(separator);
+    const PASSWORD_VALUE_WIDTH: usize = 10;
+    const PASSWORD_STATUS_SLOT_WIDTH: usize = 2;
+    let adjusted_metrics = (
+        8 + metrics.0,
+        metrics.1,
+        PASSWORD_VALUE_WIDTH + PASSWORD_STATUS_SLOT_WIDTH,
+        PASSWORD_VALUE_WIDTH,
+    );
+    let (left_width, right_width) =
+        two_column_widths(content_width, separator_width, adjusted_metrics);
     let source_active = provision.field_selected == source_index;
     let target_active = provision.field_selected == target_index;
     let source_editing = source_active
@@ -108,12 +135,12 @@ pub(super) fn password_domain_row(
 
     let (_, source_value, source_secret) = &fields[source_index];
     let (_, target_value, target_secret) = &fields[target_index];
-    let source_prefix_width = 2 + 8 + crate::ui::disp_width("原密码 ");
+    let source_prefix_width = 2 + 8 + metrics.0 + 1;
     let source_status_width = 1 + crate::ui::disp_width(&status);
     let source_value_width = left_width
         .saturating_sub(source_prefix_width + source_status_width)
         .max(4);
-    let target_prefix_width = 2 + crate::ui::disp_width("新密码 ");
+    let target_prefix_width = 2 + metrics.1 + 1;
     let target_value_width = right_width.saturating_sub(target_prefix_width).max(4);
 
     let source_shown = if source_editing {

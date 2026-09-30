@@ -128,8 +128,91 @@ impl AppState {
                         .and_then(|profile| profile.partition(part.role)),
                     part,
                 );
-                partition_status.insert(
-                    (part.start_lba, part.sector_count),
+                let format_selected = match part.role {
+                    crate::provision::PartitionRole::Boot => self.provision.form.format_boot,
+                    crate::provision::PartitionRole::Share
+                    | crate::provision::PartitionRole::BootShareCombined => {
+                        self.provision.form.format_share
+                    }
+                    crate::provision::PartitionRole::Encrypt => self.provision.form.format_encrypt,
+                    crate::provision::PartitionRole::CompatibilityReserve => false,
+                };
+                let key_domain = crate::provision::KeyDomainRole::from_partition_role(part.role);
+                let (source_knowledge, target_edited, source_password, target_password) =
+                    match key_domain {
+                        Some(crate::provision::KeyDomainRole::Share) => (
+                            self.provision.form.share_source_knowledge,
+                            self.provision.target_password_edits.share,
+                            self.provision.form.share_source_password.as_str(),
+                            self.provision.form.share_target_password.as_str(),
+                        ),
+                        Some(crate::provision::KeyDomainRole::Encrypt) => (
+                            self.provision.form.encrypt_source_knowledge,
+                            self.provision.target_password_edits.encrypt,
+                            self.provision.form.encrypt_source_password.as_str(),
+                            self.provision.form.encrypt_target_password.as_str(),
+                        ),
+                        None => (
+                            crate::provision::SourcePasswordKnowledge::Unknown,
+                            false,
+                            "",
+                            "",
+                        ),
+                    };
+                let opaque_candidate =
+                    key_domain.is_some_and(|domain| self.provision_domain_opaque_candidate(domain));
+                let target_changed = target_edited && target_password != source_password;
+                let (status, tone, reason) = if format_selected {
+                    (
+                        "⚠ 重建".to_string(),
+                        Tone::Warning,
+                        if key_domain.is_some() {
+                            "已选择重新格式化；目标区域将重建并生成新密钥".to_string()
+                        } else {
+                            "已选择重新格式化；目标区域将重建".to_string()
+                        },
+                    )
+                } else if key_domain.is_some()
+                    && source_knowledge == crate::provision::SourcePasswordKnowledge::Unknown
+                    && target_edited
+                {
+                    (
+                        "⚠ 改密需重建".to_string(),
+                        Tone::Warning,
+                        "原密码未验证，无法 Rewrap；未自动勾选格式化，请主动确认格式化后再生成新密钥"
+                            .to_string(),
+                    )
+                } else if key_domain.is_some()
+                    && source_knowledge == crate::provision::SourcePasswordKnowledge::Unknown
+                    && opaque_candidate
+                {
+                    (
+                        "✓ 透传".to_string(),
+                        Tone::Success,
+                        "来源密码未知但布局与 key profile 精确兼容；原 key material 与密文区域逐字节透传"
+                            .to_string(),
+                    )
+                } else if key_domain.is_some()
+                    && source_knowledge == crate::provision::SourcePasswordKnowledge::Unknown
+                {
+                    (
+                        "⚠ 需重建".to_string(),
+                        Tone::Warning,
+                        "来源密码未知且不满足透传条件；需要用户明确选择重建/格式化".to_string(),
+                    )
+                } else if key_domain.is_some() && assessment.candidate && target_changed {
+                    (
+                        "✓ 改密".to_string(),
+                        Tone::Success,
+                        "来源 FileKey 已验证；仅 Rewrap 到新密码，数据区保持不变".to_string(),
+                    )
+                } else if key_domain.is_some() && assessment.candidate {
+                    (
+                        "✓ 保留".to_string(),
+                        Tone::Success,
+                        "来源密码与布局均已验证；保留原 FileKey 与数据区".to_string(),
+                    )
+                } else {
                     (
                         if assessment.candidate {
                             "✓ 候选保留".into()
@@ -141,9 +224,12 @@ impl AppState {
                         } else {
                             Tone::Warning
                         },
-                        Some(part.role),
                         assessment.reason().to_string(),
-                    ),
+                    )
+                };
+                partition_status.insert(
+                    (part.start_lba, part.sector_count),
+                    (status, tone, Some(part.role), reason),
                 );
             }
         }

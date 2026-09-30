@@ -326,6 +326,15 @@ fn enter_provision(state: &mut AppState) -> ProvisionKind {
     assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     let kind = state.provision_begin_selected();
     state.provision_enter_form_workspace();
+    if kind != ProvisionKind::Plain {
+        state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+            source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+            share: None,
+            share_opaque_profile: false,
+            encrypt: None,
+            encrypt_opaque_profile: false,
+        }));
+    }
     kind
 }
 
@@ -334,6 +343,15 @@ fn enter_provision_kind(state: &mut AppState, index: usize) -> ProvisionKind {
     assert!(state.provision_select_scheme_index(index));
     let kind = state.provision_begin_selected();
     state.provision_enter_form_workspace();
+    if kind != ProvisionKind::Plain {
+        state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+            source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+            share: None,
+            share_opaque_profile: false,
+            encrypt: None,
+            encrypt_opaque_profile: false,
+        }));
+    }
     kind
 }
 
@@ -673,7 +691,7 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
 }
 
 #[test]
-fn provision_key_probe_prefills_only_verified_default_domains() {
+fn provision_key_probe_keeps_default_candidates_and_updates_verification_state() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     enter_provision(&mut state);
@@ -691,7 +709,7 @@ fn provision_key_probe_prefills_only_verified_default_domains() {
         state.provision().form.share_source_knowledge,
         edpcli::provision::SourcePasswordKnowledge::DefaultVerified
     );
-    assert!(state.provision().form.encrypt_source_password.is_empty());
+    assert_eq!(state.provision().form.encrypt_source_password, "0000aaaa");
     assert_eq!(
         state.provision().form.encrypt_source_knowledge,
         edpcli::provision::SourcePasswordKnowledge::Unknown
@@ -747,7 +765,7 @@ fn editing_source_password_invalidates_cached_verification_state() {
 }
 
 #[test]
-fn mode0_to_mode1_unknown_encrypt_keeps_target_password_editable_and_forces_format_on_edit() {
+fn mode0_to_mode1_unknown_encrypt_requires_explicit_format_for_password_change() {
     use edpcli::provision::{DiskProvisionKind, SourcePasswordKnowledge};
     use edpcli::sectors::EdpfPartition;
 
@@ -813,8 +831,23 @@ fn mode0_to_mode1_unknown_encrypt_keeps_target_password_editable_and_forces_form
     state.provision_cursor_end();
     state.provision_push_char('x');
     assert!(
-        state.provision().form.format_encrypt,
-        "editing a new password with unknown source credentials must switch that domain to rebuild/format"
+        !state.provision().form.format_encrypt,
+        "editing a new password must never auto-enable destructive formatting"
+    );
+    let error = state.provision_request().expect_err(
+        "unknown source password plus edited target password must require explicit format",
+    );
+    assert!(error.contains("主动勾选保密区格式化"), "{error}");
+    state.provision_mut().form.format_encrypt = true;
+    let request = state
+        .provision_request()
+        .expect("explicit format choice should permit rebuild with the new password");
+    assert!(request.format.encrypt);
+    assert_eq!(
+        request
+            .key_domains
+            .target_password(edpcli::provision::PartitionRole::Encrypt),
+        Some(b"0000aaaax".as_slice())
     );
     state.provision_mut().field_selected = share_target;
     assert!(state.provision_selected_field_is_editable());
