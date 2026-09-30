@@ -159,6 +159,36 @@ fn result_report_pages_share_one_component_and_provision_is_result_oriented() {
 }
 
 #[test]
+fn provision_waiting_states_are_overlays_not_full_pages() {
+    let provision = include_str!("../src/tui/provision/render.rs");
+    let stage_render = provision
+        .split("match provision.stage {")
+        .nth(1)
+        .expect("provision stage render match");
+    let planning = stage_render
+        .split("ProvisionStage::Planning =>")
+        .nth(1)
+        .expect("planning render branch")
+        .split("ProvisionStage::Review =>")
+        .next()
+        .expect("planning render boundary");
+    assert!(planning.contains("draw_provision_form(frame, main_area, state)"));
+    assert!(planning.contains("draw_provision_status_modal"));
+    assert!(!planning.contains(".block(crate::tui::ui::card"));
+
+    let exporting = stage_render
+        .split("ProvisionStage::Exporting =>")
+        .nth(1)
+        .expect("exporting render branch")
+        .split("ProvisionStage::Confirm =>")
+        .next()
+        .expect("exporting render boundary");
+    assert!(exporting.contains("draw_provision_review(frame, main_area, state)"));
+    assert!(exporting.contains("draw_provision_status_modal"));
+    assert!(!exporting.contains(".block(crate::tui::ui::card"));
+}
+
+#[test]
 fn progress_transport_coalesces_snapshots_and_limits_render_rate() {
     let task = include_str!("../src/tui/task.rs");
     let transport = include_str!("../src/tui/progress_transport.rs");

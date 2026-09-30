@@ -87,6 +87,19 @@ fn draw_provision_stepper(frame: &mut Frame, area: ratatui::layout::Rect, stage:
     frame.render_widget(Paragraph::new(line), area);
 }
 
+fn draw_provision_status_modal(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    title: &str,
+    lines: Vec<Line<'static>>,
+) {
+    let height = (lines.len() as u16).saturating_add(2).clamp(5, 10);
+    let modal = crate::tui::ui::centered_modal_rect(area, 76, height);
+    crate::tui::ui::render_modal(frame, modal, title, |frame, inner| {
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+    });
+}
+
 pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let provision = state.provision();
     let sections = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
@@ -162,21 +175,21 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             draw_provision_form(frame, main_area, state);
         }
         ProvisionStage::Planning => {
-            frame.render_widget(
-                Paragraph::new(vec![
-                    Line::from(Span::styled("◈  正在生成精确计划", secondary())),
-                    Line::from(""),
+            draw_provision_form(frame, main_area, state);
+            draw_provision_status_modal(
+                frame,
+                main_area,
+                "只读规划 · 生成计划",
+                vec![
                     Line::from(safe(
                         provision
                             .message
                             .as_deref()
                             .unwrap_or("正在只读检查目标盘…"),
                     )),
-                    Line::from("此阶段不写盘；正在计算 LCE、分区边界与协议元数据。"),
-                ])
-                .alignment(Alignment::Center)
-                .block(crate::tui::ui::card("只读规划", true)),
-                main_area,
+                    Line::from("正在计算 LCE、分区边界与协议元数据。"),
+                    Line::from(Span::styled("此阶段不会写入目标介质。", muted())),
+                ],
             );
         }
         ProvisionStage::Review => {
@@ -201,10 +214,12 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             );
         }
         ProvisionStage::Exporting => {
-            frame.render_widget(
-                Paragraph::new(vec![
-                    Line::from(Span::styled("◈ 正在导出稀疏制盘镜像", secondary())),
-                    Line::from(""),
+            draw_provision_review(frame, main_area, state);
+            draw_provision_status_modal(
+                frame,
+                main_area,
+                "镜像导出 · 执行中",
+                vec![
                     Line::from(safe(
                         provision
                             .message
@@ -212,10 +227,8 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                             .unwrap_or("正在写入镜像并执行 fsync…"),
                     )),
                     Line::from("导出完成前保持当前计划不变。"),
-                ])
-                .alignment(Alignment::Center)
-                .block(crate::tui::ui::card("镜像导出", true)),
-                main_area,
+                    Line::from(Span::styled("退出请求会等待当前导出安全结束。", muted())),
+                ],
             );
         }
         ProvisionStage::Confirm => {
