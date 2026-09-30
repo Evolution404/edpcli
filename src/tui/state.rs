@@ -19,6 +19,8 @@ mod navigation_state;
 mod provision_state;
 #[path = "restore_result_state.rs"]
 mod restore_result_state;
+#[path = "result_partition_table_state.rs"]
+mod result_partition_table_state;
 #[path = "shell/state.rs"]
 mod shell_state;
 #[path = "table_state.rs"]
