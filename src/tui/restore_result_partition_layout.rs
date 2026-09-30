@@ -20,9 +20,7 @@ fn partition_status(
         PostRestorePartitionState::CryptoMetadataInvalid => {
             ("加密元数据异常", crate::tui::ui::ResultTone::Danger)
         }
-        PostRestorePartitionState::Unsupported => {
-            ("暂不支持", crate::tui::ui::ResultTone::Muted)
-        }
+        PostRestorePartitionState::Unsupported => ("暂不支持", crate::tui::ui::ResultTone::Muted),
     }
 }
 
@@ -132,12 +130,7 @@ pub(super) fn render_partition_pane(
     );
 }
 
-pub(super) fn render_layout_pane(
-    frame: &mut Frame,
-    area: Rect,
-    state: &AppState,
-    focused: bool,
-) {
+pub(super) fn render_layout_pane(frame: &mut Frame, area: Rect, state: &AppState, focused: bool) {
     let outer = crate::tui::ui::card("全盘布局", focused);
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
