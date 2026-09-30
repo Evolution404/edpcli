@@ -22,9 +22,8 @@ fn partition_index_for_selection(
     outcome: &crate::application::post_restore::MetadataRestoreOutcome,
     selection: &crate::tui::disk_layout::DiskCapacitySelection,
 ) -> Option<usize> {
-    (0..outcome.assessment.partitions.len()).find(|index| {
-        partition_selection(outcome, *index).as_ref() == Some(selection)
-    })
+    (0..outcome.assessment.partitions.len())
+        .find(|index| partition_selection(outcome, *index).as_ref() == Some(selection))
 }
 
 impl WizardState {
@@ -143,11 +142,10 @@ impl AppState {
                 let Ok(model) = outcome.layout.as_ref() else {
                     return;
                 };
-                if wizard.post_restore_workbench.move_region_selection(
-                    model,
-                    delta,
-                    visible_rows,
-                ) {
+                if wizard
+                    .post_restore_workbench
+                    .move_region_selection(model, delta, visible_rows)
+                {
                     let selected = wizard
                         .post_restore_workbench
                         .region_selection()
@@ -217,9 +215,7 @@ mod tests {
 
     #[test]
     fn exact_geometry_lookup_does_not_map_free_space_to_a_partition() {
-        use crate::application::disk_layout::{
-            DiskLayoutModel, DiskLayoutSegment, DiskRegionKind,
-        };
+        use crate::application::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
         use crate::application::post_restore::{
             MetadataRestoreOutcome, MetadataRestoreReport, PostRestoreAssessment,
             PostRestorePartition, PostRestorePartitionState,
