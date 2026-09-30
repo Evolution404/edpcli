@@ -20,6 +20,7 @@ impl AppState {
             result: None,
             tree_selected: 0,
             panel: AdvancedInspectPanel::Tree,
+            view_mode: InspectViewMode::Business,
             pane_focus: crate::tui::pane::PaneFocus::inspect(),
             expanded,
             lazy_offsets: std::collections::BTreeMap::new(),

@@ -4,8 +4,8 @@ use super::clipboard::ClipboardBackend;
 use super::keymap::{TuiAction, WidgetRole};
 use super::pane::PaneId;
 use super::state::{
-    AdvancedInspectSource, AdvancedInspectStage, AppState, DeviceInfoNodeKey, NavCommand,
-    StateEffect, Workspace,
+    AdvancedInspectSource, AdvancedInspectStage, AppState, DeviceInfoNodeKey, InspectViewMode,
+    NavCommand, StateEffect, Workspace,
 };
 
 #[derive(Debug, Clone)]
@@ -200,16 +200,18 @@ fn dispatch_inspect(
             ActionOutcome::request(ActionRequest::InspectSelection { force_hex: false })
         }
         TuiAction::InspectBusiness => {
-            state.advanced_inspect_focus_pane(PaneId::InspectOverview);
-            state.pane_viewport_mut(PaneId::InspectDetail).scroll_x = 0;
+            state.advanced_inspect_set_view_mode(InspectViewMode::Business);
             ActionOutcome::handled()
         }
         TuiAction::InspectRawFields => {
-            state.advanced_inspect_focus_pane(PaneId::InspectDetail);
-            state.pane_viewport_mut(PaneId::InspectDetail).scroll_x = 2;
+            state.advanced_inspect_set_view_mode(InspectViewMode::RawFields);
             ActionOutcome::handled()
         }
         TuiAction::InspectHex => {
+            state.advanced_inspect_set_view_mode(InspectViewMode::Hex);
+            if state.advanced_inspect_sector().is_some() {
+                return Some(ActionOutcome::handled());
+            }
             ActionOutcome::request(ActionRequest::InspectSelection { force_hex: true })
         }
         TuiAction::PanelNext | TuiAction::PanelPrevious => {

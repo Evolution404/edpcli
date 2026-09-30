@@ -88,16 +88,18 @@ impl SectorInspectMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AdvancedInspectJumpUnit {
-    Lba,
-    ByteOffset,
+pub enum InspectViewMode {
+    Business,
+    RawFields,
+    Hex,
 }
 
-impl AdvancedInspectJumpUnit {
-    pub const fn label(self) -> &'static str {
+impl InspectViewMode {
+    pub const fn tab_index(self) -> usize {
         match self {
-            Self::Lba => "LBA",
-            Self::ByteOffset => "byte offset",
+            Self::Business => 0,
+            Self::RawFields => 1,
+            Self::Hex => 2,
         }
     }
 }
@@ -105,8 +107,12 @@ impl AdvancedInspectJumpUnit {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdvancedInspectPrompt {
     Jump {
-        unit: AdvancedInspectJumpUnit,
         input: String,
+        error: Option<String>,
+        origin_view: InspectViewMode,
+        origin_panel: AdvancedInspectPanel,
+        origin_pane: crate::tui::pane::PaneId,
+        origin_sector_mode: Option<SectorInspectMode>,
     },
     Search {
         input: String,
@@ -145,6 +151,7 @@ pub struct AdvancedInspectState {
     pub result: Option<crate::application::inspect::AdvancedInspectWorkspace>,
     pub tree_selected: usize,
     pub panel: AdvancedInspectPanel,
+    pub view_mode: InspectViewMode,
     pub pane_focus: crate::tui::pane::PaneFocus,
     pub expanded: std::collections::BTreeSet<String>,
     pub lazy_offsets: std::collections::BTreeMap<String, u64>,
@@ -206,6 +213,21 @@ impl AppState {
 
     pub fn advanced_inspect(&self) -> Option<&AdvancedInspectState> {
         self.inspect.advanced.as_ref()
+    }
+
+    pub fn advanced_inspect_view_mode(&self) -> Option<InspectViewMode> {
+        self.inspect.advanced.as_ref().map(|state| state.view_mode)
+    }
+
+    pub fn advanced_inspect_set_view_mode(&mut self, view_mode: InspectViewMode) {
+        if let Some(state) = self
+            .inspect
+            .advanced
+            .as_mut()
+            .filter(|state| state.stage == AdvancedInspectStage::Browser)
+        {
+            state.view_mode = view_mode;
+        }
     }
 
     pub fn advanced_inspect_focused_pane(&self) -> Option<crate::tui::pane::PaneId> {

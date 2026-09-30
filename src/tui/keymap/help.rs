@@ -9,8 +9,8 @@ pub struct HelpBinding {
 
 pub const INSPECT_HELP: &[HelpBinding] = &[
     HelpBinding {
-        keys: "1/2/3/4",
-        label: "业务字段/原始字段/Hex/全盘布局",
+        keys: "1/2/3",
+        label: "业务字段/原始字段/Hex",
         action: TuiAction::InspectBusiness,
     },
     HelpBinding {
@@ -55,7 +55,7 @@ pub const INSPECT_HELP: &[HelpBinding] = &[
     },
     HelpBinding {
         keys: "J",
-        label: "跳转 LBA / byte offset",
+        label: "跳转到 LBA",
         action: TuiAction::InspectJump,
     },
     HelpBinding {

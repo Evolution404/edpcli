@@ -1735,7 +1735,10 @@ impl AppState {
                     self.set_notice("全盘检查正在后台读取结构，请等待完成。");
                 } else if advanced.prompt.is_some() {
                     self.advanced_inspect_cancel_prompt();
-                } else if !self.advanced_inspect_close_sector() {
+                } else if advanced.view_mode == InspectViewMode::Hex
+                    && self.advanced_inspect_close_sector()
+                {
+                } else {
                     self.close_advanced_inspect();
                 }
                 return StateEffect::None;

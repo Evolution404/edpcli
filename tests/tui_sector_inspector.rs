@@ -5,7 +5,10 @@ use edpcli::application::inspect::{
 use edpcli::inspect::{FieldChild, FieldStyle, InspectMeta};
 use edpcli::tui::{
     render,
-    state::{AdvancedInspectSource, AppState, NavCommand, SectorInspectMode},
+    state::{
+        AdvancedInspectPrompt, AdvancedInspectSource, AppState, InspectViewMode, NavCommand,
+        SectorInspectMode,
+    },
 };
 use ratatui::{backend::TestBackend, Terminal};
 
@@ -953,37 +956,88 @@ fn jump_lba_repositions_lazy_extent_without_eager_materialization() {
 }
 
 #[test]
-fn jump_prompt_accepts_hex_lba_and_exact_absolute_byte_offset() {
+fn jump_prompt_accepts_decimal_and_hex_lba_and_preserves_view_context() {
+    use edpcli::tui::pane::PaneId;
+
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
     state.advanced_inspect_finish(Ok(workspace_with_partition(Vec::new())));
+    state.advanced_inspect_focus_pane(PaneId::InspectOverview);
+    state.advanced_inspect_set_view_mode(InspectViewMode::RawFields);
+    let initial_selection = state.advanced_inspect().unwrap().tree_selected;
 
     state.advanced_inspect_begin_jump();
-    for ch in "0x881".chars() {
-        state.advanced_inspect_prompt_push(ch);
-    }
-    assert!(state.advanced_inspect_submit_prompt().unwrap().is_none());
+    assert_eq!(
+        state.advanced_inspect_focused_pane(),
+        Some(PaneId::InspectOverview)
+    );
+    assert_eq!(
+        state.advanced_inspect_view_mode(),
+        Some(InspectViewMode::RawFields)
+    );
+    assert_eq!(
+        state.advanced_inspect().unwrap().tree_selected,
+        initial_selection
+    );
+    state.advanced_inspect_cancel_prompt();
+    assert_eq!(
+        state.advanced_inspect_focused_pane(),
+        Some(PaneId::InspectOverview)
+    );
+    assert_eq!(
+        state.advanced_inspect().unwrap().tree_selected,
+        initial_selection
+    );
 
-    let rows = state.advanced_inspect_tree_rows();
-    let selected = state.advanced_inspect().unwrap().tree_selected;
-    assert_eq!(rows[selected].range.start_lba, 2_177);
-
-    let absolute = 2_177 * edpcli::common::SECTOR as u64 + 123;
     state.advanced_inspect_begin_jump();
-    state.advanced_inspect_toggle_jump_unit();
-    for ch in format!("0x{absolute:X}").chars() {
+    for ch in "2177".chars() {
         state.advanced_inspect_prompt_push(ch);
     }
     let request = state
         .advanced_inspect_submit_prompt()
         .unwrap()
-        .expect("uncached byte-offset jump must request the target sector");
+        .expect("uncached LBA jump should request the target sector");
     assert_eq!(request.1, 2_177);
 
+    let rows = state.advanced_inspect_tree_rows();
+    let selected = state.advanced_inspect().unwrap().tree_selected;
+    assert_eq!(rows[selected].range.start_lba, 2_177);
+    assert_eq!(
+        state.advanced_inspect_view_mode(),
+        Some(InspectViewMode::RawFields)
+    );
+    assert_eq!(
+        state.advanced_inspect_focused_pane(),
+        Some(PaneId::InspectOverview)
+    );
+
+    state.advanced_inspect_set_view_mode(InspectViewMode::Hex);
+    state
+        .advanced_inspect_prepare_jump_sector(2_177, InspectViewMode::Hex, SectorInspectMode::Raw)
+        .unwrap();
+    state.advanced_inspect_begin_jump();
+    for ch in "0x882".chars() {
+        state.advanced_inspect_prompt_push(ch);
+    }
+    let request = state
+        .advanced_inspect_submit_prompt()
+        .unwrap()
+        .expect("uncached hexadecimal LBA jump should request the target sector");
+    assert_eq!(request.1, 2_178);
+
     let sector = state.advanced_inspect_sector().unwrap();
-    assert_eq!(sector.lba, 2_177);
-    assert_eq!(sector.cursor, 123);
+    assert_eq!(sector.lba, 2_178);
+    assert_eq!(sector.cursor, 0);
+    assert_eq!(sector.mode, SectorInspectMode::Raw);
     assert!(sector.pending);
+    assert_eq!(
+        state.advanced_inspect_view_mode(),
+        Some(InspectViewMode::Hex)
+    );
+    assert_eq!(
+        state.advanced_inspect_focused_pane(),
+        Some(PaneId::InspectOverview)
+    );
 }
 
 #[test]
@@ -1000,19 +1054,98 @@ fn jump_rejects_invalid_overflow_and_out_of_range_without_clamping() {
         }
         assert!(state.advanced_inspect_submit_prompt().is_err(), "{input}");
         assert_eq!(state.advanced_inspect().unwrap().tree_selected, initial);
-        assert!(state.advanced_inspect_prompt().is_some());
+        assert!(matches!(
+            state.advanced_inspect_prompt(),
+            Some(AdvancedInspectPrompt::Jump {
+                error: Some(message),
+                ..
+            }) if !message.is_empty()
+        ));
+        state.advanced_inspect_cancel_prompt();
+    }
+    assert!(state.advanced_inspect_sector().is_none());
+}
+
+#[test]
+fn jump_modal_opens_without_changing_any_browser_pane_or_hex_view() {
+    use edpcli::tui::pane::PaneId;
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace_with_partition(Vec::new())));
+
+    for pane in [
+        PaneId::InspectTree,
+        PaneId::InspectOverview,
+        PaneId::InspectDetail,
+    ] {
+        state.advanced_inspect_focus_pane(pane);
+        let panel = state.advanced_inspect().unwrap().panel;
+        let selected = state.advanced_inspect().unwrap().tree_selected;
+        state.advanced_inspect_begin_jump();
+        assert!(matches!(
+            state.advanced_inspect_prompt(),
+            Some(AdvancedInspectPrompt::Jump { .. })
+        ));
+        assert_eq!(state.advanced_inspect_focused_pane(), Some(pane));
+        assert_eq!(state.advanced_inspect().unwrap().panel, panel);
+        assert_eq!(state.advanced_inspect().unwrap().tree_selected, selected);
         state.advanced_inspect_cancel_prompt();
     }
 
+    state.advanced_inspect_set_view_mode(InspectViewMode::Hex);
+    state
+        .advanced_inspect_prepare_jump_sector(0, InspectViewMode::Hex, SectorInspectMode::Decode)
+        .unwrap();
+    state.advanced_inspect_focus_pane(PaneId::InspectOverview);
     state.advanced_inspect_begin_jump();
-    state.advanced_inspect_toggle_jump_unit();
-    let total_bytes = 10_000 * edpcli::common::SECTOR as u64;
-    for ch in total_bytes.to_string().chars() {
+    assert_eq!(
+        state.advanced_inspect_view_mode(),
+        Some(InspectViewMode::Hex)
+    );
+    assert_eq!(
+        state.advanced_inspect_focused_pane(),
+        Some(PaneId::InspectOverview)
+    );
+    assert_eq!(
+        state.advanced_inspect_sector().unwrap().mode,
+        SectorInspectMode::Decode
+    );
+    state.advanced_inspect_cancel_prompt();
+}
+
+#[test]
+fn jump_is_not_opened_while_inspect_is_running() {
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_begin_jump();
+    assert!(state.advanced_inspect_prompt().is_none());
+}
+
+#[test]
+fn jump_modal_is_centered_against_the_full_terminal_viewport() {
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace_with_partition(Vec::new())));
+    state.advanced_inspect_begin_jump();
+    for ch in "12345".chars() {
         state.advanced_inspect_prompt_push(ch);
     }
-    assert!(state.advanced_inspect_submit_prompt().is_err());
-    assert_eq!(state.advanced_inspect().unwrap().tree_selected, initial);
-    assert!(state.advanced_inspect_sector().is_none());
+
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let expected =
+        edpcli::tui::ui::centered_modal_rect(ratatui::layout::Rect::new(0, 0, 100, 30), 52, 9);
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(expected.x, expected.y)].symbol(), "┌");
+    assert_eq!(
+        buffer[(
+            expected.x + expected.width - 1,
+            expected.y + expected.height - 1,
+        )]
+            .symbol(),
+        "┘"
+    );
 }
 
 #[test]

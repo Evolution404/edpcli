@@ -41,12 +41,6 @@ impl AppState {
             state.expanded.extend(row_path);
             state.lazy_offsets.insert(lazy_node_id.clone(), page_offset);
             state.tree_revision = state.tree_revision.wrapping_add(1);
-            state.sector = None;
-            state.panel = AdvancedInspectPanel::Tree;
-            state
-                .pane_focus
-                .focus(crate::tui::pane::PaneId::InspectTree);
-            state.message = None;
         }
 
         let target_id = format!("{lazy_node_id}/sector.{lba}");
@@ -60,41 +54,12 @@ impl AppState {
         Ok(())
     }
 
-    pub fn advanced_inspect_jump_byte_offset(
-        &mut self,
-        offset: u64,
-    ) -> Result<Option<(AdvancedInspectSource, u64)>, String> {
-        let total_sectors = self
-            .inspect
-            .advanced
-            .as_ref()
-            .filter(|state| state.stage == AdvancedInspectStage::Browser)
-            .and_then(|state| state.result.as_ref())
-            .map(|workspace| workspace.topology.root.range.sector_count)
-            .ok_or_else(|| "Inspect workspace 不可用".to_string())?;
-        let total_bytes = total_sectors
-            .checked_mul(crate::common::SECTOR as u64)
-            .ok_or_else(|| "磁盘总字节数溢出 u64".to_string())?;
-        if offset >= total_bytes {
-            return Err(format!(
-                "byte offset 0x{offset:X} 超出磁盘范围 0x0..0x{total_bytes:X}"
-            ));
-        }
-
-        let lba = offset / crate::common::SECTOR as u64;
-        let cursor = (offset % crate::common::SECTOR as u64) as usize;
-        self.advanced_inspect_jump_lba(lba)?;
-        self.advanced_inspect_open_sector_at(lba, cursor)
-    }
-
-    fn advanced_inspect_open_sector_at(
+    pub fn advanced_inspect_prepare_jump_sector(
         &mut self,
         lba: u64,
-        cursor: usize,
+        view_mode: InspectViewMode,
+        mode: SectorInspectMode,
     ) -> Result<Option<(AdvancedInspectSource, u64)>, String> {
-        if cursor >= crate::common::SECTOR {
-            return Err(format!("sector-relative byte {cursor} 越界"));
-        }
         let state = self
             .inspect
             .advanced
@@ -106,19 +71,19 @@ impl AppState {
                 item.lba == lba && (item.decoded.is_some() || item.decode_error.is_some())
             })
         });
-        state.sector = Some(SectorInspectorState {
-            lba,
-            mode: SectorInspectMode::Mixed,
-            cursor,
-            pending: !ready,
-            error: None,
-            field_expanded: false,
-            pinned_field: None,
-        });
-        state.panel = AdvancedInspectPanel::Detail;
-        state
-            .pane_focus
-            .focus(crate::tui::pane::PaneId::InspectDetail);
+        state.sector = if view_mode == InspectViewMode::Hex {
+            Some(SectorInspectorState {
+                lba,
+                mode,
+                cursor: 0,
+                pending: !ready,
+                error: None,
+                field_expanded: false,
+                pinned_field: None,
+            })
+        } else {
+            None
+        };
         Ok((!ready).then(|| (state.source.clone(), lba)))
     }
 }
