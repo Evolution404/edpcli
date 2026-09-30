@@ -268,6 +268,10 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/ui/result_supplement.rs",
         "src/tui/ui/result_table.rs",
         "src/tui/disk_region_list.rs",
+        "src/tui/restore_result_state.rs",
+        "src/tui/restore_result_render.rs",
+        "src/tui/restore_result_partition_layout.rs",
+        "src/tui/restore_result_verification.rs",
         "src/tui/wizard_result_render.rs",
         "src/tui/operation_progress_render.rs",
         "src/tui/operation_progress_status.rs",
@@ -521,6 +525,10 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(lines("src/tui/ui/result_supplement.rs") < 100);
     assert!(lines("src/tui/ui/result_table.rs") < 140);
     assert!(lines("src/tui/disk_region_list.rs") < 100);
+    assert!(lines("src/tui/restore_result_state.rs") < 320);
+    assert!(lines("src/tui/restore_result_render.rs") < 120);
+    assert!(lines("src/tui/restore_result_partition_layout.rs") < 260);
+    assert!(lines("src/tui/restore_result_verification.rs") < 180);
     assert!(lines("src/tui/wizard_result_render.rs") < 120);
     assert!(lines("src/tui/operation_progress_render.rs") < 260);
     assert!(lines("src/tui/operation_progress_status.rs") < 120);
