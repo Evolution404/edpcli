@@ -103,6 +103,10 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
         ("src/cli_args/provision.rs", 700),
         ("src/application/inspect_tree/build.rs", 250),
         ("src/application/inspect_tree/topology.rs", 350),
+        ("src/application/post_restore/layout_projection.rs", 160),
+        ("src/tui/restore_result_state.rs", 320),
+        ("src/tui/restore_result_partition_layout.rs", 260),
+        ("src/tui/restore_result_verification.rs", 180),
         ("src/provision/reprovision/plan.rs", 400),
         ("src/edpb/identity.rs", 400),
     ] {
