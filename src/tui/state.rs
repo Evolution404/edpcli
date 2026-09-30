@@ -109,7 +109,6 @@ pub struct WizardState {
     pub detail_expanded: bool,
     pub restore_outcome: Option<crate::application::post_restore::MetadataRestoreOutcome>,
     pub post_restore_workbench: crate::tui::result_workbench::ResultWorkbenchState,
-    pub post_restore_selected: usize,
     pub pending_format: Option<crate::application::post_restore::PartitionFormatRequest>,
     pub volume_label_input: String,
     pub volume_label_target: Option<PostRestoreLabelTarget>,
@@ -478,7 +477,6 @@ impl AppState {
             detail_expanded: false,
             restore_outcome: None,
             post_restore_workbench: crate::tui::result_workbench::ResultWorkbenchState::default(),
-            post_restore_selected: 0,
             pending_format: None,
             volume_label_input: String::new(),
             volume_label_target: None,
@@ -1078,7 +1076,6 @@ impl AppState {
                 Ok(outcome) => {
                     wizard.stage = WizardStage::PostRestore;
                     wizard.restore_outcome = Some(outcome);
-                    wizard.post_restore_selected = 0;
                     wizard.pending_format = None;
                     Self::clear_post_restore_volume_label(wizard);
                     wizard.message =
