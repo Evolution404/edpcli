@@ -14,6 +14,8 @@ use super::disk_region_list::{DiskRegionListMode, DiskRegionListState};
 use super::pane::{PaneFocus, PaneId};
 use super::ui::{ResultTone, ViewportClass};
 
+pub const RESULT_PARTITION_COLUMN_COUNT: usize = 7;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResultHero {
     pub title: String,
