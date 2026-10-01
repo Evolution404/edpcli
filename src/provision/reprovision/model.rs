@@ -1,4 +1,5 @@
 use super::*;
+use crate::provision::KeyDomainRole;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CapacityInputMode {
