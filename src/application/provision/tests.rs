@@ -446,6 +446,38 @@ impl SectorDev for MemoryDev {
 }
 
 #[test]
+fn plain_extent_reader_recovers_exact_fat16_boot_evidence_from_live_media() {
+    let total_sectors = 200_000u64;
+    let plan = PlainProvisionPlan::new(
+        total_sectors,
+        vec![PlainPartitionSpec::new(
+            63,
+            20_417,
+            FilesystemKind::Fat16,
+            "BOOT",
+        )],
+    )
+    .unwrap();
+    let write_plan =
+        build_plain_provision_write_plan(&plan, None, &[0x1234_5678]).unwrap();
+    let mut dev = MemoryDev::default();
+    for (&lba, sector) in &write_plan.writes {
+        dev.sectors.insert(lba, sector.bytes.to_vec());
+    }
+
+    let extents = read_plain_source_extents(&mut dev, total_sectors).unwrap();
+    assert_eq!(
+        extents,
+        vec![crate::provision::PlainSourceExtent {
+            start_lba: 63,
+            sector_count: 20_417,
+            filesystem: Some(FilesystemKind::Fat16),
+        }]
+    );
+}
+
+
+#[test]
 fn plain_prewrite_snapshot_rejects_stale_lba7_metadata() {
     let total_sectors = 100_000;
     let plan = PlainProvisionPlan::default_for_disk(total_sectors).unwrap();
