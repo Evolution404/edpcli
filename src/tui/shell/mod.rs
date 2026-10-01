@@ -22,7 +22,6 @@ pub fn header(frame: &mut Frame, area: Rect, state: &AppState, core_mode: CoreMo
         InputMode::Search => ("SEARCH", theme.secondary_accent()),
         InputMode::Command => ("COMMAND", theme.secondary_accent()),
         InputMode::Confirm => ("CONFIRM", theme.warning()),
-        InputMode::Help => ("HELP", theme.muted()),
     };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -32,7 +31,11 @@ pub fn header(frame: &mut Frame, area: Rect, state: &AppState, core_mode: CoreMo
                 theme.muted(),
             ),
             Span::styled(format!("  [{mode}]"), mode_style),
-            Span::styled("  ·  管理员模式", theme.success()),
+            if state.is_demo() {
+                Span::styled("  ·  演示模式 / 不访问真实介质", theme.warning())
+            } else {
+                Span::styled("  ·  管理员模式", theme.success())
+            },
             animation::compact_indicator(state.animation_frame(), core_mode),
         ]))
         .style(theme.surface()),
@@ -40,17 +43,21 @@ pub fn header(frame: &mut Frame, area: Rect, state: &AppState, core_mode: CoreMo
     );
 }
 
-pub fn navigation(frame: &mut Frame, area: Rect, workspace: Workspace) {
+pub fn navigation(frame: &mut Frame, area: Rect, state: &AppState) {
     let theme = theme::current();
     let class = ui::ViewportClass::for_width(area.width);
-    let labels = if class == ui::ViewportClass::Compact {
-        ["设备", "检查", "制盘", "备份"]
-    } else {
-        ["设备", "Inspect", "制盘", "备份"]
+    let labels = ["设备", "备份"];
+    let active = match state.workspace() {
+        Workspace::Devices | Workspace::Provision => Workspace::Devices,
+        Workspace::Backups => Workspace::Backups,
+        Workspace::Inspect => match state.advanced_inspect().map(|inspect| &inspect.source) {
+            Some(crate::tui::state::AdvancedInspectSource::Backup(_)) => Workspace::Backups,
+            _ => Workspace::Devices,
+        },
     };
-    let index = Workspace::ALL
+    let index = Workspace::TOP_LEVEL
         .iter()
-        .position(|candidate| *candidate == workspace)
+        .position(|candidate| *candidate == active)
         .unwrap_or(0);
     frame.render_widget(
         Tabs::new(labels)
@@ -67,10 +74,38 @@ pub fn navigation(frame: &mut Frame, area: Rect, workspace: Workspace) {
     }
 }
 
-pub fn footer(frame: &mut Frame, area: Rect, text: &str) {
+pub fn message_bar(
+    frame: &mut Frame,
+    area: Rect,
+    notice: Option<&crate::tui::ui::UiMessage>,
+    status: Option<&str>,
+) {
+    let theme = theme::current();
+    let mut spans = Vec::new();
+    if let Some(notice) = notice {
+        spans.push(Span::styled(
+            format!("{} ", notice.marker()),
+            notice.style(),
+        ));
+        spans.push(Span::styled(
+            crate::ui::sanitize_terminal_text(notice.text()),
+            notice.style(),
+        ));
+    }
+    if let Some(status) = status {
+        if !spans.is_empty() {
+            spans.push(Span::styled("  ·  ", theme.muted()));
+        }
+        spans.push(Span::styled(
+            crate::ui::sanitize_terminal_text(status),
+            theme.secondary_text(),
+        ));
+    }
+    if spans.is_empty() {
+        spans.push(Span::styled("就绪", theme.muted()));
+    }
     frame.render_widget(
-        Paragraph::new(crate::ui::sanitize_terminal_text(text))
-            .style(theme::current().secondary_text()),
+        Paragraph::new(Line::from(spans)).style(theme.surface()),
         area,
     );
 }

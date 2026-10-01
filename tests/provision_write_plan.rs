@@ -21,6 +21,7 @@ fn spec(total_sectors: u64) -> ProvisionSpec {
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "Netac".into(),
             product: "OnlyDisk".into(),

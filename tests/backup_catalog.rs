@@ -41,6 +41,7 @@ fn identity(
         hardware: HardwareIdentityEvidence {
             vid: Some(0x0dd8),
             pid: Some(0x2005),
+            serial: None,
             serial_sha256: serial.map(str::to_string),
             serial_quality: if serial.is_some() {
                 SerialQuality::Usable
@@ -136,6 +137,46 @@ fn backup_affinity_policy_confirms_a_b_c_and_keeps_d_possible_only() {
 }
 
 #[test]
+fn v3_raw_serial_can_form_strong_group_without_persisted_serial_digest() {
+    use edpcli::diskio::{backup_group_key, BackupEntry, BackupIntegrityStatus, BackupMeta};
+
+    let mut first = identity(None, None, None, DiskProvisionKind::Plain);
+    first.hardware.serial = Some("RAW-SERIAL-123".into());
+    first.hardware.serial_quality = SerialQuality::Usable;
+    first.hardware.serial_sha256 = None;
+    let mut second = first.clone();
+
+    let make_entry = |path: &str, snapshot: MediaIdentitySnapshot| BackupEntry {
+        meta: Some(BackupMeta {
+            disk: 5,
+            secs: Some(245_760_000),
+            vid: "2bdf".into(),
+            pid: "0300".into(),
+            device_id: "disk&ven_test&prod_plain".into(),
+            onlyid: None,
+            identity: Some(snapshot),
+        }),
+        path: path.into(),
+        mtime: 0,
+        provision_kind: Some(DiskProvisionKind::Plain),
+        integrity_status: BackupIntegrityStatus::Verified,
+        size_ok: true,
+        lba8: None,
+        content_sha256: None,
+        coverage: None,
+    };
+
+    let a = make_entry("a.edpb", first);
+    let b = make_entry("b.edpb", second.clone());
+    assert_eq!(backup_group_key(&a), backup_group_key(&b));
+    assert!(backup_group_key(&a).is_some());
+
+    second.hardware.serial = Some("RAW-SERIAL-OTHER".into());
+    let c = make_entry("c.edpb", second);
+    assert_ne!(backup_group_key(&a), backup_group_key(&c));
+}
+
+#[test]
 fn scanned_verified_backup_exposes_canonical_identity_projection() {
     let Some((_tmp, catalog)) = copied_catalog() else {
         return;
@@ -210,7 +251,7 @@ fn ownership_uses_lba8_cached_during_catalog_scan() {
     assert_eq!(ownership.user.as_deref(), Some("宋旭琳"));
 }
 #[test]
-fn september_10_netac_backup_with_conflicting_edpf_tables_is_plain() {
+fn september_10_netac_backup_with_conflicting_edpf_tables_is_unknown_to_edp_detector() {
     let mode0 = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/backup/disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid949028302_20260910_172420.bin"
@@ -218,7 +259,7 @@ fn september_10_netac_backup_with_conflicting_edpf_tables_is_plain() {
     .expect("recorded backup image");
     assert_eq!(
         edpcli::provision::DiskProvisionKind::from_metadata(&mode0, "disk&ven_netac&prod_onlydisk"),
-        edpcli::provision::DiskProvisionKind::Mode0
+        Some(edpcli::provision::DiskProvisionKind::Mode0)
     );
     let conflicting = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -230,6 +271,6 @@ fn september_10_netac_backup_with_conflicting_edpf_tables_is_plain() {
             &conflicting,
             "disk&ven_netac&prod_onlydisk"
         ),
-        edpcli::provision::DiskProvisionKind::Plain
+        None
     );
 }

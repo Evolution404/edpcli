@@ -1,4 +1,4 @@
-//! 外接盘发现、cems 只读探测与列表渲染。
+//! 外接盘发现与 cems 只读探测。
 //!
 //! 这里集中平台设备信息 + LBA4/7/12 的只读探测逻辑，顶层 CLI 只负责路由。
 
@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 
-use crate::common::{fmt_gb, group_digits, EdpCliError, EXIT_IO, SECTOR};
+use crate::common::SECTOR;
 use crate::diskio::{self, find_backups};
 use crate::identify::identify;
 use crate::metainfo;
@@ -15,7 +15,7 @@ use crate::protocol::semantic::SemanticContext;
 use crate::provision::{
     DiskProvisionKind, ExistingPartition, ExistingProvisionProfile, PartitionRole,
 };
-use crate::sectors::{looks_nopwd, parse_lba12, EdpfPartition};
+use crate::sectors::{parse_lba12, EdpfPartition};
 use crate::sysinfo::{self, CmdRunner};
 
 pub struct Row {
@@ -24,9 +24,13 @@ pub struct Row {
     pub vid: String,
     pub pid: String,
     pub proto: String,
+    /// Raw hardware serial for the current scan session only. Do not persist this field.
+    pub serial: Option<String>,
+    /// Best-effort hardware model from native inquiry; available even for Plain media.
+    pub hardware_model: Option<String>,
     pub device_id: Option<String>,
     /// Read-only canonical snapshot pinned to the protocol image seen by this scan.
-    pub identity_pin: Option<crate::application::media_identity::MediaIdentityPin>,
+    pub identity_pin: Option<crate::media_identity::MediaIdentityPin>,
     pub onlyid: Option<String>,
     pub dept: Option<String>,
     pub user: Option<String>,
@@ -39,16 +43,25 @@ pub struct Row {
     pub n_possible_baks: usize,
     pub denied: bool,
     pub probe_error: Option<String>,
-    pub is_nopwd: bool,
     pub provision_kind: DiskProvisionKind,
     pub partitions: Option<Vec<EdpfPartition>>,
+    pub partition_table: Option<crate::partition_table::PartitionTableSnapshot>,
+    /// Validated LBA7-pointed legacy compatibility extent for the current scan.
+    pub lce: Option<crate::backup_metadata::Lba7CompatibilityGeometry>,
+    pub partition_table_error: Option<String>,
 }
 
 impl Row {
     /// UI-only prefill from the scan cache. The physical preparation path reads
     /// and validates the source metadata again before allowing PreserveExact.
+    pub fn confirmed_provision_kind(&self) -> Option<DiskProvisionKind> {
+        self.identity_pin
+            .as_ref()
+            .and_then(|pin| pin.snapshot.protocol.provision_kind)
+    }
+
     pub fn existing_profile_for_prefill(&self) -> Option<ExistingProvisionProfile> {
-        let mode = self.provision_kind.official_mode()?;
+        let mode = self.confirmed_provision_kind()?.official_mode()?;
         let parts = self.partitions.as_ref()?;
         if parts.len() != mode.partition_types().len() {
             return None;
@@ -62,21 +75,7 @@ impl Row {
             {
                 return None;
             }
-            let role = match (mode, index) {
-                (crate::provision::OfficialPartitionMode::WholeDiskEncrypted, 0) => {
-                    PartitionRole::CompatibilityReserve
-                }
-                (crate::provision::OfficialPartitionMode::BootShareCombined, 0) => {
-                    PartitionRole::BootShareCombined
-                }
-                (_, 0) => PartitionRole::Boot,
-                (
-                    crate::provision::OfficialPartitionMode::DefaultThreePartition
-                    | crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition,
-                    1,
-                ) => PartitionRole::Share,
-                _ => PartitionRole::Encrypt,
-            };
+            let role = crate::provision::official_partition_role(mode, index, partition_type);
             partitions.push(ExistingPartition {
                 role,
                 partition_type,
@@ -91,9 +90,71 @@ impl Row {
             partitions,
         })
     }
+
+    pub fn canonical_layout(&self) -> Result<crate::disk_layout::DiskLayoutModel, String> {
+        use crate::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
+
+        let total_sectors = self.size / SECTOR as u64;
+        match self.confirmed_provision_kind() {
+            Some(DiskProvisionKind::Plain) => {
+                let table = self.partition_table.as_ref().ok_or_else(|| {
+                    self.partition_table_error
+                        .clone()
+                        .unwrap_or_else(|| "普通盘分区表尚未完整读取".into())
+                })?;
+                DiskLayoutModel::canonical_plain(total_sectors, table)
+            }
+            Some(_) => {
+                let profile = self
+                    .existing_profile_for_prefill()
+                    .ok_or_else(|| "EDP 分区几何尚未完整确认".to_string())?;
+                let lce = self
+                    .lce
+                    .as_ref()
+                    .ok_or_else(|| "LBA7 LCE 几何尚未确认".to_string())?;
+                let partitions = profile
+                    .partitions
+                    .into_iter()
+                    .map(|partition| DiskLayoutSegment {
+                        label: partition.role.label().into(),
+                        start_lba: partition.start_lba,
+                        sector_count: partition.sector_count,
+                        kind: DiskRegionKind::from_partition_role(partition.role),
+                    })
+                    .collect();
+                DiskLayoutModel::canonical_edp(
+                    total_sectors,
+                    partitions,
+                    lce.start_lba,
+                    lce.sector_count,
+                )
+            }
+            None => Err("介质类型尚未确认，无法建立可靠容量布局".into()),
+        }
+    }
 }
 
-/// 外接盘一览数据: 编号/容量/接口; USB 盘再尽力识别 cems 身份、免密状态、
+fn hardware_model(runner: &dyn CmdRunner, disk: u32) -> Option<String> {
+    let inquiry = runner.hardware_probe(disk)?.inquiry?;
+    let vendor = inquiry.vendor.trim();
+    let product = inquiry.product.trim();
+    let model = match (vendor.is_empty(), product.is_empty()) {
+        (false, false)
+            if product
+                .to_ascii_lowercase()
+                .starts_with(&vendor.to_ascii_lowercase()) =>
+        {
+            product.to_string()
+        }
+        (false, false) => format!("{vendor} {product}"),
+        (false, true) => vendor.to_string(),
+        (true, false) => product.to_string(),
+        (true, true) => return None,
+    };
+    Some(model)
+}
+
+/// 外接盘一览数据: 编号/容量/接口; USB 盘再尽力识别 cems 身份、
 /// EDPF 分区与备份份数。权限不足和读取异常分开记录。
 pub fn scan_disks(
     runner: &dyn CmdRunner,
@@ -108,6 +169,8 @@ pub fn scan_disks(
             vid: d.vid.clone(),
             pid: d.pid.clone(),
             proto: d.proto.clone(),
+            serial: runner.hardware_serial(d.n),
+            hardware_model: hardware_model(runner, d.n),
             device_id: None,
             identity_pin: None,
             onlyid: None,
@@ -122,9 +185,11 @@ pub fn scan_disks(
             n_possible_baks: 0,
             denied: false,
             probe_error: None,
-            is_nopwd: false,
             provision_kind: DiskProvisionKind::Plain,
             partitions: None,
+            partition_table: None,
+            lce: None,
+            partition_table_error: None,
         };
         if d.proto == "USB" {
             let probe = (|| -> io::Result<()> {
@@ -169,15 +234,10 @@ pub fn scan_disks(
                             row.label = ownership.label;
                         }
                     }
-                    let read = |lba: u32| {
-                        read_exact(lba)
-                            .map_err(|e| EdpCliError::new(EXIT_IO, format!("错误: {}", e)))
-                    };
-                    row.is_nopwd = looks_nopwd(&read, did).map_err(|e| io::Error::other(e.msg))?;
                     let lba12 = read_exact(12)?;
-                    row.provision_kind = DiskProvisionKind::from_sectors(&lba7, &lba12, did);
-                    row.partitions = parse_lba12(&lba12, did);
-                    if row.provision_kind != DiskProvisionKind::Plain {
+                    if let Some(kind) = DiskProvisionKind::from_sectors(&lba7, &lba12, did) {
+                        row.provision_kind = kind;
+                        row.partitions = parse_lba12(&lba12, did);
                         let lba6 = read_exact(6)?;
                         row.label =
                             metainfo::safe6_label_from_lba6(&lba6, &meta).or(row.label.take());
@@ -197,11 +257,83 @@ pub fn scan_disks(
                 for lba in 0..crate::common::METADATA_SECTOR_COUNT as u32 {
                     protocol_image.extend_from_slice(&read_exact(lba)?);
                 }
-                let identity = crate::application::media_identity_observer::
-                    media_identity_from_protocol_image(runner, d.n, &protocol_image)
+                let mut identity =
+                    crate::media_identity_observer::media_identity_from_protocol_image(
+                        runner,
+                        d.n,
+                        &protocol_image,
+                    )
                     .map_err(|error| io::Error::other(error.msg))?;
+                let total_sectors = d.size / SECTOR as u64;
+                identity = crate::media_identity_observer::apply_runtime_plain_override(
+                    identity,
+                    &protocol_image,
+                    total_sectors,
+                    |lba| {
+                        let lba = u32::try_from(lba)
+                            .map_err(|_| format!("LBA{lba} 超出当前扫描器 u32 范围"))?;
+                        read_exact(lba).map_err(|error| error.to_string())
+                    },
+                );
+                if identity.protocol.provision_kind == Some(DiskProvisionKind::Plain) {
+                    row.device_id = None;
+                    row.onlyid = None;
+                    row.dept = None;
+                    row.user = None;
+                    row.label = None;
+                    row.force_change_password = None;
+                    row.cancel_password_complexity_check = None;
+                    row.max_share_password_errors = None;
+                    row.max_encrypt_password_errors = None;
+                    row.provision_kind = DiskProvisionKind::Plain;
+                    row.partitions = None;
+                    row.lce = None;
+                } else if let Some(kind) = identity.protocol.provision_kind {
+                    row.provision_kind = kind;
+                }
+                if identity.protocol.provision_kind != Some(DiskProvisionKind::Plain) {
+                    if let Some(device_id) = identity.protocol.device_id.as_deref() {
+                        row.lce = crate::backup_metadata::parse_lba7_compatibility_geometry(
+                            &protocol_image,
+                            device_id,
+                            total_sectors,
+                        )
+                        .ok();
+                    }
+                }
+
+                if identity.protocol.provision_kind == Some(DiskProvisionKind::Plain) {
+                    match crate::partition_table::read_partition_table(total_sectors, |lba| {
+                        let lba = u32::try_from(lba)
+                            .map_err(|_| format!("LBA{lba} 超出当前扫描器 u32 范围"))?;
+                        read_exact(lba).map_err(|error| error.to_string())
+                    }) {
+                        Ok(mut table) => {
+                            for partition in &mut table.partitions {
+                                let Ok(start) = u32::try_from(partition.start_lba) else {
+                                    continue;
+                                };
+                                let Ok(boot) = read_exact(start) else {
+                                    continue;
+                                };
+                                partition.filesystem =
+                                    crate::filesystem::detect_boot_sector_with_geometry(
+                                        partition.start_lba,
+                                        partition.sector_count,
+                                        &boot,
+                                    )
+                                    .ok()
+                                    .flatten()
+                                    .map(|filesystem| filesystem.label().to_string());
+                            }
+                            row.partition_table = Some(table);
+                        }
+                        Err(error) => row.partition_table_error = Some(error),
+                    }
+                }
+
                 let matches = find_backups(backup_dir, &identity);
-                row.identity_pin = Some(crate::application::media_identity::MediaIdentityPin::new(
+                row.identity_pin = Some(crate::media_identity::MediaIdentityPin::new(
                     identity,
                     &protocol_image,
                 ));
@@ -220,120 +352,4 @@ pub fn scan_disks(
         rows.push(row);
     }
     rows
-}
-
-pub fn print_disk_table(rows: &[Row]) -> String {
-    use crate::ui::{dim, render_table, truncate_mid, TableCell, Tone};
-    let mut out = String::new();
-    if rows.is_empty() {
-        out.push_str("未检测到外接盘。\n");
-        return out;
-    }
-    out.push_str(&format!("外接盘 {} 个:\n", rows.len()));
-    let table_rows = rows
-        .iter()
-        .map(|row| {
-            let (status, tone) = if row.proto != "USB" {
-                ("非 USB / 不支持".to_string(), Tone::Dim)
-            } else if row.denied {
-                ("需管理员权限才能识别".to_string(), Tone::Dim)
-            } else if let Some(error) = &row.probe_error {
-                (format!("读取异常: {}", error), Tone::Yellow)
-            } else {
-                (
-                    row.provision_kind.short_name().to_string(),
-                    if row.provision_kind == DiskProvisionKind::Plain {
-                        Tone::Dim
-                    } else {
-                        Tone::Green
-                    },
-                )
-            };
-            vec![
-                TableCell::left(format!("disk{}", row.disk), Tone::Bold),
-                TableCell::right(fmt_gb(row.size), Tone::Magenta),
-                TableCell::left(
-                    row.proto.clone(),
-                    if row.proto == "USB" {
-                        Tone::Green
-                    } else {
-                        Tone::Dim
-                    },
-                ),
-                TableCell::left(format!("{}:{}", row.vid, row.pid), Tone::Yellow),
-                TableCell::left(
-                    row.user
-                        .as_deref()
-                        .filter(|value| !value.is_empty())
-                        .map(|value| truncate_mid(value, 14))
-                        .unwrap_or_else(|| "—".to_string()),
-                    if row.user.is_some() {
-                        Tone::Cyan
-                    } else {
-                        Tone::Dim
-                    },
-                ),
-                TableCell::left(
-                    row.dept
-                        .as_deref()
-                        .filter(|value| !value.is_empty())
-                        .map(|value| truncate_mid(value, 28))
-                        .unwrap_or_else(|| "—".to_string()),
-                    if row.dept.is_some() {
-                        Tone::Cyan
-                    } else {
-                        Tone::Dim
-                    },
-                ),
-                TableCell::left(status, tone),
-            ]
-        })
-        .collect::<Vec<_>>();
-    out.push_str(&render_table(
-        &["设备", "容量", "总线", "VID:PID", "姓名", "部门", "盘型"],
-        &table_rows,
-    ));
-
-    for row in rows {
-        if row.proto == "USB" && !row.denied && row.probe_error.is_none() && row.device_id.is_some()
-        {
-            let mut details = Vec::new();
-            if let Some(parts) = &row.partitions {
-                let items: Vec<String> = parts
-                    .iter()
-                    .map(|part| {
-                        format!(
-                            "{} {} (LBA {}~{})",
-                            part.type_name(),
-                            fmt_gb(part.size_bytes),
-                            group_digits(part.start_lba),
-                            group_digits(part.end_lba())
-                        )
-                    })
-                    .collect();
-                details.push(format!("└─ EDPF: {}", items.join(" · ")));
-            }
-            let mut meta = Vec::new();
-            if let Some(onlyid) = &row.onlyid {
-                meta.push(format!("onlyid={}", onlyid));
-            }
-            meta.push(match (row.n_baks, row.n_possible_baks) {
-                (0, 0) => "无备份".to_string(),
-                (confirmed, 0) => format!("备份 {confirmed} 份"),
-                (0, possible) => format!("可能相关 {possible} 份"),
-                (confirmed, possible) => {
-                    format!("备份 {confirmed} 份 · 可能相关 {possible} 份")
-                }
-            });
-            details.push(format!("   {}", meta.join(" · ")));
-            out.push_str(&format!(
-                "  {}\n",
-                crate::ui::bold(&format!("disk{} 详情", row.disk))
-            ));
-            for detail in details {
-                out.push_str(&format!("    {}\n", dim(&detail)));
-            }
-        }
-    }
-    out
 }

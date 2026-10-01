@@ -9,6 +9,7 @@ pub mod backup_coverage;
 pub mod device;
 pub mod disk_layout;
 pub mod evidence;
+pub(crate) mod filesystem_format;
 pub mod identity;
 pub mod inspect;
 pub mod inspect_summary;
@@ -16,8 +17,11 @@ pub(crate) mod inspect_text;
 pub mod inspect_tree;
 pub mod media_identity;
 pub mod media_identity_observer;
+pub mod partition_table;
+pub mod post_restore;
 pub mod progress;
 pub mod provision;
+pub mod provision_geometry;
 pub mod target_session;
 pub mod write;
 pub use crate::diskio::BackupIntegrityStatus;
@@ -34,9 +38,27 @@ use crate::sysinfo::{CmdRunner, ReadProbeCache};
 /// Frontend interaction boundary shared by CLI selectors and write services.
 pub trait Prompter {
     fn prompt_line(&mut self, msg: &str) -> String;
+    fn prompt_secret(&mut self, msg: &str) -> crate::provision::SecretBytes {
+        let mut input = self.prompt_line(msg).into_bytes();
+        while input
+            .last()
+            .is_some_and(|byte| matches!(byte, b'\r' | b'\n'))
+        {
+            input.pop();
+        }
+        let secret = crate::provision::SecretBytes::new(&input);
+        input.fill(0);
+        secret
+    }
     fn confirm_yes(&mut self, msg: &str) -> bool;
     fn confirm_write_yes(&mut self, msg: &str) -> bool {
         self.confirm_yes(msg)
+    }
+    fn confirm_post_restore_format_yes(&mut self, msg: &str) -> bool {
+        self.confirm_write_yes(msg)
+    }
+    fn confirm_reinitialize_yes(&mut self, msg: &str) -> bool {
+        self.confirm_write_yes(msg)
     }
 
     /// UI-neutral typed progress event. Frontends decide how to render or store it.
@@ -85,8 +107,7 @@ pub struct BackupWorkspaceItem {
     pub identity: Option<crate::application::media_identity::MediaIdentitySnapshot>,
     pub user: Option<String>,
     pub dept: Option<String>,
-    pub is_nopwd: bool,
-    pub provision_kind: crate::provision::DiskProvisionKind,
+    pub provision_kind: Option<crate::provision::DiskProvisionKind>,
     pub integrity_status: BackupIntegrityStatus,
     pub size_ok: bool,
     pub content_sha256: Option<String>,
@@ -141,7 +162,6 @@ pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {
                 identity: entry.meta.as_ref().and_then(|meta| meta.identity.clone()),
                 user: ownership.as_ref().and_then(|value| value.user.clone()),
                 dept: ownership.as_ref().and_then(|value| value.dept.clone()),
-                is_nopwd: entry.is_nopwd,
                 provision_kind: entry.provision_kind,
                 integrity_status: entry.integrity_status,
                 size_ok: entry.size_ok,

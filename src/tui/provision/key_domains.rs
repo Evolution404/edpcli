@@ -1,146 +1,51 @@
 use super::*;
 
 impl AppState {
-    pub fn provision_finish_key_probe(
-        &mut self,
-        result: Result<crate::application::provision::ProvisionKeyProbe, String>,
-    ) {
-        if self.provision.stage != ProvisionStage::Form {
-            return;
-        }
-        match result {
-            Ok(probe) => {
-                let mut status = Vec::new();
-                self.provision.form.share_opaque_profile = probe.share_opaque_profile;
-                self.provision.form.encrypt_opaque_profile = probe.encrypt_opaque_profile;
-                if let Some(knowledge) = probe.share {
-                    if self.provision.form.share_source_password.is_empty() {
-                        self.provision.form.share_source_knowledge = knowledge;
-                        if knowledge == crate::provision::SourcePasswordKnowledge::DefaultVerified {
-                            self.provision.form.share_source_password = "0000aaaa".into();
-                        }
-                    }
-                    status.push(format!(
-                        "交换域:{}",
-                        match self.provision.form.share_source_knowledge {
-                            crate::provision::SourcePasswordKnowledge::DefaultVerified => {
-                                "默认密码已验证"
-                            }
-                            crate::provision::SourcePasswordKnowledge::UserVerified => {
-                                "用户密码已验证"
-                            }
-                            crate::provision::SourcePasswordKnowledge::Unknown => "Unknown",
-                        }
-                    ));
-                }
-                if let Some(knowledge) = probe.encrypt {
-                    if self.provision.form.encrypt_source_password.is_empty() {
-                        self.provision.form.encrypt_source_knowledge = knowledge;
-                        if knowledge == crate::provision::SourcePasswordKnowledge::DefaultVerified {
-                            self.provision.form.encrypt_source_password = "0000aaaa".into();
-                        }
-                    }
-                    status.push(format!(
-                        "保密域:{}",
-                        match self.provision.form.encrypt_source_knowledge {
-                            crate::provision::SourcePasswordKnowledge::DefaultVerified => {
-                                "默认密码已验证"
-                            }
-                            crate::provision::SourcePasswordKnowledge::UserVerified => {
-                                "用户密码已验证"
-                            }
-                            crate::provision::SourcePasswordKnowledge::Unknown => "Unknown",
-                        }
-                    ));
-                }
-                self.provision.message = Some(if status.is_empty() {
-                    format!(
-                        "来源状态: {} · 无 EDP 用户密码域",
-                        probe.source_kind.short_name()
-                    )
-                } else {
-                    format!(
-                        "来源状态: {} · {}",
-                        probe.source_kind.short_name(),
-                        status.join(" · ")
-                    )
-                });
-                self.provision_sync_cursor_to_end();
-            }
-            Err(message) => {
-                self.provision.message = Some(format!("来源密码域只读探测失败: {message}"));
-            }
-        }
-    }
+    pub(super) fn provision_initialize_password_candidates(&mut self, kind: ProvisionKind) {
+        use crate::provision::{KeyDomainRole, SourcePasswordKnowledge};
+        use password_verification::{TargetPasswordMode, TargetPasswordModeState};
 
-    pub fn provision_finish_source_password_verify(
-        &mut self,
-        domain: crate::provision::KeyDomainRole,
-        result: Result<crate::provision::SourcePasswordKnowledge, String>,
-    ) {
-        if self.provision.stage != ProvisionStage::Form {
-            return;
-        }
-        match (domain, result) {
-            (crate::provision::KeyDomainRole::Share, Ok(knowledge)) => {
-                self.provision.form.share_source_knowledge = knowledge;
-                self.provision.message = Some("交换域来源密码验证通过。".into());
-            }
-            (crate::provision::KeyDomainRole::Encrypt, Ok(knowledge)) => {
-                self.provision.form.encrypt_source_knowledge = knowledge;
-                self.provision.message = Some("保密域来源密码验证通过。".into());
-            }
-            (crate::provision::KeyDomainRole::Share, Err(message)) => {
-                self.provision.form.share_source_knowledge =
-                    crate::provision::SourcePasswordKnowledge::Unknown;
-                self.provision.message = Some(message);
-            }
-            (crate::provision::KeyDomainRole::Encrypt, Err(message)) => {
-                self.provision.form.encrypt_source_knowledge =
-                    crate::provision::SourcePasswordKnowledge::Unknown;
-                self.provision.message = Some(message);
-            }
-        }
-    }
+        self.provision.source_password_edit_dirty = false;
+        self.provision.share_source_password_revision = 0;
+        self.provision.encrypt_source_password_revision = 0;
+        self.provision.target_password_modes = TargetPasswordModeState::default();
+        self.provision.form.share_source_password.clear();
+        self.provision.form.encrypt_source_password.clear();
+        self.provision.form.share_target_password.clear();
+        self.provision.form.encrypt_target_password.clear();
+        self.provision.form.share_source_knowledge = SourcePasswordKnowledge::Unknown;
+        self.provision.form.encrypt_source_knowledge = SourcePasswordKnowledge::Unknown;
+        self.provision.share_source_verification = ProvisionPasswordVerificationState::Idle;
+        self.provision.encrypt_source_verification = ProvisionPasswordVerificationState::Idle;
 
-    pub fn provision_set_planning(&mut self) {
-        self.provision.stage = ProvisionStage::Planning;
-        self.input_mode = InputMode::Normal;
-        self.provision.message = Some("正在只读检查目标并生成精确制盘计划…".into());
-    }
+        let mode = kind.mode();
+        let password =
+            String::from_utf8_lossy(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD).into_owned();
+        let share_active = matches!(mode, Some(0 | 1 | 3));
+        let encrypt_active = matches!(mode, Some(0..=2));
+        let share_from_source =
+            share_active && self.provision_source_has_password_domain(KeyDomainRole::Share);
+        let encrypt_from_source =
+            encrypt_active && self.provision_source_has_password_domain(KeyDomainRole::Encrypt);
 
-    pub fn provision_finish_plan(&mut self, result: Result<ProvisionPrepared, String>) {
-        match result {
-            Ok(prepared) => {
-                if let ProvisionPrepared::Official(official) = &prepared {
-                    if let Some(target_plan) = &official.target_plan {
-                        for part in &target_plan.partitions {
-                            match crate::provision::KeyDomainRole::from_partition_role(
-                                part.geometry.role,
-                            ) {
-                                Some(crate::provision::KeyDomainRole::Share) => {
-                                    if let Some(knowledge) = part.source_password_knowledge {
-                                        self.provision.form.share_source_knowledge = knowledge;
-                                    }
-                                }
-                                Some(crate::provision::KeyDomainRole::Encrypt) => {
-                                    if let Some(knowledge) = part.source_password_knowledge {
-                                        self.provision.form.encrypt_source_knowledge = knowledge;
-                                    }
-                                }
-                                None => {}
-                            }
-                        }
-                    }
-                }
-                self.provision.prepared = Some(prepared);
-                self.provision.stage = ProvisionStage::Review;
-                self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_review();
-                self.provision.message = None;
+        if share_active {
+            if share_from_source {
+                self.provision.form.share_source_password = password.clone();
+                self.provision.share_source_verification =
+                    ProvisionPasswordVerificationState::Verifying;
+            } else {
+                self.provision.form.share_target_password = password.clone();
+                self.provision.target_password_modes.share = TargetPasswordMode::Explicit;
             }
-            Err(message) => {
-                self.provision.stage = ProvisionStage::Form;
-                self.provision.message = Some(message);
+        }
+        if encrypt_active {
+            if encrypt_from_source {
+                self.provision.form.encrypt_source_password = password.clone();
+                self.provision.encrypt_source_verification =
+                    ProvisionPasswordVerificationState::Verifying;
+            } else {
+                self.provision.form.encrypt_target_password = password;
+                self.provision.target_password_modes.encrypt = TargetPasswordMode::Explicit;
             }
         }
     }

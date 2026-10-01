@@ -8,6 +8,11 @@ fn lines(path: &str) -> usize {
         .count()
 }
 
+fn read_source(path: &str) -> String {
+    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
+        .unwrap_or_else(|error| panic!("read {path}: {error}"))
+}
+
 fn exists(path: &str) {
     assert!(
         Path::new(env!("CARGO_MANIFEST_DIR")).join(path).is_file(),
@@ -56,34 +61,335 @@ fn assert_sources_exclude(paths: impl IntoIterator<Item = PathBuf>, forbidden: &
     }
 }
 
+fn near_hard_limit(actual: usize, hard_limit: usize) -> bool {
+    actual.saturating_mul(5) >= hard_limit.saturating_mul(4)
+}
+
+#[test]
+fn tui_modals_must_not_center_against_local_content_rects() {
+    for path in rust_sources_under("src/tui") {
+        if path.ends_with("ui/modal.rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !source.contains("centered_modal_rect(area")
+                && !source.contains("centered_modal_rect(parent"),
+            "{} centers a modal against a local rect instead of frame.area()",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn tui_user_messages_must_carry_explicit_severity() {
+    for path in rust_sources_under("src/tui") {
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !source.contains("message: Option<String>"),
+            "{} introduces an untyped user-facing message; use UiMessage so color follows semantic severity",
+            path.display()
+        );
+        assert!(
+            !source.contains("notice: Option<String>"),
+            "{} introduces an untyped notice; use UiMessage so normal feedback cannot inherit warning/error color",
+            path.display()
+        );
+        assert!(
+            !source.contains(r#"starts_with("错误")"#),
+            "{} infers severity from message text; use UiMessageTone instead",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn provision_preview_and_submit_share_single_preflight_decision_source() {
+    let layout = fs::read_to_string("src/tui/provision/layout_presentation.rs")
+        .expect("read provision layout presentation");
+    let validation =
+        fs::read_to_string("src/tui/provision/validation.rs").expect("read provision validation");
+    let field_input =
+        fs::read_to_string("src/tui/provision/field_input.rs").expect("read provision field input");
+
+    assert!(
+        layout.contains("provision_preflight()"),
+        "right-side provision layout must consume the shared synchronous preflight"
+    );
+    assert!(
+        validation.contains("provision_preflight()?"),
+        "provision_request must consume the same synchronous preflight before background planning"
+    );
+    assert!(
+        !layout.contains("provision_password_intent(")
+            && !layout.contains("PreserveAssessment::for_partition"),
+        "layout_presentation must not re-implement password/geometry disposition rules"
+    );
+    assert!(
+        !field_input.contains("provision_password_plan_intent"),
+        "field_input must not introduce a second submit-only password planning rule"
+    );
+}
+
+#[test]
+fn soft_size_budget_warns_before_existing_hard_limits() {
+    assert!(!near_hard_limit(79, 100));
+    assert!(near_hard_limit(80, 100));
+    for (path, hard_limit) in [
+        ("src/tui/mod.rs", 400),
+        ("src/tui/render.rs", 1_200),
+        ("src/tui/keymap.rs", 420),
+        ("src/tui/keymap/help.rs", 320),
+        ("src/tui/help_overlay.rs", 150),
+        ("src/tui/status.rs", 140),
+        ("src/tui/overview.rs", 180),
+        ("src/tui/ui/modal.rs", 100),
+        ("src/tui/ui/confirmation.rs", 180),
+        ("src/tui/restore_confirmation_render.rs", 260),
+        ("src/tui/ui/workspace_overview.rs", 160),
+        ("src/tui/devices/state.rs", 400),
+        ("src/tui/disk_layout_state.rs", 120),
+        ("src/tui/navigation_state.rs", 300),
+        ("src/tui/table_state.rs", 650),
+        ("src/tui/resume.rs", 180),
+        ("src/tui/inspect/state.rs", 350),
+        ("src/tui/inspect/field_navigation.rs", 220),
+        ("src/tui/inspect/lifecycle_state.rs", 180),
+        ("src/tui/inspect/preview_state.rs", 200),
+        ("src/tui/inspect/search_state.rs", 450),
+        ("src/tui/inspect/jump_state.rs", 200),
+        ("src/tui/inspect/detail_render.rs", 420),
+        ("src/tui/inspect/field_table_render.rs", 180),
+        ("src/tui/provision/state.rs", 400),
+        ("src/tui/provision/execution_state.rs", 220),
+        ("src/tui/provision/scheme_picker_state.rs", 120),
+        ("src/tui/provision/scheme_picker_render.rs", 160),
+        ("src/tui/provision/field_presentation.rs", 340),
+        ("src/tui/provision/field_layout.rs", 180),
+        ("src/cli_args.rs", 400),
+        ("src/cli_args/parse_support.rs", 100),
+        ("src/cli_args/help.rs", 160),
+        ("src/cli.rs", 250),
+        ("src/cli/prompter.rs", 180),
+        ("src/cli_args/provision.rs", 700),
+        ("src/application/inspect_tree/build.rs", 250),
+        ("src/application/inspect_tree/topology.rs", 350),
+        ("src/application/post_restore/layout_projection.rs", 160),
+        ("src/tui/restore_result_state.rs", 320),
+        ("src/tui/restore_result_partition_layout.rs", 260),
+        ("src/tui/restore_result_verification.rs", 180),
+        ("src/provision/reprovision/plan.rs", 400),
+        ("src/edpb/identity.rs", 400),
+    ] {
+        let actual = lines(path);
+        assert!(
+            actual < hard_limit,
+            "{path} exceeds hard limit {hard_limit}"
+        );
+        if near_hard_limit(actual, hard_limit) {
+            eprintln!("[architecture soft budget] {path}: {actual}/{hard_limit} lines");
+        }
+    }
+}
+
+#[test]
+fn complete_dependency_direction_is_guarded() {
+    exists("src/disk_scan_render.rs");
+    exists("src/text_width.rs");
+    let lower_layer_forbidden = [
+        "crate::application",
+        "crate::tui",
+        "crate::cli",
+        "crate::ui",
+        "crate::inspect_cli",
+        "crate::metainfo_cli",
+        "crate::inspect_adapter",
+        "ratatui",
+        "crossterm",
+    ];
+    for directory in [
+        "src/protocol",
+        "src/provision",
+        "src/platform",
+        "src/diskio",
+        "src/edpb",
+    ] {
+        assert_sources_exclude(rust_sources_under(directory), &lower_layer_forbidden);
+    }
+    for path in [
+        "src/media_identity.rs",
+        "src/media_identity_observer.rs",
+        "src/partition_table.rs",
+        "src/backup_coverage.rs",
+        "src/disk_layout.rs",
+        "src/inspect_target.rs",
+        "src/backup_metadata.rs",
+        "src/filesystem/analysis/mod.rs",
+        "src/backup_catalog.rs",
+        "src/disk_scan.rs",
+    ] {
+        assert_sources_exclude(rust_sources_under(path), &lower_layer_forbidden);
+    }
+    let application_forbidden = [
+        "crate::tui",
+        "crate::cli",
+        "crate::ui",
+        "crate::inspect_cli",
+        "crate::metainfo_cli",
+        "ratatui",
+        "crossterm",
+    ];
+    let mut application = rust_sources_under("src/application");
+    application.extend(rust_sources_under("src/application.rs"));
+    assert_sources_exclude(application, &application_forbidden);
+}
+
+#[test]
+fn tui_does_not_import_protocol_implementation_modules() {
+    assert_sources_exclude(rust_sources_under("src/tui"), &["crate::protocol::"]);
+}
+
+#[test]
+fn provision_stage_writes_are_centralized_in_transitions() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for path in rust_sources_under("src/tui") {
+        let relative = path.strip_prefix(root).unwrap_or(&path);
+        if relative == Path::new("src/tui/provision/transitions.rs")
+            || relative == Path::new("src/tui/demo/mod.rs")
+        {
+            continue;
+        }
+        let relative = relative.to_string_lossy();
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !source.contains("self.provision.stage = ProvisionStage::"),
+            "{} writes ProvisionStage outside transitions",
+            relative
+        );
+        assert!(
+            !source.contains("provision_mut().stage = ProvisionStage::"),
+            "{} writes ProvisionStage outside transitions",
+            relative
+        );
+    }
+}
+
+#[test]
+fn library_root_exposes_stable_interfaces_only() {
+    let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
+        .expect("read library root");
+    for module in ["backup_cli", "build_info", "elevate", "plist"] {
+        assert!(
+            source.contains(&format!("pub(crate) mod {module};")),
+            "{module} is an internal implementation module"
+        );
+    }
+    for module in [
+        "application",
+        "cli",
+        "cli_args",
+        "command_spec",
+        "completion",
+        "diskio",
+        "edpb",
+        "inspect",
+        "platform",
+        "protocol",
+        "provision",
+        "tui",
+    ] {
+        assert!(
+            source.contains(&format!("pub mod {module};")),
+            "{module} is a maintained external integration surface"
+        );
+    }
+}
+
 #[test]
 fn large_modules_are_split_by_domain_boundary() {
     for path in [
         "src/application/provision/prepare.rs",
         "src/application/provision/commit.rs",
         "src/application/provision/export.rs",
+        "src/application/provision/progress_projection.rs",
         "src/diskio/device.rs",
         "src/diskio/transaction.rs",
         "src/diskio/backup_config.rs",
         "src/diskio/backup_catalog.rs",
         "src/diskio/backup_create.rs",
         "src/tui/provision/state.rs",
+        "src/tui/provision/execution_state.rs",
+        "src/tui/provision/scheme_picker_state.rs",
         "src/tui/provision/form.rs",
         "src/tui/provision/plain_editor.rs",
         "src/tui/provision/fields.rs",
+        "src/tui/provision/field_model.rs",
+        "src/tui/provision/field_presentation.rs",
+        "src/tui/provision/field_layout.rs",
+        "src/tui/provision/field_input.rs",
+        "src/tui/provision/password_verification.rs",
         "src/tui/provision/validation.rs",
         "src/tui/provision/layout.rs",
         "src/tui/provision/editor.rs",
         "src/tui/provision/render.rs",
+        "src/tui/provision/scheme_picker_render.rs",
+        "src/tui/provision/form_render.rs",
+        "src/tui/provision/review_render.rs",
+        "src/tui/provision/result_render.rs",
+        "src/tui/provision/result_partition_layout.rs",
+        "src/tui/provision/result_interaction.rs",
+        "src/tui/provision/result_geometry.rs",
+        "src/tui/provision/result_model.rs",
+        "src/tui/ui/operation_result.rs",
+        "src/tui/ui/result_supplement.rs",
+        "src/tui/ui/result_table.rs",
+        "src/tui/disk_region_list.rs",
+        "src/tui/restore_result_state.rs",
+        "src/tui/restore_result_render.rs",
+        "src/tui/restore_result_partition_layout.rs",
+        "src/tui/restore_result_verification.rs",
+        "src/tui/wizard_result_render.rs",
+        "src/tui/operation_progress_render.rs",
+        "src/tui/operation_progress_status.rs",
+        "src/tui/progress_transport.rs",
+        "src/tui/runtime_updates.rs",
+        "src/tui/resume.rs",
+        "src/tui/runtime_input.rs",
+        "src/tui/runtime_input/inspect.rs",
+        "src/tui/runtime_input/provision.rs",
+        "src/tui/runtime_input/backup_batch.rs",
+        "src/tui/runtime_input/backup_prune.rs",
+        "src/tui/runtime_input/backup_wizard.rs",
+        "src/tui/runtime_input/shell.rs",
         "src/tui/provision/task.rs",
         "src/tui/inspect/state.rs",
+        "src/tui/inspect/lifecycle_state.rs",
+        "src/tui/inspect/field_navigation.rs",
+        "src/tui/inspect/search_state.rs",
+        "src/tui/inspect/jump_state.rs",
+        "src/tui/inspect/detail_state.rs",
+        "src/tui/inspect/tree_state.rs",
         "src/tui/inspect/sector_state.rs",
+        "src/tui/inspect/preview_state.rs",
         "src/tui/inspect/render.rs",
+        "src/tui/inspect/tree_render.rs",
+        "src/tui/inspect/detail_render.rs",
+        "src/tui/inspect/field_table_render.rs",
         "src/tui/inspect/sector_render.rs",
         "src/tui/backups/state.rs",
         "src/tui/backups/render.rs",
         "src/tui/devices/render.rs",
+        "src/tui/devices/state.rs",
         "src/tui/dispatch.rs",
+        "src/tui/controller.rs",
+        "src/tui/controller/provision.rs",
+        "src/tui/disk_layout_state.rs",
+        "src/tui/navigation_state.rs",
+        "src/tui/task_gate.rs",
+        "src/tui/table_state.rs",
         "src/inspect/model.rs",
         "src/inspect_adapter.rs",
         "src/application/inspect_text.rs",
@@ -99,29 +405,118 @@ fn large_modules_are_split_by_domain_boundary() {
     }
 
     assert!(lines("src/application/provision.rs") < 1_000);
+    assert!(lines("src/application/provision/progress_projection.rs") < 120);
     assert!(lines("src/diskio.rs") < 500);
-    assert!(lines("src/tui/state.rs") < 3_500);
-    assert!(lines("src/tui/render.rs") < 1_500);
-    assert!(lines("src/tui/task.rs") < 1_000);
+    assert!(lines("src/tui/state.rs") < 2_200);
     assert!(
-        lines("src/tui/mod.rs") < 1_800,
+        lines("src/tui/navigation_state.rs") < 300,
+        "workspace/pane navigation state must stay isolated from AppState business state"
+    );
+    assert!(
+        lines("src/tui/disk_layout_state.rs") < 120,
+        "shared DiskLayout interaction state must stay isolated from AppState orchestration"
+    );
+    assert!(
+        lines("src/tui/devices/state.rs") < 400,
+        "Devices workspace state must stay isolated from AppState orchestration"
+    );
+    assert!(
+        lines("src/tui/table_state.rs") < 650,
+        "shared table interaction state must stay isolated from AppState orchestration"
+    );
+    assert!(lines("src/tui/render.rs") < 1_500);
+    assert!(lines("src/tui/task.rs") < 800);
+    assert!(
+        lines("src/tui/task_gate.rs") < 180,
+        "generation/single-flight task gates must stay isolated from business worker routing"
+    );
+    assert!(
+        lines("src/tui/mod.rs") < 400,
         "TUI module root must remain lifecycle-oriented; action dispatch belongs in dispatch.rs"
     );
+    assert!(
+        lines("src/tui/resume.rs") < 180,
+        "TUI elevation-resume argv encoding must stay isolated from terminal lifecycle"
+    );
+    assert!(lines("src/tui/runtime_updates.rs") < 160);
+    assert!(lines("src/tui/runtime_input.rs") < 180);
+    for path in [
+        "src/tui/runtime_input/inspect.rs",
+        "src/tui/runtime_input/provision.rs",
+        "src/tui/runtime_input/backup_batch.rs",
+        "src/tui/runtime_input/backup_prune.rs",
+        "src/tui/runtime_input/backup_wizard.rs",
+        "src/tui/runtime_input/post_restore_wizard.rs",
+        "src/tui/runtime_input/shell.rs",
+    ] {
+        assert!(
+            lines(path) < 300,
+            "runtime input handler is oversized: {path}"
+        );
+    }
     assert!(
         lines("src/tui/dispatch.rs") < 600,
         "TUI dispatch module must stay responsibility-bounded"
     );
     assert!(
-        lines("src/tui/inspect/state.rs") < 1_900,
-        "Inspect workspace state must not absorb Sector Inspector state again"
+        lines("src/tui/controller.rs") < 600,
+        "shared TUI action controller must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/controller/provision.rs") < 350,
+        "Provision action routing must stay isolated from the shared controller"
+    );
+    assert!(
+        lines("src/tui/inspect/state.rs") < 350,
+        "Inspect workspace state must stay type/focus-oriented"
+    );
+    assert!(
+        lines("src/tui/inspect/field_navigation.rs") < 220,
+        "Inspect field navigation must stay isolated from workspace state"
+    );
+    assert!(
+        lines("src/tui/inspect/lifecycle_state.rs") < 180,
+        "Inspect begin/request/finish lifecycle must stay isolated from navigation state"
+    );
+    assert!(
+        lines("src/tui/inspect/preview_state.rs") < 200,
+        "Inspect preview loading must stay isolated from workspace orchestration"
+    );
+    assert!(
+        lines("src/tui/inspect/search_state.rs") < 450,
+        "Inspect search/prompt state must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/inspect/jump_state.rs") < 200,
+        "Inspect jump state must stay isolated from structured search"
+    );
+    assert!(
+        lines("src/tui/inspect/detail_state.rs") < 500,
+        "Inspect detail/pane state must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/inspect/tree_state.rs") < 600,
+        "Inspect tree state must stay responsibility-bounded"
     );
     assert!(
         lines("src/tui/inspect/sector_state.rs") < 450,
         "Sector Inspector state must stay responsibility-bounded"
     );
     assert!(
-        lines("src/tui/inspect/render.rs") < 750,
-        "Inspect workspace renderer must not absorb Sector Inspector rendering again"
+        lines("src/tui/inspect/render.rs") < 400,
+        "Inspect workspace renderer must stay layout/orchestration-oriented"
+    );
+    assert!(
+        lines("src/tui/inspect/tree_render.rs") < 180,
+        "Inspect tree renderer must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/inspect/detail_render.rs") < 420,
+        "Inspect detail renderer must stay responsibility-bounded"
+    );
+    assert!(
+        lines("src/tui/inspect/field_table_render.rs") < 180,
+        "Inspect field table rendering must stay isolated from object evidence rendering"
     );
     assert!(
         lines("src/tui/inspect/sector_render.rs") < 350,
@@ -151,12 +546,22 @@ fn large_modules_are_split_by_domain_boundary() {
     }
     assert!(lines("src/inspect/render.rs") < 400);
     assert!(
-        lines("src/tui/provision/state.rs") < 520,
+        lines("src/tui/provision/state.rs") < 400,
         "Provision orchestration state must not absorb form/capacity/plain model again"
     );
     assert!(
+        lines("src/tui/provision/execution_state.rs") < 220,
+        "Provision export/confirm/write lifecycle must stay isolated from form orchestration"
+    );
+    assert!(lines("src/tui/provision/scheme_picker_state.rs") < 120);
+    assert!(lines("src/tui/provision/scheme_picker_render.rs") < 160);
+    assert!(
         lines("src/tui/provision/editor.rs") < 300,
         "Provision edit actions must stay bounded"
+    );
+    assert!(
+        lines("src/tui/provision/option_editor.rs") < 240,
+        "Provision option edit actions must stay bounded"
     );
     let editor_source = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/editor.rs"),
@@ -180,9 +585,38 @@ fn large_modules_are_split_by_domain_boundary() {
         "Provision validation adapter must not duplicate canonical protocol or domain parsers"
     );
     assert!(
-        lines("src/tui/provision/fields.rs") < 900,
+        lines("src/tui/provision/fields.rs") < 350,
         "Provision field navigation and input editing must stay responsibility-bounded"
     );
+    assert!(lines("src/tui/provision/field_model.rs") < 120);
+    assert!(lines("src/tui/provision/field_presentation.rs") < 340);
+    assert!(lines("src/tui/provision/field_layout.rs") < 180);
+    assert!(lines("src/tui/provision/field_input.rs") < 250);
+    assert!(lines("src/tui/provision/password_verification.rs") < 200);
+    assert!(lines("src/tui/provision/key_domains.rs") < 80);
+    assert!(
+        lines("src/tui/provision/render.rs") < 400,
+        "Provision root renderer must stay layout/orchestration-oriented"
+    );
+    assert!(lines("src/tui/provision/form_render.rs") < 300);
+    assert!(lines("src/tui/provision/review_render.rs") < 170);
+    assert!(lines("src/tui/provision/result_render.rs") < 340);
+    assert!(lines("src/tui/provision/result_partition_layout.rs") < 260);
+    assert!(lines("src/tui/provision/result_interaction.rs") < 180);
+    assert!(lines("src/tui/provision/result_geometry.rs") < 120);
+    assert!(lines("src/tui/provision/result_model.rs") < 120);
+    assert!(lines("src/tui/ui/operation_result.rs") < 340);
+    assert!(lines("src/tui/ui/result_supplement.rs") < 100);
+    assert!(lines("src/tui/ui/result_table.rs") < 140);
+    assert!(lines("src/tui/disk_region_list.rs") < 100);
+    assert!(lines("src/tui/restore_result_state.rs") < 320);
+    assert!(lines("src/tui/restore_result_render.rs") < 120);
+    assert!(lines("src/tui/restore_result_partition_layout.rs") < 260);
+    assert!(lines("src/tui/restore_result_verification.rs") < 180);
+    assert!(lines("src/tui/wizard_result_render.rs") < 120);
+    assert!(lines("src/tui/operation_progress_render.rs") < 260);
+    assert!(lines("src/tui/operation_progress_status.rs") < 120);
+    assert!(lines("src/tui/progress_transport.rs") < 180);
     let field_source = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/fields.rs"),
     )
@@ -191,10 +625,14 @@ fn large_modules_are_split_by_domain_boundary() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/state.rs"),
     )
     .expect("read provision orchestration state");
+    let input_source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/field_input.rs"),
+    )
+    .expect("read provision field input module");
     for name in ["provision_push_char", "provision_delete_char"] {
         assert!(
-            field_source.contains(name),
-            "fields module is missing {name}"
+            input_source.contains(name),
+            "field input module is missing {name}"
         );
         assert!(
             !orchestration_source.contains(&format!("fn {name}(")),
@@ -209,6 +647,9 @@ fn large_modules_are_split_by_domain_boundary() {
         !field_source.contains("provision_field_slot"),
         "fields module must not reintroduce numeric field slots"
     );
+    assert!(!field_source.contains("fn provision_visible_fields("));
+    assert!(!field_source.contains("fn provision_push_char("));
+    assert!(!field_source.contains("fn provision_source_password_verify_request("));
     assert!(
         lines("src/tui/provision/form.rs") < 650,
         "Provision form model must stay responsibility-bounded"
@@ -263,11 +704,123 @@ fn large_modules_are_split_by_domain_boundary() {
 }
 
 #[test]
+fn cli_entry_is_split_by_command_domain() {
+    for path in [
+        "src/cli_args/provision.rs",
+        "src/cli_args/inspect.rs",
+        "src/cli_args/backup.rs",
+        "src/cli_args/help.rs",
+        "src/cli_args/parse_support.rs",
+        "src/cli/commands/provision.rs",
+        "src/cli/commands/backup.rs",
+        "src/cli/prompter.rs",
+    ] {
+        exists(path);
+    }
+    assert!(lines("src/cli_args.rs") < 400);
+    assert!(lines("src/cli_args/parse_support.rs") < 100);
+    assert!(lines("src/cli_args/help.rs") < 160);
+    assert!(lines("src/cli.rs") < 250);
+    assert!(lines("src/cli/prompter.rs") < 180);
+    let args = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli_args.rs"))
+        .expect("read CLI parser root");
+    assert!(!args.contains("fn parse_new_provision_opts("));
+    assert!(!args.contains("fn parse_lbas("));
+    let cli = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli.rs"))
+        .expect("read CLI command root");
+    assert!(!cli.contains("fn provision_flow("));
+    assert!(!cli.contains("fn real_flow("));
+}
+
+#[test]
+fn application_inspect_is_split_by_read_responsibility() {
+    for path in [
+        "src/application/inspect/model.rs",
+        "src/application/inspect/request.rs",
+        "src/application/inspect/decode.rs",
+        "src/application/inspect/source.rs",
+        "src/application/inspect/export.rs",
+        "src/application/inspect/service.rs",
+        "src/application/inspect_tree/model.rs",
+        "src/application/inspect_tree/build.rs",
+        "src/application/inspect_tree/topology.rs",
+        "src/application/inspect_tree/search.rs",
+    ] {
+        exists(path);
+    }
+    assert!(lines("src/application/inspect.rs") < 160);
+    assert!(lines("src/application/inspect_tree.rs") < 80);
+    let inspect = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application/inspect.rs"),
+    )
+    .expect("read inspect service root");
+    assert!(!inspect.contains("fn run_advanced_source("));
+    assert!(!inspect.contains("fn sector_meta_text("));
+}
+
+#[test]
+fn reprovision_domain_is_split_by_responsibility() {
+    for path in [
+        "src/provision/reprovision/model.rs",
+        "src/provision/reprovision/parsing.rs",
+        "src/provision/reprovision/prefill.rs",
+        "src/provision/reprovision/geometry.rs",
+        "src/provision/reprovision/disposition.rs",
+        "src/provision/reprovision/plan.rs",
+    ] {
+        exists(path);
+    }
+    assert!(lines("src/provision/reprovision.rs") < 100);
+    assert!(lines("src/provision/reprovision/plan.rs") < 400);
+    let root = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provision/reprovision.rs"),
+    )
+    .expect("read reprovision root");
+    assert!(!root.contains("fn parse_existing_provision("));
+    assert!(!root.contains("fn prefill_for_target_mode("));
+    assert!(!root.contains("fn decide_partition_action("));
+}
+
+#[test]
+fn edpb_container_is_split_by_protocol_responsibility() {
+    for path in [
+        "src/edpb/model.rs",
+        "src/edpb/codec.rs",
+        "src/edpb/identity.rs",
+        "src/edpb/write.rs",
+        "src/edpb/read.rs",
+        "src/edpb/validate.rs",
+        "src/edpb/legacy.rs",
+    ] {
+        exists(path);
+    }
+    assert!(lines("src/edpb.rs") < 100);
+    for path in [
+        "src/edpb/write.rs",
+        "src/edpb/read.rs",
+        "src/edpb/validate.rs",
+    ] {
+        assert!(
+            lines(path) < 400,
+            "EDPB responsibility module oversized: {path}"
+        );
+    }
+    let root = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/edpb.rs"))
+        .expect("read EDPB root");
+    assert!(!root.contains("fn verify_file("));
+    assert!(!root.contains("fn write_container("));
+}
+
+#[test]
 fn workspace_modules_do_not_import_platform_or_diskio_directly() {
     for path in [
         "src/tui/provision/state.rs",
+        "src/tui/provision/execution_state.rs",
+        "src/tui/provision/scheme_picker_state.rs",
         "src/tui/provision/render.rs",
+        "src/tui/provision/scheme_picker_render.rs",
         "src/tui/inspect/state.rs",
+        "src/tui/inspect/search_state.rs",
         "src/tui/inspect/render.rs",
         "src/tui/backups/state.rs",
         "src/tui/backups/render.rs",
@@ -303,8 +856,12 @@ fn entire_tui_uses_application_boundary_for_platform_and_raw_disk_access() {
 
 #[test]
 fn cli_uses_application_boundary_for_raw_disk_access() {
-    let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cli.rs"))
-        .expect("read cli");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = rust_sources_under("src/cli")
+        .into_iter()
+        .chain([root.join("src/cli.rs")])
+        .map(|path| fs::read_to_string(path).expect("read CLI source"))
+        .collect::<String>();
     for forbidden in [
         "crate::diskio",
         "FileDev::open_rdonly",
@@ -327,7 +884,8 @@ fn provision_write_frontends_cannot_bypass_mandatory_application_backup() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let application = fs::read_to_string(root.join("src/application/provision.rs"))
         .expect("read provision application");
-    let cli = fs::read_to_string(root.join("src/cli.rs")).expect("read cli");
+    let cli = fs::read_to_string(root.join("src/cli/commands/provision.rs"))
+        .expect("read CLI provision command");
     let tui = fs::read_to_string(root.join("src/tui/provision/task.rs"))
         .expect("read tui provision task");
 
@@ -389,43 +947,6 @@ fn real_usb_password_hil_keeps_secrets_off_argv_and_is_default_off() {
         assert!(
             !source.contains(forbidden),
             "HIL source must not contain plaintext password/CLI secret token: {forbidden}"
-        );
-    }
-}
-
-#[test]
-fn real_usb_k6_verify_is_read_only_and_identity_bound() {
-    let source = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/real_usb_k6_verify.rs"),
-    )
-    .expect("real USB K6 verifier must exist");
-
-    for required in [
-        "EXPECTED_VID",
-        "EXPECTED_PID",
-        "EXPECTED_TOTAL_SECTORS",
-        "EXPECTED_DEVICE_ID",
-        "guard_usb_disk",
-        "FileDev::open_rdonly",
-        "stream_file_payload",
-        "DEFAULT_KEY_DOMAIN_PASSWORD",
-        "aggregate_sha256",
-    ] {
-        assert!(
-            source.contains(required),
-            "missing K6 verifier safety token: {required}"
-        );
-    }
-    for forbidden in [
-        "open_rdwr",
-        "write_sector(",
-        "execute_write_transaction",
-        "atomic_write",
-        "Command::new",
-    ] {
-        assert!(
-            !source.contains(forbidden),
-            "K6 verifier must stay read-only: found {forbidden}"
         );
     }
 }
@@ -511,7 +1032,7 @@ fn critical_io_paths_have_no_panicking_shortcuts() {
         "src/application/evidence.rs",
         "src/diskio/device.rs",
         "src/diskio/transaction.rs",
-        "src/backup_deep.rs",
+        "src/filesystem/analysis/mod.rs",
     ] {
         let source = fs::read_to_string(root.join(path))
             .unwrap_or_else(|error| panic!("read {path}: {error}"));
@@ -522,8 +1043,8 @@ fn critical_io_paths_have_no_panicking_shortcuts() {
             );
         }
     }
-    let fat =
-        fs::read_to_string(root.join("src/backup_deep/fat.rs")).expect("read FAT parser source");
+    let fat = fs::read_to_string(root.join("src/filesystem/analysis/fat.rs"))
+        .expect("read FAT parser source");
     let parse = fat
         .split("pub(super) fn parse(")
         .nth(1)
@@ -582,9 +1103,18 @@ fn raw_write_flows_use_target_session_for_safety_transition() {
 fn inspect_disk_and_backup_sources_use_evidence_source() {
     exists("src/application/evidence.rs");
     let source = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application/inspect.rs"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application/inspect/service.rs"),
     )
-    .expect("read application inspect");
+    .expect("read application inspect service");
+    assert_sources_exclude(
+        rust_sources_under("src/application/inspect"),
+        &[
+            "struct AdvancedBackupReader",
+            "crate::edpb::verify_file",
+            "crate::edpb::read_raw_protocol",
+            "FileDev::open_rdonly",
+        ],
+    );
 
     for forbidden in [
         "struct AdvancedBackupReader",
@@ -643,18 +1173,604 @@ fn domain_and_application_import_direction_is_guarded() {
 }
 
 #[test]
+fn app_state_owns_devices_through_devices_substate() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
+    let devices =
+        fs::read_to_string(root.join("src/tui/devices/state.rs")).expect("read devices state");
+
+    let app_state = state
+        .split("pub struct AppState {")
+        .nth(1)
+        .and_then(|tail| tail.split("impl Default for AppState").next())
+        .expect("AppState section");
+    assert!(app_state.contains("devices: DevicesState"));
+    assert!(state.contains("#[path = \"devices/state.rs\"]"));
+    for legacy_field in [
+        "devices: Vec<crate::disk_scan::Row>",
+        "device_table_view: super::table_layout::TableViewData",
+        "device_scan_pending: bool",
+        "devices_pane_focus: crate::tui::pane::PaneFocus",
+        "device_summary_selected: usize",
+        "device_summary_expanded: u8",
+    ] {
+        assert!(
+            !app_state.contains(legacy_field),
+            "device-owned field must live in DevicesState: {legacy_field}"
+        );
+    }
+    for owned_field in [
+        "rows: Vec<crate::disk_scan::Row>",
+        "table_view: super::super::table_layout::TableViewData",
+        "scan_pending: bool",
+        "pane_focus: crate::tui::pane::PaneFocus",
+        "info_selected: DeviceInfoNodeKey",
+        "info_expanded: BTreeSet<DeviceInfoNodeKey>",
+    ] {
+        assert!(
+            devices.contains(owned_field),
+            "DevicesState must own field: {owned_field}"
+        );
+    }
+}
+
+#[test]
+fn app_state_owns_backups_through_backups_substate() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
+    let backups =
+        fs::read_to_string(root.join("src/tui/backups/state.rs")).expect("read backups state");
+
+    let app_state = state
+        .split("pub struct AppState {")
+        .nth(1)
+        .and_then(|tail| tail.split("impl Default for AppState").next())
+        .expect("AppState section");
+    assert!(app_state.contains("backups: BackupsState"));
+    for legacy_field in [
+        "backups: Vec<crate::application::BackupWorkspaceItem>",
+        "backup_verify_run: Option<BackupVerifyRunState>",
+        "backup_table_view: super::table_layout::TableViewData",
+        "backup_scan_pending: bool",
+        "backup_delete: Option<BackupDeleteState>",
+        "backup_batch_delete: Option<BackupBatchDeleteState>",
+        "backup_selection: std::collections::BTreeSet<std::path::PathBuf>",
+        "backup_prune: Option<BackupPruneState>",
+        "backups_pane_focus: crate::tui::pane::PaneFocus",
+    ] {
+        assert!(
+            !app_state.contains(legacy_field),
+            "backup-owned field must live in BackupsState: {legacy_field}"
+        );
+    }
+    for owned_field in [
+        "rows: Vec<crate::application::BackupWorkspaceItem>",
+        "verify_run: Option<BackupVerifyRunState>",
+        "table_view: super::super::table_layout::TableViewData",
+        "scan_pending: bool",
+        "delete: Option<BackupDeleteState>",
+        "batch_delete: Option<BackupBatchDeleteState>",
+        "selection: std::collections::BTreeSet<std::path::PathBuf>",
+        "prune: Option<BackupPruneState>",
+        "pane_focus: crate::tui::pane::PaneFocus",
+    ] {
+        assert!(
+            backups.contains(owned_field),
+            "BackupsState must own field: {owned_field}"
+        );
+    }
+    assert!(!backups.contains("BackupCreateChoiceState"));
+    assert!(!backups.contains("create_choice:"));
+}
+
+#[test]
+fn inspect_tree_and_detail_renderers_are_split_from_workspace_root() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let render =
+        fs::read_to_string(root.join("src/tui/inspect/render.rs")).expect("read inspect renderer");
+    let tree = fs::read_to_string(root.join("src/tui/inspect/tree_render.rs"))
+        .expect("read inspect tree renderer");
+    let detail = fs::read_to_string(root.join("src/tui/inspect/detail_render.rs"))
+        .expect("read inspect detail renderer");
+
+    assert!(!render.contains("fn draw_inspect_tree_pane"));
+    assert!(tree.contains("fn draw_inspect_tree_pane"));
+    assert!(!render.contains("fn draw_inspect_object_panes"));
+    assert!(detail.contains("fn draw_inspect_object_panes"));
+}
+
+#[test]
+fn inspect_cached_decode_enriches_topology_nodes_instead_of_rebuilding_identity() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tree_state = fs::read_to_string(root.join("src/tui/inspect/tree_state.rs"))
+        .expect("read inspect tree state");
+    let build = fs::read_to_string(root.join("src/application/inspect_tree/build.rs"))
+        .expect("read inspect tree build");
+
+    assert!(tree_state.contains("enrich_sector_node("));
+    assert!(
+        !tree_state.contains("standalone_sector_node_with_fields("),
+        "TUI cache hydration must enrich canonical topology nodes rather than reconstruct them"
+    );
+    assert!(build.contains("pub fn enrich_sector_node"));
+    assert!(build.contains("pub fn standalone_sector_node_with_fields"));
+}
+
+#[test]
+fn tui_renderers_do_not_assume_parent_surface_palette_colors() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for path in rust_sources_under("src/tui") {
+        if path.ends_with("theme.rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        for forbidden in [
+            "palette().background",
+            "palette().canvas",
+            "palette().surface",
+            "palette().surface_raised",
+            "palette().surface_active",
+            "palette().surface_focus",
+            "Color::",
+            ".fg(",
+            ".bg(",
+            "Modifier::REVERSED",
+            "focused_panel()",
+            ".border_style(panel())",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{} must consume surface styles through theme APIs or inherit the parent buffer; found {forbidden}",
+                path.display()
+            );
+        }
+    }
+    let layout =
+        fs::read_to_string(root.join("src/tui/disk_layout.rs")).expect("read disk layout renderer");
+    assert!(layout.contains("disk_region_half_block"));
+    let table = fs::read_to_string(root.join("src/tui/ui/table.rs")).expect("read shared table");
+    let card = fs::read_to_string(root.join("src/tui/ui/card.rs")).expect("read shared card");
+    assert!(table.contains("table_surface(focused)"));
+    assert!(card.contains("pane_surface(focused)"));
+}
+
+#[test]
+fn media_write_yes_prompt_has_one_ui_owner_and_backup_management_does_not_reuse_it() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let confirmation = fs::read_to_string(root.join("src/tui/ui/confirmation.rs"))
+        .expect("read confirmation component");
+    let root_render = fs::read_to_string(root.join("src/tui/render.rs")).expect("read root render");
+    let provision_render = fs::read_to_string(root.join("src/tui/provision/render.rs"))
+        .expect("read provision render");
+    let backup_render =
+        fs::read_to_string(root.join("src/tui/backups/render.rs")).expect("read backup render");
+    let backup_state =
+        fs::read_to_string(root.join("src/tui/backups/state.rs")).expect("read backup state");
+    let batch_input = fs::read_to_string(root.join("src/tui/runtime_input/backup_batch.rs"))
+        .expect("read batch input");
+    let prune_input = fs::read_to_string(root.join("src/tui/runtime_input/backup_prune.rs"))
+        .expect("read prune input");
+
+    assert!(confirmation.contains("输入 YES 确认写入"));
+    assert!(confirmation.contains("Enter\", theme.accent().add_modifier(Modifier::BOLD)"));
+    assert!(confirmation.contains("开始恢复"));
+    assert!(root_render.contains("render_write_confirmation_modal"));
+    assert!(provision_render.contains("render_write_confirmation_modal"));
+    assert!(backup_render.contains("render_action_confirmation_modal"));
+    for (name, source) in [
+        ("root renderer", root_render.as_str()),
+        ("provision renderer", provision_render.as_str()),
+        ("backup renderer", backup_render.as_str()),
+    ] {
+        assert!(
+            !source.contains("输入 YES"),
+            "{name} must delegate the write-authorization prompt to the shared component"
+        );
+    }
+    for (name, source) in [
+        ("backup state", backup_state.as_str()),
+        ("backup batch input", batch_input.as_str()),
+        ("backup prune input", prune_input.as_str()),
+    ] {
+        assert!(
+            !source.contains("YES"),
+            "{name} must not reuse media-write authorization for backup-file management"
+        );
+    }
+}
+
+#[test]
+fn help_and_status_information_architecture_has_single_owners() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let render = fs::read_to_string(root.join("src/tui/render.rs")).expect("read root renderer");
+    let keymap = fs::read_to_string(root.join("src/tui/keymap.rs")).expect("read keymap");
+    let help_registry =
+        fs::read_to_string(root.join("src/tui/keymap/help.rs")).expect("read help registry");
+    let help = fs::read_to_string(root.join("src/tui/help_overlay.rs")).expect("read help overlay");
+    let status = fs::read_to_string(root.join("src/tui/status.rs")).expect("read status model");
+    let shell = fs::read_to_string(root.join("src/tui/shell/mod.rs")).expect("read shell");
+    let controller =
+        fs::read_to_string(root.join("src/tui/controller.rs")).expect("read controller");
+
+    assert!(render.contains("status::dynamic_status"));
+    assert!(render.contains("help_overlay::draw_help_overlay"));
+    assert!(!render.contains("制盘方案：j/k"));
+    assert!(!render.contains("检查字段表："));
+    assert!(!render.contains("y 单元格 · Y 整行"));
+    assert!(keymap.contains("pub use help::"));
+    assert!(help_registry.contains("pub const DEVICES_HELP"));
+    assert!(help_registry.contains("pub const BACKUPS_HELP"));
+    assert!(help_registry.contains("pub const PROVISION_HELP"));
+    assert!(help_registry.contains("pub const GLOBAL_HELP"));
+    assert!(!help_registry.contains("pub const NORMAL_HELP"));
+    assert!(help.contains("PICKER_HELP"));
+    assert!(help.contains("TABLE_HELP"));
+    assert!(status.contains("pub(super) fn dynamic_status"));
+    assert!(shell.contains("\"? 帮助\""));
+    assert!(shell.contains("pub fn message_bar"));
+    assert!(!shell.contains("pub fn footer"));
+    let dispatch = controller
+        .split_once("pub(super) fn dispatch_action")
+        .map(|(_, dispatch)| dispatch)
+        .expect("dispatch_action");
+    let global_help = dispatch
+        .find("if action == TuiAction::Help")
+        .expect("global help dispatch");
+    let picker = dispatch
+        .find("if state.provision_scheme_picker_open()")
+        .expect("picker dispatch");
+    assert!(
+        global_help < picker,
+        "global ? help must be dispatched before business overlays can swallow it"
+    );
+}
+
+#[test]
+fn device_and_backup_overviews_share_one_layout_and_one_kind_counter() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let devices = fs::read_to_string(root.join("src/tui/devices/list_render.rs"))
+        .expect("read device list renderer");
+    let backups =
+        fs::read_to_string(root.join("src/tui/backups/render.rs")).expect("read backup renderer");
+    let overview =
+        fs::read_to_string(root.join("src/tui/overview.rs")).expect("read overview model");
+    let component = fs::read_to_string(root.join("src/tui/ui/workspace_overview.rs"))
+        .expect("read overview component");
+
+    assert!(devices.contains("ui::workspace_overview"));
+    assert!(backups.contains("ui::workspace_overview"));
+    assert!(devices.contains("ProvisionKindCounts::from_kinds"));
+    assert!(backups.contains("ProvisionKindCounts::from_kinds"));
+    assert!(overview.contains("if count > 0"));
+    assert!(component.contains("搜索 · 实时过滤"));
+    for stale in [
+        "h/l 激活",
+        "</> 移列",
+        "0/$ 首尾列",
+        "H/L 视口",
+        "s 排序",
+        "S 默认",
+    ] {
+        assert!(
+            !backups.contains(stale),
+            "backup table title must not advertise shortcuts: {stale}"
+        );
+    }
+}
+
+#[test]
+fn modal_surface_is_a_shared_theme_primitive_not_a_business_local_clear_block() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let modal = fs::read_to_string(root.join("src/tui/ui/modal.rs")).expect("read modal primitive");
+    let picker = fs::read_to_string(root.join("src/tui/provision/scheme_picker_render.rs"))
+        .expect("read scheme picker");
+
+    assert!(modal.contains("theme.modal_background()"));
+    assert!(modal.contains("theme.modal_border()"));
+    assert!(modal.contains("buffer.set_style"));
+    assert!(modal.contains("Clear"));
+    assert!(picker.contains("ui::render_modal"));
+    assert!(!picker.contains("Clear"));
+    assert!(!picker.contains("Block::default"));
+}
+
+#[test]
+fn provision_stage_renderers_are_split_from_workspace_root() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let render = fs::read_to_string(root.join("src/tui/provision/render.rs"))
+        .expect("read provision renderer");
+    for (path, marker) in [
+        ("form_render.rs", "fn draw_provision_form"),
+        ("review_render.rs", "fn draw_provision_review"),
+    ] {
+        let source = fs::read_to_string(root.join("src/tui/provision").join(path))
+            .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        assert!(source.contains(marker), "{path} must own {marker}");
+        assert!(!render.contains(marker), "{marker} leaked into render.rs");
+    }
+    let shared = fs::read_to_string(root.join("src/tui/operation_progress_render.rs"))
+        .expect("read shared operation progress renderer");
+    assert!(shared.contains("fn draw_operation_progress"));
+    assert!(!root.join("src/tui/provision/running_render.rs").exists());
+    assert!(!root.join("src/tui/provision/selection_render.rs").exists());
+    let provision_state =
+        fs::read_to_string(root.join("src/tui/provision/state.rs")).expect("read provision state");
+    let table_state =
+        fs::read_to_string(root.join("src/tui/table_state.rs")).expect("read table state");
+    let table_layout =
+        fs::read_to_string(root.join("src/tui/table_layout.rs")).expect("read table layout");
+    for forbidden in [
+        "ProvisionStage::SelectDisk",
+        "provision_select_disk",
+        "ProvisionDevices",
+    ] {
+        assert!(
+            !provision_state.contains(forbidden)
+                && !table_state.contains(forbidden)
+                && !table_layout.contains(forbidden),
+            "redundant provision device-selection surface returned: {forbidden}"
+        );
+    }
+    assert!(!root.join("src/tui/runtime_input/backup_choice.rs").exists());
+    assert!(!root.join("src/tui/backups/result_render.rs").exists());
+}
+
+#[test]
+fn inspect_tree_model_and_navigation_are_split_from_workspace_root() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state =
+        fs::read_to_string(root.join("src/tui/inspect/state.rs")).expect("read inspect state");
+    let tree = fs::read_to_string(root.join("src/tui/inspect/tree_state.rs"))
+        .expect("read inspect tree state");
+
+    for marker in [
+        "pub struct AdvancedInspectTreeRow",
+        "pub fn advanced_inspect_tree_rows",
+        "pub fn advanced_inspect_move_tree",
+        "pub fn advanced_inspect_toggle_selected",
+    ] {
+        assert!(
+            !state.contains(marker),
+            "{marker} leaked back into inspect/state.rs"
+        );
+        assert!(
+            tree.contains(marker),
+            "{marker} missing from inspect/tree_state.rs"
+        );
+    }
+}
+
+#[test]
+fn inspect_detail_and_pane_state_is_split_from_workspace_root() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state =
+        fs::read_to_string(root.join("src/tui/inspect/state.rs")).expect("read inspect state");
+    let detail = fs::read_to_string(root.join("src/tui/inspect/detail_state.rs"))
+        .expect("read inspect detail state");
+
+    for marker in [
+        "pub fn advanced_inspect_detail_rows",
+        "pub fn advanced_inspect_detail_toggle_selected",
+        "pub fn advanced_inspect_focused_content_len",
+        "pub fn advanced_inspect_move_focused_vertical",
+    ] {
+        assert!(
+            !state.contains(marker),
+            "{marker} leaked back into inspect/state.rs"
+        );
+        assert!(
+            detail.contains(marker),
+            "{marker} missing from inspect/detail_state.rs"
+        );
+    }
+}
+
+#[test]
+fn inspect_search_and_jump_state_is_split_from_workspace_root() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state =
+        fs::read_to_string(root.join("src/tui/inspect/state.rs")).expect("read inspect state");
+    let search = fs::read_to_string(root.join("src/tui/inspect/search_state.rs"))
+        .expect("read inspect search state");
+    let jump = fs::read_to_string(root.join("src/tui/inspect/jump_state.rs"))
+        .expect("read inspect jump state");
+
+    for marker in [
+        "pub fn advanced_inspect_begin_jump",
+        "pub fn advanced_inspect_begin_search",
+        "pub fn advanced_inspect_search_next",
+    ] {
+        assert!(
+            !state.contains(marker),
+            "{marker} leaked back into inspect/state.rs"
+        );
+        assert!(
+            search.contains(marker),
+            "{marker} missing from inspect/search_state.rs"
+        );
+    }
+    let jump_marker = "pub fn advanced_inspect_jump_lba";
+    assert!(
+        !state.contains(jump_marker) && !search.contains(jump_marker),
+        "{jump_marker} must stay isolated from workspace/search state"
+    );
+    assert!(
+        jump.contains(jump_marker),
+        "{jump_marker} missing from inspect/jump_state.rs"
+    );
+}
+
+#[test]
+fn app_state_owns_inspect_through_inspect_substate() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
+    let inspect =
+        fs::read_to_string(root.join("src/tui/inspect/state.rs")).expect("read inspect state");
+    let table_state =
+        fs::read_to_string(root.join("src/tui/table_state.rs")).expect("read table state");
+
+    let app_state = state
+        .split("pub struct AppState {")
+        .nth(1)
+        .and_then(|tail| tail.split("impl Default for AppState").next())
+        .expect("AppState section");
+    assert!(app_state.contains("inspect: InspectState"));
+    assert!(
+        !app_state.contains("advanced_inspect: Option<AdvancedInspectState>"),
+        "Inspect workspace root state must not live directly in AppState"
+    );
+    assert!(inspect.contains("pub struct InspectState"));
+    assert!(inspect.contains("advanced: Option<AdvancedInspectState>"));
+    assert!(
+        state.contains("self.inspect.advanced") || table_state.contains("self.inspect.advanced"),
+        "AppState facade modules must access Inspect workspace field through InspectState"
+    );
+    assert!(
+        inspect.contains("self.inspect.advanced"),
+        "Inspect methods must access workspace field through InspectState"
+    );
+}
+
+#[test]
+fn app_state_owns_global_shell_state_through_shell_substate() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
+    let shell = fs::read_to_string(root.join("src/tui/shell/state.rs")).expect("read shell state");
+
+    let app_state = state
+        .split("pub struct AppState {")
+        .nth(1)
+        .and_then(|tail| tail.split("impl Default for AppState").next())
+        .expect("AppState section");
+    assert!(app_state.contains("shell: ShellState"));
+    for legacy_field in [
+        "demo_mode: bool",
+        "workspace: Workspace",
+        "critical_operation: bool",
+        "exit_pending: bool",
+        "navigation: NavigationStack",
+        "notice: Option<crate::tui::ui::UiMessage>",
+        "notice_at: Option<std::time::Instant>",
+        "animation_frame: u64",
+        "selected: usize",
+        "item_count: usize",
+        "input_mode: InputMode",
+        "input_buffer: String",
+        "search_query: String",
+        "search_matches: Vec<usize>",
+        "search_cursor: usize",
+        "wizard: Option<WizardState>",
+        "pinned_disk: Option<u32>",
+        "disk_layout_tail: crate::tui::disk_layout::TailExpansion",
+        "disk_layout_selected: usize",
+    ] {
+        assert!(
+            !app_state
+                .lines()
+                .any(|line| line.trim() == format!("{legacy_field},")),
+            "global shell field must live in ShellState: {legacy_field}"
+        );
+        assert!(
+            shell.contains(legacy_field),
+            "ShellState must own global field: {legacy_field}"
+        );
+    }
+}
+
+#[test]
+fn app_state_is_only_shell_plus_four_workspace_states() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
+    let app_state = state
+        .split("pub struct AppState {")
+        .nth(1)
+        .and_then(|tail| tail.split('}').next())
+        .expect("AppState body");
+    let fields = app_state
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.contains(':') && line.ends_with(','))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        fields,
+        [
+            "shell: ShellState,",
+            "devices: DevicesState,",
+            "inspect: InspectState,",
+            "backups: BackupsState,",
+            "provision: ProvisionState,",
+        ]
+    );
+}
+
+#[test]
+fn tui_event_loop_does_not_interpret_workspace_stages() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = fs::read_to_string(root.join("src/tui/mod.rs")).expect("read TUI module root");
+    let production = source.split("#[cfg(test)]").next().unwrap_or(&source);
+    assert!(production.contains("runtime_input::handle_key"));
+    for stage in [
+        "AdvancedInspectStage",
+        "ProvisionStage",
+        "BackupBatchDeleteStage",
+        "BackupPruneStage",
+        "WizardStage",
+    ] {
+        assert!(
+            !production.contains(stage),
+            "event loop still interprets {stage}"
+        );
+    }
+}
+
+#[test]
+fn production_and_demo_share_one_tui_action_controller() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let controller = fs::read_to_string(root.join("src/tui/controller.rs"))
+        .expect("read shared TUI action controller");
+    let dispatch =
+        fs::read_to_string(root.join("src/tui/dispatch.rs")).expect("read production TUI dispatch");
+    let demo = fs::read_to_string(root.join("src/tui/demo/mod.rs")).expect("read demo TUI loop");
+
+    assert!(controller.contains("pub(super) fn dispatch_action"));
+    assert!(dispatch.contains("controller::dispatch_action"));
+    assert!(demo.contains("controller::dispatch_action"));
+    assert!(
+        !demo.contains("fn handle_action("),
+        "demo must not maintain a second TUI action router"
+    );
+}
+
+#[test]
+fn infrastructure_does_not_depend_on_application_layer() {
+    let mut infrastructure = rust_sources_under("src/diskio");
+    for path in ["src/edpb.rs", "src/disk_scan.rs"] {
+        infrastructure.push(Path::new(env!("CARGO_MANIFEST_DIR")).join(path));
+    }
+    assert_sources_exclude(infrastructure, &["crate::application"]);
+    for path in [
+        "src/media_identity.rs",
+        "src/media_identity_observer.rs",
+        "src/partition_table.rs",
+        "src/backup_coverage.rs",
+        "src/disk_layout.rs",
+    ] {
+        assert_sources_exclude(rust_sources_under(path), &["crate::application"]);
+    }
+}
+
+#[test]
 fn chapter_15_identity_write_boundaries_remain_separate() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let source = |path: &str| {
-        fs::read_to_string(root.join(path)).unwrap_or_else(|error| panic!("read {path}: {error}"))
-    };
-    let restore = source("src/application/write.rs");
-    let selector = source("src/selectors.rs");
-    let observer = source("src/application/media_identity_observer.rs");
-    let matcher = source("src/application/media_identity.rs");
-    let edpb = source("src/edpb.rs");
-    let backup_writer = source("src/diskio/backup_create.rs");
-    let lineage = source("src/application/provision/identity_lineage.rs");
+    let restore = read_source("src/application/write.rs");
+    let selector = read_source("src/selectors.rs");
+    let observer = read_source("src/media_identity_observer.rs");
+    let matcher = read_source("src/media_identity.rs");
+    let edpb_writer = read_source("src/edpb/write.rs");
+    let edpb_legacy = read_source("src/edpb/legacy.rs");
+    let backup_writer = read_source("src/diskio/backup_create.rs");
+    let lineage = read_source("src/application/provision/identity_lineage.rs");
 
     let authorize = restore
         .split("fn authorize_restore(")
@@ -669,14 +1785,11 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
     assert!(!restore.contains("for_onlyid"));
     assert!(!restore.contains("matches_onlyid"));
 
-    let writer = edpb
-        .split("const LEGACY_HARDWARE_SERIAL_NOTE_PREFIX")
-        .next()
-        .expect("EDPB writer before legacy adapter");
-    assert!(!writer.contains("hardware_serial_sha256="));
+    assert!(!edpb_writer.contains("hardware_serial_sha256="));
     assert!(!backup_writer.contains("hardware_serial_sha256="));
-    assert!(edpb.contains("fn legacy_hardware_serial_digest("));
-    assert!(edpb.contains("edpb.manifest.v2"));
+    assert!(edpb_legacy.contains("fn legacy_hardware_serial_digest("));
+    assert!(edpb_writer.contains("edpb.manifest.v3"));
+    assert!(edpb_writer.contains("write_legacy_v2_core_backup_with_identity"));
 
     for forbidden in ["prepare_write(", "reopen_rdwr(", "write_sector("] {
         assert!(
@@ -694,7 +1807,7 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
         "src/tui/backups/render.rs",
         "src/tui/inspect/render.rs",
     ] {
-        let renderer = source(path);
+        let renderer = read_source(path);
         for forbidden in [
             "FileDev::open_",
             "verify_file(",
@@ -706,13 +1819,267 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
         }
     }
 
-    let prepare = source("src/application/provision/prepare.rs");
-    let commit = source("src/application/provision/commit.rs");
-    assert!(prepare.contains("RegionDisposition::Migrate =>"));
-    assert!(commit.contains("RegionDisposition::Migrate =>"));
-    assert!(prepare.contains("K6"));
-    assert!(prepare.contains("prepare_migrations"));
-    assert!(prepare.contains("build_migrated_filesystem"));
-    assert!(!commit.contains("Migrate 当前 unsupported"));
-    assert!(commit.contains("Migrate 写集合缺少目标文件系统引导扇区"));
+    for path in [
+        "src/application/provision.rs",
+        "src/application/provision/prepare.rs",
+        "src/application/provision/commit.rs",
+        "src/provision/plain.rs",
+        "src/provision/reprovision/plan.rs",
+        "src/tui/provision/review.rs",
+    ] {
+        let text = read_source(path);
+        for forbidden in [
+            "RegionDisposition::Migrate",
+            "migration_sources",
+            "prepare_migrations",
+            "prepare_existing_to_plain",
+            "prepare_plain_to_official",
+            "build_migrated_filesystem",
+            "build_plain_migrated_provision_write_plan",
+            "文件级 staging",
+            "K6 Plain→EDP",
+            "K6 EDP→Plain",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "Provision file migration must stay removed: {path} contains {forbidden}"
+            );
+        }
+    }
+    for path in [
+        "src/application/provision/migration.rs",
+        "src/provision/migration.rs",
+        "src/filesystem/migration.rs",
+        "examples/real_usb_k6_verify.rs",
+    ] {
+        assert!(
+            !root.join(path).exists(),
+            "file-level migration artifact must stay removed: {path}"
+        );
+    }
+    let prepare = read_source("src/application/provision/prepare.rs");
+    let plain_prepare = prepare
+        .split("pub fn prepare_plain_provision(")
+        .nth(1)
+        .expect("Plain prepare boundary");
+    assert!(plain_prepare.contains("build_plain_provision_write_plan("));
+    for forbidden in [
+        "key_domains",
+        "parse_existing_provision(",
+        "analyze_partition(",
+        "stream_file_payload(",
+        "migration",
+    ] {
+        assert!(
+            !plain_prepare.contains(forbidden),
+            "EDP→Plain must not read/migrate files: found {forbidden}"
+        );
+    }
+    let restore_result = read_source("src/tui/restore_result_render.rs");
+    assert!(restore_result.contains("文件数据未恢复"));
+}
+
+#[test]
+fn plain_scan_and_prepare_share_geometry_aware_filesystem_evidence() {
+    let scan = read_source("src/disk_scan.rs");
+    let prepare = read_source("src/application/provision/prepare.rs");
+    let helper = "detect_boot_sector_with_geometry(";
+
+    assert!(
+        scan.contains(helper),
+        "Plain device scan must use geometry-aware filesystem evidence"
+    );
+    assert!(
+        prepare.contains(helper),
+        "Provision prepare must use the same geometry-aware filesystem evidence"
+    );
+    assert!(
+        !scan.contains("partition.filesystem = crate::filesystem::detect_boot_sector("),
+        "Plain device scan must not fall back to type-only filesystem detection"
+    );
+}
+
+#[test]
+fn passive_capacity_display_uses_one_global_unit_system() {
+    for path in [
+        "src/disk_scan_render.rs",
+        "src/ui.rs",
+        "src/inspect_cli.rs",
+        "src/backup_cli.rs",
+        "src/application/identity.rs",
+        "src/metainfo.rs",
+        "src/inspect/model.rs",
+        "src/tui/restore_result_partition_layout.rs",
+        "src/tui/devices/state.rs",
+        "src/tui/devices/presentation.rs",
+        "src/tui/disk_layout.rs",
+        "src/tui/provision/layout.rs",
+        "src/tui/provision/confirmation_render.rs",
+        "src/tui/provision/scheme_picker_render.rs",
+    ] {
+        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
+            .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        let routes_through_global_capacity = source.contains("fmt_capacity")
+            || (path == "src/tui/restore_result_partition_layout.rs"
+                && source.contains("result_partition_table_view"));
+        assert!(
+            routes_through_global_capacity,
+            "{path} must route passive capacity text through the global formatter"
+        );
+        for forbidden in [
+            "1_073_741_824.0",
+            "1_000_000_000.0",
+            "/ 1024.0 / 1024.0 / 1024.0",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{path} hardcodes capacity conversion {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn provision_capacity_editor_follows_global_unit_system() {
+    let form = read_source("src/tui/provision/form.rs");
+    let presentation = read_source("src/tui/provision/field_presentation.rs");
+    let hints = read_source("src/tui/provision/field_layout.rs");
+
+    assert!(form.contains("CAPACITY_UNIT_SYSTEM"));
+    assert!(form.contains("CapacityUnitSystem::Decimal"));
+    assert!(form.contains("CapacityUnitSystem::Binary"));
+    for forbidden in ["容量 (MiB)", "容量 (GiB)", "Space 切换 MiB / GiB"] {
+        assert!(
+            !presentation.contains(forbidden) && !hints.contains(forbidden),
+            "Provision capacity UI must not hardcode binary unit text: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn default_key_domain_password_has_one_production_source_of_truth() {
+    let canonical_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provision/key_domain.rs");
+    let canonical = fs::read_to_string(&canonical_path).expect("read key-domain defaults");
+    assert!(canonical.contains("pub const DEFAULT_KEY_DOMAIN_PASSWORD_TEXT: &str = \"0000aaaa\";"));
+    assert!(canonical.contains(
+        "pub const DEFAULT_KEY_DOMAIN_PASSWORD: &[u8] = DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.as_bytes();"
+    ));
+
+    for path in rust_sources_under("src") {
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if path == canonical_path || file_name == "tests.rs" || file_name.ends_with("_tests.rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !source.contains("0000aaaa"),
+            "{} hardcodes the default key-domain password instead of using DEFAULT_KEY_DOMAIN_PASSWORD[_TEXT]",
+            path.display()
+        );
+        assert!(
+            !source.contains("const DEFAULT_PASSWORD"),
+            "{} declares a duplicate default password constant",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn provision_layout_never_uses_ambiguous_pending_fallback_text() {
+    let layout = read_source("src/tui/provision/layout_presentation.rs");
+    assert!(!layout.contains("? 待确认"));
+    assert!(!layout.contains("同步检查尚未生成当前区域结论"));
+    assert!(layout.contains("⚠ 计划异常"));
+    assert!(layout.contains("缺少同步预检结论"));
+}
+
+#[test]
+fn provisioning_docs_keep_file_migration_out_of_the_product_contract() {
+    let provisioning = read_source("docs/provisioning/PROVISIONING.md");
+    let architecture = read_source("docs/architecture/ARCHITECTURE.md");
+    let usage = read_source("docs/user/USAGE.md");
+    let release = read_source("docs/user/RELEASE.md");
+
+    assert!(provisioning.contains("Provision 不提供文件级迁移"));
+    assert!(architecture.contains("Provision 不读取、暂存或搬运用户文件"));
+    assert!(usage.contains("Provision 不读取或搬运来源文件"));
+    assert!(release.contains("Provision 明确不提供文件级迁移"));
+    for forbidden in ["K6", "`Migrate`", "迁移预检", "迁移数据"] {
+        assert!(
+            !provisioning.contains(forbidden)
+                && !architecture.contains(forbidden)
+                && !usage.contains(forbidden)
+                && !release.contains(forbidden),
+            "current product docs must not advertise removed file migration: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn restore_result_capacity_is_formatted_by_shared_result_projection() {
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/result_partition_table_state.rs"),
+    )
+    .expect("read shared result partition projection");
+    assert!(source.contains("fmt_capacity"));
+}
+
+#[test]
+fn post_restore_layout_projection_is_application_owned_and_nonfatal() {
+    let projection = include_str!("../src/application/post_restore/layout_projection.rs");
+    let restore = include_str!("../src/application/write.rs");
+
+    assert!(projection.contains("parse_existing_provision"));
+    assert!(projection.contains("DiskRegionKind::from_partition_role"));
+    assert!(projection.contains("DiskLayoutModel::canonical_edp"));
+    assert!(projection.contains("DiskLayoutModel::canonical_plain_plan"));
+    assert!(
+        !projection.contains("crate::tui"),
+        "post-restore layout projection must stay UI-neutral"
+    );
+
+    let restore_tail = restore
+        .split("let layout = super::post_restore::project_restored_layout_readonly")
+        .nth(1)
+        .expect("restore flow must retain a typed layout projection result");
+    let outcome_section = restore_tail
+        .split("Ok(super::post_restore::MetadataRestoreOutcome")
+        .nth(1)
+        .expect("restore flow must still return MetadataRestoreOutcome");
+    assert!(
+        outcome_section.contains("layout,"),
+        "projection Result must be carried into the outcome"
+    );
+    assert!(
+        !restore_tail
+            .split("Ok(super::post_restore::MetadataRestoreOutcome")
+            .next()
+            .unwrap_or_default()
+            .contains("?;"),
+        "layout projection failure must not reclassify a verified restore as failed"
+    );
+}
+
+#[test]
+fn restore_result_has_one_selection_source_of_truth() {
+    let state = include_str!("../src/tui/state.rs");
+    let result_state = include_str!("../src/tui/restore_result_state.rs");
+    let render = include_str!("../src/tui/render.rs");
+
+    assert!(
+        !state.contains("post_restore_selected"),
+        "legacy restore result row selection must not return"
+    );
+    assert!(
+        result_state.contains("post_restore_workbench.selected_partition"),
+        "restore actions must resolve selection through the shared result workbench"
+    );
+    assert!(
+        render.contains("WizardStage::PostRestore => unreachable!"),
+        "legacy inline PostRestore renderer must remain unreachable"
+    );
 }

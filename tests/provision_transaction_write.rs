@@ -8,9 +8,9 @@ use edpcli::{
         execute_write_transaction_observed, SectorDev, SectorWriteStage, TransactionActivityPhase,
         WriteTransactionPlan,
     },
+    filesystem::FilesystemKind,
     provision::{
-        build_migrated_filesystem, build_plain_provision_write_plan, MigrationStagedEntry,
-        MigrationTransform, OfficialFilesystemFormat, PlainCleanupExtent, PlainPartitionSpec,
+        build_plain_provision_write_plan, PlainCleanupExtent, PlainPartitionSpec,
         PlainProvisionPlan,
     },
 };
@@ -155,7 +155,7 @@ fn plain_plan_maps_to_the_same_generic_transaction_stages() {
         vec![PlainPartitionSpec::new(
             2_048,
             20_000,
-            OfficialFilesystemFormat::ExFat,
+            FilesystemKind::ExFat,
             "DATA",
         )],
     )
@@ -220,46 +220,6 @@ fn official_writer_rejects_incomplete_or_out_of_bounds_plan_before_writing() {
         EXIT_IO
     );
     assert!(dev.writes.is_empty());
-}
-
-#[test]
-fn k6_populated_filesystem_write_set_rolls_back_with_official_transaction() {
-    let payload = b"k6-rollback-payload".repeat(96);
-    let image = build_migrated_filesystem(
-        OfficialFilesystemFormat::ExFat,
-        2_048,
-        200_000,
-        0x4b36_5242,
-        "K6ROLL",
-        &[MigrationStagedEntry {
-            source_index: 0,
-            transform: MigrationTransform::ShareToEncrypt,
-            path: "/payload.bin".into(),
-            is_directory: false,
-            data: payload,
-            attributes: 0x20,
-            mtime: None,
-            ctime: None,
-        }],
-    )
-    .unwrap();
-    let mut k6_patch = patch();
-    for (&relative_lba, sector) in image.sectors() {
-        let absolute = u32::try_from(2_048 + relative_lba).unwrap();
-        assert!(k6_patch.insert(absolute, sector.to_vec()).is_none());
-    }
-
-    let mut dev = MemoryDev::default();
-    for &lba in k6_patch.keys() {
-        dev.sectors.insert(lba, vec![0xaa; SECTOR]);
-    }
-    let before = dev.sectors.clone();
-    // Data writes are ordered by LBA. This fails after several ordinary data
-    // sectors and inside the K6 filesystem write set, before metadata/MBR commit.
-    dev.fail_call = Some(5);
-    let error = atomic_write_official_provision_sectors(&mut dev, &k6_patch, 300_000).unwrap_err();
-    assert_eq!(error.code, EXIT_ROLLED_BACK, "{}", error.msg);
-    assert_eq!(dev.sectors, before);
 }
 
 #[test]

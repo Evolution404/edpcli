@@ -2,12 +2,14 @@ use edpcli::disk_scan::Row;
 use edpcli::tui::state::AppState;
 
 fn device() -> Row {
-    Row {
+    let mut row = Row {
         disk: 6,
         size: 64_000_000_000,
         vid: "1234".into(),
         pid: "5678".into(),
         proto: "USB".into(),
+        serial: Some("SERIAL-TEST-0001".into()),
+        hardware_model: None,
         device_id: Some("disk&ven_demo&prod_u335".into()),
         identity_pin: None,
         onlyid: Some("ABCDEF0123456789".into()),
@@ -22,10 +24,14 @@ fn device() -> Row {
         n_possible_baks: 0,
         denied: false,
         probe_error: None,
-        is_nopwd: false,
         provision_kind: edpcli::provision::DiskProvisionKind::Plain,
         partitions: None,
-    }
+        partition_table: None,
+        partition_table_error: None,
+        lce: None,
+    };
+    crate::common::confirm_row_identity(&mut row);
+    row
 }
 
 #[test]
@@ -41,11 +47,16 @@ fn selected_device_is_exposed_for_dashboard_detail_panel() {
 
 #[test]
 fn device_dashboard_renders_identity_detail_fields() {
-    let render = include_str!("../src/tui/devices/render.rs");
-    for field in ["onlyid", "device_id", "已有备份"] {
+    let source = concat!(
+        include_str!("../src/tui/devices/render.rs"),
+        include_str!("../src/tui/devices/presentation.rs"),
+        include_str!("../src/tui/devices/state.rs"),
+        include_str!("../src/tui/state.rs")
+    );
+    for field in ["onlyid", "device_id", "序列号", "容量布局", "状态与备份"] {
         assert!(
-            render.contains(field),
-            "device detail panel must render {field}"
+            source.contains(field),
+            "device workbench must expose {field}"
         );
     }
 }

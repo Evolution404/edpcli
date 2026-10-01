@@ -37,8 +37,8 @@
     "read_dispatch": "EdpEDisk64.sys.m loc_124e0: version != 0x206 calls sub_13160 with 8-byte key",
     "write_dispatch": "EdpEDisk64.sys.m loc_12208: version != 0x206 calls sub_13450 with 8-byte key"
   },
-  "sandisk_no_password_old_entry_type4": {
-    "source": "/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4/dec/LBA07_dec.bin",
+  "sandisk_mode1_old_entry_type4": {
+    "source": "/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/sandisk_mode1_capture/dec/LBA07_dec.bin",
     "need_encrypt": 1,
     "start_lba": 120164408,
     "partition_size_bytes": 3072,
@@ -47,8 +47,8 @@
     "key8_crc32_bare": "9d13ad66",
     "entry_key_crc32_bare": "9d13ad66"
   },
-  "sandisk_no_password_new_entry_type4": {
-    "source": "/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4/dec/LBA12_dec.bin",
+  "sandisk_mode1_new_entry_type4": {
+    "source": "/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/sandisk_mode1_capture/dec/LBA12_dec.bin",
     "start_lba": 117611865,
     "partition_size_bytes": 1299594240,
     "encrypt_mode": 2
@@ -57,7 +57,7 @@
     "reproduction_script": "scripts/protocol/probe_lba7_compatibility_driver.py",
     "method": "Unicorn x64, EdpEDisk64.sys sub_13160 followed by sub_13450, input/output in the same buffer as in the driver call sites",
     "validated_roundtrip": "16-byte zero block and both complete 3072-byte samples re-encrypt byte-for-byte to their starting ciphertext",
-    "sandisk_nopwd": {
+    "sandisk_mode1": {
       "key8": "24a4cfbdc9bf4101",
       "decrypted_sha256": "5e3620abcfd6977c9408659eea36f7a195eafb4adb49039fdb01ba91bfca2ac7",
       "decrypted_entropy_bits_per_byte_approx": 7.936,

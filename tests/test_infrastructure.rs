@@ -141,6 +141,22 @@ fn fast_runner_derives_test_source_mapping_from_suite_roots() {
 }
 
 #[test]
+fn local_install_has_one_repository_owned_entrypoint() {
+    let makefile = read("Makefile");
+    let install = read("scripts/install.sh");
+    let installer = read("scripts/install-local.sh");
+
+    assert!(makefile.contains("install:"));
+    assert!(makefile.contains("./scripts/install.sh"));
+    assert!(install.contains("cargo build --release --locked"));
+    assert!(install.contains("scripts/install-local.sh"));
+    assert!(!install.contains("cargo install --path"));
+    assert!(installer.contains(".local/bin/edpcli"));
+    assert!(installer.contains("SHA-256 mismatch after install"));
+    assert!(installer.contains("command -v edpcli"));
+}
+
+#[test]
 fn fast_and_full_gate_entrypoints_are_repository_owned() {
     let fast = read("scripts/test-fast.sh");
     let full = read("scripts/test-full.py");

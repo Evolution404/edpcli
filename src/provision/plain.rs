@@ -1,11 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::common::{METADATA_LAST_LBA, SECTOR};
-
-use super::{
-    build_empty_exfat, build_empty_fat16, build_migrated_filesystem, MigrationStagedEntry,
-    OfficialFilesystemFormat,
-};
+use crate::filesystem::{build_empty_filesystem, FilesystemKind, SparseFilesystemImage};
 
 pub const DEFAULT_PLAIN_START_LBA: u64 = 2048;
 pub const MAX_PLAIN_PARTITIONS: usize = 4;
@@ -71,7 +67,7 @@ impl PlainProvisionWritePlan {
 pub struct PlainPartitionSpec {
     pub start_lba: u64,
     pub sector_count: u64,
-    pub filesystem: OfficialFilesystemFormat,
+    pub filesystem: FilesystemKind,
     pub volume_label: String,
 }
 
@@ -79,7 +75,7 @@ impl PlainPartitionSpec {
     pub fn new(
         start_lba: u64,
         sector_count: u64,
-        filesystem: OfficialFilesystemFormat,
+        filesystem: FilesystemKind,
         volume_label: impl Into<String>,
     ) -> Self {
         Self {
@@ -134,7 +130,7 @@ impl PlainProvisionPlan {
             vec![PlainPartitionSpec::new(
                 DEFAULT_PLAIN_START_LBA,
                 total_sectors - DEFAULT_PLAIN_START_LBA,
-                OfficialFilesystemFormat::ExFat,
+                FilesystemKind::ExFat,
                 "普通卷",
             )],
         )
@@ -275,11 +271,12 @@ pub fn plain_gaps(
     Ok(gaps)
 }
 
-fn plain_mbr_partition_type(format: OfficialFilesystemFormat) -> u8 {
+fn plain_mbr_partition_type(format: FilesystemKind) -> u8 {
     match format {
-        OfficialFilesystemFormat::Fat16 => 0x0e,
-        OfficialFilesystemFormat::ExFat | OfficialFilesystemFormat::Ntfs => 0x07,
-        OfficialFilesystemFormat::Fat32 => 0x0c,
+        FilesystemKind::Fat12 => 0x01,
+        FilesystemKind::Fat16 => 0x0e,
+        FilesystemKind::ExFat | FilesystemKind::Ntfs => 0x07,
+        FilesystemKind::Fat32 => 0x0c,
     }
 }
 
@@ -302,25 +299,14 @@ fn build_plain_mbr(plan: &PlainProvisionPlan) -> Result<[u8; SECTOR], String> {
 fn plain_filesystem_image(
     partition: &PlainPartitionSpec,
     volume_serial: u32,
-) -> Result<super::SparseFilesystemImage, String> {
-    match partition.filesystem {
-        OfficialFilesystemFormat::Fat16 => build_empty_fat16(
-            partition.start_lba,
-            partition.sector_count,
-            volume_serial,
-            &partition.volume_label,
-        ),
-        OfficialFilesystemFormat::ExFat => build_empty_exfat(
-            partition.start_lba,
-            partition.sector_count,
-            volume_serial,
-            &partition.volume_label,
-        ),
-        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => Err(format!(
-            "Plain portable writer 尚未实现 {} 文件系统",
-            partition.filesystem.config_token()
-        )),
-    }
+) -> Result<SparseFilesystemImage, String> {
+    build_empty_filesystem(
+        partition.filesystem,
+        partition.start_lba,
+        partition.sector_count,
+        volume_serial,
+        Some(&partition.volume_label),
+    )
 }
 
 fn insert_plain_write(
@@ -346,30 +332,13 @@ pub fn build_plain_provision_write_plan(
     source_lce: Option<PlainCleanupExtent>,
     volume_serials: &[u32],
 ) -> Result<PlainProvisionWritePlan, String> {
-    build_plain_provision_write_plan_inner(plan, source_lce, volume_serials, None)
-}
-
-pub fn build_plain_migrated_provision_write_plan(
-    plan: &PlainProvisionPlan,
-    source_lce: Option<PlainCleanupExtent>,
-    volume_serials: &[u32],
-    migrations: &[Vec<MigrationStagedEntry>],
-) -> Result<PlainProvisionWritePlan, String> {
-    if migrations.len() != plan.partitions.len() {
-        return Err(format!(
-            "Plain K6 migration target count {} does not match partition count {}",
-            migrations.len(),
-            plan.partitions.len()
-        ));
-    }
-    build_plain_provision_write_plan_inner(plan, source_lce, volume_serials, Some(migrations))
+    build_plain_provision_write_plan_inner(plan, source_lce, volume_serials)
 }
 
 fn build_plain_provision_write_plan_inner(
     plan: &PlainProvisionPlan,
     source_lce: Option<PlainCleanupExtent>,
     volume_serials: &[u32],
-    migrations: Option<&[Vec<MigrationStagedEntry>]>,
 ) -> Result<PlainProvisionWritePlan, String> {
     validate_plain_partitions(plan.total_sectors, &plan.partitions)?;
     if plan.total_sectors <= u64::from(METADATA_LAST_LBA) {
@@ -437,17 +406,7 @@ fn build_plain_provision_write_plan_inner(
         .zip(volume_serials.iter().copied())
         .enumerate()
     {
-        let image = match migrations.and_then(|all| all.get(index)) {
-            Some(entries) if !entries.is_empty() => build_migrated_filesystem(
-                partition.filesystem,
-                partition.start_lba,
-                partition.sector_count,
-                volume_serial,
-                &partition.volume_label,
-                entries,
-            )?,
-            _ => plain_filesystem_image(partition, volume_serial)?,
-        };
+        let image = plain_filesystem_image(partition, volume_serial)?;
         for (&relative_lba, sector) in image.sectors() {
             let lba = partition
                 .start_lba

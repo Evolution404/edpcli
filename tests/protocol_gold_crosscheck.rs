@@ -10,7 +10,7 @@ use std::{fs, path::Path};
 
 const GOLD: &str = include_str!("../audit/protocol/gold_samples.tsv");
 const AUTHENTIC: &[u8; 6656] =
-    include_bytes!("../audit/protocol/gold/authentic-nopwd/sandisk_ultra_20260823_lba0_12.bin");
+    include_bytes!("../audit/protocol/gold/authentic-mode1/sandisk_ultra_20260823_lba0_12.bin");
 const USB_MAIN_BSEC_PREFIX_HEX: &str =
     include_str!("fixtures/protocol_evidence/official_usb_main_bsec_lba0_prefix.hex");
 const NETAC_MBR_PREFIX_HEX: &str =
@@ -174,10 +174,10 @@ fn general_census_lba0_bootstrap_is_exhaustively_three_first_party_profiles() {
             assert_eq!(prefix, netac.as_slice());
             2
         };
-        if columns[0] == "authentic-nopwd" {
+        if columns[0] == "authentic-mode1" {
             assert_eq!(
                 class, 1,
-                "authentic no-password disk must retain UsbMainBSec bootstrap"
+                "authentic mode1 disk must retain UsbMainBSec bootstrap"
             );
         }
         counts[class] += 1;
@@ -219,7 +219,7 @@ fn host_hardinfo_identity_can_repeat_across_different_target_usb_vendors() {
 }
 
 #[test]
-fn authentic_nopwd_lba4_flags_require_a_separate_representation_audit() {
+fn authentic_mode1_lba4_flags_require_a_separate_representation_audit() {
     let raw = &AUTHENTIC[4 * 512..5 * 512];
     let onlyid = 794_661_040u32;
     let node = xor_rolling(&raw[0x18..], (onlyid & 0xffff) ^ (onlyid >> 16));

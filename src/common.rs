@@ -10,7 +10,6 @@ pub const EXIT_OK: i32 = 0; // 成功(含 dry-run/预览)
 pub const EXIT_IO: i32 = 1; // 运行时 IO 错误
 pub const EXIT_USAGE: i32 = 2; // 用法错误(未知旗标/缺参数/参数非数字)
 pub const EXIT_TARGET: i32 = 3; // 目标不可用(非cems/识别失败/size越界/系统盘)
-pub const EXIT_ALREADY_NOPWD: i32 = 4; // 已免密盘拒绝重复写入(需 --force)
 pub const EXIT_BACKUP: i32 = 5; // 备份问题(无匹配/大小不符/SHA-256不符)
 pub const EXIT_INTERMEDIATE: i32 = 6; // 写失败且回滚失败(中间态, 需人处理)
 pub const EXIT_ROLLED_BACK: i32 = 7; // 写失败但已完整回滚(可安全重试)
@@ -34,11 +33,60 @@ impl EdpCliError {
 
 pub type EdpCliResult<T> = Result<T, EdpCliError>;
 
-/// 容量显示: GB(10^9) 两位小数, 四舍五入(纯整数运算, 与 macOS 显示一致)。
-/// Python 版为 `(b+5e6)//1e7/100` 再 `:.2f`; 本实现整数路径可证逐位等价。
-pub fn fmt_gb(num_bytes: u64) -> String {
-    let cent = (num_bytes + 5_000_000) / 10_000_000; // GB×100, 四舍五入
-    format!("{}.{:02}GB", cent / 100, cent % 100)
+/// 全项目被动容量展示使用的换算口径。
+///
+/// 修改这一处即可在十进制 1000 制与二进制 1024 制之间切换。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapacityUnitSystem {
+    Decimal,
+    Binary,
+}
+
+pub const CAPACITY_UNIT_SYSTEM: CapacityUnitSystem = CapacityUnitSystem::Decimal;
+
+/// 全项目统一的自动量级容量展示。
+///
+/// Decimal: B / KB / MB / GB，按 1000 进位。
+/// Binary:  B / KiB / MiB / GiB，按 1024 进位。
+pub fn fmt_capacity(num_bytes: u64) -> String {
+    fmt_capacity_with_system(num_bytes, CAPACITY_UNIT_SYSTEM)
+}
+
+pub fn fmt_capacity_with_system(num_bytes: u64, system: CapacityUnitSystem) -> String {
+    let (base, suffixes): (u64, [&str; 4]) = match system {
+        CapacityUnitSystem::Decimal => (1_000, ["B", "KB", "MB", "GB"]),
+        CapacityUnitSystem::Binary => (1_024, ["B", "KiB", "MiB", "GiB"]),
+    };
+
+    let mut divisor = 1_u64;
+    let mut level = 0_usize;
+    while level < suffixes.len() - 1 && num_bytes >= divisor.saturating_mul(base) {
+        divisor = divisor.saturating_mul(base);
+        level += 1;
+    }
+
+    if level == 0 {
+        return format!("{num_bytes}B");
+    }
+
+    let mut divisor = u128::from(divisor);
+    let mut hundredths = (u128::from(num_bytes) * 100 + divisor / 2) / divisor;
+    while level < suffixes.len() - 1 && hundredths >= u128::from(base) * 100 {
+        divisor *= u128::from(base);
+        level += 1;
+        hundredths = (u128::from(num_bytes) * 100 + divisor / 2) / divisor;
+    }
+    format!(
+        "{}.{:02}{}",
+        hundredths / 100,
+        hundredths % 100,
+        suffixes[level]
+    )
+}
+
+/// 扇区容量统一展示；协议与几何仍保持 sector 作为真值。
+pub fn fmt_capacity_sectors(sectors: u64) -> String {
+    fmt_capacity(sectors.saturating_mul(SECTOR as u64))
 }
 
 /// Python `format(n, ',')` 千分位等价。
@@ -81,16 +129,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fmt_gb_matches_python() {
-        // Python: f'{(b + 5*10**6)//10**7/100:.2f}GB'
-        assert_eq!(fmt_gb(0), "0.00GB");
-        assert_eq!(fmt_gb(62_914_560_000), "62.91GB"); // netac 总容
-        assert_eq!(fmt_gb(59_750_819_680), "59.75GB"); // netac Share
-        assert_eq!(fmt_gb(64_000_000_000), "64.00GB");
-        assert_eq!(fmt_gb(500_107_862_016), "500.11GB");
-        // 舍入边界: 恰在 .005 处四舍五入
-        assert_eq!(fmt_gb(1_004_999_999), "1.00GB");
-        assert_eq!(fmt_gb(1_005_000_000), "1.01GB");
+    fn capacity_display_follows_global_unit_system() {
+        for bytes in [
+            999,
+            123_000,
+            999_999,
+            10_450_000,
+            64_000_000_000,
+            500_107_862_016,
+        ] {
+            assert_eq!(
+                fmt_capacity(bytes),
+                fmt_capacity_with_system(bytes, CAPACITY_UNIT_SYSTEM)
+            );
+        }
+    }
+
+    #[test]
+    fn capacity_display_can_switch_globally_to_binary_1024_scale() {
+        assert_eq!(
+            fmt_capacity_with_system(512_000_000_000, CapacityUnitSystem::Binary),
+            "476.84GiB"
+        );
+        assert_eq!(
+            fmt_capacity_with_system(10_485_760, CapacityUnitSystem::Binary),
+            "10.00MiB"
+        );
+        assert_eq!(
+            fmt_capacity_with_system(512_000_000_000, CapacityUnitSystem::Decimal),
+            "512.00GB"
+        );
     }
 
     #[test]

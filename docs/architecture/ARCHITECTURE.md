@@ -4,24 +4,31 @@
 
 ## 分层
 
-`CLI / TUI -> application/service -> provision + protocol + backup -> platform + disk I/O`
+`CLI / TUI -> application/service -> domain + provision + protocol + backup -> platform + disk I/O`
+
+`lib.rs` 只公开被 CLI/TUI、集成测试及 HIL 示例直接使用的稳定业务边界；`backup_cli`、`build_info`、`elevate`、`plist` 等入口内部实现为 crate 内可见。
 
 - `src/cli*.rs`：CLI 参数解析与文本入口；公开命令目录统一由 `src/command_spec.rs` 描述，并供 help/completion 共用。
-- `src/tui/`：交互式前端；制盘、检查、备份、设备工作区分别维护状态/渲染/任务逻辑，不直接实现裸盘安全策略。
-- `src/application/`：CLI/TUI 共用应用服务；制盘按 `prepare/commit/export` 分离，`TargetSession` 统一写盘状态转换，`EvidenceSource` 统一物理盘/EDPB 只读证据入口。
+- `src/tui/`：交互式前端；`controller` 统一解释生产与演示模式的 `TuiAction` 和当前控件角色，真实外部副作用由生产任务适配器执行，演示模式只能消费内存夹具；制盘、检查、备份、设备工作区不直接实现裸盘安全策略。
+- `src/application/`：CLI/TUI 共用应用服务；制盘按 `prepare/commit/export` 分离，`TargetSession` 统一写盘状态转换，`EvidenceSource` 统一物理盘/EDPB 只读证据入口；`post_restore` 分别处理只读评估、分区格式化和加密分区重建。
+- `src/media_identity.rs`、`src/partition_table.rs`、`src/disk_layout.rs`、`src/backup_coverage.rs`：UI-neutral 领域/读模型与纯算法；`application` 仅保留兼容 re-export 和 use-case 编排，`diskio`/`edpb`/`disk_scan` 不得反向依赖 application。
+- `src/media_identity_observer.rs`：只读身份观察服务，可读取协议镜像和硬件探测但没有任何写盘状态转换入口。
 - `src/provision/`：纯内存制盘领域模型与验证器；Plain 与官方 mode0～3 都通过统一 `ProvisionRequest` 进入应用层。
+- `src/filesystem/`：统一文件系统驱动领域；FAT12/FAT16/FAT32/exFAT/NTFS 共享识别和元信息接口，当前第一方格式化、读回和文件级分析只开放 FAT16/exFAT。
 - `src/protocol/`：LBA0～12、IIR、LCE 的类型化协议模型；`protocol::semantic` 提供跨业务语义，不包含 UI 字段名、颜色或渲染结构。
 - `src/diskio/`：块设备、写事务、备份配置、备份目录和备份创建按职责拆分。
-- `src/backup_*` / `src/edpb.rs`：元数据/深度备份与自包含 EDPB 容器。
+- `src/backup_*` / `src/edpb/`：元数据备份与自包含 EDPB 容器；容器模型、编解码、身份、写入、读取和校验按职责分离。
 - `src/platform/`：macOS/Linux/Windows 的设备、锁定、卸载和平台探测边界。
+- `src/tui/operation_progress_render.rs` 与 `operation_progress_status.rs`：备份、恢复、制盘共用的长操作进度页面；业务百分比和阶段计数来自应用事件，前端只渲染。
+- `src/disk_scan.rs` 只负责设备只读扫描；CLI 列表排版位于 `src/disk_scan_render.rs`。`src/text_width.rs` 提供无终端依赖的显示宽度与填充原语。
 
 ## 读写边界
 
-只读路径使用只读设备句柄；`list/info/inspect/backup create/deep` 不进入写盘准备流程。真实写盘必须经 `TargetSession<ReadOnly> -> TargetSession<PreparedWrite> -> TargetSession<WriteLocked>` 显式状态转换，并保持系统盘保护、USB 整盘确认、写前备份、卸载/锁卷、重新打开后的身份复核、原子写、同步/读回、失败回滚。
+只读路径使用只读设备句柄；`list/info/inspect/backup create` 不进入写盘准备流程。真实写盘必须经 `TargetSession<ReadOnly> -> TargetSession<PreparedWrite> -> TargetSession<WriteLocked>` 显式状态转换，并保持系统盘保护、USB 整盘确认、卸载/锁卷、重新打开后的身份复核、同步/读回、失败回滚。制盘在写盘前强制创建元数据备份；恢复后的格式化和密钥域重建是恢复事务之外的独立授权操作。
 
 CLI 与 TUI 的制盘能力共用同一 `ProvisionRequest::{Official, Plain}` 和 prepare/commit 服务。Plain 是普通 MBR 磁盘目标，不属于官方 mode 编号，也不得映射为 mode4。
 
-应用层通过 `WriteEvent`、`BackupReport`、制盘报告和检查工作区返回结构化结果；ANSI/CLI 文本渲染位于前端层。TUI 后台任务只传递结构化结果，不直接向终端写输出；进入关键写入阶段后，退出请求延迟到安全收尾完成。
+应用层通过 `WriteEvent`、`MetadataBackupReport`、`MetadataRestoreOutcome`、`PostRestoreAssessment`、制盘报告和检查工作区返回结构化结果；ANSI/CLI 文本渲染位于前端层。备份、恢复、制盘的长操作统一投影为 `OperationRunState`：`OverallProgress` 表示总体基点，`StageProgress` 表示逻辑步骤 `N/M`，`WorkProgress` 表示当前 sector/byte 工作量。高频快照在运输层合并，终端正常刷新上限约 20 Hz；警告、错误、回滚和阶段边界保持可见。TUI 后台任务只传递结构化结果，不直接向终端写输出；进入关键写入阶段后，退出请求延迟到安全收尾完成。
 
 ## 协议与语义事实源
 
@@ -33,11 +40,11 @@ LBA0～12 的类型化解析器、配置类型轴和跨 LBA 语义位于 `src/pr
 
 当前正式备份格式是自包含、自校验 `.edpb`。运行时不再读取或生成旧 `.bin/.md5/.sha256` 备份链；已经迁移成 EDPB 的历史快照仍可按 `LegacyMigrated` 清单语义只读解析。
 
-元数据备份保存 LBA0～12 和必要证据区；深度备份在此基础上通过 `PartitionReader` 只读获取文件系统元数据。当前 FAT16/FAT32/exFAT 可生成目录清单；无法确认的格式采用“无法确认即拒绝继续”的安全策略。
+备份统一使用 v3 `metadata_only` 合约。Plain MBR/GPT 保存分区表原始元数据和类型化几何；EDP 保存 LBA0～12、LBA7 指向的 LCE 与已确认盘尾协议对象。备份不采集文件系统、目录或用户文件；可用 USB 序列号原文保存在 v3 容器中，历史 v1/v2 序列号摘要保持读取兼容。旧版深度备份格式已移除，不再创建、读取、校验或检查。元数据恢复只写回 `restorable` 原始工件并返回类型化报告；后续评估、格式化与密钥域重建分别走独立服务与安全链。
 
 ## 制盘架构
 
-官方 mode0～3 与 Plain 都是正式产品能力。CLI/TUI 均支持 plan/write；可确定性导出的目标共用 image/export 路径。应用层先 prepare 出不可变计划，再由 commit 执行安全写入，领域层不直接打开设备、执行平台命令或提权。
+官方 mode0～3 与 Plain 都是正式产品能力。CLI/TUI 共用只读准备和真实提交服务，可确定性导出的目标共用镜像导出路径。应用层先生成不可变计划，再由提交阶段执行安全写入，领域层不直接打开设备、执行平台命令或提权。已有盘通过区域处理策略选择原样保留、验证保留、密钥重新包装、重建或丢弃。Provision 不读取、暂存或搬运用户文件；语义或几何无法原地兼容的目标区域必须明确重建。备份恢复仍是独立的元数据恢复链，不恢复文件数据。
 
 ## 验证
 

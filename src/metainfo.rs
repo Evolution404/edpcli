@@ -47,7 +47,6 @@ pub struct MetaInfoSummary {
     pub safe6_register: Option<String>,
     pub safe6_checksum: Option<String>,
     pub pdkb_device_id: Option<String>,
-    pub is_nopwd: Option<bool>,
     pub partitions: Vec<PartitionInfo>,
 }
 
@@ -77,15 +76,7 @@ fn context_from_backup_meta(meta: &diskio::BackupMeta) -> SemanticContext {
 }
 
 fn human_bytes(value: u64) -> String {
-    if value >= 1_000_000_000 {
-        format!("{:.2} GB", value as f64 / 1_000_000_000.0)
-    } else if value >= 1_000_000 {
-        format!("{:.2} MB", value as f64 / 1_000_000.0)
-    } else if value >= 1_000 {
-        format!("{:.2} KB", value as f64 / 1_000.0)
-    } else {
-        format!("{} B", value)
-    }
+    crate::common::fmt_capacity(value)
 }
 
 fn partition_info(partition: semantic::PartitionSemantics) -> PartitionInfo {
@@ -162,19 +153,6 @@ where
             .map(partition_info),
     );
 
-    let is_nopwd = base.device_id.as_deref().and_then(|device_id| {
-        let snapshot = |lba| match lba {
-            0 => Ok(raw0.clone()),
-            6 => Ok(raw6.clone()),
-            12 => Ok(raw12.clone()),
-            _ => Err(crate::common::EdpCliError::new(
-                crate::common::EXIT_IO,
-                format!("错误: info 免密判断不应读取 LBA{lba}"),
-            )),
-        };
-        crate::sectors::looks_nopwd(&snapshot, device_id).ok()
-    });
-
     Ok(MetaInfoSummary {
         is_plain: false,
         onlyid,
@@ -209,7 +187,6 @@ where
             }
         }),
         pdkb_device_id: semantic::pdkb_device_id(&raw11, &base),
-        is_nopwd,
         partitions: partition_rows,
     })
 }
@@ -283,7 +260,7 @@ pub fn render_with_source(summary: &MetaInfoSummary, source: Option<&str>) -> St
         out.push_str(&format!(
             "  {}  {}\n",
             crate::ui::dim(&crate::ui::pad_to("容量", 18)),
-            crate::ui::magenta(&crate::common::fmt_gb(size))
+            crate::ui::magenta(&crate::common::fmt_capacity(size))
         ));
     }
     row(
@@ -354,14 +331,6 @@ pub fn render_with_source(summary: &MetaInfoSummary, source: Option<&str>) -> St
         &mut out,
         "EDP/cems",
         summary.device_id.as_ref().map(|_| "已识别"),
-        crate::ui::green,
-    );
-    row(
-        &mut out,
-        "免密",
-        summary
-            .is_nopwd
-            .map(|value| if value { "是" } else { "否" }),
         crate::ui::green,
     );
     row(

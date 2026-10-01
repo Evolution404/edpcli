@@ -321,14 +321,14 @@ fn documentation_keeps_the_official_provisioning_chain_and_strict_rules() {
         "Cylinders*TracksPerCylinder*SectorsPerTrack*BytesPerSector",
         "22/22",
         "不能单独把字段升级为完全闭环",
-        "禁止把免密转换盘",
+        "禁止把mode1 重制盘",
         "19 份 SHA-256 唯一",
         "20份唯一金标",
         "完整 6656B SHA-256 去重",
         "audit/protocol/gold/strict-encrypted/",
-        "audit/protocol/gold/authentic-nopwd/",
+        "audit/protocol/gold/authentic-mode1/",
         "/Users/zhangyuxi/.edpcli-backup",
-        "/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/no_password_disk4",
+        "/Users/zhangyuxi/Desktop/u_disk/analyze/disk_data/sandisk_mode1_capture",
         "用于产品回归，**没有协议参考价值**",
     ] {
         assert!(

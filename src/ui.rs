@@ -91,10 +91,6 @@ pub fn render_write_event(event: &crate::application::WriteEvent) -> String {
 
     match event {
         WriteEvent::BackupCreated { path } => format!("{}  {}\n", green("备份"), path.display()),
-        WriteEvent::BackupCreatedIsNopwd => format!(
-            "{}\n",
-            yellow("注意: 本份备份为【免密状态】快照 — 还原它不会回到加密原盘。")
-        ),
         WriteEvent::RestoreMatchesHeader {
             disk,
             onlyid,
@@ -103,31 +99,16 @@ pub fn render_write_event(event: &crate::application::WriteEvent) -> String {
         WriteEvent::RestoreMatchRow {
             index,
             time,
-            is_nopwd,
             file_name,
-        } => format!(
-            "  [{}] {}   {}   {}\n",
-            index,
-            time,
-            if *is_nopwd {
-                "免密状态"
-            } else {
-                "加密原盘"
-            },
-            file_name
-        ),
+        } => format!("  [{}] {}   {}\n", index, time, file_name),
         WriteEvent::RestoreSelectionRetry { message } => format!("{}\n", yellow(message)),
         WriteEvent::BackupShaVerified { digest } => {
             format!("{}  {}\n", green("SHA-256 校验通过"), digest)
         }
-        WriteEvent::RestoreSnapshotNopwdWarning => format!(
-            "{}\n",
-            yellow("注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。")
-        ),
         WriteEvent::RestoreDryRunNotice { path, disk } => format!(
             "{}\n",
             dim(&format!(
-                "[dry-run] 将还原 {} → disk{} LBA0-12 ({}B) — 未写入(免密快照不作还原)。",
+                "[dry-run] 将还原 {} → disk{} LBA0-12 ({}B) — 未写入。",
                 path.display(),
                 disk,
                 crate::common::METADATA_IMAGE_LEN
@@ -139,7 +120,29 @@ pub fn render_write_event(event: &crate::application::WriteEvent) -> String {
             truncate_mid(&path.display().to_string(), 64)
         ),
         WriteEvent::RestoreWriteCompleted => {
-            format!("{}\n", green("已还原, 读回校验通过。请拔出重插。"))
+            format!(
+                "{}\n{}\n",
+                green("元数据恢复成功，读回校验通过。"),
+                yellow("文件系统未恢复；部分分区可能需要格式化。")
+            )
+        }
+        WriteEvent::PostRestoreAssessment { assessment } => {
+            use crate::application::post_restore::PostRestorePartitionState;
+            let mut out = String::new();
+            for partition in &assessment.partitions {
+                let state = match partition.state {
+                    PostRestorePartitionState::Usable => "可用",
+                    PostRestorePartitionState::NeedsFormat => "需要格式化",
+                    PostRestorePartitionState::PasswordRequired => "需要原密码",
+                    PostRestorePartitionState::CryptoMetadataInvalid => "加密元数据异常",
+                    PostRestorePartitionState::Unsupported => "无法可靠判断",
+                };
+                out.push_str(&format!("分区 {}  {}\n", partition.index, state));
+            }
+            if assessment.partitions.is_empty() {
+                out.push_str("恢复后状态：无法可靠判断\n");
+            }
+            out
         }
     }
 }
@@ -267,61 +270,8 @@ pub fn render_table(headers: &[&str], rows: &[Vec<TableCell>]) -> String {
 // ══════════════════════════════════════════════════════════════════
 // 显示宽度(East Asian Width 简化版: CJK=2, 零宽=0, 其余=1)
 // ══════════════════════════════════════════════════════════════════
-fn char_width(c: char) -> usize {
-    let u = c as u32;
-    // 零宽: 控制字符/组合附标/变体选择符
-    if u < 0x20
-        || u == 0x7F
-        || (0x0300..=0x036F).contains(&u)
-        || (0xFE00..=0xFE0F).contains(&u)
-        || u == 0x200B
-    {
-        return 0;
-    }
-    // 东亚宽: 谚文 Jamo / CJK 部首与符号(含全角标点) / 假名 / CJK 兼容 /
-    // 扩展A / 统一表意 / 彝文 / 谚文音节 / 兼容表意 / 兼容形式 /
-    // 全角 ASCII 与符号 / 扩展B+
-    if (0x1100..=0x115F).contains(&u)
-        || (0x2E80..=0x303E).contains(&u)
-        || (0x3041..=0x33FF).contains(&u)
-        || (0x3400..=0x4DBF).contains(&u)
-        || (0x4E00..=0x9FFF).contains(&u)
-        || (0xA000..=0xA4CF).contains(&u)
-        || (0xAC00..=0xD7A3).contains(&u)
-        || (0xF900..=0xFAFF).contains(&u)
-        || (0xFE30..=0xFE4F).contains(&u)
-        || (0xFF00..=0xFF60).contains(&u)
-        || (0xFFE0..=0xFFE6).contains(&u)
-        || (0x20000..=0x3FFFD).contains(&u)
-    {
-        return 2;
-    }
-    1
-}
-
-pub fn disp_width(s: &str) -> usize {
-    s.chars().map(char_width).sum()
-}
-
-/// 左对齐右填充到显示宽度 width。
-pub fn pad_to(s: &str, width: usize) -> String {
-    let w = disp_width(s);
-    if w >= width {
-        s.to_string()
-    } else {
-        format!("{}{}", s, " ".repeat(width - w))
-    }
-}
-
-/// 右对齐左填充到显示宽度 width。
-pub fn pad_left(s: &str, width: usize) -> String {
-    let w = disp_width(s);
-    if w >= width {
-        s.to_string()
-    } else {
-        format!("{}{}", " ".repeat(width - w), s)
-    }
-}
+use crate::text_width::char_width;
+pub use crate::text_width::{disp_width, pad_left, pad_to};
 
 /// 超宽时中间 … 截断(保首尾, 按显示宽度计)。
 pub fn truncate_mid(s: &str, max: usize) -> String {
@@ -355,31 +305,19 @@ pub fn truncate_mid(s: &str, max: usize) -> String {
 }
 
 // CLI table renderers retained as presentation-only helpers. Application services never depend on CLI routing.
-/// restore 选单条目(时间已格式化 + 是否免密快照)。
-pub fn backup_menu_str(entries: &[(String, bool)]) -> String {
+/// restore 选单条目。
+pub fn backup_menu_str(entries: &[String]) -> String {
     let rows = entries
         .iter()
         .enumerate()
-        .map(|(i, (time, is_nopwd))| {
+        .map(|(i, time)| {
             vec![
                 crate::ui::TableCell::right((i + 1).to_string(), crate::ui::Tone::BoldCyan),
                 crate::ui::TableCell::left(time.clone(), crate::ui::Tone::Plain),
-                crate::ui::TableCell::left(
-                    if *is_nopwd {
-                        "免密状态"
-                    } else {
-                        "加密原盘"
-                    },
-                    if *is_nopwd {
-                        crate::ui::Tone::Green
-                    } else {
-                        crate::ui::Tone::Plain
-                    },
-                ),
             ]
         })
         .collect::<Vec<_>>();
-    crate::ui::render_table(&["编号", "时间", "状态"], &rows)
+    crate::ui::render_table(&["编号", "时间"], &rows)
 }
 
 /// 多 USB 盘选单。
@@ -392,7 +330,7 @@ pub fn disk_menu_str(disks: &[crate::sysinfo::ExtDisk]) -> String {
                 crate::ui::TableCell::right((i + 1).to_string(), crate::ui::Tone::BoldCyan),
                 crate::ui::TableCell::left(format!("disk{}", d.n), crate::ui::Tone::Bold),
                 crate::ui::TableCell::right(
-                    crate::common::fmt_gb(d.size),
+                    crate::common::fmt_capacity(d.size),
                     crate::ui::Tone::Magenta,
                 ),
                 crate::ui::TableCell::left(format!("{}:{}", d.vid, d.pid), crate::ui::Tone::Yellow),

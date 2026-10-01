@@ -10,11 +10,11 @@
 ## 当前架构
 
 - [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md)：当前模块边界、只读/写入安全边界、CLI/TUI/应用层/平台层关系。
+- [`ui/TUI.md`](ui/TUI.md)：当前 TUI 工作区、键位、长操作进度、表格与安全交互规范。
 
 ## 备份
 
 - [`backup/EDPB_FORMAT_V1.md`](backup/EDPB_FORMAT_V1.md)：EDPB v1 容器与 `Artifact`/`Region` 规范。
-- [`backup/DEEP_BACKUP_V1.md`](backup/DEEP_BACKUP_V1.md)：深度备份的只读文件系统目录清单、解密和证据边界。
 
 ## EDP 协议
 
@@ -25,7 +25,7 @@
 
 ## 制盘
 
-- [`provisioning/PROVISIONING.md`](provisioning/PROVISIONING.md)：制盘功能的唯一长期事实源，同时记录当前已实现能力与未来官方四模式/转换路线图，并严格区分两者。
+- [`provisioning/PROVISIONING.md`](provisioning/PROVISIONING.md)：当前五种目标、布局、数据保留/重建、密钥域、文件系统能力与写盘安全规范。
 
 ## 证据目录
 
@@ -33,7 +33,7 @@
 
 ## 文档规则
 
-1. 当前行为只写入上述标准文档；不要再创建 `*_PLAN_*`、`HANDOFF_*`、`LIVE_STATUS` 等平行事实源。
+1. 当前行为只写入上述标准文档；不要再创建 `*_PLAN_*`、`*_AUDIT_*`、`HANDOFF_*`、`LIVE_STATUS` 等平行事实源。
 2. 协议语义优先级：机器账本/字段目录/测试 > 协议总文档 > 专题说明；历史分析笔记不能覆盖标准结论。
 3. 过程性调查若仍有长期证据价值，放到 `audit/protocol/notes/`，并明确它是来源/边界说明而非当前状态表。
 4. 文档中的“已支持/已闭环”必须能指向代码和测试；未实现能力不得以计划语气伪装成当前功能。

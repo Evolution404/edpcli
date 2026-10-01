@@ -20,78 +20,31 @@ pub enum ProvisionBarKind {
     Compatibility,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PlainProvisionFieldKind {
-    StartLba,
-    Capacity,
-    Filesystem,
-    VolumeLabel,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ProvisionPasswordVerificationState {
+    #[default]
+    Idle,
+    Verifying,
+    Failed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProvisionFieldId {
-    Plain {
-        partition: usize,
-        kind: PlainProvisionFieldKind,
-    },
-    LabelId,
-    User,
-    Department,
-    Safe6Label,
-    SourcePassword(crate::provision::KeyDomainRole),
-    TargetPassword(crate::provision::KeyDomainRole),
-    Capacity(crate::provision::PartitionRole),
-    StartLba(crate::provision::PartitionRole),
-    FormatEnabled(crate::provision::PartitionRole),
-    Filesystem(crate::provision::PartitionRole),
-    VolumeLabel(crate::provision::PartitionRole),
-    ForceChangePassword,
-    CancelPasswordComplexityCheck,
-    MaxPasswordErrors(crate::provision::KeyDomainRole),
-}
+#[path = "lba8_identity_field.rs"]
+mod lba8_identity_field;
+pub(crate) use lba8_identity_field::Lba8IdentityField;
+#[path = "field_model.rs"]
+mod field_model;
+pub(crate) use field_model::{
+    PlainProvisionFieldKind, ProvisionFieldCapabilities, ProvisionFieldDescriptor,
+    ProvisionFieldId, ProvisionFieldSection, ProvisionRegionFocus,
+};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ProvisionFieldSection {
-    Identity,
-    PartitionLayout,
-    PasswordDomain,
-    Formatting,
-    PasswordPolicy,
-    PlainPartition(usize),
-}
-
-impl ProvisionFieldSection {
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Identity => "身份信息",
-            Self::PartitionLayout => "分区布局",
-            Self::PasswordDomain => "密码域",
-            Self::Formatting => "格式化（可选）",
-            Self::PasswordPolicy => "密码策略",
-            Self::PlainPartition(0) => "普通分区 P1",
-            Self::PlainPartition(1) => "普通分区 P2",
-            Self::PlainPartition(2) => "普通分区 P3",
-            Self::PlainPartition(3) => "普通分区 P4",
-            Self::PlainPartition(_) => "普通分区",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ProvisionFieldCapabilities {
-    pub editable: bool,
-    pub secret: bool,
-    pub toggle: bool,
-    pub fill_capacity: bool,
-    pub verify_source_password: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ProvisionFieldDescriptor {
-    pub id: ProvisionFieldId,
-    pub section: ProvisionFieldSection,
-    pub capabilities: ProvisionFieldCapabilities,
-}
+#[path = "result_model.rs"]
+mod result_model;
+pub use result_model::{ProvisionResultPartition, ProvisionResultSnapshot};
+#[path = "result_geometry.rs"]
+mod result_geometry;
+#[path = "result_interaction.rs"]
+mod result_interaction;
 
 impl ProvisionKind {
     pub const ALL: [Self; 5] = [
@@ -129,12 +82,20 @@ impl ProvisionKind {
     pub const fn description(self) -> &'static str {
         self.target().description()
     }
+
+    pub const fn disk_kind(self) -> crate::provision::DiskProvisionKind {
+        match self {
+            Self::Mode0 => crate::provision::DiskProvisionKind::Mode0,
+            Self::Mode1 => crate::provision::DiskProvisionKind::Mode1,
+            Self::Mode2 => crate::provision::DiskProvisionKind::Mode2,
+            Self::Mode3 => crate::provision::DiskProvisionKind::Mode3,
+            Self::Plain => crate::provision::DiskProvisionKind::Plain,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionStage {
-    SelectDisk,
-    Menu,
     Form,
     Planning,
     Review,
@@ -147,52 +108,111 @@ pub enum ProvisionStage {
 
 pub type ProvisionPrepared = crate::application::provision::PreparedProvision;
 
+#[path = "advanced_identity.rs"]
+mod advanced_identity;
 #[path = "editor.rs"]
 mod editor;
+#[path = "execution_state.rs"]
+mod execution_state;
+#[path = "field_input.rs"]
+mod field_input;
+#[path = "field_layout.rs"]
+mod field_layout;
+#[path = "field_presentation.rs"]
+mod field_presentation;
 #[path = "fields.rs"]
 mod fields;
 #[path = "fields_access.rs"]
 mod fields_access;
 #[path = "form.rs"]
 mod form;
+#[path = "form_entry.rs"]
+mod form_entry;
+#[path = "insert_mode.rs"]
+mod insert_mode;
 #[path = "key_domains.rs"]
 mod key_domains;
+#[path = "option_editor.rs"]
+mod option_editor;
+#[path = "plan_completion.rs"]
+mod plan_completion;
+#[path = "transitions.rs"]
+mod transitions;
+use transitions::{ProvisionFormViewSnapshot, ProvisionReviewViewSnapshot};
 #[path = "layout.rs"]
 mod layout;
 #[path = "layout_presentation.rs"]
 mod layout_presentation;
+#[path = "navigation_model.rs"]
+mod navigation_model;
+pub use navigation_model::ProvisionSurface;
 #[path = "pane.rs"]
 mod pane;
+#[path = "password_model.rs"]
+mod password_model;
+#[path = "password_target_state.rs"]
+mod password_target_state;
+#[path = "password_verification.rs"]
+mod password_verification;
 #[path = "plain_editor.rs"]
 mod plain_editor;
+#[path = "preflight.rs"]
+mod preflight;
+#[cfg(test)]
+#[path = "preflight_tests.rs"]
+mod preflight_tests;
 #[path = "review.rs"]
 mod review;
+#[path = "review_region_projection.rs"]
+mod review_region_projection;
 #[path = "run.rs"]
 mod run;
-pub(crate) use review::{ProvisionReviewRowKind, ProvisionReviewTone};
-pub use run::ProvisionRunState;
+#[path = "scheme_picker_state.rs"]
+mod scheme_picker_state;
+#[path = "source_password_state.rs"]
+mod source_password_state;
+pub(crate) use review::{
+    ProvisionConfirmationAction, ProvisionConfirmationDataEffect,
+    ProvisionConfirmationFilesystemEffect, ProvisionConfirmationPasswordEffect,
+    ProvisionConfirmationRegion, ProvisionConfirmationViewModel,
+};
 #[path = "validation.rs"]
 mod validation;
 
-use form::{toggle_supported_fs, ProvisionInputPolicy};
+use form::{shift_supported_fs, toggle_supported_fs, ProvisionInputPolicy};
 pub use form::{PlainPartitionForm, PlainProvisionForm, ProvisionForm};
 
 #[derive(Debug, Clone)]
 pub struct ProvisionState {
     pub stage: ProvisionStage,
     pub kind: ProvisionKind,
-    pub menu_selected: usize,
+    pub scheme_selected: usize,
+    pub scheme_picker_open: bool,
     pub field_selected: usize,
     pub field_cursor: usize,
+    pub advanced_identity_open: bool,
+    pub(crate) source_password_edit_dirty: bool,
+    pub(crate) share_source_password_revision: u64,
+    pub(crate) encrypt_source_password_revision: u64,
+    pub(crate) share_source_verification: ProvisionPasswordVerificationState,
+    pub(crate) encrypt_source_verification: ProvisionPasswordVerificationState,
+    pub(super) target_password_modes: password_verification::TargetPasswordModeState,
     pub form: ProvisionForm,
     pub plain_form: PlainProvisionForm,
     pub prepared: Option<ProvisionPrepared>,
     pub confirmation: String,
     pub export_path: String,
-    pub message: Option<String>,
+    pub message: Option<crate::tui::ui::UiMessage>,
     pub result_status: Option<crate::application::provision::ProvisionExecutionStatus>,
-    pub run: Option<ProvisionRunState>,
+    pub result_outcome: Option<crate::application::provision::ProvisionWriteOutcome>,
+    pub result_plan: Option<ProvisionResultSnapshot>,
+    pub result_workbench: crate::tui::result_workbench::ResultWorkbenchState,
+    pub run: Option<crate::application::progress::OperationRunState>,
     pub pane_focus: crate::tui::pane::PaneFocus,
+    pub review_region_selected: usize,
+    pub review_details_expanded: bool,
+    form_view_snapshot: Option<ProvisionFormViewSnapshot>,
+    review_view_snapshot: Option<ProvisionReviewViewSnapshot>,
     pub(super) target_disk: Option<u32>,
     form_initialized_for: Option<(u32, u64, Option<String>, ProvisionKind)>,
 }
@@ -200,11 +220,19 @@ pub struct ProvisionState {
 impl Default for ProvisionState {
     fn default() -> Self {
         Self {
-            stage: ProvisionStage::Menu,
+            stage: ProvisionStage::Form,
             kind: ProvisionKind::Mode0,
-            menu_selected: 0,
+            scheme_selected: 0,
+            scheme_picker_open: false,
             field_selected: 0,
             field_cursor: 0,
+            advanced_identity_open: false,
+            source_password_edit_dirty: false,
+            share_source_password_revision: 0,
+            encrypt_source_password_revision: 0,
+            share_source_verification: ProvisionPasswordVerificationState::Idle,
+            encrypt_source_verification: ProvisionPasswordVerificationState::Idle,
+            target_password_modes: password_verification::TargetPasswordModeState::default(),
             form: ProvisionForm::default(),
             plain_form: PlainProvisionForm::default(),
             prepared: None,
@@ -212,8 +240,15 @@ impl Default for ProvisionState {
             export_path: String::new(),
             message: None,
             result_status: None,
+            result_outcome: None,
+            result_plan: None,
+            result_workbench: crate::tui::result_workbench::ResultWorkbenchState::default(),
             run: None,
             pane_focus: crate::tui::pane::PaneFocus::provision_form(),
+            review_region_selected: 0,
+            review_details_expanded: false,
+            form_view_snapshot: None,
+            review_view_snapshot: None,
             target_disk: None,
             form_initialized_for: None,
         }
@@ -225,293 +260,26 @@ impl AppState {
         &mut self.provision
     }
 
-    pub fn provision_begin_insert(&mut self) -> bool {
-        if self.workspace != Workspace::Provision
-            || self.provision.stage != ProvisionStage::Form
-            || !self.provision_selected_field_is_editable()
-        {
-            return false;
-        }
-        self.input_mode = InputMode::Insert;
-        self.provision_sync_cursor_to_end();
-        true
-    }
-
-    pub fn provision_end_insert(&mut self) {
-        if self.input_mode == InputMode::Insert {
-            self.input_mode = InputMode::Normal;
-        }
+    pub const fn provision_target_disk(&self) -> Option<u32> {
+        self.provision.target_disk
     }
 
     pub fn provision_reset(&mut self) {
-        self.input_mode = InputMode::Normal;
+        self.shell.input_mode = InputMode::Normal;
         let selected = self
             .provision
-            .menu_selected
+            .scheme_selected
             .min(ProvisionKind::ALL.len() - 1);
         let target_disk = self.provision.target_disk;
         self.provision = ProvisionState::default();
-        self.provision.menu_selected = selected;
+        self.provision.scheme_selected = selected;
         self.provision.kind = ProvisionKind::ALL[selected];
         self.provision.target_disk = target_disk;
-        self.pinned_disk = target_disk;
-        if self.workspace == Workspace::Provision {
-            if target_disk.is_some() {
-                self.provision.stage = ProvisionStage::Menu;
-                self.set_item_count(ProvisionKind::ALL.len());
-                self.selected = selected;
-            } else {
-                self.provision.stage = ProvisionStage::SelectDisk;
-                self.set_item_count(self.provision_selectable_devices().count());
-                self.selected = 0;
-            }
-        }
-    }
-
-    pub fn provision_begin_selected(&mut self) -> ProvisionKind {
-        let index = self.selected.min(ProvisionKind::ALL.len() - 1);
-        let kind = ProvisionKind::ALL[index];
-        if self.selected_device().is_none() {
-            self.provision.stage = ProvisionStage::SelectDisk;
-            self.provision.message = Some("请先在制盘页明确选择 USB 目标盘。".into());
-            self.set_item_count(self.provision_selectable_devices().count());
-            return kind;
-        }
-        self.provision.menu_selected = index;
-        self.provision.kind = kind;
-        self.provision.field_selected = 0;
-        self.provision.field_cursor = 0;
-        self.provision.confirmation.clear();
-        self.provision.message = None;
-        self.provision.prepared = None;
-        self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_form();
-        let current_target = self
-            .selected_device()
-            .map(|row| (row.disk, row.size, row.device_id.clone(), kind));
-        if self.provision.form_initialized_for == current_target {
-            self.provision.stage = ProvisionStage::Form;
-            self.provision_sync_cursor_to_end();
-            return kind;
-        }
-        if kind == ProvisionKind::Plain {
-            let total_sectors = self
-                .selected_device()
-                .map(|row| row.size / crate::common::SECTOR as u64)
-                .unwrap_or_default();
-            match PlainProvisionForm::default_for_disk(total_sectors) {
-                Ok(form) => {
-                    self.provision.plain_form = form;
-                    self.provision.form_initialized_for = current_target;
-                    self.provision.stage = ProvisionStage::Form;
-                    self.provision.message = None;
-                    self.provision_sync_cursor_to_end();
-                }
-                Err(message) => {
-                    self.provision.plain_form = PlainProvisionForm::default();
-                    self.provision.stage = ProvisionStage::Form;
-                    self.provision.message = Some(message);
-                }
-            }
-            return kind;
-        }
-        self.provision.form = ProvisionForm::default();
-        let defaults = self.selected_device().map(|row| {
-            (
-                row.onlyid.clone(),
-                row.user.clone().unwrap_or_default(),
-                row.dept.clone().unwrap_or_default(),
-                row.label.clone(),
-                row.force_change_password,
-                row.cancel_password_complexity_check,
-                row.max_share_password_errors,
-                row.max_encrypt_password_errors,
-            )
-        });
-        let scanned_onlyid = defaults
-            .as_ref()
-            .and_then(|(onlyid, _, _, _, _, _, _, _)| onlyid.clone())
-            .filter(|value| !value.trim().is_empty());
-        self.provision.form.label_id = scanned_onlyid.unwrap_or_else(|| {
-            crate::provision::OnlyId::random_candidate()
-                .map(|value| value.text().to_string())
-                .unwrap_or_else(|_| "1".into())
-        });
-        if let Some((
-            _,
-            user,
-            dept,
-            label,
-            force_change_password,
-            cancel_password_complexity_check,
-            max_share_password_errors,
-            max_encrypt_password_errors,
-        )) = defaults
-        {
-            self.provision.form.user = user;
-            self.provision.form.dept = dept;
-            if let Some(label) = label.filter(|value| !value.trim().is_empty()) {
-                self.provision.form.label = label;
-            }
-            if let Some(force_change_password) = force_change_password {
-                self.provision.form.force_change_password = force_change_password;
-            }
-            if let Some(cancel) = cancel_password_complexity_check {
-                self.provision.form.cancel_password_complexity_check = cancel;
-            }
-            if let Some(value) = max_share_password_errors {
-                self.provision.form.max_share_password_errors = value.to_string();
-            }
-            if let Some(value) = max_encrypt_password_errors {
-                self.provision.form.max_encrypt_password_errors = value.to_string();
-            }
-        }
-        let target_mode = kind
-            .target()
-            .official_mode()
-            .expect("TUI official mode menu cannot select Plain");
-        let prefill = self.selected_device().and_then(|row| {
-                let source = row.existing_profile_for_prefill();
-                let total = row.size / crate::common::SECTOR as u64;
-                let lce = crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity(total, crate::common::SECTOR as u32)?;
-                crate::provision::prefill_for_target_mode(source.as_ref(), target_mode, lce.start_lba, crate::common::SECTOR as u64).ok()
-            });
-        if let Some(prefill) = prefill {
-            self.provision.form.apply_prefill(&prefill);
-        }
-        self.provision.form_initialized_for = current_target;
-        self.provision.stage = ProvisionStage::Form;
-        self.provision_sync_cursor_to_end();
-        kind
-    }
-
-    pub fn provision_begin_export(&mut self) {
-        if self.provision.stage != ProvisionStage::Review || self.provision.prepared.is_none() {
-            return;
-        }
-        self.provision.export_path = match self.provision.kind.mode() {
-            Some(mode) => format!("./edp-mode{mode}.img"),
-            None => "./edp-plain.img".into(),
-        };
-        self.provision.stage = ProvisionStage::ExportPath;
-        self.input_mode = InputMode::Insert;
-        self.provision.message = None;
-    }
-
-    pub fn provision_export_push_char(&mut self, ch: char) {
-        if self.provision.stage == ProvisionStage::ExportPath
-            && !ch.is_control()
-            && self.provision.export_path.chars().count() < 512
-        {
-            self.provision.export_path.push(ch);
-            self.provision.message = None;
-        }
-    }
-
-    pub fn provision_export_backspace(&mut self) {
-        if self.provision.stage == ProvisionStage::ExportPath {
-            self.provision.export_path.pop();
-            self.provision.message = None;
-        }
-    }
-
-    pub fn provision_take_export(
-        &mut self,
-    ) -> Option<(
-        crate::application::provision::PreparedProvision,
-        std::path::PathBuf,
-    )> {
-        if self.provision.stage != ProvisionStage::ExportPath {
-            return None;
-        }
-        let path = self.provision.export_path.trim();
-        if path.is_empty() {
-            self.provision.message = Some("镜像导出路径不能为空".into());
-            return None;
-        }
-        let prepared = self.provision.prepared.as_ref()?.clone();
-        let path = std::path::PathBuf::from(path);
-        self.provision.stage = ProvisionStage::Exporting;
-        self.provision.message = Some(format!("正在后台导出 {}…", path.display()));
-        Some((prepared, path))
-    }
-
-    pub fn provision_finish_export(&mut self, result: Result<std::path::PathBuf, String>) {
-        self.provision.stage = ProvisionStage::Review;
-        self.input_mode = InputMode::Normal;
-        self.provision.message = Some(match result {
-            Ok(path) => format!("镜像导出完成：{}", path.display()),
-            Err(message) => message,
-        });
-    }
-
-    pub fn provision_cancel_export(&mut self) {
-        if self.provision.stage == ProvisionStage::ExportPath {
-            self.provision.stage = ProvisionStage::Review;
-            self.provision.message = None;
-            self.input_mode = InputMode::Normal;
-        }
-    }
-
-    pub fn provision_begin_confirm(&mut self) {
-        if self.provision.prepared.is_some() {
-            self.provision.stage = ProvisionStage::Confirm;
-            self.input_mode = InputMode::Confirm;
-            self.provision.confirmation.clear();
-            self.provision.message = None;
-        }
-    }
-
-    pub fn provision_push_confirmation(&mut self, ch: char) {
-        if self.provision.stage == ProvisionStage::Confirm && self.provision.confirmation.len() < 16
-        {
-            self.provision.confirmation.push(ch);
-            self.provision.message = None;
-        }
-    }
-
-    pub fn provision_backspace_confirmation(&mut self) {
-        if self.provision.stage == ProvisionStage::Confirm {
-            self.provision.confirmation.pop();
-            self.provision.message = None;
-        }
-    }
-
-    pub fn provision_take_for_write(&mut self) -> Option<ProvisionPrepared> {
-        if self.provision.stage != ProvisionStage::Confirm {
-            return None;
-        }
-        if self.provision.confirmation != "YES" {
-            self.provision.message = Some("必须精确输入 YES 才会执行破坏性写盘".into());
-            return None;
-        }
-        let prepared = self.provision.prepared.take()?;
-        self.provision.stage = ProvisionStage::Running;
-        self.input_mode = InputMode::Normal;
-        self.provision.message = Some("事务写盘进行中；退出请求会延迟到安全检查点".into());
-        self.provision.result_status = None;
-        self.provision.run = Some(ProvisionRunState::new());
-        self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_running();
-        self.critical_operation = true;
-        Some(prepared)
-    }
-
-    pub fn provision_finish_write(
-        &mut self,
-        result: Result<crate::application::provision::ProvisionWriteOutcome, String>,
-    ) {
-        self.critical_operation = false;
-        self.provision.stage = ProvisionStage::Result;
-        self.input_mode = InputMode::Normal;
-        match result {
-            Ok(outcome) => {
-                self.provision.result_status = Some(outcome.execution_status());
-                self.provision.message = Some(outcome.summary_lines().join("\n"));
-            }
-            Err(message) => {
-                self.provision.result_status =
-                    Some(crate::application::provision::ProvisionExecutionStatus::FatalFailure);
-                self.provision.message = Some(message);
-            }
+        self.shell.pinned_disk = target_disk;
+        if self.shell.workspace == Workspace::Provision {
+            self.provision_transition_enter_form();
+            self.provision.scheme_picker_open = false;
+            self.set_item_count(0);
         }
     }
 }

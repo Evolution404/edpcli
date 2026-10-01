@@ -19,11 +19,12 @@ mod macos {
     use edpcli::application::Prompter;
     use edpcli::common::SECTOR;
     use edpcli::diskio::{raw_path, FileDev, SectorDev};
+    use edpcli::filesystem::FilesystemKind;
     use edpcli::provision::{
         parse_existing_provision, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
-        OfficialFilesystemFormat, OfficialPartitionMode, PartitionAction, PartitionRole,
-        ProvisionImage, ProvisionTarget, RegionDisposition, SourcePasswordKnowledge,
-        TargetIdentity, DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_SAFE6_LABEL,
+        OfficialPartitionMode, PartitionAction, PartitionRole, ProvisionImage, ProvisionTarget,
+        RegionDisposition, SourcePasswordKnowledge, TargetIdentity, DEFAULT_KEY_DOMAIN_PASSWORD,
+        DEFAULT_SAFE6_LABEL,
     };
     use edpcli::sysinfo::{disk_total_sectors, CmdRunner, SysRunner};
     use sha2::{Digest, Sha256};
@@ -361,9 +362,9 @@ mod macos {
             boot_label: "BOOT".into(),
             share_label: "SHARE".into(),
             encrypt_label: "ENCRYPT".into(),
-            boot_fs: OfficialFilesystemFormat::Fat16,
-            share_fs: OfficialFilesystemFormat::ExFat,
-            encrypt_fs: OfficialFilesystemFormat::ExFat,
+            boot_fs: FilesystemKind::Fat16,
+            share_fs: FilesystemKind::ExFat,
+            encrypt_fs: FilesystemKind::ExFat,
         }
     }
 
@@ -389,6 +390,7 @@ mod macos {
             user: "TEST".into(),
             dept: "TEST".into(),
             label: DEFAULT_SAFE6_LABEL.into(),
+            lba8_identity: edpcli::provision::Lba8Identity::default(),
             key_domains: KeyDomainSecrets::new(
                 KeyDomainSecretPair::new(share_source, Some(share_target)),
                 KeyDomainSecretPair::new(encrypt_source, Some(encrypt_target)),
@@ -550,7 +552,7 @@ mod macos {
         let raw = dev
             .read_sector(lba)
             .map_err(|error| format!("读取 {} 首扇区失败: {error}", role.label()))?;
-        let plain = edpcli::backup_deep::keys::decrypt_mode2(&raw, &raw_file_key)
+        let plain = edpcli::partition_transform::decrypt_mode2(&raw, &raw_file_key)
             .map_err(|error| format!("解密 {} 首扇区失败: {error}", role.label()))?;
         if !strict_exfat_boot(&plain, part.start_lba, part.sector_count) {
             return Err(format!(

@@ -8,8 +8,9 @@ use edpcli::application::media_identity::{
 };
 use edpcli::edpb::{
     canonical_media_identity, read_raw_protocol, verify_file, write_core_backup,
-    write_core_backup_with_identity, write_legacy_v1_core_backup_with_notes, CaptureLevel,
-    CoreCapture, RestorePolicy, RAW_PROTOCOL_ARTIFACT_ID,
+    write_core_backup_with_identity, write_legacy_v1_core_backup_with_notes,
+    write_legacy_v2_core_backup_with_identity, CaptureLevel, CoreCapture, RestorePolicy,
+    RAW_PROTOCOL_ARTIFACT_ID,
 };
 use edpcli::provision::DiskProvisionKind;
 
@@ -55,6 +56,7 @@ fn typed_identity(quality: SerialQuality, digest: Option<&str>) -> MediaIdentity
         hardware: HardwareIdentityEvidence {
             vid: Some(0x0dd8),
             pid: Some(0x2005),
+            serial: None,
             serial_sha256: digest.map(str::to_string),
             serial_quality: quality,
             vendor: Some("Netac".into()),
@@ -106,8 +108,8 @@ fn core_container_round_trips_raw_protocol_and_manifest() {
 }
 
 #[test]
-fn new_writer_uses_manifest_v2_with_typed_protocol_identity() {
-    let tmp = TempDir::new("edpb_manifest_v2");
+fn chapter_18_b1_new_writer_uses_manifest_v3_metadata_restore_contract() {
+    let tmp = TempDir::new("edpb_manifest_v3");
     let path = tmp.0.join("sample.edpb");
     let data = vec![0xA5; 13 * 512];
 
@@ -115,7 +117,19 @@ fn new_writer_uses_manifest_v2_with_typed_protocol_identity() {
     let verified = verify_file(&path).unwrap();
     let json = serde_json::to_value(&verified.manifest).unwrap();
 
-    assert_eq!(json["schema"], "edpb.manifest.v2");
+    assert_eq!(json["schema"], "edpb.manifest.v3");
+    assert_eq!(json["backup_purpose"], "metadata_only");
+    assert_eq!(
+        json["restore_contract"]["restores_partition_structure"],
+        true
+    );
+    assert_eq!(json["restore_contract"]["restores_edp_protocol"], true);
+    assert_eq!(json["restore_contract"]["restores_filesystem"], false);
+    assert_eq!(json["restore_contract"]["restores_user_data"], false);
+    assert_eq!(
+        json["restore_contract"]["post_restore_assessment_required"],
+        true
+    );
     assert_eq!(
         json["identity"]["protocol"]["device_id"],
         "disk&ven_netac&prod_onlydisk"
@@ -123,12 +137,41 @@ fn new_writer_uses_manifest_v2_with_typed_protocol_identity() {
     assert_eq!(json["identity"]["protocol"]["onlyid"], "1402259934");
     assert!(
         json["identity"]["hardware"].is_object(),
-        "v2 must formally carry typed hardware identity"
+        "v3 must formally carry typed hardware identity"
     );
     assert!(
         json["identity"]["derived"].is_object(),
-        "v2 must formally carry typed derived evidence"
+        "v3 must formally carry typed derived evidence"
     );
+}
+
+#[test]
+fn chapter_18_b1_v3_persists_raw_serial_and_never_persists_new_serial_digest() {
+    let tmp = TempDir::new("edpb_manifest_v3_raw_serial");
+    let path = tmp.0.join("sample.edpb");
+    let data = vec![0xA6; 13 * 512];
+    let mut identity = typed_identity(SerialQuality::Usable, Some(&"ab".repeat(32)));
+    identity.hardware.serial = Some("NETAC-RAW-SERIAL-001".into());
+
+    write_core_backup_with_identity(&path, &capture(&data), &identity).unwrap();
+    let verified = verify_file(&path).unwrap();
+    let json = serde_json::to_value(&verified.manifest).unwrap();
+
+    assert_eq!(json["schema"], "edpb.manifest.v3");
+    assert_eq!(
+        json["identity"]["hardware"]["serial"],
+        "NETAC-RAW-SERIAL-001"
+    );
+    assert!(
+        json["identity"]["hardware"].get("serial_sha256").is_none(),
+        "v3 must not persist a newly generated serial_sha256 field"
+    );
+    let canonical = canonical_media_identity(&verified.manifest).unwrap();
+    assert_eq!(
+        canonical.hardware.serial.as_deref(),
+        Some("NETAC-RAW-SERIAL-001")
+    );
+    assert_eq!(canonical.hardware.serial_sha256, None);
 }
 
 #[test]
@@ -144,7 +187,7 @@ fn new_plain_manifest_never_promotes_legacy_candidate_to_observed_device_id() {
     let verified = verify_file(&path).unwrap();
     let json = serde_json::to_value(&verified.manifest).unwrap();
 
-    assert_eq!(json["schema"], "edpb.manifest.v2");
+    assert_eq!(json["schema"], "edpb.manifest.v3");
     assert!(
         json["identity"]["protocol"]["device_id"].is_null(),
         "Plain must not have an observed EDP device_id"
@@ -160,11 +203,11 @@ fn new_plain_manifest_never_promotes_legacy_candidate_to_observed_device_id() {
 }
 
 #[test]
-fn v1_encrypted_and_passwordless_backups_remain_readable() {
+fn v1_encrypted_and_mode1_backups_remain_readable() {
     let tmp = TempDir::new("edpb_v1_edp");
     let data = vec![0x39; 13 * 512];
 
-    for state in ["encrypted", "passwordless"] {
+    for state in ["encrypted", "mode1"] {
         let path = tmp.0.join(format!("{state}.edpb"));
         let mut legacy = capture(&data);
         legacy.device_state = state.into();
@@ -242,10 +285,12 @@ fn v2_round_trips_missing_suspicious_and_usable_serial_evidence() {
     for (index, (quality, digest)) in cases.into_iter().enumerate() {
         let path = tmp.0.join(format!("{index}.edpb"));
         let identity = typed_identity(quality, digest.as_deref());
-        write_core_backup_with_identity(&path, &capture(&data), &identity).unwrap();
+        write_legacy_v2_core_backup_with_identity(&path, &capture(&data), &identity).unwrap();
         let verified = verify_file(&path).unwrap();
+        assert_eq!(verified.manifest.schema, "edpb.manifest.v2");
         let decoded = canonical_media_identity(&verified.manifest).unwrap();
         assert_eq!(decoded.hardware.serial_quality, quality);
+        assert_eq!(decoded.hardware.serial, None);
         assert_eq!(decoded.hardware.serial_sha256, digest);
         assert!(
             verified
@@ -265,7 +310,7 @@ fn typed_and_legacy_serial_conflict_is_invalid_fail_closed() {
     let path = tmp.0.join("sample.edpb");
     let data = vec![0x61; 13 * 512];
     let identity = typed_identity(SerialQuality::Usable, Some(&"11".repeat(32)));
-    write_core_backup_with_identity(&path, &capture(&data), &identity).unwrap();
+    write_legacy_v2_core_backup_with_identity(&path, &capture(&data), &identity).unwrap();
 
     let mut verified = verify_file(&path).unwrap();
     verified

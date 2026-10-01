@@ -354,6 +354,18 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    fn disk_total_sectors_prefers_physical_size_over_smaller_volume_size() {
+        let mut m = HashMap::new();
+        m.insert(
+            "diskutil info -plist disk4".to_string(),
+            "<plist version=\"1.0\"><dict><key>IOKitSize</key><integer>15502147584</integer><key>Size</key><integer>15502147584</integer><key>TotalSize</key><integer>15502143488</integer></dict></plist>".to_string(),
+        );
+        let runner = FakeRunner { outputs: m };
+        assert_eq!(disk_total_sectors(&runner, 4), Some(30_277_632));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
     fn read_probe_cache_reuses_ioreg_snapshot_across_disks() {
         let out = "\
 +-o USB A@00100000  <class IOUSBHostDevice, id 0x1>\n\
@@ -409,6 +421,7 @@ mod tests {
                     vid: Some(0x3535),
                     pid: Some(0x6300),
                     transport: NativeTransport::Uas,
+                    windows_pnp_instance_id: None,
                     inquiry: None,
                 })
             }
@@ -437,6 +450,7 @@ mod tests {
                     vid: Some(disk as u16),
                     pid: Some(0x2005),
                     transport: NativeTransport::Bot,
+                    windows_pnp_instance_id: None,
                     inquiry: None,
                 })
             }

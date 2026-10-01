@@ -70,7 +70,7 @@ fn usage_errors_exit_two() {
 
 #[test]
 fn provision_write_bridges_the_same_backup_dir_across_elevation_and_commit() {
-    let source = include_str!("../src/cli.rs");
+    let source = include_str!("../src/cli/commands/provision.rs");
     assert!(source.contains("argv_with_backup_dir_for_elevation(backup_dir.as_deref())"));
     assert!(source.contains("crate::application::resolve_backup_dir(backup_dir.as_deref())"));
 }
@@ -204,6 +204,7 @@ impl CmdRunner for ProbeRunner {
             vid: Some(self.vid),
             pid: Some(self.pid),
             transport: edpcli::platform::NativeTransport::Uas,
+            windows_pnp_instance_id: None,
             inquiry: Some(edpcli::platform::InquiryInfo {
                 vendor: "Netac".into(),
                 product: "OnlyDisk".into(),
@@ -367,8 +368,6 @@ fn backup_create_is_read_only_and_verifiable() {
         &mut manual_dev,
     )
     .unwrap();
-
-    assert!(!manual.is_nopwd);
     assert_eq!(manual_prompt.idx, 0, "backup create 不应要求写盘确认");
     assert!(!manual_dev.switched, "backup create 不得 reopen 为读写");
     assert_eq!(manual_dev.writes, 0, "backup create 不得写 U 盘");
@@ -377,6 +376,20 @@ fn backup_create_is_read_only_and_verifiable() {
     assert_eq!(
         manual_verified.manifest.snapshot.capture_level,
         edpcli::edpb::CaptureLevel::Metadata
+    );
+    assert!(
+        !manual_verified.manifest.partitions.is_empty(),
+        "EDP metadata backup must carry typed partition geometry"
+    );
+    assert!(
+        manual_verified.manifest.artifacts.iter().all(|artifact| {
+            !artifact.id.contains("filesystem")
+                && !artifact.id.contains("prefix")
+                && !artifact.id.contains("suffix")
+                && !artifact.id.contains("fskey")
+                && !artifact.kind.contains("filesystem")
+        }),
+        "normal EDP metadata backup must not depend on filesystem evidence"
     );
     assert!(manual_verified
         .manifest
@@ -405,16 +418,11 @@ fn edp_backup_records_hardware_serial_binding_when_available() {
 
     let report = backup_create_flow(6, &mut ctx(&runner, &mut prompt, &tmp.0), &mut dev).unwrap();
     let verified = edpb::verify_file(&report.path).unwrap();
+    assert_eq!(verified.manifest.schema, "edpb.manifest.v3");
     let identity = edpb::canonical_media_identity(&verified.manifest).unwrap();
-    let expected = hardware_serial_note(serial)
-        .strip_prefix("hardware_serial_sha256=")
-        .unwrap()
-        .to_string();
 
-    assert_eq!(
-        identity.hardware.serial_sha256.as_deref(),
-        Some(expected.as_str())
-    );
+    assert_eq!(identity.hardware.serial.as_deref(), Some(serial));
+    assert_eq!(identity.hardware.serial_sha256, None);
     assert!(verified
         .manifest
         .provenance
@@ -438,10 +446,7 @@ fn restore_clone_with_same_edp_identity_but_different_usb_serial_is_rejected_bef
         "0dd8",
         "2005",
         122_880_000,
-        (
-            "encrypted",
-            vec![hardware_serial_note("SOURCE-USB-SERIAL-001")],
-        ),
+        ("edp", vec![hardware_serial_note("SOURCE-USB-SERIAL-001")]),
     );
     let runner = netac_serial_runner(6, "CLONED-USB-SERIAL-002");
     let mut prompt = ScriptPrompter::yes();
@@ -481,10 +486,7 @@ fn restore_numeric_selector_cannot_bypass_serial_authorization() {
         "0dd8",
         "2005",
         122_880_000,
-        (
-            "encrypted",
-            vec![hardware_serial_note("SOURCE-USB-SERIAL-001")],
-        ),
+        ("edp", vec![hardware_serial_note("SOURCE-USB-SERIAL-001")]),
     );
     let runner = netac_serial_runner(6, "CLONED-USB-SERIAL-002");
     let mut prompt = ScriptPrompter::yes();
@@ -515,7 +517,7 @@ fn restore_weak_backup_cannot_authorize_destructive_write() {
         "0dd8",
         "2005",
         122_880_000,
-        "encrypted",
+        "edp",
     );
     let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
     let mut prompt = ScriptPrompter::yes();
@@ -546,10 +548,7 @@ fn restore_geometry_conflict_rejected_before_write() {
         "0dd8",
         "2005",
         122_880_001,
-        (
-            "encrypted",
-            vec![hardware_serial_note("NETAC-HIL-SERIAL-001")],
-        ),
+        ("edp", vec![hardware_serial_note("NETAC-HIL-SERIAL-001")]),
     );
     let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
     let mut prompt = ScriptPrompter::yes();
@@ -573,7 +572,7 @@ fn restore_vid_pid_hard_conflict_rejected_before_write() {
     };
     let tmp = TmpDir::new("restore_vid_pid_conflict");
     let backup = tmp.0.join("source.edpb");
-    write_netac_edpb(&backup, &original, "encrypted");
+    write_netac_edpb(&backup, &original, "edp");
     for (vid, pid) in [(0x9999, 0x2005), (0x0dd8, 0x9999)] {
         let runner = ProbeRunner {
             inner: netac_serial_runner(6, "NETAC-HIL-SERIAL-001"),
@@ -609,10 +608,7 @@ fn restore_same_protocol_clone_swapped_after_reopen_has_zero_writes() {
         "0dd8",
         "2005",
         122_880_000,
-        (
-            "encrypted",
-            vec![hardware_serial_note("SOURCE-USB-SERIAL-001")],
-        ),
+        ("edp", vec![hardware_serial_note("SOURCE-USB-SERIAL-001")]),
     );
     let reopened = Arc::new(AtomicBool::new(false));
     let runner = ReopenSerialRunner {
@@ -652,10 +648,7 @@ fn restore_v1_and_v2_canonical_identity_share_hard_conflict_authorization() {
         "0dd8",
         "2005",
         122_880_000,
-        (
-            "encrypted",
-            vec![hardware_serial_note("SOURCE-USB-SERIAL-001")],
-        ),
+        ("edp", vec![hardware_serial_note("SOURCE-USB-SERIAL-001")]),
     );
     let source_runner = netac_serial_runner(6, "SOURCE-USB-SERIAL-001");
     let identity =
@@ -676,10 +669,10 @@ fn restore_v1_and_v2_canonical_identity_share_hard_conflict_authorization() {
         total_sectors: Some(122_880_000),
         logical_sector_size: SECTOR as u32,
         edpcli_version: env!("CARGO_PKG_VERSION").into(),
-        device_state: "encrypted".into(),
+        device_state: "edp".into(),
         lba0_12: &original,
     };
-    edpb::write_core_backup_with_identity(&v2, &capture, &identity).unwrap();
+    edpb::write_legacy_v2_core_backup_with_identity(&v2, &capture, &identity).unwrap();
     assert_eq!(
         edpb::verify_file(&v1).unwrap().manifest.schema,
         "edpb.manifest.v1"
@@ -713,7 +706,7 @@ fn restore_corrupt_edp_with_nonzero_lba4_does_not_fallback_plain() {
     };
     let tmp = TmpDir::new("restore_corrupt_edp_not_plain");
     let backup = tmp.0.join("source.edpb");
-    write_netac_edpb(&backup, &original, "encrypted");
+    write_netac_edpb(&backup, &original, "edp");
     let mut corrupt = original;
     corrupt[7 * SECTOR..8 * SECTOR].fill(0);
     let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
@@ -748,7 +741,7 @@ fn restore_numeric_target_uses_backup_selector_and_current_disk_identity() {
     let target = backup_dir.join(
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172300.edpb",
     );
-    write_netac_edpb(&target, &orig, "encrypted");
+    write_netac_edpb(&target, &orig, "edp");
 
     let mut prompt = ScriptPrompter {
         inputs: vec!["NO".into()],
@@ -773,83 +766,8 @@ fn restore_numeric_target_uses_backup_selector_and_current_disk_identity() {
 }
 
 #[test]
-fn restore_explicit_nopwd_backup_blocked() {
-    let Some((conv, did)) = passwordless_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let runner = netac_runner(26);
-    let tmp = TmpDir::new("restore_block");
-    // 当前盘是免密盘(conv), 备份也是免密快照 → 硬拦截不写入
-    let bakfile = tmp.0.join("conv.edpb");
-    write_netac_edpb(&bakfile, &conv, "passwordless");
-    let img_path = tmp.0.join("disk.img");
-    let original = load_disk_image("netac").unwrap();
-    fs::write(&img_path, &original).unwrap();
-    let mut prompt = ScriptPrompter::yes();
-    let mut dev = FileDev::open_rdwr(
-        img_path.to_str().unwrap(),
-        std::time::Duration::from_secs(1),
-    )
-    .unwrap();
-    let code = restore_flow(
-        Some(bakfile.to_string_lossy().into_owned()),
-        26,
-        &mut ctx(&runner, &mut prompt, &tmp.0),
-        &mut dev,
-    )
-    .unwrap();
-    assert_eq!(code, EXIT_OK); // 正常返回(提示未写入), 与 Python 行为一致
-    assert_eq!(fs::read(&img_path).unwrap(), original); // 未写盘
-    let _ = did;
-}
-
-#[test]
-fn restore_detects_nopwd_from_edpb_manifest_when_current_device_id_is_unavailable() {
-    let Some((conv, _)) = passwordless_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
-    let mut runner = netac_runner(26);
-    runner.canned.remove("ioreg -r -c IOSCSITargetDevice -l");
-
-    let tmp = TmpDir::new("restore_nopwd_without_current_did");
-    let bakfile = tmp.0.join(
-        "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260917_120000.edpb",
-    );
-    write_netac_edpb(&bakfile, &conv, "passwordless");
-
-    let img_path = tmp.0.join("disk.img");
-    fs::write(&img_path, &original).unwrap();
-    let mut prompt = ScriptPrompter::yes();
-    let mut dev = FileDev::open_rdwr(
-        img_path.to_str().unwrap(),
-        std::time::Duration::from_secs(1),
-    )
-    .unwrap();
-
-    let code = restore_flow(
-        Some(bakfile.to_string_lossy().into_owned()),
-        26,
-        &mut ctx(&runner, &mut prompt, &tmp.0),
-        &mut dev,
-    )
-    .unwrap();
-    assert_eq!(code, EXIT_OK);
-    assert_eq!(
-        fs::read(&img_path).unwrap(),
-        original,
-        "即使当前盘 device_id 识别失败，也必须从 EDPB Manifest 识别免密快照并拒绝写入"
-    );
-}
-
-#[test]
 fn restore_rejects_legacy_bin_when_device_id_is_unavailable() {
-    let Some((conv, _)) = passwordless_image("netac") else {
+    let Some((conv, _)) = mode1_fixture_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
@@ -900,7 +818,7 @@ fn restore_refuses_when_current_disk_identity_tag_is_zero() {
     let bakfile = tmp.0.join(
         "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.edpb",
     );
-    write_netac_edpb(&bakfile, &original, "encrypted");
+    write_netac_edpb(&bakfile, &original, "edp");
 
     let mut current = original.clone();
     current[4 * SECTOR..4 * SECTOR + 16].fill(0);
@@ -952,7 +870,11 @@ fn corrupt_edp_with_nonzero_lba4_never_falls_back_to_plain_backup() {
     .unwrap_err();
 
     assert_eq!(error.code, EXIT_BACKUP);
-    assert!(error.msg.contains("LBA4") && error.msg.contains("EDP"));
+    assert!(
+        error.msg.contains("EDP 协议身份") && error.msg.contains("拒绝误判为 Plain"),
+        "{}",
+        error.msg
+    );
 }
 
 #[test]
@@ -972,7 +894,7 @@ fn restore_allows_plain_lba4_zero_only_with_matching_hardware_binding() {
         "0dd8",
         "2005",
         122_880_000,
-        ("encrypted", vec![hardware_serial_note(serial)]),
+        ("edp", vec![hardware_serial_note(serial)]),
     );
 
     let current = plain_metadata(original.clone());
@@ -1017,10 +939,7 @@ fn restore_plain_lba4_zero_rejects_wrong_hardware_serial() {
         "0dd8",
         "2005",
         122_880_000,
-        (
-            "encrypted",
-            vec![hardware_serial_note("NETAC-HIL-SERIAL-001")],
-        ),
+        ("edp", vec![hardware_serial_note("NETAC-HIL-SERIAL-001")]),
     );
 
     let current = plain_metadata(original);
@@ -1125,21 +1044,41 @@ fn plain_backup_uses_hardware_identity_and_serial_binding() {
     );
 
     assert_eq!(verified.manifest.snapshot.device_state, "plain");
+    assert_eq!(
+        verified.manifest.snapshot.capture_level,
+        edpb::CaptureLevel::Metadata
+    );
+    assert!(
+        !verified.manifest.partitions.is_empty(),
+        "Plain v3 backup must carry typed partition metadata"
+    );
+    assert!(
+        verified
+            .manifest
+            .artifacts
+            .iter()
+            .all(|artifact| artifact.id != edpb::RAW_PROTOCOL_ARTIFACT_ID),
+        "Plain v3 backup must not persist fixed LBA0-12 as protocol"
+    );
+    assert!(
+        verified.manifest.artifacts.iter().all(|artifact| {
+            artifact.restore_policy == edpb::RestorePolicy::Restorable
+                && artifact.kind == "raw_sectors"
+                && !artifact.id.contains("filesystem")
+                && !artifact.id.contains("directory")
+        }),
+        "Plain v3 backup may contain only restorable partition-table raw metadata"
+    );
     assert_eq!(verified.manifest.device.vid, "0dd8");
     assert_eq!(verified.manifest.device.pid, "2005");
     assert_eq!(
         verified.manifest.device.device_id,
         "disk&ven_netac&prod_onlydisk&rev_1.00"
     );
+    assert_eq!(verified.manifest.schema, "edpb.manifest.v3");
     let identity = edpb::canonical_media_identity(&verified.manifest).unwrap();
-    let expected = hardware_serial_note(serial)
-        .strip_prefix("hardware_serial_sha256=")
-        .unwrap()
-        .to_string();
-    assert_eq!(
-        identity.hardware.serial_sha256.as_deref(),
-        Some(expected.as_str())
-    );
+    assert_eq!(identity.hardware.serial.as_deref(), Some(serial));
+    assert_eq!(identity.hardware.serial_sha256, None);
     assert_eq!(identity.protocol.device_id, None);
     assert_eq!(identity.protocol.onlyid, None);
     assert!(verified
@@ -1151,12 +1090,108 @@ fn plain_backup_uses_hardware_identity_and_serial_binding() {
 }
 
 #[test]
+fn chapter_18_b4_plain_v3_restore_writes_partition_metadata_without_protocol_core() {
+    let Some(original_edp) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let serial = "NETAC-HIL-SERIAL-001";
+    let runner = netac_serial_runner(26, serial);
+    let tmp = TmpDir::new("chapter18_b4_plain_restore");
+    let backup_dir = tmp.0.join("bak");
+
+    let mut plain = plain_metadata(original_edp.clone());
+    plain[446 + 4] = 0x07;
+    plain[446 + 8..446 + 12].copy_from_slice(&2_048u32.to_le_bytes());
+    plain[446 + 12..446 + 16].copy_from_slice(&100_000u32.to_le_bytes());
+    plain[510..512].copy_from_slice(&[0x55, 0xaa]);
+
+    let source_path = tmp.0.join("plain.img");
+    fs::write(&source_path, &plain).unwrap();
+    let mut source_dev = FileDev::open_rdonly(source_path.to_str().unwrap()).unwrap();
+    let mut backup_prompt = ScriptPrompter::yes();
+    let report = backup_create_flow(
+        26,
+        &mut Ctx {
+            runner: &runner,
+            clock: &FixedClockForCli,
+            prompt: &mut backup_prompt,
+            backup_dir: backup_dir.clone(),
+        },
+        &mut source_dev,
+    )
+    .unwrap();
+    let verified = edpb::verify_file(&report.path).unwrap();
+    assert_eq!(verified.manifest.schema, "edpb.manifest.v3");
+    assert!(verified
+        .manifest
+        .artifacts
+        .iter()
+        .all(|artifact| artifact.id != edpb::RAW_PROTOCOL_ARTIFACT_ID));
+
+    let target_path = tmp.0.join("target.img");
+    fs::write(&target_path, &original_edp).unwrap();
+    let mut target_dev = FileDev::open_rdwr(
+        target_path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+    let mut restore_prompt = ScriptPrompter::yes();
+    let code = restore_flow(
+        Some(report.path.to_string_lossy().into_owned()),
+        26,
+        &mut Ctx {
+            runner: &runner,
+            clock: &FixedClockForCli,
+            prompt: &mut restore_prompt,
+            backup_dir,
+        },
+        &mut target_dev,
+    )
+    .unwrap();
+
+    assert_eq!(code, EXIT_OK);
+    let restored = fs::read(&target_path).unwrap();
+    assert_eq!(
+        &restored[..SECTOR],
+        &plain[..SECTOR],
+        "MBR must be restored"
+    );
+    assert_eq!(
+        &restored[3 * SECTOR..4 * SECTOR],
+        &original_edp[3 * SECTOR..4 * SECTOR],
+        "Plain restore must preserve manufacturer LBA3 byte-for-byte"
+    );
+    for lba in [1usize, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
+        assert!(
+            restored[lba * SECTOR..(lba + 1) * SECTOR]
+                .iter()
+                .all(|byte| *byte == 0),
+            "Plain restore must clear stale EDP protocol LBA{lba}"
+        );
+    }
+    assert_eq!(
+        edpcli::provision::DiskProvisionKind::from_sectors(
+            &restored[7 * SECTOR..8 * SECTOR],
+            &restored[12 * SECTOR..13 * SECTOR],
+            "disk&ven_netac&prod_onlydisk"
+        ),
+        None,
+        "restored Plain metadata must not remain classifiable as an EDP mode"
+    );
+    assert_eq!(
+        u32::from_le_bytes(restored[454..458].try_into().unwrap()),
+        2_048
+    );
+}
+
+#[test]
 fn restore_picker_selects_newest_and_writes() {
     let Some(orig) = load_disk_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let (Some((conv, _)),) = (passwordless_image("netac"),) else {
+    let (Some((conv, _)),) = (mode1_fixture_image("netac"),) else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
@@ -1164,14 +1199,14 @@ fn restore_picker_selects_newest_and_writes() {
     let tmp = TmpDir::new("restore_pick");
     let bak = tmp.0.join("bak");
     fs::create_dir_all(&bak).unwrap();
-    // 两份备份: 旧的(原盘内容)较新、新的(免密快照)较旧 → 选择 1 = 最新(mtime 大者)
+    // 两份同介质备份：按 mtime 选择最新一份。
     let older = bak.join("disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260101_000000.edpb");
-    let newer = bak.join("disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_nopwd_20260916_230000.edpb");
-    write_netac_edpb(&older, &orig, "encrypted");
-    write_netac_edpb(&newer, &conv, "passwordless");
+    let newer = bak.join("disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260916_230000.edpb");
+    write_netac_edpb(&older, &orig, "edp");
+    write_netac_edpb(&newer, &conv, "mode1");
     set_mtime(&older, 1_700_000_000);
     set_mtime(&newer, 1_790_000_000);
-    // 当前盘为原盘; 选择"1"(最新 = 免密快照) → 应被硬拦截不写入
+    // 当前盘为原盘；选择 1（最新 mode1 备份）并确认后正常恢复。
     let img_path = tmp.0.join("disk.img");
     fs::write(&img_path, &orig).unwrap();
     let mut prompt = ScriptPrompter {
@@ -1185,9 +1220,9 @@ fn restore_picker_selects_newest_and_writes() {
     .unwrap();
     let code = restore_flow(None, 26, &mut ctx(&runner, &mut prompt, &bak), &mut dev).unwrap();
     assert_eq!(code, EXIT_OK);
-    assert_eq!(fs::read(&img_path).unwrap(), orig); // 免密快照 → 未写
+    assert_eq!(fs::read(&img_path).unwrap(), conv);
 
-    // 选择"2"(原盘备份) + YES → 完整写入 13 扇(内容同原盘, 校验写路径无异常)
+    // 选择 2（较旧备份）+ YES → 正常恢复原盘协议镜像。
     let mut prompt2 = ScriptPrompter {
         inputs: vec!["2".into(), "YES".into()],
         idx: 0,
@@ -1211,7 +1246,7 @@ fn restore_edpb_payload_hash_mismatch_rejected() {
     let runner = netac_runner(26);
     let tmp = TmpDir::new("restore_edpb_hash");
     let bakfile = tmp.0.join("broken.edpb");
-    write_netac_edpb(&bakfile, &orig, "encrypted");
+    write_netac_edpb(&bakfile, &orig, "edp");
     let verified = edpb::verify_file(&bakfile).unwrap();
     let data_offset = verified.manifest.artifacts[0].storage.data_offset as usize;
     let mut bytes = fs::read(&bakfile).unwrap();
@@ -1247,7 +1282,7 @@ fn restore_valid_edpb_needs_no_external_sidecar() {
     let bakfile = tmp.0.join(
         "disk26_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.edpb",
     );
-    write_netac_edpb(&bakfile, &orig, "encrypted");
+    write_netac_edpb(&bakfile, &orig, "edp");
     assert!(!std::path::PathBuf::from(format!("{}.sha256", bakfile.display())).exists());
     let img_path = tmp.0.join("disk.img");
     fs::write(&img_path, &orig).unwrap();
@@ -1278,7 +1313,7 @@ fn restore_truncated_edpb_is_rejected() {
     let runner = netac_runner(26);
     let tmp = TmpDir::new("restore_truncated_edpb");
     let bakfile = tmp.0.join("truncated.edpb");
-    write_netac_edpb(&bakfile, &orig, "encrypted");
+    write_netac_edpb(&bakfile, &orig, "edp");
     let mut bytes = fs::read(&bakfile).unwrap();
     bytes.truncate(bytes.len() - 20);
     fs::write(&bakfile, bytes).unwrap();
@@ -1311,7 +1346,7 @@ fn restore_explicit_backup_from_other_disk_is_rejected() {
     let runner = netac_runner(26);
     let tmp = TmpDir::new("restore_wrong_disk");
     let bakfile = tmp.0.join("other-disk.edpb");
-    write_lexar_edpb(&bakfile, &other, "encrypted");
+    write_lexar_edpb(&bakfile, &other, "edp");
 
     let img_path = tmp.0.join("disk.img");
     fs::write(&img_path, &current).unwrap();
@@ -1382,7 +1417,7 @@ fn restore_refuses_if_disk_identity_changes_after_reopen() {
     let backup = tmp.0.join(
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260917_120000.edpb",
     );
-    write_netac_edpb(&backup, &netac, "encrypted");
+    write_netac_edpb(&backup, &netac, "edp");
     let mut prompt = ScriptPrompter::yes();
     let mut dev = SwapOnReopenDev::new(netac, lexar);
 
@@ -1445,7 +1480,7 @@ impl SectorDev for RestorableSparseDev {
 }
 
 #[test]
-fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
+fn restore_metadata_edpb_restores_lba0_12_and_validated_lce_together() {
     use edpcli::edpb::{
         ArtifactCompleteness, ArtifactInput, Extent, MetadataCapture, Region, RestorePolicy,
         SemanticStatus,
@@ -1477,6 +1512,23 @@ fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
         corrupt[17] ^= 0x5a;
         current_lce.insert(lba, corrupt);
     }
+    let tail_mirror_start =
+        total_sectors - edpcli::backup_metadata::TAIL_METADATA_MIRROR_OFFSET_SECTORS;
+    let tail_restore_start =
+        total_sectors - edpcli::backup_metadata::TAIL_END4_MIRROR_OFFSET_SECTORS;
+    let tail_mirror_backup =
+        vec![0xA5; edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS as usize * SECTOR];
+    let tail_restore_backup = vec![0x5A; SECTOR];
+    for offset in 0..edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS {
+        current_lce.insert(
+            u32::try_from(tail_mirror_start + offset).unwrap(),
+            vec![0x11; SECTOR],
+        );
+    }
+    current_lce.insert(
+        u32::try_from(tail_restore_start).unwrap(),
+        vec![0x22; SECTOR],
+    );
 
     let tmp = TmpDir::new("restore_lce");
     let backup = tmp.0.join(
@@ -1494,33 +1546,88 @@ fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
             total_sectors: Some(total_sectors),
             logical_sector_size: SECTOR as u32,
             edpcli_version: env!("CARGO_PKG_VERSION").into(),
-            device_state: "encrypted".into(),
+            device_state: "edp".into(),
             lba0_12: &original,
         },
-        regions: vec![Region {
-            id: "region.lba7_compatibility_extent".into(),
-            role: "lba7_legacy_partition_compatibility_extent".into(),
-            start_lba: Some(geometry.start_lba),
-            sector_count: Some(geometry.sector_count),
-            semantic_status: SemanticStatus::Identified,
-        }],
-        extents: vec![Extent {
-            id: "extent.lba7_compatibility".into(),
-            region_id: "region.lba7_compatibility_extent".into(),
-            start_lba: geometry.start_lba,
-            sector_count: geometry.sector_count,
-            purpose: "lba7_compatibility_extent_ciphertext".into(),
-        }],
-        artifacts: vec![ArtifactInput {
-            id: "raw.lba7_compatibility".into(),
-            kind: "raw_sectors".into(),
-            media_type: "application/octet-stream".into(),
-            source_extent_ids: vec!["extent.lba7_compatibility".into()],
-            derivation: None,
-            restore_policy: RestorePolicy::Restorable,
-            completeness: ArtifactCompleteness::Complete,
-            data: lce_backup.clone(),
-        }],
+        partitions: Vec::new(),
+        regions: vec![
+            Region {
+                id: "region.lba7_compatibility_extent".into(),
+                role: "lba7_legacy_partition_compatibility_extent".into(),
+                start_lba: Some(geometry.start_lba),
+                sector_count: Some(geometry.sector_count),
+                semantic_status: SemanticStatus::Identified,
+            },
+            Region {
+                id: "region.tail.metadata_mirror_512k".into(),
+                role: "lba4_lba12_backup_mirror".into(),
+                start_lba: Some(tail_mirror_start),
+                sector_count: Some(edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS),
+                semantic_status: SemanticStatus::Identified,
+            },
+            Region {
+                id: "region.tail.restore_node_end4".into(),
+                role: "historical_restore_node_mirror".into(),
+                start_lba: Some(tail_restore_start),
+                sector_count: Some(1),
+                semantic_status: SemanticStatus::Identified,
+            },
+        ],
+        extents: vec![
+            Extent {
+                id: "extent.lba7_compatibility".into(),
+                region_id: "region.lba7_compatibility_extent".into(),
+                start_lba: geometry.start_lba,
+                sector_count: geometry.sector_count,
+                purpose: "lba7_compatibility_extent_ciphertext".into(),
+            },
+            Extent {
+                id: "extent.tail.metadata_mirror_512k".into(),
+                region_id: "region.tail.metadata_mirror_512k".into(),
+                start_lba: tail_mirror_start,
+                sector_count: edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS,
+                purpose: "historical_lba4_lba12_mirror".into(),
+            },
+            Extent {
+                id: "extent.tail.restore_node_end4".into(),
+                region_id: "region.tail.restore_node_end4".into(),
+                start_lba: tail_restore_start,
+                sector_count: 1,
+                purpose: "historical_restore_node_mirror".into(),
+            },
+        ],
+        artifacts: vec![
+            ArtifactInput {
+                id: "raw.lba7_compatibility".into(),
+                kind: "raw_sectors".into(),
+                media_type: "application/octet-stream".into(),
+                source_extent_ids: vec!["extent.lba7_compatibility".into()],
+                derivation: None,
+                restore_policy: RestorePolicy::Restorable,
+                completeness: ArtifactCompleteness::Complete,
+                data: lce_backup.clone(),
+            },
+            ArtifactInput {
+                id: "raw.tail.metadata_mirror_512k".into(),
+                kind: "raw_sectors".into(),
+                media_type: "application/octet-stream".into(),
+                source_extent_ids: vec!["extent.tail.metadata_mirror_512k".into()],
+                derivation: None,
+                restore_policy: RestorePolicy::Restorable,
+                completeness: ArtifactCompleteness::Complete,
+                data: tail_mirror_backup.clone(),
+            },
+            ArtifactInput {
+                id: "raw.tail.restore_node_end4".into(),
+                kind: "raw_sectors".into(),
+                media_type: "application/octet-stream".into(),
+                source_extent_ids: vec!["extent.tail.restore_node_end4".into()],
+                derivation: None,
+                restore_policy: RestorePolicy::Restorable,
+                completeness: ArtifactCompleteness::Complete,
+                data: tail_restore_backup.clone(),
+            },
+        ],
         notes: vec![],
     };
     let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
@@ -1547,8 +1654,10 @@ fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
     assert_eq!(dev.metadata, original);
     assert_eq!(
         dev.writes,
-        13 + geometry.sector_count as usize,
-        "one transaction must restore all 13 protocol sectors and all LCE sectors"
+        13 + geometry.sector_count as usize
+            + edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS as usize
+            + 1,
+        "one transaction must restore protocol, LCE and confirmed tail metadata"
     );
     for offset in 0..geometry.sector_count {
         let lba = u32::try_from(geometry.start_lba + offset).unwrap();
@@ -1558,35 +1667,18 @@ fn restore_deep_edpb_restores_lba0_12_and_validated_lce_together() {
             &lce_backup[start..start + SECTOR]
         );
     }
-}
-
-#[test]
-fn deep_backup_create_never_unmounts_reopens_or_writes() {
-    let orig = load_disk_image("netac").expect("committed netac fixture");
-    let mut runner = netac_runner(6);
-    runner.canned.remove("diskutil unmountDisk force disk6");
-    let tmp = TmpDir::new("deep_readonly_flow");
-    let mut prompt = ScriptPrompter {
-        inputs: vec![],
-        idx: 0,
-    };
-    let mut dev = SwapOnReopenDev::new(orig.clone(), orig.clone());
-    let report = edpcli::application::write::backup_create_level_flow(
-        6,
-        &mut ctx(&runner, &mut prompt, &tmp.0),
-        &mut dev,
-        true,
-    )
-    .unwrap();
-    assert!(!dev.switched);
-    assert_eq!(dev.writes, 0);
-    assert_eq!(prompt.idx, 0);
-    let v = edpb::verify_file(&report.path).unwrap();
-    assert_eq!(v.manifest.snapshot.capture_level, edpb::CaptureLevel::Deep);
-    assert!(v
-        .manifest
-        .artifacts
-        .iter()
-        .any(|a| a.kind == "filesystem_summary"));
-    assert_eq!(edpb::read_raw_protocol(&report.path).unwrap(), orig);
+    for offset in 0..edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS {
+        let lba = u32::try_from(tail_mirror_start + offset).unwrap();
+        let start = offset as usize * SECTOR;
+        assert_eq!(
+            dev.sectors.get(&lba).unwrap(),
+            &tail_mirror_backup[start..start + SECTOR]
+        );
+    }
+    assert_eq!(
+        dev.sectors
+            .get(&u32::try_from(tail_restore_start).unwrap())
+            .unwrap(),
+        &tail_restore_backup
+    );
 }

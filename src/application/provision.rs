@@ -10,29 +10,27 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::backup_deep::{analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader};
 use crate::backup_metadata::{parse_lba7_compatibility_geometry, PartitionGeometry};
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_OK, EXIT_TARGET, SECTOR};
 use crate::diskio::{self, SectorDev};
+use crate::filesystem::analysis::{analyze_partition, AnalysisStatus, PartitionReader};
+use crate::filesystem::{build_empty_filesystem, FilesystemKind, SparseFilesystemImage};
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
-    apply_target_geometry_overrides, build_empty_exfat, build_empty_fat16,
-    build_migrated_filesystem, build_official_partition_filesystem,
-    build_official_provision_protocol_image, build_plain_migrated_provision_write_plan,
-    build_plain_provision_write_plan, encrypt_sparse_mode2, parse_existing_provision,
-    prefill_for_target_mode, unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key,
-    CapacityInput, CapacitySource, FileKeyWrapMode, KeyDomainRole, KeyDomainSecrets,
-    OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
-    OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId,
-    ParsedExistingProvision, PartitionAction, PartitionFilesystemImage, PartitionFormatTarget,
-    PartitionRole, PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
+    apply_target_geometry_overrides, build_official_partition_filesystem,
+    build_official_provision_protocol_image, build_plain_provision_write_plan,
+    parse_existing_provision, prefill_for_target_mode, unwrap_legacy_lba7_file_key, wrap_file_key,
+    wrap_legacy_lba7_file_key, CapacityInput, CapacitySource, FileKeyWrapMode, KeyDomainRole,
+    KeyDomainSecrets, OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision,
+    PartitionAction, PartitionFilesystemImage, PartitionFormatTarget, PartitionRole,
+    PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
     PlainProvisionWritePlan, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
     ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge,
-    SparseFilesystemImage, TargetGeometryOverrides, TargetIdentity, TargetPasswordPolicy,
-    TargetProvisionPlan, DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_MODE0_BOOT_SECTORS,
+    TargetGeometryOverrides, TargetIdentity, TargetPasswordPolicy, TargetProvisionPlan,
+    DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_MODE0_BOOT_SECTORS,
 };
 use crate::sysinfo::{self, CmdRunner};
-use encoding_rs::GBK;
 
 use super::device::open_readonly_usb_disk;
 use super::media_identity::MediaIdentityPin;
@@ -62,6 +60,7 @@ pub struct OfficialProvisionRequest {
     pub user: String,
     pub dept: String,
     pub label: String,
+    pub lba8_identity: crate::provision::Lba8Identity,
     pub key_domains: KeyDomainSecrets,
     pub volume_label: String,
     pub format: FormatOptions,
@@ -100,16 +99,13 @@ impl PlainPartitionSize {
 pub struct PlainPartitionRequest {
     pub start_lba: u64,
     pub size: PlainPartitionSize,
-    pub filesystem: OfficialFilesystemFormat,
+    pub filesystem: FilesystemKind,
     pub volume_label: String,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PlainProvisionRequest {
     pub partitions: Vec<PlainPartitionRequest>,
-    /// Source-only credentials used when an existing EDP disk is migrated to Plain.
-    /// KeyDomainSecrets keeps Debug output redacted and zeroes secret buffers on drop.
-    pub key_domains: KeyDomainSecrets,
 }
 
 impl PlainProvisionRequest {
@@ -125,7 +121,6 @@ impl PlainProvisionRequest {
                     volume_label: partition.volume_label.clone(),
                 })
                 .collect(),
-            key_domains: KeyDomainSecrets::default(),
         }
     }
 
@@ -184,9 +179,9 @@ pub struct FormatOptions {
     pub boot_label: String,
     pub share_label: String,
     pub encrypt_label: String,
-    pub boot_fs: OfficialFilesystemFormat,
-    pub share_fs: OfficialFilesystemFormat,
-    pub encrypt_fs: OfficialFilesystemFormat,
+    pub boot_fs: FilesystemKind,
+    pub share_fs: FilesystemKind,
+    pub encrypt_fs: FilesystemKind,
 }
 
 impl Default for FormatOptions {
@@ -198,9 +193,9 @@ impl Default for FormatOptions {
             boot_label: "启动区".into(),
             share_label: "交换区".into(),
             encrypt_label: "保密区".into(),
-            boot_fs: OfficialFilesystemFormat::Fat16,
-            share_fs: OfficialFilesystemFormat::ExFat,
-            encrypt_fs: OfficialFilesystemFormat::ExFat,
+            boot_fs: FilesystemKind::Fat16,
+            share_fs: FilesystemKind::ExFat,
+            encrypt_fs: FilesystemKind::ExFat,
         }
     }
 }
@@ -227,28 +222,17 @@ impl FormatOptions {
 
 fn build_plain_format_image(
     target: &PartitionFormatTarget,
-    filesystem: OfficialFilesystemFormat,
+    filesystem: FilesystemKind,
     volume_label: &str,
     volume_serial: u32,
 ) -> Result<SparseFilesystemImage, String> {
-    match filesystem {
-        OfficialFilesystemFormat::Fat16 => build_empty_fat16(
-            target.geometry.start_sector,
-            target.geometry.sector_count(),
-            volume_serial,
-            volume_label,
-        ),
-        OfficialFilesystemFormat::ExFat => build_empty_exfat(
-            target.geometry.start_sector,
-            target.geometry.sector_count(),
-            volume_serial,
-            volume_label,
-        ),
-        OfficialFilesystemFormat::Fat32 | OfficialFilesystemFormat::Ntfs => Err(format!(
-            "portable filesystem writer does not yet implement {}",
-            filesystem.config_token()
-        )),
-    }
+    build_empty_filesystem(
+        filesystem,
+        target.geometry.start_sector,
+        target.geometry.sector_count(),
+        volume_serial,
+        Some(volume_label),
+    )
 }
 
 pub fn plan_format_targets(
@@ -306,11 +290,16 @@ fn plan_format_targets_with_keys(
             }
         })
         .collect::<Vec<_>>();
+    let registry = crate::filesystem::default_registry();
     for choice in planned.iter().filter(|choice| choice.target.format_capable) {
-        if !matches!(
-            choice.filesystem,
-            Some(OfficialFilesystemFormat::Fat16 | OfficialFilesystemFormat::ExFat)
-        ) {
+        let filesystem = choice
+            .filesystem
+            .ok_or("format-capable target is missing a filesystem")?;
+        let driver = registry
+            .driver(filesystem)
+            .ok_or_else(|| format!("{} 文件系统没有已注册驱动", choice.target.role.label()))?;
+        let capabilities = driver.capabilities();
+        if !capabilities.format || !capabilities.verify_format {
             return Err(format!(
                 "{} 文件系统尚无可验证的写入实现",
                 choice.target.role.label()
@@ -356,7 +345,7 @@ fn plan_format_targets_with_keys(
 pub struct PlannedPartitionFormat {
     pub target: PartitionFormatTarget,
     pub selected: bool,
-    pub filesystem: Option<OfficialFilesystemFormat>,
+    pub filesystem: Option<FilesystemKind>,
     pub volume_label: String,
     pub volume_serial: u32,
     pub prepared_image: Option<PartitionFilesystemImage>,
@@ -501,6 +490,7 @@ pub struct ProvisionKeyProbe {
 pub struct PreparedNewProvision {
     pub disk: u32,
     pub device_id: String,
+    pub source_kind: crate::provision::DiskProvisionKind,
     pub mode: OfficialPartitionMode,
     pub force_change_password: bool,
     pub pass_info_policy: PassInfoPolicy,
@@ -553,6 +543,7 @@ impl std::fmt::Debug for PreparedNewProvision {
             .debug_struct("PreparedNewProvision")
             .field("disk", &self.disk)
             .field("device_id", &self.device_id)
+            .field("source_kind", &self.source_kind)
             .field("mode", &self.mode)
             .field("force_change_password", &self.force_change_password)
             .field("pass_info_policy", &self.pass_info_policy)
@@ -708,8 +699,9 @@ fn sizes(
 mod commit;
 mod export;
 mod identity_lineage;
-mod migration;
 mod prepare;
+mod prepared_projection;
+mod progress_projection;
 
 pub use commit::{
     capture_manufacturer_lba3, commit_new_provision, commit_plain_provision, commit_provision,
@@ -717,12 +709,12 @@ pub use commit::{
 pub use export::{
     export_provision_image, export_sparse_plain_provision_image, export_sparse_provision_image,
 };
-#[cfg(test)]
-use prepare::target_encrypt_capacity_override;
 pub use prepare::{
     prepare_plain_provision, prepare_provision, prepare_target_provision,
     probe_provision_key_domains_on_disk, verify_provision_source_password_on_disk,
 };
+#[cfg(test)]
+use prepare::{read_plain_source_extents, target_encrypt_capacity_override};
 
 pub fn prepare_provision_on_disk(
     runner: &dyn CmdRunner,
@@ -775,6 +767,7 @@ where
 fn verify_mandatory_backup_pin(
     report: &super::write::BackupReport,
     pin: &MediaIdentityPin,
+    source_metadata: &[u8],
 ) -> EdpCliResult<String> {
     let verified = crate::edpb::verify_file(&report.path).map_err(|message| {
         err(
@@ -789,18 +782,36 @@ fn verify_mandatory_backup_pin(
                 format!("错误: 强制备份 canonical identity 无效: {message}"),
             )
         })?;
-    let raw = crate::edpb::read_raw_protocol(&report.path).map_err(|message| {
-        err(
-            EXIT_TARGET,
-            format!("错误: 强制备份来源快照不可读: {message}"),
-        )
-    })?;
-    pin.verify(&identity, &raw).map_err(|conflict| {
+    pin.verify(&identity, source_metadata).map_err(|conflict| {
         err(
             EXIT_TARGET,
             format!("错误: 强制备份与制盘准备阶段介质身份不一致: {conflict:?}"),
         )
     })?;
+    let artifact_id = if report.edp_protocol_saved {
+        crate::edpb::RAW_PROTOCOL_ARTIFACT_ID
+    } else {
+        "raw.plain.partition_table.0"
+    };
+    let raw = crate::edpb::read_artifact(&report.path, artifact_id).map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 强制备份来源快照不可读: {message}"),
+        )
+    })?;
+    let expected = if report.edp_protocol_saved {
+        source_metadata
+    } else {
+        source_metadata
+            .get(..SECTOR)
+            .ok_or_else(|| err(EXIT_TARGET, "错误: 制盘准备阶段 Plain MBR 快照长度异常"))?
+    };
+    if raw != expected {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 强制备份元数据与制盘准备阶段快照不一致",
+        ));
+    }
     Ok(verified.file_sha256)
 }
 
@@ -882,7 +893,9 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
     prompt: &mut dyn super::Prompter,
     sink: &mut dyn FnMut(crate::application::progress::ProgressEvent),
 ) -> EdpCliResult<ProvisionWriteOutcome> {
-    use crate::application::progress::{emit_isolated, Phase, ProgressEvent, Step};
+    use crate::application::progress::{
+        emit_isolated, LogPolicy, Phase, ProgressEvent, Severity, Step,
+    };
     let format_count = match prepared {
         PreparedProvision::Official(official) => official
             .format_targets
@@ -905,14 +918,14 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
         prompt,
         expected_onlyid.as_deref(),
         Some(prepared.device_id()),
-        false,
     )?;
     current += 1;
     emit_isolated(
         sink,
         ProgressEvent::new(Phase::Backup, Step::MandatoryBackup, current, total),
     );
-    let backup_sha256 = verify_mandatory_backup_pin(&backup, prepared.before_pin())?;
+    let backup_sha256 =
+        verify_mandatory_backup_pin(&backup, prepared.before_pin(), prepared.source_metadata()?)?;
     current += 1;
     emit_isolated(
         sink,
@@ -923,8 +936,7 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
             if work.is_none() && step != Step::LockAndReopen {
                 current += 1;
             }
-            let mut event = ProgressEvent::new(phase, step, current, total);
-            event.work = work;
+            let event = progress_projection::commit_event(phase, step, current, total, work);
             emit_isolated(sink, event);
         })?;
     let mut outcome = ProvisionWriteOutcome {
@@ -935,6 +947,11 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
     if matches!(&outcome.commit, ProvisionCommitOutcome::Official(report) if report.formats.iter().any(|format| format.result.is_err()))
     {
         outcome.warnings.push(ProvisionWarning::IncompleteFormat);
+        let mut complete = ProgressEvent::new(Phase::Complete, Step::Completed, total, total);
+        complete.severity = Severity::Warning;
+        complete.log_policy = LogPolicy::Append;
+        complete.detail = Some("制盘事务完成，但至少一个分区格式化失败".into());
+        emit_isolated(sink, complete);
         return Ok(outcome);
     }
     if let Err(warning) = record_lineage_after_commit(
@@ -951,6 +968,10 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
         sink,
         ProgressEvent::new(Phase::Lineage, Step::PostWriteIdentity, current, total),
     );
+    let mut complete = ProgressEvent::new(Phase::Complete, Step::Completed, total, total);
+    complete.log_policy = LogPolicy::Append;
+    complete.detail = Some("制盘全部步骤完成".into());
+    emit_isolated(sink, complete);
     Ok(outcome)
 }
 

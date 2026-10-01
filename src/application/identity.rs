@@ -2,7 +2,7 @@
 
 use super::media_identity::{
     match_media_identity, IdentityConfidence, IdentityEvidenceKind, IdentityEvidenceOutcome,
-    IdentityEvidenceResult, IdentityMatch, MediaIdentitySnapshot, MediaRelationship,
+    IdentityEvidenceResult, IdentityMatch, MediaIdentitySnapshot, MediaRelationship, SerialQuality,
 };
 use crate::provision::DiskProvisionKind;
 
@@ -10,6 +10,106 @@ use super::BackupWorkspaceItem;
 
 pub const IDENTITY_HEADINGS: [&str; 7] =
     ["容量", "VID:PID", "型号", "onlyid", "姓名", "部门", "盘型"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityReliability {
+    Strong,
+    Medium,
+    Weak,
+    Pending,
+    Unknown,
+}
+
+impl IdentityReliability {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Strong => "强",
+            Self::Medium => "中",
+            Self::Weak => "弱",
+            Self::Pending => "待确认",
+            Self::Unknown => "未知",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityMatchLevel {
+    Strong,
+    Medium,
+    Weak,
+    Conflict,
+    Unknown,
+}
+
+impl IdentityMatchLevel {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Strong => "强",
+            Self::Medium => "较强",
+            Self::Weak => "弱",
+            Self::Conflict => "冲突",
+            Self::Unknown => "未知",
+        }
+    }
+
+    pub const fn from_relationship(relationship: Option<MediaRelationship>) -> Self {
+        match relationship {
+            Some(MediaRelationship::SamePhysicalMedia) => Self::Strong,
+            Some(MediaRelationship::SameEdpInstance | MediaRelationship::SameControlledLineage) => {
+                Self::Medium
+            }
+            Some(
+                MediaRelationship::ProbableSameMedia
+                | MediaRelationship::ModelOnlyMatch
+                | MediaRelationship::Ambiguous,
+            ) => Self::Weak,
+            Some(MediaRelationship::DifferentMedia) => Self::Conflict,
+            None => Self::Unknown,
+        }
+    }
+}
+
+pub fn device_identity_reliability(
+    row: &crate::disk_scan::Row,
+) -> (IdentityReliability, &'static str) {
+    match row
+        .identity_pin
+        .as_ref()
+        .map(|pin| pin.snapshot.hardware.serial_quality)
+    {
+        Some(SerialQuality::Usable) => (IdentityReliability::Strong, "硬件序列号 + VID:PID + 容量"),
+        Some(SerialQuality::Suspicious) => (
+            IdentityReliability::Medium,
+            "序列号可疑，结合 VID:PID + 容量",
+        ),
+        Some(SerialQuality::Missing) if row.device_id.is_some() && row.onlyid.is_some() => (
+            IdentityReliability::Medium,
+            "EDP device_id + onlyid + 硬件特征",
+        ),
+        Some(SerialQuality::Missing) => (IdentityReliability::Weak, "仅硬件型号/容量等非唯一特征"),
+        None if row.serial.is_some() => {
+            (IdentityReliability::Pending, "已读取序列号，身份快照未建立")
+        }
+        None if row.device_id.is_some() || row.onlyid.is_some() => {
+            (IdentityReliability::Pending, "仅协议身份可用")
+        }
+        None => (IdentityReliability::Unknown, "未建立可靠身份依据"),
+    }
+}
+
+pub fn device_hardware_serial(row: &crate::disk_scan::Row) -> String {
+    row.serial
+        .as_deref()
+        .or_else(|| {
+            row.identity_pin
+                .as_ref()
+                .and_then(|pin| pin.snapshot.hardware.serial.as_deref())
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("—")
+        .to_string()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalIdentityProjection {
@@ -48,6 +148,10 @@ impl CanonicalIdentityProjection {
         }
     }
 
+    pub fn match_level(&self) -> IdentityMatchLevel {
+        IdentityMatchLevel::from_relationship(Some(self.relationship))
+    }
+
     pub fn evidence_lines(&self) -> Vec<String> {
         self.evidence
             .iter()
@@ -82,6 +186,7 @@ pub struct WorkspaceIdentity {
     pub vid: Option<String>,
     pub pid: Option<String>,
     pub device_id: Option<String>,
+    pub hardware_model: Option<String>,
     pub onlyid: Option<String>,
     pub user: Option<String>,
     pub dept: Option<String>,
@@ -97,14 +202,14 @@ impl WorkspaceIdentity {
             vid: Some(row.vid.clone()),
             pid: Some(row.pid.clone()),
             device_id: row.device_id.clone(),
+            hardware_model: row.hardware_model.clone(),
             onlyid: row.onlyid.clone(),
             user: row.user.clone(),
             dept: row.dept.clone(),
-            provision_kind: (row.proto == "USB"
-                && !row.denied
-                && row.probe_error.is_none()
-                && row.device_id.is_some())
-            .then_some(row.provision_kind),
+            provision_kind: row
+                .identity_pin
+                .as_ref()
+                .and_then(|pin| pin.snapshot.protocol.provision_kind),
             canonical: row
                 .identity_pin
                 .as_ref()
@@ -118,13 +223,15 @@ impl WorkspaceIdentity {
             vid: backup.vid.clone(),
             pid: backup.pid.clone(),
             device_id: backup.device_id.clone(),
+            hardware_model: None,
             onlyid: backup.onlyid.clone(),
             user: backup.user.clone(),
             dept: backup.dept.clone(),
             provision_kind: (backup.integrity_status
                 == crate::diskio::BackupIntegrityStatus::Verified
                 && backup.size_ok)
-                .then_some(backup.provision_kind),
+                .then_some(backup.provision_kind)
+                .flatten(),
             canonical: backup
                 .identity
                 .as_ref()
@@ -172,22 +279,25 @@ impl WorkspaceIdentity {
     }
 
     pub fn model(&self) -> String {
-        let Some(device_id) = self.device_id.as_deref() else {
-            return "—".into();
-        };
-        let mut ven = None;
-        let mut prod = None;
-        for part in device_id.split('&') {
-            ven = ven.or_else(|| part.strip_prefix("ven_"));
-            prod = prod.or_else(|| part.strip_prefix("prod_"));
+        if let Some(device_id) = self.device_id.as_deref() {
+            let mut ven = None;
+            let mut prod = None;
+            for part in device_id.split('&') {
+                ven = ven.or_else(|| part.strip_prefix("ven_"));
+                prod = prod.or_else(|| part.strip_prefix("prod_"));
+            }
+            if let (Some(ven), Some(prod)) = (
+                ven.filter(|v| !v.is_empty()),
+                prod.filter(|v| !v.is_empty()),
+            ) {
+                return format!("{ven}_{prod}");
+            }
         }
-        match (
-            ven.filter(|v| !v.is_empty()),
-            prod.filter(|v| !v.is_empty()),
-        ) {
-            (Some(ven), Some(prod)) => format!("{ven}_{prod}"),
-            _ => "—".into(),
-        }
+        self.hardware_model
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("—")
+            .to_string()
     }
 
     pub fn display_cells(&self) -> [String; 7] {
@@ -200,7 +310,7 @@ impl WorkspaceIdentity {
         };
         [
             self.size_bytes
-                .map(crate::common::fmt_gb)
+                .map(crate::common::fmt_capacity)
                 .unwrap_or_else(|| "—".into()),
             self.vid_pid(),
             self.model(),
@@ -216,8 +326,49 @@ impl WorkspaceIdentity {
     pub fn search_text(&self) -> String {
         let mut values = self.display_cells().to_vec();
         values.push(self.device_id.clone().unwrap_or_default());
+        values.push(self.hardware_model.clone().unwrap_or_default());
         values.push(self.vid.clone().unwrap_or_default());
         values.push(self.pid.clone().unwrap_or_default());
         values.join(" ")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn identity(device_id: Option<&str>, hardware_model: Option<&str>) -> WorkspaceIdentity {
+        WorkspaceIdentity {
+            size_bytes: None,
+            vid: None,
+            pid: None,
+            device_id: device_id.map(str::to_string),
+            hardware_model: hardware_model.map(str::to_string),
+            onlyid: None,
+            user: None,
+            dept: None,
+            provision_kind: None,
+            canonical: None,
+        }
+    }
+
+    #[test]
+    fn plain_media_model_falls_back_to_native_hardware_inquiry() {
+        assert_eq!(
+            identity(None, Some("SanDisk Ultra USB 3.0")).model(),
+            "SanDisk Ultra USB 3.0"
+        );
+    }
+
+    #[test]
+    fn protocol_device_id_model_keeps_precedence_when_available() {
+        assert_eq!(
+            identity(
+                Some("disk&ven_sandisk&prod_extreme"),
+                Some("SanDisk Native Product")
+            )
+            .model(),
+            "sandisk_extreme"
+        );
     }
 }

@@ -1,17 +1,17 @@
+use edpcli::filesystem::FilesystemKind;
 use edpcli::protocol::{
     edpf::EdpPartitionType, lba7_compat::locate_lba7_compatibility_extent_from_geometry,
 };
 use edpcli::provision::{
     build_official_partition_layout, generate_official_image, official_mbr_partition_type,
     visible_mbr_partition_type, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
-    OfficialFilesystemFormat, OfficialPartitionFilesystems, OfficialPartitionMode,
-    OfficialPartitionSizes, OfficialProvisionPlan, OfficialProvisionValidator, OnlyId,
-    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-    TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
-    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    Lba8Identity, OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, OfficialProvisionValidator, OnlyId, ProvisionEntropy, ProvisionImage,
+    ProvisionMetadata, ProvisionProfile, ProvisionSpec, TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS,
+    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use edpcli::{
-    crypto::{a6b0_full, crc32_bare, xor_rolling},
+    crypto::{a6b0_full, crc32_bare, lba6_decode, xor_rolling},
     platform::{HardwareProbe, InquiryInfo, NativeTransport},
 };
 
@@ -65,13 +65,10 @@ fn visible_mbr_type_tracks_the_front_filesystem_without_changing_edp_roles() {
     ] {
         let plan = official_plan(mode);
         let default_front = plan.format_targets().unwrap().remove(0);
-        assert_eq!(
-            default_front.filesystem,
-            Some(OfficialFilesystemFormat::Fat16)
-        );
+        assert_eq!(default_front.filesystem, Some(FilesystemKind::Fat16));
         assert_eq!(plan.visible_mbr_partition_type().unwrap(), 0x0e);
         let mut filesystems = OfficialPartitionFilesystems::defaults();
-        filesystems.boot = OfficialFilesystemFormat::ExFat;
+        filesystems.boot = FilesystemKind::ExFat;
         let exfat = plan.with_filesystems(filesystems);
         assert_eq!(exfat.visible_mbr_partition_type().unwrap(), 0x07);
         assert_eq!(
@@ -82,7 +79,7 @@ fn visible_mbr_type_tracks_the_front_filesystem_without_changing_edp_roles() {
     let combined = official_plan(OfficialPartitionMode::BootShareCombined);
     assert_eq!(
         combined.format_targets().unwrap()[0].filesystem,
-        Some(OfficialFilesystemFormat::ExFat)
+        Some(FilesystemKind::ExFat)
     );
     assert_eq!(combined.visible_mbr_partition_type().unwrap(), 0x07);
     assert_eq!(
@@ -94,14 +91,14 @@ fn visible_mbr_type_tracks_the_front_filesystem_without_changing_edp_roles() {
     assert_eq!(
         visible_mbr_partition_type(
             OfficialPartitionMode::DefaultThreePartition,
-            OfficialFilesystemFormat::Fat32
+            FilesystemKind::Fat32
         ),
         0x0c
     );
     assert_eq!(
         visible_mbr_partition_type(
             OfficialPartitionMode::DefaultThreePartition,
-            OfficialFilesystemFormat::Ntfs
+            FilesystemKind::Ntfs
         ),
         0x07
     );
@@ -113,7 +110,7 @@ fn generated_mode0_exfat_front_uses_mbr_07_from_the_initial_protocol_image() {
     let entropy = ProvisionEntropy::new([0x5a; 252]);
     let fat16_plan = official_plan(OfficialPartitionMode::DefaultThreePartition);
     let mut filesystems = OfficialPartitionFilesystems::defaults();
-    filesystems.boot = OfficialFilesystemFormat::ExFat;
+    filesystems.boot = FilesystemKind::ExFat;
     let exfat_plan = fat16_plan.with_filesystems(filesystems);
     let fat16 = generate_official_image(&spec, &entropy, &fat16_plan).unwrap();
     let exfat = generate_official_image(&spec, &entropy, &exfat_plan).unwrap();
@@ -127,7 +124,7 @@ fn generated_mode0_exfat_front_uses_mbr_07_from_the_initial_protocol_image() {
 #[test]
 fn official_plan_defaults_to_current_writer_exfat_but_accepts_other_configured_formats() {
     let default = official_plan(OfficialPartitionMode::BootShareCombined);
-    assert_eq!(default.filesystem_format, OfficialFilesystemFormat::ExFat);
+    assert_eq!(default.filesystem_format, FilesystemKind::ExFat);
 
     let compat = locate_lba7_compatibility_extent_from_geometry(1024, 255, 63, 512).unwrap();
     let current = wrap_file_key(
@@ -138,10 +135,7 @@ fn official_plan_defaults_to_current_writer_exfat_but_accepts_other_configured_f
         ],
         FileKeyWrapMode::Sm4,
     );
-    for format in [
-        OfficialFilesystemFormat::Ntfs,
-        OfficialFilesystemFormat::Fat32,
-    ] {
+    for format in [FilesystemKind::Ntfs, FilesystemKind::Fat32] {
         let plan = OfficialProvisionPlan::new_with_filesystem(
             OfficialPartitionMode::BootShareCombined,
             OfficialPartitionSizes::new(32, 64, 128),
@@ -223,11 +217,12 @@ fn mode_specific_unused_size_fields_do_not_change_the_layout() {
     assert_eq!(a, b);
 }
 
-fn official_spec() -> ProvisionSpec {
+fn official_spec_with_lba8(identity: Lba8Identity) -> ProvisionSpec {
     let probe = HardwareProbe {
         vid: Some(0x0dd8),
         pid: Some(0x2005),
         transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
         inquiry: Some(InquiryInfo {
             vendor: "Netac".into(),
             product: "OnlyDisk".into(),
@@ -241,8 +236,90 @@ fn official_spec() -> ProvisionSpec {
         "江苏省电力有限公司",
         "江苏电力!SAFE6",
     )
+    .unwrap()
+    .with_lba8_identity(identity)
     .unwrap();
     ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1()).unwrap()
+}
+
+fn official_spec() -> ProvisionSpec {
+    official_spec_with_lba8(Lba8Identity::default())
+}
+
+#[test]
+fn custom_lba8_identity_is_encoded_and_validated_end_to_end() {
+    let identity = Lba8Identity {
+        glab: "CUSTOM-GLAB-001".into(),
+        indus: "POWER".into(),
+        orgcd: "ORG001".into(),
+        org: "NANJING".into(),
+        unit: "OPS".into(),
+        alarm: "A1".into(),
+        autonum: "YD900001".into(),
+        rmark: "RMARK".into(),
+        vol0: "BOOTMETA".into(),
+        vol1: "SHAREMETA".into(),
+        vol2: "ENCMETA".into(),
+        volc0: "C0".into(),
+        volc1: "C1".into(),
+        volc2: "C2".into(),
+    };
+
+    let spec = official_spec_with_lba8(identity.clone());
+    let plan = official_plan(OfficialPartitionMode::DefaultThreePartition);
+    let image = generate_official_image(&spec, &ProvisionEntropy::new([0x5a; 252]), &plan).unwrap();
+    OfficialProvisionValidator::validate(&spec, &image, &plan).unwrap();
+
+    let lba6 = lba6_decode(&image.as_bytes()[6 * 512..7 * 512]);
+    assert_eq!(&lba6[0x70..0x78], b"YD900001");
+    assert_eq!(lba6[0x78], 0);
+
+    let crc = crc32_bare(spec.target().device_id().as_bytes());
+    let wire = &image.as_bytes()[8 * 512..9 * 512];
+    let first = a6b0_full(&wire[..16], &crc.to_le_bytes(), 0);
+    let logical = u32le(&first, 4) as usize;
+    let encrypted_len = (logical / 16 + 1) * 16;
+    let plain = a6b0_full(&wire[..encrypted_len], &crc.to_le_bytes(), 0);
+    let body = String::from_utf8_lossy(&plain[0x80..logical]);
+
+    for expected in [
+        "GLab=CUSTOM-GLAB-001",
+        "Indus=POWER",
+        "Orgcd=ORG001",
+        "Org=NANJING",
+        "Unit=OPS",
+        "Dept=",
+        "User=USER06",
+        "Alarm=A1",
+        "Autonum=YD900001",
+        "Label=",
+        "Rmark=RMARK",
+        "VOL0=BOOTMETA",
+        "VOL1=SHAREMETA",
+        "VOL2=ENCMETA",
+        "VOLC0=C0",
+        "VOLC1=C1",
+        "VOLC2=C2",
+    ] {
+        assert!(body.contains(expected), "missing {expected} in {body}");
+    }
+
+    let invalid_autonum = Lba8Identity {
+        autonum: "1234567890123456".into(),
+        ..Lba8Identity::default()
+    };
+    assert!(invalid_autonum.validate().is_err());
+
+    let invalid_pipe = Lba8Identity {
+        org: "bad|value".into(),
+        ..Lba8Identity::default()
+    };
+    assert!(invalid_pipe.validate().is_err());
+    let invalid_equals = Lba8Identity {
+        org: "bad=value".into(),
+        ..Lba8Identity::default()
+    };
+    assert!(invalid_equals.validate().is_err());
 }
 
 fn legacy_key_material() -> edpcli::provision::LegacyLba7KeyMaterial {

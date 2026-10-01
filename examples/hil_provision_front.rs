@@ -4,7 +4,7 @@
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 
-use edpcli::provision::{build_empty_exfat, build_empty_fat16};
+use edpcli::filesystem::{build_empty_exfat, build_empty_fat16};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);

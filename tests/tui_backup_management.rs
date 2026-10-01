@@ -48,12 +48,14 @@ fn backup_workspace_uses_one_create_modal_and_only_keeps_explicit_single_key_act
     let state = include_str!("../src/tui/backups/state.rs");
     assert!(keymap.contains("KeyCode::Char('R') => Some(TuiAction::Restore)"));
 
-    let render = include_str!("../src/tui/backups/render.rs");
-    assert!(state.contains("begin_backup_create_choice"));
-    assert!(state.contains("BackupCreateChoice::Metadata"));
-    assert!(state.contains("BackupCreateChoice::Deep"));
-    assert!(render.contains("(\"Metadata\","));
-    assert!(render.contains("(\"Deep\","));
+    let render = include_str!("../src/tui/render.rs");
+    let runtime_input = include_str!("../src/tui/runtime_input.rs");
+    assert!(!state.contains("BackupCreateChoiceState"));
+    assert!(!state.contains("begin_backup_create_choice"));
+    assert!(!state.contains("create_choice:"));
+    assert!(!runtime_input.contains("backup_choice"));
+    assert!(render.contains("创建元数据备份"));
+    assert!(render.contains("不会向目标设备写入"));
 }
 
 #[test]
@@ -76,19 +78,20 @@ fn backup_delete_uses_shared_application_service_not_direct_filesystem_removal()
 }
 
 #[test]
-fn backup_page_exposes_the_complete_management_shortcuts() {
-    let render = include_str!("../src/tui/render.rs");
-    for label in [
-        "v 校验",
-        "d 删除",
-        "R 恢复",
-        "b 新建",
-        "i Inspect",
-        "Space 勾选",
+fn backup_help_registry_exposes_the_complete_management_shortcuts() {
+    let keymap = include_str!("../src/tui/keymap/help.rs");
+    for (key, label) in [
+        ("v", "校验备份"),
+        ("d", "删除备份"),
+        ("R", "恢复备份"),
+        ("b", "新建备份"),
+        ("Enter / i", "检查备份"),
+        ("Space", "勾选 / 取消勾选"),
     ] {
         assert!(
-            render.contains(label),
-            "missing backup shortcut hint: {label}"
+            keymap.contains(&format!("keys: \"{key}\""))
+                && keymap.contains(&format!("label: \"{label}\"")),
+            "missing backup shortcut binding: {key} -> {label}"
         );
     }
 }

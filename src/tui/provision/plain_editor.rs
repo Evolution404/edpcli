@@ -1,4 +1,7 @@
-use super::{toggle_supported_fs, PlainPartitionForm, PlainProvisionFieldKind, PlainProvisionForm};
+use super::{
+    shift_supported_fs, toggle_supported_fs, PlainPartitionForm, PlainProvisionFieldKind,
+    PlainProvisionForm,
+};
 
 impl PlainProvisionForm {
     fn specs(&self) -> Result<Vec<crate::provision::PlainPartitionSpec>, String> {
@@ -66,6 +69,56 @@ impl PlainProvisionForm {
         Ok(())
     }
 
+    pub(super) fn fill_partition_start(
+        &mut self,
+        total_sectors: u64,
+        partition: usize,
+    ) -> Result<(), String> {
+        let required = self
+            .partitions
+            .get(partition)
+            .ok_or_else(|| "普通分区不存在".to_string())?
+            .resolve_sector_count(&format!("P{} 容量", partition + 1))?;
+        let mut occupied = self
+            .partitions
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != partition)
+            .map(|(index, part)| {
+                let start = part
+                    .start_lba
+                    .trim()
+                    .parse::<u64>()
+                    .map_err(|_| format!("P{} 起点 LBA 必须是整数", index + 1))?;
+                let count = part.resolve_sector_count(&format!("P{} 容量", index + 1))?;
+                let end = start
+                    .checked_add(count)
+                    .ok_or_else(|| format!("P{} 范围溢出", index + 1))?;
+                Ok((start, end))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        occupied.sort_by_key(|(start, _)| *start);
+
+        let mut cursor = crate::provision::DEFAULT_PLAIN_START_LBA;
+        let mut found = None;
+        for (start, end) in occupied {
+            if start >= cursor && start.saturating_sub(cursor) >= required {
+                found = Some(cursor);
+                break;
+            }
+            cursor = cursor.max(end);
+        }
+        if found.is_none() && total_sectors.saturating_sub(cursor) >= required {
+            found = Some(cursor);
+        }
+        let start = found.ok_or_else(|| "当前普通分区没有可容纳其容量的起点".to_string())?;
+        self.partitions
+            .get_mut(partition)
+            .ok_or_else(|| "普通分区不存在".to_string())?
+            .start_lba = start.to_string();
+        Ok(())
+    }
+
     pub(super) fn toggle_partition_option(
         &mut self,
         partition: usize,
@@ -81,6 +134,28 @@ impl PlainProvisionForm {
             }
             PlainProvisionFieldKind::Filesystem => {
                 part.filesystem = toggle_supported_fs(part.filesystem);
+                Ok(true)
+            }
+            PlainProvisionFieldKind::StartLba | PlainProvisionFieldKind::VolumeLabel => Ok(false),
+        }
+    }
+
+    pub(super) fn shift_partition_option(
+        &mut self,
+        partition: usize,
+        kind: PlainProvisionFieldKind,
+        reverse: bool,
+    ) -> Result<bool, String> {
+        let Some(part) = self.partitions.get_mut(partition) else {
+            return Ok(false);
+        };
+        match kind {
+            PlainProvisionFieldKind::Capacity => {
+                part.shift_capacity_unit(reverse)?;
+                Ok(true)
+            }
+            PlainProvisionFieldKind::Filesystem => {
+                part.filesystem = shift_supported_fs(part.filesystem, reverse);
                 Ok(true)
             }
             PlainProvisionFieldKind::StartLba | PlainProvisionFieldKind::VolumeLabel => Ok(false),
@@ -109,7 +184,7 @@ impl PlainProvisionForm {
         let spec = crate::provision::PlainPartitionSpec::new(
             next_start,
             plan.total_sectors - next_start,
-            crate::provision::OfficialFilesystemFormat::ExFat,
+            crate::filesystem::FilesystemKind::ExFat,
             format!("普通卷{number}"),
         );
         self.partitions.push(PlainPartitionForm::from_spec(&spec));

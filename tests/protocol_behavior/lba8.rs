@@ -8,7 +8,7 @@ use edpcli::{
 };
 
 fn device_id_for(profile: &str, sample: &str) -> String {
-    if profile == "authentic-nopwd" {
+    if profile == "authentic-mode1" {
         "disk&ven_sandisk&prod_ultra&rev_1.00".into()
     } else {
         crate::gold_name::parse_gold_name(sample).unwrap().device_id

@@ -41,10 +41,9 @@ fn render_restore_events() {
         plain(&WriteEvent::RestoreMatchRow {
             index: 1,
             time: "2026-09-17 00:00".into(),
-            is_nopwd: true,
             file_name: "disk6_x.bin".into(),
         }),
-        "  [1] 2026-09-17 00:00   免密状态   disk6_x.bin\n"
+        "  [1] 2026-09-17 00:00   disk6_x.bin\n"
     );
     assert_eq!(
         plain(&WriteEvent::RestoreSelectionRetry {
@@ -59,16 +58,12 @@ fn render_restore_events() {
         "SHA-256 校验通过  aaaa\n"
     );
     assert_eq!(
-        plain(&WriteEvent::RestoreSnapshotNopwdWarning),
-        "注意: 该备份为【免密状态】快照 — 还原后仍是免密盘, 不会回到加密原盘。\n"
-    );
-    assert_eq!(
         plain(&WriteEvent::RestoreDryRunNotice {
             path: "/b/x.bin".into(),
             disk: 6,
         }),
         format!(
-            "[dry-run] 将还原 /b/x.bin → disk6 LBA0-12 ({}B) — 未写入(免密快照不作还原)。\n",
+            "[dry-run] 将还原 /b/x.bin → disk6 LBA0-12 ({}B) — 未写入。\n",
             METADATA_IMAGE_LEN
         )
     );
@@ -80,7 +75,13 @@ fn render_restore_events() {
     );
     assert_eq!(
         plain(&WriteEvent::RestoreWriteCompleted),
-        "已还原, 读回校验通过。请拔出重插。\n"
+        "元数据恢复成功，读回校验通过。\n文件系统未恢复；部分分区可能需要格式化。\n"
+    );
+    assert_eq!(
+        plain(&WriteEvent::PostRestoreAssessment {
+            assessment: edpcli::application::post_restore::PostRestoreAssessment::default(),
+        }),
+        "恢复后状态：无法可靠判断\n"
     );
 }
 
@@ -122,15 +123,14 @@ impl edpcli::cli::Prompter for EventRecorderPrompter {
 fn tag(event: &WriteEvent) -> &'static str {
     match event {
         WriteEvent::BackupCreated { .. } => "backup-created",
-        WriteEvent::BackupCreatedIsNopwd => "backup-created-is-nopwd",
         WriteEvent::RestoreMatchesHeader { .. } => "restore-matches-header",
         WriteEvent::RestoreMatchRow { .. } => "restore-match-row",
         WriteEvent::RestoreSelectionRetry { .. } => "restore-selection-retry",
         WriteEvent::BackupShaVerified { .. } => "backup-sha-verified",
-        WriteEvent::RestoreSnapshotNopwdWarning => "restore-snapshot-nopwd-warning",
         WriteEvent::RestoreDryRunNotice { .. } => "restore-dry-run-notice",
         WriteEvent::RestoreTargetHeader { .. } => "restore-target-header",
         WriteEvent::RestoreWriteCompleted => "restore-write-completed",
+        WriteEvent::PostRestoreAssessment { .. } => "post-restore-assessment",
     }
 }
 
@@ -150,19 +150,36 @@ impl edpcli::diskio::Clock for FixedClock {
     }
 }
 
+#[cfg(target_os = "macos")]
+struct SerialRunner {
+    inner: crate::common::FakeRunner,
+}
+
+#[cfg(target_os = "macos")]
+impl edpcli::sysinfo::CmdRunner for SerialRunner {
+    fn check_output(&self, cmd: &[&str], timeout: std::time::Duration) -> std::io::Result<String> {
+        self.inner.check_output(cmd, timeout)
+    }
+
+    fn hardware_serial(&self, _disk: u32) -> Option<String> {
+        Some("NETAC-EVENT-TEST-001".into())
+    }
+}
+
 #[test]
 #[cfg(target_os = "macos")]
-fn backup_create_and_restore_dry_run_event_sequence() {
+fn backup_create_and_restore_event_sequence() {
     use crate::common::*;
-    use edpcli::application::write::{backup_create_flow, restore_flow, Ctx};
-    use edpcli::common::EXIT_OK;
+    use edpcli::application::write::{backup_create_flow, restore_flow_typed, Ctx};
     use edpcli::diskio::FileDev;
 
-    let Some((conv, _did)) = passwordless_image("netac") else {
+    let Some((conv, _did)) = mode1_fixture_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let runner = netac_runner(6);
+    let runner = SerialRunner {
+        inner: netac_runner(6),
+    };
     let tmp = TmpDir::new("wp_restore");
     let bak = tmp.0.join("bak");
     std::fs::create_dir_all(&bak).unwrap();
@@ -182,14 +199,10 @@ fn backup_create_and_restore_dry_run_event_sequence() {
         backup_dir: bak.clone(),
     };
     let created = backup_create_flow(6, &mut ctx, &mut dev).unwrap();
-    assert!(created.is_nopwd);
+    assert!(created.edp_protocol_saved);
+    assert!(created.partition_count > 0);
     let tags: Vec<&str> = create_prompt.events.iter().map(tag).collect();
-    assert_eq!(
-        tags,
-        vec!["backup-created", "backup-created-is-nopwd"],
-        "{:?}",
-        create_prompt.events
-    );
+    assert_eq!(tags, vec!["backup-created"], "{:?}", create_prompt.events);
 
     let mut restore_prompt = EventRecorderPrompter::default();
     let mut ctx = Ctx {
@@ -198,21 +211,27 @@ fn backup_create_and_restore_dry_run_event_sequence() {
         prompt: &mut restore_prompt,
         backup_dir: bak,
     };
-    let code = restore_flow(
+    let report = restore_flow_typed(
         Some(created.path.to_string_lossy().into_owned()),
         6,
         &mut ctx,
         &mut dev,
     )
     .unwrap();
-    assert_eq!(code, EXIT_OK);
+    assert!(report.report.metadata_restored);
+    assert!(report.report.readback_verified);
+    assert_eq!(
+        report.report.restored_artifact_ids,
+        vec!["raw.protocol.lba0_12"]
+    );
     let tags: Vec<&str> = restore_prompt.events.iter().map(tag).collect();
     assert_eq!(
         tags,
         vec![
             "backup-sha-verified",
-            "restore-snapshot-nopwd-warning",
-            "restore-dry-run-notice",
+            "restore-target-header",
+            "restore-write-completed",
+            "post-restore-assessment",
         ],
         "{:?}",
         restore_prompt.events

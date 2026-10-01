@@ -140,7 +140,7 @@ pub fn lba4_overlays_are_explicit_and_do_not_select_encoding() {
 #[test]
 pub fn lba4_authentic_capture_keeps_reader_flags_and_nonzero_backing() {
     let image = include_bytes!(
-        "../../audit/protocol/gold/authentic-nopwd/sandisk_ultra_20260823_lba0_12.bin"
+        "../../audit/protocol/gold/authentic-mode1/sandisk_ultra_20260823_lba0_12.bin"
     );
     let raw: &[u8; 512] = image[2048..2560].try_into().unwrap();
     let view = parse_lba4(raw, Lba4Context::default()).unwrap();

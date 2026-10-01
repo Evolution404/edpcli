@@ -13,7 +13,6 @@ fn removed_dead_and_legacy_write_helpers_do_not_return() {
         "fn wildcard_match(",
         "fn read_lba_file(",
         "fn backup_label_id(",
-        "fn backup_is_nopwd(",
         "fn sha256_sidecar_path(",
         "fn read_backup_sha256(",
     ] {
@@ -26,8 +25,9 @@ fn removed_dead_and_legacy_write_helpers_do_not_return() {
     let reprovision = source("src/provision/reprovision.rs");
     assert!(!reprovision.contains("fn force_change_password_from_sectors("));
 
-    let edpb = source("src/edpb.rs");
-    assert!(!edpb.contains("fn write_legacy_migrated_backup("));
+    for path in ["src/edpb/write.rs", "src/edpb/legacy.rs"] {
+        assert!(!source(path).contains("fn write_legacy_migrated_backup("));
+    }
     assert!(
         !Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("examples/migrate_legacy_backups.rs")
@@ -38,7 +38,7 @@ fn removed_dead_and_legacy_write_helpers_do_not_return() {
 
 #[test]
 fn migrated_edpb_read_semantics_remain_supported() {
-    let edpb = source("src/edpb.rs");
+    let edpb = source("src/edpb/model.rs");
     assert!(
         edpb.contains("LegacyMigrated"),
         "already-migrated EDPB manifests must remain deserializable"

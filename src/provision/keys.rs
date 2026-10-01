@@ -1,11 +1,12 @@
 //! Current LBA12 file-key wrapping used by the first-party writer.
 
-use crate::{
-    backup_deep::keys::sm4_encrypt_block,
-    crypto::{a7f0_encrypt, aes128_ecb_encrypt_block, crc32_bare},
+use super::key_domain::DEFAULT_KEY_DOMAIN_PASSWORD;
+
+use crate::crypto::{
+    a6b0_decrypt, a7f0_encrypt, aes128_ecb_decrypt_block, aes128_ecb_encrypt_block, crc32_bare,
+    sm4_decrypt_block, sm4_encrypt_block,
 };
 
-const DEFAULT_PASSWORD: &[u8] = b"0000aaaa";
 const DEFAULT_EFFECTIVE_PASSWORD: &[u8] = b"LtSWi[2f)j";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -86,6 +87,29 @@ pub enum FileKeyWrapMode {
     Aes128Ecb = 3,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExistingFileKeyError {
+    PasswordRequired,
+    PasswordMismatch,
+    UnsupportedEncryptMode,
+    FileKeyCrcMismatch,
+    MalformedKeyRecord,
+}
+
+impl std::fmt::Display for ExistingFileKeyError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::PasswordRequired => "需要原密码",
+            Self::PasswordMismatch => "原密码验证失败",
+            Self::UnsupportedEncryptMode => "不支持的 EncryptMode",
+            Self::FileKeyCrcMismatch => "FileKeyCRC 校验失败",
+            Self::MalformedKeyRecord => "加密密钥记录异常",
+        })
+    }
+}
+
+impl std::error::Error for ExistingFileKeyError {}
+
 impl FileKeyWrapMode {
     pub const fn raw(self) -> u8 {
         self as u8
@@ -124,12 +148,7 @@ pub fn wrap_file_key(
     file_key: [u8; 16],
     mode: FileKeyWrapMode,
 ) -> ProvisionKeyMaterial {
-    let effective_password = if original_password == DEFAULT_PASSWORD {
-        DEFAULT_EFFECTIVE_PASSWORD
-    } else {
-        original_password
-    };
-    let digest = md5_digest(effective_password);
+    let digest = md5_digest(effective_password(original_password));
     let wrapped_file_key = match mode {
         FileKeyWrapMode::A7f0 => a7f0_encrypt(&file_key, &digest, 0),
         FileKeyWrapMode::Sm4 => sm4_encrypt_block(&file_key, &digest),
@@ -140,6 +159,39 @@ pub fn wrap_file_key(
         file_key_crc: crc32_bare(&file_key),
         wrapped_file_key,
         encrypt_mode: mode,
+    }
+}
+
+pub fn unwrap_file_key(
+    password: Option<&[u8]>,
+    material: ProvisionKeyMaterial,
+) -> Result<[u8; 16], ExistingFileKeyError> {
+    if material.file_key_crc == 0 && material.wrapped_file_key == [0; 16] {
+        return Err(ExistingFileKeyError::MalformedKeyRecord);
+    }
+    let password = password
+        .filter(|password| !password.is_empty())
+        .ok_or(ExistingFileKeyError::PasswordRequired)?;
+    if crc32_bare(password) != material.user_key_crc {
+        return Err(ExistingFileKeyError::PasswordMismatch);
+    }
+    let digest = md5_digest(effective_password(password));
+    let key = match material.encrypt_mode {
+        FileKeyWrapMode::A7f0 => a6b0_decrypt(&material.wrapped_file_key, &digest, 0),
+        FileKeyWrapMode::Sm4 => sm4_decrypt_block(&material.wrapped_file_key, &digest),
+        FileKeyWrapMode::Aes128Ecb => aes128_ecb_decrypt_block(&material.wrapped_file_key, &digest),
+    };
+    if crc32_bare(&key) != material.file_key_crc {
+        return Err(ExistingFileKeyError::FileKeyCrcMismatch);
+    }
+    Ok(key)
+}
+
+fn effective_password(password: &[u8]) -> &[u8] {
+    if password == DEFAULT_KEY_DOMAIN_PASSWORD {
+        DEFAULT_EFFECTIVE_PASSWORD
+    } else {
+        password
     }
 }
 
@@ -223,9 +275,12 @@ mod tests {
 
     #[test]
     fn legacy_default_password_fold_matches_first_party_vector() {
-        assert_eq!(legacy_password_fold32(b"0000aaaa"), 0x9191_9191);
+        assert_eq!(
+            legacy_password_fold32(DEFAULT_KEY_DOMAIN_PASSWORD),
+            0x9191_9191
+        );
         let material = wrap_legacy_lba7_file_key(
-            b"0000aaaa",
+            DEFAULT_KEY_DOMAIN_PASSWORD,
             [0x7d, 0x9e, 0xe4, 0xe8, 0x75, 0x4a, 0xd4, 0x38],
         );
         assert_eq!(material.user_key_crc, 0x0429_735d);
@@ -248,4 +303,147 @@ mod tests {
             hex16("548b072cba7f104d88a446556cc3c432")
         );
     }
+
+    #[test]
+    fn existing_file_key_verification_covers_all_wrap_modes_and_typed_failures() {
+        let file_key = [0x42; 16];
+        for mode in [
+            FileKeyWrapMode::A7f0,
+            FileKeyWrapMode::Sm4,
+            FileKeyWrapMode::Aes128Ecb,
+        ] {
+            let material = wrap_file_key(b"ProofPass1!", file_key, mode);
+            assert_eq!(
+                unwrap_file_key(Some(b"ProofPass1!"), material),
+                Ok(file_key)
+            );
+            assert_eq!(
+                unwrap_file_key(None, material),
+                Err(ExistingFileKeyError::PasswordRequired)
+            );
+            assert_eq!(
+                unwrap_file_key(Some(b"wrong"), material),
+                Err(ExistingFileKeyError::PasswordMismatch)
+            );
+            let damaged = ProvisionKeyMaterial {
+                file_key_crc: material.file_key_crc ^ 1,
+                ..material
+            };
+            assert_eq!(
+                unwrap_file_key(Some(b"ProofPass1!"), damaged),
+                Err(ExistingFileKeyError::FileKeyCrcMismatch)
+            );
+        }
+        let default_material =
+            wrap_file_key(DEFAULT_KEY_DOMAIN_PASSWORD, file_key, FileKeyWrapMode::Sm4);
+        assert_eq!(
+            unwrap_file_key(Some(DEFAULT_KEY_DOMAIN_PASSWORD), default_material),
+            Ok(file_key)
+        );
+        assert_eq!(
+            unwrap_file_key(
+                Some(b"ProofPass1!"),
+                ProvisionKeyMaterial {
+                    user_key_crc: crc32_bare(b"ProofPass1!"),
+                    file_key_crc: 0,
+                    wrapped_file_key: [0; 16],
+                    encrypt_mode: FileKeyWrapMode::Sm4,
+                }
+            ),
+            Err(ExistingFileKeyError::MalformedKeyRecord)
+        );
+    }
+}
+
+/// Recover a mode2 file key from an LBA12 v0x0206 default-password entry.
+/// The first-party default-password substitution and the entry's FileKeyCRC
+/// must both agree before the key can be used for partition-sector reads.
+pub fn default_file_key(image: &[u8], device_id: &str, index: usize) -> Result<[u8; 16], String> {
+    default_file_key_checked(image, device_id, index).map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DefaultFileKeyError {
+    InvalidImageOrIndex,
+    DeviceIdMismatch,
+    UnsupportedPassInfo,
+    InvalidEntry(crate::protocol::types::ProtocolError),
+    NotEncryptedMode2,
+    NotDefaultPassword,
+    FileKeyCrcMismatch,
+}
+
+impl std::fmt::Display for DefaultFileKeyError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidImageOrIndex => {
+                formatter.write_str("invalid protocol image or partition index")
+            }
+            Self::DeviceIdMismatch => {
+                formatter.write_str("LBA12 does not decode to EDPF with current device_id")
+            }
+            Self::UnsupportedPassInfo => {
+                formatter.write_str("default key unwrap supports PassInfo v0x0206 only")
+            }
+            Self::InvalidEntry(error) => error.fmt(formatter),
+            Self::NotEncryptedMode2 => {
+                formatter.write_str("default key unwrap requires an encrypted mode2 entry")
+            }
+            Self::NotDefaultPassword => {
+                formatter.write_str("partition does not advertise the default password")
+            }
+            Self::FileKeyCrcMismatch => formatter.write_str("default password FileKeyCRC mismatch"),
+        }
+    }
+}
+
+impl std::error::Error for DefaultFileKeyError {}
+
+pub fn default_file_key_checked(
+    image: &[u8],
+    device_id: &str,
+    index: usize,
+) -> Result<[u8; 16], DefaultFileKeyError> {
+    use crate::crypto::{a6b0_full, crc32_bare};
+    use crate::protocol::edpf::{EdpfEntry96, PassInfo};
+
+    if image.len() != 13 * 512 || index >= 3 {
+        return Err(DefaultFileKeyError::InvalidImageOrIndex);
+    }
+    let device_crc = crc32_bare(device_id.as_bytes());
+    let plain = a6b0_full(&image[12 * 512..13 * 512], &device_crc.to_le_bytes(), 0);
+    if &plain[..4] != b"EDPF" {
+        return Err(DefaultFileKeyError::DeviceIdMismatch);
+    }
+    let pass_bytes = plain
+        .get(0x120..0x12e)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or(DefaultFileKeyError::InvalidImageOrIndex)?;
+    let pass = PassInfo::decode_stored(pass_bytes);
+    if pass.version != 0x0206 {
+        return Err(DefaultFileKeyError::UnsupportedPassInfo);
+    }
+    let entry_bytes = plain
+        .get(index * 96..(index + 1) * 96)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or(DefaultFileKeyError::InvalidImageOrIndex)?;
+    let entry = EdpfEntry96::parse(entry_bytes).map_err(DefaultFileKeyError::InvalidEntry)?;
+    if index >= entry.partition_count as usize || entry.need_encrypt == 0 || entry.encrypt_mode != 2
+    {
+        return Err(DefaultFileKeyError::NotEncryptedMode2);
+    }
+    if entry.user_key_crc != crc32_bare(DEFAULT_KEY_DOMAIN_PASSWORD) {
+        return Err(DefaultFileKeyError::NotDefaultPassword);
+    }
+    // v0x0206 substitutes LtSWi[2f)j before MD5. This digest is pinned by
+    // the first-party producer and consumer evidence in the protocol audit.
+    const EFFECTIVE_MD5: [u8; 16] = [
+        0x54, 0x8b, 0x07, 0x2c, 0xba, 0x7f, 0x10, 0x4d, 0x88, 0xa4, 0x46, 0x55, 0x6c, 0xc3, 0xc4,
+        0x32,
+    ];
+    let key = sm4_decrypt_block(&entry.encrypted_file_key, &EFFECTIVE_MD5);
+    if crc32_bare(&key) != entry.file_key_crc {
+        return Err(DefaultFileKeyError::FileKeyCrcMismatch);
+    }
+    Ok(key)
 }

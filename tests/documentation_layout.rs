@@ -6,8 +6,8 @@ const REQUIRED_DOCS: &[&str] = &[
     "docs/user/USAGE.md",
     "docs/user/RELEASE.md",
     "docs/architecture/ARCHITECTURE.md",
+    "docs/ui/TUI.md",
     "docs/backup/EDPB_FORMAT_V1.md",
-    "docs/backup/DEEP_BACKUP_V1.md",
     "docs/protocol/README.md",
     "docs/protocol/EDP_LBA0_12_FIELD_GUIDE.md",
     "docs/protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md",
@@ -48,6 +48,12 @@ fn obsolete_parallel_plans_and_handoffs_do_not_reappear() {
         "docs/EDP_PROTOCOL_LIVE_STATUS.md",
         "docs/EDP_PROTOCOL_ENGINEERING_PLAN.md",
         "docs/PROVISION_NEW_USB_PLAN_2026-09-19.md",
+        "docs/architecture/ARCHITECTURE_AUDIT_2026-09-25.md",
+        "docs/architecture/FILESYSTEM_DOMAIN_REFACTOR_2026-09-29.md",
+        "docs/architecture/UNIFIED_OPERATION_PROGRESS_REFACTOR_2026-09-29.md",
+        "docs/provisioning/TUI_TRUECOLOR_VIM_MIGRATION_AUDIT_2026-09-25.md",
+        "docs/ui/DEVICE_WORKBENCH_PLAN_2026-09-28.md",
+        "docs/validation/INSPECT_HIL_2026-09-23.md",
     ] {
         assert!(
             !Path::new(obsolete).exists(),
@@ -57,26 +63,87 @@ fn obsolete_parallel_plans_and_handoffs_do_not_reappear() {
 }
 
 #[test]
-fn provisioning_documents_current_four_mode_product_and_future_extensions() {
+fn provisioning_documents_current_product_contract() {
     let doc = fs::read_to_string("docs/provisioning/PROVISIONING.md").unwrap();
     for required in [
-        "## 1. 当前已经实现的能力",
-        "## 3. 当前实现 A：官方四模式新盘制盘",
-        "## 4. 已审核实施方案：通用四模式制盘与数据保留",
+        "## 1. 产品边界",
+        "## 2. 五种目标状态",
         "缺省三分区",
         "启动区和交换区二合一",
         "整盘加密",
         "内外网通用双分区",
-        "## 5. 实施顺序",
-        "## 6. 测试门禁",
-        "## 7. 完成标准",
-        "## 8. 当前实施状态与交接",
-        "## 9. Inspect 全盘结构化浏览器重构计划",
+        "Plain 不是 mode4",
+        "## 3. 统一制盘流程",
+        "## 4. 分区与文件系统",
+        "## 5. 已有盘重制与数据保留",
+        "## 6. 密钥与密码域",
+        "## 7. 写盘安全",
+        "## 8. CLI 与 TUI",
+        "## 9. 验证",
     ] {
         assert!(
             doc.contains(required),
-            "provisioning roadmap lost required boundary: {required}"
+            "provisioning current contract lost required boundary: {required}"
         );
+    }
+}
+
+#[test]
+fn tui_document_describes_current_runtime_contract() {
+    let doc = fs::read_to_string("docs/ui/TUI.md").unwrap();
+    for required in [
+        "## 1. 工作区与层级",
+        "## 2. 键位",
+        "## 3. 设备工作区",
+        "## 4. 备份工作区",
+        "## 5. 全盘检查",
+        "## 6. 制盘流程",
+        "## 7. 长操作进度",
+        "OperationRunState",
+        "StageProgress",
+        "20 Hz",
+        "## 8. 视觉与表格",
+        "## 9. 安全边界",
+    ] {
+        assert!(
+            doc.contains(required),
+            "TUI current contract missing: {required}"
+        );
+    }
+}
+
+#[test]
+fn canonical_documents_stay_bounded_and_do_not_become_history_logs() {
+    for (path, limit) in [
+        ("docs/architecture/ARCHITECTURE.md", 500usize),
+        ("docs/provisioning/PROVISIONING.md", 1_200),
+        ("docs/backup/EDPB_FORMAT_V1.md", 500),
+        ("docs/ui/TUI.md", 500),
+    ] {
+        let lines = fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("read {path}: {error}"))
+            .lines()
+            .count();
+        assert!(
+            lines < limit,
+            "{path} grew to {lines} lines; limit is {limit}"
+        );
+    }
+
+    let mut files = Vec::new();
+    collect_markdown_files(Path::new("docs"), &mut files);
+    for path in files {
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        for marker in ["_PLAN_", "_AUDIT_", "HANDOFF_", "LIVE_STATUS"] {
+            assert!(
+                !name.contains(marker),
+                "completed process document must not live in docs/: {}",
+                path.display()
+            );
+        }
     }
 }
 
@@ -114,9 +181,6 @@ fn markdown_prose_uses_chinese_instead_of_english_sentences() {
 
     // 该文件由机器目录生成，其中字段 ID、类型名、轴/状态名和测试符号属于技术标识。
     files.retain(|path| path != Path::new("docs/protocol/EDP_LBA0_12_FIELD_GUIDE.md"));
-    // The provisioning specification uses exact Rust domain names and English
-    // protocol terms as normative identifiers throughout its prose.
-    files.retain(|path| path != Path::new("docs/provisioning/PROVISIONING.md"));
 
     for path in files {
         let text = fs::read_to_string(&path).unwrap();
@@ -196,7 +260,6 @@ fn markdown_prose_rejects_common_english_narrative_terms() {
         "formatter",
         "serializer",
         "classifier",
-        "deep",
         "core",
         "number",
         "product",
@@ -278,7 +341,6 @@ fn markdown_prose_rejects_common_english_narrative_terms() {
     collect_markdown_files(Path::new("docs"), &mut files);
     collect_markdown_files(Path::new("audit/protocol"), &mut files);
     files.retain(|path| path != Path::new("docs/protocol/EDP_LBA0_12_FIELD_GUIDE.md"));
-    files.retain(|path| path != Path::new("docs/provisioning/PROVISIONING.md"));
 
     for path in files {
         let text = fs::read_to_string(&path).unwrap();

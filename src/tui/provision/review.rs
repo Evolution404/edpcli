@@ -1,443 +1,526 @@
+use super::review_region_projection::{
+    disposition_label, merge_all_regions, partition_reason, password_disposition_label,
+};
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProvisionReviewRowKind {
-    Status,
-    KeyValue,
-    Change,
-    Notice,
-    Action,
+pub(crate) enum ProvisionConfirmationAction {
+    Fixed,
+    Preserve,
+    Free,
+    Passthrough,
+    Rewrap,
+    FormatRebuild,
+    New,
+    Delete,
+}
+
+impl ProvisionConfirmationAction {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Fixed => "● 固定",
+            Self::Preserve => "● 保留",
+            Self::Free => "○ 空闲",
+            Self::Passthrough => "✓ 透传",
+            Self::Rewrap => "✓ 改密",
+            Self::FormatRebuild => "⚠ 格式化重建",
+            Self::New => "+ 新建",
+            Self::Delete => "✗ 删除",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProvisionReviewTone {
-    Muted,
-    Accent,
-    Success,
-    Warning,
+pub(crate) enum ProvisionConfirmationDataEffect {
+    Preserve,
+    Clear,
+    None,
+}
+
+impl ProvisionConfirmationDataEffect {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Preserve => "✓ 保留",
+            Self::Clear => "⚠ 清空",
+            Self::None => "— 不涉及",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProvisionConfirmationPasswordEffect {
+    None,
+    Preserve,
+    Rewrap,
+    InitializeNew,
+    Rebuild,
+}
+
+impl ProvisionConfirmationPasswordEffect {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "— 不涉及",
+            Self::Preserve => "✓ 保留原密码域",
+            Self::Rewrap => "↻ 使用目标密码，FileKey 保持",
+            Self::InitializeNew => "+ 新建密码域",
+            Self::Rebuild => "⚠ 重建密码域，生成新 FileKey",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProvisionConfirmationFilesystemEffect {
+    Keep,
+    Format(crate::filesystem::FilesystemKind),
+    Create(crate::filesystem::FilesystemKind),
+    None,
+}
+
+impl ProvisionConfirmationFilesystemEffect {
+    pub fn label(self) -> String {
+        match self {
+            Self::Keep => "✓ 保持".into(),
+            Self::Format(filesystem) => {
+                format!("⚠ 格式化 {}", filesystem.windows_format_name())
+            }
+            Self::Create(filesystem) => format!("+ 新建 {}", filesystem.windows_format_name()),
+            Self::None => "— 不涉及".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProvisionReviewRow {
-    pub kind: ProvisionReviewRowKind,
-    pub tone: ProvisionReviewTone,
-    pub text: String,
-    pub badge: Option<&'static str>,
+pub(crate) struct ProvisionConfirmationTarget {
+    pub disk: u32,
+    pub total_sectors: u64,
+    pub device_id: String,
+    pub vid: Option<u16>,
+    pub pid: Option<u16>,
+    pub onlyid: Option<String>,
+    pub target: crate::provision::ProvisionTarget,
 }
 
-impl ProvisionReviewRow {
-    fn new(
-        kind: ProvisionReviewRowKind,
-        tone: ProvisionReviewTone,
-        text: impl Into<String>,
-    ) -> Self {
-        Self {
-            kind,
-            tone,
-            text: text.into(),
-            badge: None,
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProvisionConfirmationRegion {
+    pub label: String,
+    pub role: Option<crate::provision::PartitionRole>,
+    pub selection: crate::tui::disk_layout::DiskCapacitySelection,
+    pub sector_count: u64,
+    pub action: ProvisionConfirmationAction,
+    pub data_effect: ProvisionConfirmationDataEffect,
+    pub password_effect: ProvisionConfirmationPasswordEffect,
+    pub filesystem_effect: ProvisionConfirmationFilesystemEffect,
+    pub reason_summary: String,
+    pub technical_basis: Vec<String>,
+}
 
-    fn with_badge(mut self, badge: &'static str) -> Self {
-        self.badge = Some(badge);
-        self
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProvisionConfirmationOverall {
+    pub cleared_regions: usize,
+    pub reformatted_regions: usize,
+    pub password_changed_regions: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProvisionConfirmationViewModel {
+    pub target: ProvisionConfirmationTarget,
+    pub layout: crate::tui::disk_layout::DiskLayoutModel,
+    pub overall: ProvisionConfirmationOverall,
+    pub regions: Vec<ProvisionConfirmationRegion>,
+}
+
+impl ProvisionConfirmationViewModel {
+    pub(crate) fn from_prepared(prepared: &ProvisionPrepared) -> Result<Self, String> {
+        use crate::tui::disk_layout::{
+            DiskCapacitySelection, DiskLayoutModel, DiskLayoutSegment, DiskRegionKind,
+        };
+
+        let probe = prepared.hardware_probe();
+        let target = ProvisionConfirmationTarget {
+            disk: prepared.disk(),
+            total_sectors: prepared.total_sectors(),
+            device_id: prepared.device_id().to_string(),
+            vid: probe.vid,
+            pid: probe.pid,
+            onlyid: prepared.expected_onlyid().map(str::to_string),
+            target: prepared.target(),
+        };
+
+        let (layout, regions) = match prepared {
+            ProvisionPrepared::Official(official) => {
+                let target_plan = official
+                    .target_plan
+                    .as_ref()
+                    .ok_or("计划确认失败：正式制盘计划缺少最终分区计划")?;
+                let (lce_start_lba, lce_sector_count) = prepared
+                    .lce_extent()
+                    .ok_or("计划确认失败：正式制盘计划缺少 LCE 范围")?;
+                let partition_segments = target_plan
+                    .partitions
+                    .iter()
+                    .map(|part| DiskLayoutSegment {
+                        label: part.geometry.role.label().into(),
+                        start_lba: part.geometry.start_lba,
+                        sector_count: part.geometry.sector_count,
+                        kind: DiskRegionKind::from_partition_role(part.geometry.role),
+                    })
+                    .collect::<Vec<_>>();
+                let layout = DiskLayoutModel::canonical_edp(
+                    prepared.total_sectors(),
+                    partition_segments,
+                    lce_start_lba,
+                    lce_sector_count,
+                )
+                .map_err(|_| "计划确认失败：无法生成完整的 EDP 最终布局".to_string())?;
+                layout
+                    .validate_complete()
+                    .map_err(|_| "计划确认失败：EDP 最终磁盘布局不完整".to_string())?;
+                if layout
+                    .segments
+                    .iter()
+                    .any(|segment| segment.kind == DiskRegionKind::Conflict)
+                {
+                    return Err("计划确认失败：最终磁盘布局存在区域冲突".into());
+                }
+
+                let mut regions = Vec::with_capacity(target_plan.partitions.len());
+                for part in &target_plan.partitions {
+                    if part.password_disposition
+                        == Some(crate::provision::PasswordDisposition::Blocked)
+                    {
+                        return Err(format!(
+                            "计划确认失败：{} 的密码处理条件仍未满足",
+                            part.geometry.role.label()
+                        ));
+                    }
+                    let format_choice = official.format_targets.iter().find(|choice| {
+                        choice.target.role == part.geometry.role
+                            && choice.target.geometry.start_sector == part.geometry.start_lba
+                            && choice.target.geometry.sector_count() == part.geometry.sector_count
+                    });
+                    let format_selected = format_choice.is_some_and(|choice| choice.selected);
+                    if part.disposition == crate::provision::RegionDisposition::Rebuild
+                        && part.geometry.role
+                            != crate::provision::PartitionRole::CompatibilityReserve
+                        && !format_selected
+                    {
+                        return Err(format!(
+                            "计划确认失败：{} 需要重建，但未找到已选择的格式化目标",
+                            part.geometry.role.label()
+                        ));
+                    }
+                    if part.password_disposition
+                        == Some(crate::provision::PasswordDisposition::Rebuild)
+                        && !format_selected
+                    {
+                        return Err(format!(
+                            "计划确认失败：{} 的密码域需要重建，但未找到已选择的格式化目标",
+                            part.geometry.role.label()
+                        ));
+                    }
+
+                    let kind = DiskRegionKind::from_partition_role(part.geometry.role);
+                    let end_exclusive = part
+                        .geometry
+                        .start_lba
+                        .checked_add(part.geometry.sector_count)
+                        .ok_or("计划确认失败：目标分区 LBA 范围溢出")?;
+                    let selection = DiskCapacitySelection {
+                        start_lba: part.geometry.start_lba,
+                        end_exclusive,
+                        kind,
+                    };
+                    let matching_segments = layout
+                        .segments
+                        .iter()
+                        .filter(|segment| {
+                            segment.start_lba == selection.start_lba
+                                && segment.kind == selection.kind
+                                && segment.end_exclusive().ok() == Some(selection.end_exclusive)
+                        })
+                        .count();
+                    if matching_segments != 1 {
+                        return Err(format!(
+                            "计划确认失败：{} 的 LBA 范围无法唯一对应到最终布局",
+                            part.geometry.role.label()
+                        ));
+                    }
+
+                    let (action, data_effect) = if format_selected {
+                        (
+                            ProvisionConfirmationAction::FormatRebuild,
+                            ProvisionConfirmationDataEffect::Clear,
+                        )
+                    } else {
+                        match part.password_disposition {
+                            Some(crate::provision::PasswordDisposition::Passthrough(_)) => (
+                                ProvisionConfirmationAction::Passthrough,
+                                ProvisionConfirmationDataEffect::Preserve,
+                            ),
+                            Some(crate::provision::PasswordDisposition::Rewrap) => (
+                                ProvisionConfirmationAction::Rewrap,
+                                ProvisionConfirmationDataEffect::Preserve,
+                            ),
+                            Some(crate::provision::PasswordDisposition::Rebuild) => {
+                                return Err(format!(
+                                    "计划确认失败：{} 的密码域重建状态尚未收敛",
+                                    part.geometry.role.label()
+                                ))
+                            }
+                            Some(crate::provision::PasswordDisposition::Blocked) => unreachable!(),
+                            None => match part.disposition {
+                                crate::provision::RegionDisposition::PreserveOpaque
+                                | crate::provision::RegionDisposition::PreserveVerified
+                                | crate::provision::RegionDisposition::RewrapVerified => (
+                                    ProvisionConfirmationAction::Preserve,
+                                    ProvisionConfirmationDataEffect::Preserve,
+                                ),
+                                crate::provision::RegionDisposition::Rebuild
+                                    if part.geometry.role
+                                        == crate::provision::PartitionRole::CompatibilityReserve =>
+                                {
+                                    (
+                                        ProvisionConfirmationAction::New,
+                                        ProvisionConfirmationDataEffect::None,
+                                    )
+                                }
+                                crate::provision::RegionDisposition::Rebuild => {
+                                    return Err(format!(
+                                        "计划确认失败：{} 的重建状态尚未收敛",
+                                        part.geometry.role.label()
+                                    ))
+                                }
+                                crate::provision::RegionDisposition::Drop => (
+                                    ProvisionConfirmationAction::Delete,
+                                    ProvisionConfirmationDataEffect::Clear,
+                                ),
+                            },
+                        }
+                    };
+
+                    let password_effect = match part.password_disposition {
+                        Some(crate::provision::PasswordDisposition::Passthrough(_)) => {
+                            ProvisionConfirmationPasswordEffect::Preserve
+                        }
+                        Some(crate::provision::PasswordDisposition::Rewrap) => {
+                            ProvisionConfirmationPasswordEffect::Rewrap
+                        }
+                        Some(crate::provision::PasswordDisposition::Rebuild) => {
+                            let source_has_domain =
+                                crate::provision::KeyDomainRole::from_partition_role(
+                                    part.geometry.role,
+                                )
+                                .is_some_and(|domain| official.source_kind.has_key_domain(domain));
+                            if source_has_domain {
+                                ProvisionConfirmationPasswordEffect::Rebuild
+                            } else {
+                                ProvisionConfirmationPasswordEffect::InitializeNew
+                            }
+                        }
+                        Some(crate::provision::PasswordDisposition::Blocked) => unreachable!(),
+                        None => ProvisionConfirmationPasswordEffect::None,
+                    };
+                    let filesystem_effect = if format_selected {
+                        let filesystem = format_choice
+                            .and_then(|choice| choice.filesystem)
+                            .or(part.geometry.filesystem)
+                            .ok_or_else(|| {
+                                format!(
+                                    "计划确认失败：{} 已选择格式化，但缺少文件系统类型",
+                                    part.geometry.role.label()
+                                )
+                            })?;
+                        ProvisionConfirmationFilesystemEffect::Format(filesystem)
+                    } else if part.geometry.role
+                        == crate::provision::PartitionRole::CompatibilityReserve
+                    {
+                        ProvisionConfirmationFilesystemEffect::None
+                    } else {
+                        ProvisionConfirmationFilesystemEffect::Keep
+                    };
+                    let mut technical_basis = vec![format!(
+                        "区域处理    {}",
+                        disposition_label(part.disposition)
+                    )];
+                    if let Some(password) = part.password_disposition {
+                        technical_basis.push(format!(
+                            "密码处理    {}",
+                            password_disposition_label(password)
+                        ));
+                    }
+                    technical_basis.push(format!(
+                        "LBA 范围    {}–{}",
+                        selection.start_lba,
+                        selection.end_exclusive.saturating_sub(1)
+                    ));
+                    regions.push(ProvisionConfirmationRegion {
+                        label: part.geometry.role.label().into(),
+                        role: Some(part.geometry.role),
+                        selection,
+                        sector_count: part.geometry.sector_count,
+                        action,
+                        data_effect,
+                        password_effect,
+                        filesystem_effect,
+                        reason_summary: partition_reason(
+                            part.disposition,
+                            part.password_disposition,
+                            format_selected,
+                        ),
+                        technical_basis,
+                    });
+                }
+                let regions = merge_all_regions(&layout, regions)?;
+                (layout, regions)
+            }
+            ProvisionPrepared::Plain(plain) => {
+                let partition_segments = plain
+                    .plan
+                    .partitions
+                    .iter()
+                    .enumerate()
+                    .map(|(index, part)| DiskLayoutSegment {
+                        label: format!("普通分区[{}]", index + 1),
+                        start_lba: part.start_lba,
+                        sector_count: part.sector_count,
+                        kind: DiskRegionKind::Plain,
+                    })
+                    .collect::<Vec<_>>();
+                let layout = DiskLayoutModel::canonical_plain_plan(
+                    plain.plan.total_sectors,
+                    partition_segments,
+                )
+                .map_err(|_| "计划确认失败：无法生成完整的普通盘最终布局".to_string())?;
+                layout
+                    .validate_complete()
+                    .map_err(|_| "计划确认失败：普通盘最终磁盘布局不完整".to_string())?;
+                let mut regions = Vec::with_capacity(plain.plan.partitions.len());
+                for (index, part) in plain.plan.partitions.iter().enumerate() {
+                    let end_exclusive = part.end_exclusive().map_err(|_| {
+                        format!("计划确认失败：普通分区 P{} 的 LBA 范围无效", index + 1)
+                    })?;
+                    let selection = DiskCapacitySelection {
+                        start_lba: part.start_lba,
+                        end_exclusive,
+                        kind: DiskRegionKind::Plain,
+                    };
+                    let matching_segments = layout
+                        .segments
+                        .iter()
+                        .filter(|segment| {
+                            segment.start_lba == selection.start_lba
+                                && segment.kind == selection.kind
+                                && segment.end_exclusive().ok() == Some(selection.end_exclusive)
+                        })
+                        .count();
+                    if matching_segments != 1 {
+                        return Err(format!(
+                            "计划确认失败：普通分区 P{} 的 LBA 范围无法唯一对应到最终布局",
+                            index + 1
+                        ));
+                    }
+                    let from_edp = plain.source_kind != crate::provision::DiskProvisionKind::Plain;
+                    regions.push(ProvisionConfirmationRegion {
+                        label: format!("P{}", index + 1),
+                        role: None,
+                        selection,
+                        sector_count: part.sector_count,
+                        action: ProvisionConfirmationAction::New,
+                        data_effect: ProvisionConfirmationDataEffect::Clear,
+                        password_effect: ProvisionConfirmationPasswordEffect::None,
+                        filesystem_effect: ProvisionConfirmationFilesystemEffect::Create(part.filesystem),
+                        reason_summary: if from_edp {
+                            "当前 EDP 盘将重新初始化为普通盘；不会读取或迁移来源文件，目标普通分区创建新的空文件系统。".into()
+                        } else {
+                            "目标普通分区将创建新的空文件系统，原文件不保留。".into()
+                        },
+                        technical_basis: vec![
+                            "文件处理    不读取、不迁移来源文件".into(),
+                            format!(
+                                "LBA 范围    {}–{}",
+                                part.start_lba,
+                                end_exclusive.saturating_sub(1)
+                            ),
+                        ],
+                    });
+                }
+                let regions = merge_all_regions(&layout, regions)?;
+                (layout, regions)
+            }
+        };
+
+        let overall = ProvisionConfirmationOverall {
+            cleared_regions: regions
+                .iter()
+                .filter(|region| region.data_effect == ProvisionConfirmationDataEffect::Clear)
+                .count(),
+            reformatted_regions: regions
+                .iter()
+                .filter(|region| {
+                    matches!(
+                        region.filesystem_effect,
+                        ProvisionConfirmationFilesystemEffect::Format(_)
+                            | ProvisionConfirmationFilesystemEffect::Create(_)
+                    )
+                })
+                .count(),
+            password_changed_regions: regions
+                .iter()
+                .filter(|region| {
+                    matches!(
+                        region.password_effect,
+                        ProvisionConfirmationPasswordEffect::Rewrap
+                            | ProvisionConfirmationPasswordEffect::InitializeNew
+                            | ProvisionConfirmationPasswordEffect::Rebuild
+                    )
+                })
+                .count(),
+        };
+        Ok(Self {
+            target,
+            layout,
+            overall,
+            regions,
+        })
     }
 }
 
 impl AppState {
-    pub(crate) fn provision_review_summary_rows(&self) -> Vec<ProvisionReviewRow> {
-        let lines = self.provision_review_summary_lines();
-        let message_index = self
-            .provision
-            .message
-            .as_ref()
-            .map(|_| lines.len().saturating_sub(3));
-        let last_action_start = lines.len().saturating_sub(2);
-        lines
-            .into_iter()
-            .enumerate()
-            .map(|(index, text)| {
-                let (kind, tone) = if index == 0 {
-                    (ProvisionReviewRowKind::Status, ProvisionReviewTone::Success)
-                } else if Some(index) == message_index {
-                    (ProvisionReviewRowKind::Notice, ProvisionReviewTone::Warning)
-                } else if index >= last_action_start {
-                    (ProvisionReviewRowKind::Action, ProvisionReviewTone::Accent)
-                } else {
-                    (ProvisionReviewRowKind::KeyValue, ProvisionReviewTone::Muted)
-                };
-                ProvisionReviewRow::new(kind, tone, text)
-            })
-            .collect()
+    pub(crate) fn provision_confirmation_view_model(
+        &self,
+    ) -> Result<ProvisionConfirmationViewModel, String> {
+        let prepared = self.provision.prepared.as_ref().ok_or("计划对象尚未准备")?;
+        ProvisionConfirmationViewModel::from_prepared(prepared)
     }
 
-    pub(crate) fn provision_review_change_rows(&self) -> Vec<ProvisionReviewRow> {
-        use crate::provision::RegionDisposition;
-        let mut rows = Vec::new();
-        match self.provision.prepared.as_ref() {
-            Some(ProvisionPrepared::Official(prepared)) => {
-                rows.push(ProvisionReviewRow::new(
-                    ProvisionReviewRowKind::Notice,
-                    ProvisionReviewTone::Accent,
-                    "先写协议/LCE 并验证，再逐分区格式化和读回。",
-                ));
-                for choice in &prepared.format_targets {
-                    rows.push(ProvisionReviewRow::new(
-                        ProvisionReviewRowKind::Change,
-                        if choice.selected {
-                            ProvisionReviewTone::Warning
-                        } else {
-                            ProvisionReviewTone::Muted
-                        },
-                        format!(
-                            "{}  格式化 {}  {}",
-                            choice.target.role.label(),
-                            if choice.selected { "是" } else { "否" },
-                            choice
-                                .filesystem
-                                .map(|fs| fs.windows_format_name())
-                                .unwrap_or("—")
-                        ),
-                    ));
-                }
-                if let Some(plan) = &prepared.target_plan {
-                    for part in &plan.partitions {
-                        let (action, tone, badge) = match part.disposition {
-                            RegionDisposition::PreserveOpaque => (
-                                "保留（Opaque，原 key material）",
-                                ProvisionReviewTone::Success,
-                                "保留",
-                            ),
-                            RegionDisposition::PreserveVerified => {
-                                ("保留（已验证）", ProvisionReviewTone::Success, "保留")
-                            }
-                            RegionDisposition::RewrapVerified => (
-                                "仅重包 wrapper；数据保持",
-                                ProvisionReviewTone::Success,
-                                "重新封装",
-                            ),
-                            RegionDisposition::Migrate => (
-                                "文件级 staging 后迁移到目标文件系统",
-                                ProvisionReviewTone::Success,
-                                "迁移",
-                            ),
-                            RegionDisposition::Rebuild => {
-                                ("重建并初始化文件系统", ProvisionReviewTone::Warning, "重建")
-                            }
-                            RegionDisposition::Drop => {
-                                ("丢弃来源区域", ProvisionReviewTone::Warning, "删除")
-                            }
-                        };
-                        rows.push(
-                            ProvisionReviewRow::new(
-                                ProvisionReviewRowKind::Change,
-                                tone,
-                                format!(
-                                    "{}  {}  {} sector",
-                                    part.geometry.role.label(),
-                                    action,
-                                    part.geometry.sector_count
-                                ),
-                            )
-                            .with_badge(badge),
-                        );
-                        rows.push(ProvisionReviewRow::new(
-                            ProvisionReviewRowKind::KeyValue,
-                            ProvisionReviewTone::Muted,
-                            format!(
-                                "  密码域: {:?}  来源状态: {:?}  目标策略: {:?}",
-                                crate::provision::KeyDomainRole::from_partition_role(
-                                    part.geometry.role
-                                ),
-                                part.source_password_knowledge,
-                                part.target_password_policy,
-                            ),
-                        ));
-                        rows.push(ProvisionReviewRow::new(
-                            ProvisionReviewRowKind::Notice,
-                            tone,
-                            format!("  原因: {}", part.reason),
-                        ));
-                    }
-                }
-            }
-            Some(ProvisionPrepared::Plain(prepared)) => {
-                for (index, part) in prepared.plan.partitions.iter().enumerate() {
-                    rows.push(
-                        ProvisionReviewRow::new(
-                            ProvisionReviewRowKind::Change,
-                            ProvisionReviewTone::Warning,
-                            format!(
-                                "P{}  LBA {}–{}  {} sector  重建",
-                                index + 1,
-                                part.start_lba,
-                                part.end_lba().unwrap_or(part.start_lba),
-                                part.sector_count
-                            ),
-                        )
-                        .with_badge("重建"),
-                    );
-                }
-                rows.push(ProvisionReviewRow::new(
-                    ProvisionReviewRowKind::Notice,
-                    ProvisionReviewTone::Warning,
-                    "将清除 EDP 协议状态并重建普通分区；这不是安全擦除。",
-                ));
-            }
-            None => rows.push(ProvisionReviewRow::new(
-                ProvisionReviewRowKind::Notice,
-                ProvisionReviewTone::Muted,
-                "暂无变更明细。",
-            )),
-        }
-        rows
+    pub fn provision_review_region_count(&self) -> usize {
+        self.provision_confirmation_view_model()
+            .map(|view| view.regions.len())
+            .unwrap_or(0)
     }
 
-    pub fn provision_review_summary_lines(&self) -> Vec<String> {
-        let mut lines = vec![
-            "✓ 计划已通过全部只读校验".into(),
-            self.provision.kind.title().into(),
-        ];
-        match self.provision.prepared.as_ref() {
-            Some(ProvisionPrepared::Plain(prepared)) => {
-                lines.push(format!(
-                    "目标: disk{} · 恢复普通盘 · {} 个 MBR 主分区 · {} sectors",
-                    prepared.disk,
-                    prepared.plan.partitions.len(),
-                    prepared.plan.total_sectors
-                ));
-                lines.push(format!(
-                    "来源状态: {} · 来源 LCE cleanup: {}",
-                    prepared.source_kind.short_name(),
-                    prepared
-                        .source_lce_start_lba
-                        .and_then(|lba| lba.checked_add(6).and_then(|end| {
-                            crate::application::inspect_tree::format_lba_closed_range(lba, end)
-                        }))
-                        .unwrap_or_else(|| "无".into())
-                ));
-                lines.push(format!(
-                    "事务触碰: {} sectors · 最高写入 LBA: {}",
-                    prepared.write_plan.touched_sector_count(),
-                    prepared.write_plan.highest_touched_lba().unwrap_or(0)
-                ));
-                lines.push("LBA3 已从目标盘捕获并绑定；写入前将再次复核。".into());
-            }
-            Some(ProvisionPrepared::Official(prepared)) => {
-                lines.extend([
-                    format!("目标: disk{} · {}", prepared.disk, prepared.device_id),
-                    format!(
-                        "容量: {} sectors · LCE: LBA{}",
-                        prepared.write_image.total_sectors, prepared.lce_start_lba
-                    ),
-                    format!(
-                        "事务触碰: {} sectors · 最高写入 LBA: {}",
-                        prepared.write_image.touched_sector_count(),
-                        prepared.write_image.highest_touched_lba().unwrap_or(0)
-                    ),
-                    "LBA3 已从目标盘捕获并绑定；写入前将再次复核。".into(),
-                    format!(
-                        "初始化密码强制修改: {}",
-                        if prepared.force_change_password {
-                            "是"
-                        } else {
-                            "否"
-                        }
-                    ),
-                    format!(
-                        "取消密码复杂性验证: {}",
-                        if prepared.pass_info_policy.cancel_password_complexity_check {
-                            "是"
-                        } else {
-                            "否"
-                        }
-                    ),
-                    format!(
-                        "交换区密码最大错误次数: {}",
-                        prepared.pass_info_policy.max_share_password_errors
-                    ),
-                    format!(
-                        "保密区密码最大错误次数: {}",
-                        prepared.pass_info_policy.max_encrypt_password_errors
-                    ),
-                ]);
-            }
-            None => lines.push("计划对象尚未准备。".into()),
-        }
-        if let Some(message) = &self.provision.message {
-            lines.push(message.clone());
-        }
-        lines.extend([
-            "Enter 进入最终 YES 确认".into(),
-            "e 导出目标绑定镜像 · Esc 返回修改".into(),
-        ]);
-        lines
+    pub fn provision_review_selected_region(&self) -> usize {
+        let count = self.provision_review_region_count();
+        self.provision
+            .review_region_selected
+            .min(count.saturating_sub(1))
     }
 
-    pub fn provision_review_change_lines(&self) -> Vec<String> {
-        let mut lines = Vec::new();
-        match self.provision.prepared.as_ref() {
-            Some(ProvisionPrepared::Plain(prepared)) => {
-                for (index, part) in prepared.plan.partitions.iter().enumerate() {
-                    lines.push(format!(
-                        "P{} {} · {} sectors · {} · 卷标:{}",
-                        index + 1,
-                        part.end_exclusive()
-                            .ok()
-                            .and_then(|end| {
-                                crate::application::inspect_tree::format_lba_closed_range(
-                                    part.start_lba,
-                                    end,
-                                )
-                            })
-                            .unwrap_or_else(|| "[无效范围]".into()),
-                        part.sector_count,
-                        part.filesystem.windows_format_name(),
-                        part.volume_label
-                    ));
-                }
-                for gap in &prepared.plan.gaps {
-                    lines.push(format!(
-                        "空闲 {} · {} sectors",
-                        gap.start_lba
-                            .checked_add(gap.sector_count)
-                            .and_then(|end| {
-                                crate::application::inspect_tree::format_lba_closed_range(
-                                    gap.start_lba,
-                                    end,
-                                )
-                            })
-                            .unwrap_or_else(|| "[无效范围]".into()),
-                        gap.sector_count
-                    ));
-                }
-                lines.push("⚠ 将清除 EDP 协议状态并重建上述普通分区；这不是安全擦除。".into());
-            }
-            Some(ProvisionPrepared::Official(prepared)) => {
-                lines.push("先写协议/LCE 并验证，再对勾选的分区单独格式化并验证。".into());
-                lines.push("制盘后格式化:".into());
-                for choice in &prepared.format_targets {
-                    let target = &choice.target;
-                    lines.push(format!(
-                        "{} {} type{} {} {}{} 卷标:{}",
-                        if !target.format_capable {
-                            "—"
-                        } else if choice.selected {
-                            "☑"
-                        } else {
-                            "☐"
-                        },
-                        target.role.label(),
-                        target.geometry.partition_type.raw(),
-                        if !target.format_capable {
-                            "不可格式化"
-                        } else if target.physically_encrypted {
-                            "加密"
-                        } else {
-                            "明文"
-                        },
-                        choice
-                            .filesystem
-                            .map(|format| format.windows_format_name())
-                            .unwrap_or("—"),
-                        target
-                            .visible_mbr_type
-                            .map(|mbr| format!(" / MBR 0x{mbr:02X}"))
-                            .unwrap_or_default(),
-                        if target.format_capable {
-                            choice.volume_label.as_str()
-                        } else {
-                            "—"
-                        }
-                    ));
-                }
-                if let Some(target_plan) = &prepared.target_plan {
-                    lines.push(format!(
-                        "未分配空间: {} sectors",
-                        target_plan.unallocated_sectors
-                    ));
-                    for part in &target_plan.partitions {
-                        let disposition = match part.disposition {
-                            crate::provision::RegionDisposition::PreserveOpaque => {
-                                "PreserveOpaque · 原 key material 原样透传 · data extent 0 写入"
-                            }
-                            crate::provision::RegionDisposition::PreserveVerified => {
-                                "PreserveVerified · K_old 保持 · wrapper 保持 · data extent 0 写入"
-                            }
-                            crate::provision::RegionDisposition::RewrapVerified => {
-                                "RewrapVerified · K_old 保持 · 仅重包 wrapper · data extent 0 写入"
-                            }
-                            crate::provision::RegionDisposition::Migrate => {
-                                "Migrate · staging 完整源文件 · K_new · 原子写入/读回/回滚"
-                            }
-                            crate::provision::RegionDisposition::Rebuild => {
-                                "Rebuild · K_new · 必须完整初始化文件系统"
-                            }
-                            crate::provision::RegionDisposition::Drop => {
-                                "Drop · 来源区域不进入目标"
-                            }
-                        };
-                        let password_knowledge = match part.source_password_knowledge {
-                            Some(crate::provision::SourcePasswordKnowledge::DefaultVerified) => {
-                                "默认密码已验证"
-                            }
-                            Some(crate::provision::SourcePasswordKnowledge::UserVerified) => {
-                                "用户旧密码已验证"
-                            }
-                            Some(crate::provision::SourcePasswordKnowledge::Unknown) => {
-                                "来源密码 Unknown"
-                            }
-                            None => "无用户密码域",
-                        };
-                        let target_policy = match part.target_password_policy {
-                            Some(crate::provision::TargetPasswordPolicy::PreserveOpaque) => {
-                                "目标密码禁用（Opaque）"
-                            }
-                            Some(crate::provision::TargetPasswordPolicy::ReuseVerified) => {
-                                "目标密码沿用已验证值"
-                            }
-                            Some(crate::provision::TargetPasswordPolicy::ReplaceVerified) => {
-                                "目标密码变更，仅允许 Rewrap"
-                            }
-                            Some(crate::provision::TargetPasswordPolicy::InitializeNew) => {
-                                "目标密码用于新 key material"
-                            }
-                            None => "无目标密码策略",
-                        };
-                        lines.push(format!(
-                            "{} {} ({} sectors): {}",
-                            part.geometry.role.label(),
-                            part.geometry
-                                .start_lba
-                                .checked_add(part.geometry.sector_count)
-                                .and_then(|end| {
-                                    crate::application::inspect_tree::format_lba_closed_range(
-                                        part.geometry.start_lba,
-                                        end,
-                                    )
-                                })
-                                .unwrap_or_else(|| "[无效范围]".into()),
-                            part.geometry.sector_count,
-                            disposition
-                        ));
-                        lines.push(format!(
-                            "  密码状态: {} · {}",
-                            password_knowledge, target_policy
-                        ));
-                        lines.push(format!("  {}", part.reason));
-                    }
-                    if target_plan
-                        .partitions
-                        .iter()
-                        .all(|part| part.action == crate::provision::PartitionAction::Rebuild)
-                    {
-                        lines.push("e 导出与该目标绑定的稀疏制盘镜像".into());
-                    }
-                }
-            }
-            None => lines.push("暂无变更明细。".into()),
+    pub fn provision_review_move_region(&mut self, delta: isize) {
+        let count = self.provision_review_region_count();
+        if count == 0 {
+            self.provision.review_region_selected = 0;
+            return;
         }
-        lines
+        let current = self.provision_review_selected_region();
+        self.provision.review_region_selected = if delta < 0 {
+            current.saturating_sub(delta.unsigned_abs())
+        } else {
+            current.saturating_add(delta as usize).min(count - 1)
+        };
+    }
+
+    pub fn provision_review_toggle_details(&mut self) {
+        self.provision.review_details_expanded = !self.provision.review_details_expanded;
     }
 }

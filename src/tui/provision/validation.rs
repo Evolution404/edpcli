@@ -13,6 +13,26 @@ impl AppState {
         self.provision.kind.target().official_mode()
     }
 
+    pub(super) fn provision_initial_prefill(
+        &self,
+        kind: ProvisionKind,
+    ) -> Option<crate::provision::ProvisionPrefill> {
+        let target_mode = kind.target().official_mode()?;
+        let row = self.selected_device()?;
+        let source = row.existing_profile_for_prefill();
+        let total_sectors = row.size / crate::common::SECTOR as u64;
+        let lce = crate::application::provision_geometry::verified_usb_compatibility_extent(
+            total_sectors,
+        )?;
+        crate::provision::prefill_for_target_mode(
+            source.as_ref(),
+            target_mode,
+            lce.start_lba,
+            crate::common::SECTOR as u64,
+        )
+        .ok()
+    }
+
     pub(super) fn provision_resolved_prefill(
         &self,
     ) -> Result<
@@ -23,8 +43,8 @@ impl AppState {
         String,
     > {
         use crate::provision::{
-            apply_target_geometry_overrides, CapacityInput, CapacityInputMode, CapacitySource,
-            QuickCapacityUnit, TargetGeometryOverrides,
+            apply_target_geometry_overrides_draft, CapacityInput, CapacityInputMode,
+            CapacitySource, QuickCapacityUnit, TargetGeometryOverrides,
         };
 
         let row = self
@@ -34,11 +54,10 @@ impl AppState {
             .provision_target_mode()
             .ok_or_else(|| "离线快照工具不使用物理制盘表单".to_string())?;
         let total_sectors = row.size / crate::common::SECTOR as u64;
-        let lce = crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity(
+        let lce = crate::application::provision_geometry::verified_usb_compatibility_extent(
             total_sectors,
-            crate::common::SECTOR as u32,
         )
-        .ok_or_else(|| "当前目标不符合已验证的 512B/255x63 USB LCE 几何".to_string())?;
+        .ok_or_else(|| "当前目标不符合已验证的 USB 制盘兼容几何".to_string())?;
         let source = row.existing_profile_for_prefill();
         let base = crate::provision::prefill_for_target_mode(
             source.as_ref(),
@@ -161,43 +180,8 @@ impl AppState {
                 "保密区",
             )?,
         };
-        let resolved = apply_target_geometry_overrides(base, source.as_ref(), overrides)?;
+        let resolved = apply_target_geometry_overrides_draft(base, source.as_ref(), overrides)?;
         Ok((resolved, source))
-    }
-
-    pub(super) fn provision_domain_opaque_candidate(
-        &self,
-        domain: crate::provision::KeyDomainRole,
-    ) -> bool {
-        let (knowledge, profile_capable) = match domain {
-            crate::provision::KeyDomainRole::Share => (
-                self.provision.form.share_source_knowledge,
-                self.provision.form.share_opaque_profile,
-            ),
-            crate::provision::KeyDomainRole::Encrypt => (
-                self.provision.form.encrypt_source_knowledge,
-                self.provision.form.encrypt_opaque_profile,
-            ),
-        };
-        if knowledge != crate::provision::SourcePasswordKnowledge::Unknown || !profile_capable {
-            return false;
-        }
-        let Ok((resolved, Some(source))) = self.provision_resolved_prefill() else {
-            return false;
-        };
-        let Ok(targets) = resolved.target_partitions(crate::common::SECTOR as u64) else {
-            return false;
-        };
-        let Some(target) = targets.iter().find(|part| {
-            crate::provision::KeyDomainRole::from_partition_role(part.role) == Some(domain)
-        }) else {
-            return false;
-        };
-        let Some(old) = source.partition(target.role) else {
-            return false;
-        };
-        crate::application::provision::PreserveAssessment::for_partition(Some(old), target)
-            .candidate
     }
 
     pub(super) fn provision_selected_partition_role(
@@ -297,7 +281,7 @@ impl AppState {
             .provision
             .kind
             .mode()
-            .ok_or_else(|| "免密改造不使用新盘表单".to_string())?;
+            .ok_or_else(|| "当前流程不使用新盘表单".to_string())?;
         let parse_sectors = |value: &str, label: &str| -> Result<u64, String> {
             value
                 .parse::<u64>()
@@ -305,10 +289,30 @@ impl AppState {
                 .filter(|value| *value > 0)
                 .ok_or_else(|| format!("{label} 必须为正整数扇区"))
         };
-        let share_opaque =
-            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share);
-        let encrypt_opaque =
-            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt);
+        let preflight = self.provision_preflight()?;
+        preflight.validate_for_submit()?;
+        let share_target_requested =
+            preflight.target_password_requested(crate::provision::KeyDomainRole::Share);
+        let encrypt_target_requested =
+            preflight.target_password_requested(crate::provision::KeyDomainRole::Encrypt);
+        let share_target = share_target_requested.then(|| {
+            if self.provision_target_password_mode(crate::provision::KeyDomainRole::Share)
+                == password_verification::TargetPasswordMode::Explicit
+            {
+                self.provision.form.share_target_password.as_str()
+            } else {
+                self.provision.form.share_source_password.as_str()
+            }
+        });
+        let encrypt_target = encrypt_target_requested.then(|| {
+            if self.provision_target_password_mode(crate::provision::KeyDomainRole::Encrypt)
+                == password_verification::TargetPasswordMode::Explicit
+            {
+                self.provision.form.encrypt_target_password.as_str()
+            } else {
+                self.provision.form.encrypt_source_password.as_str()
+            }
+        });
         let form = &self.provision.form;
         let exact = crate::provision::CapacityInputMode::Exact;
         let capacity_sectors = |active: bool,
@@ -360,6 +364,7 @@ impl AppState {
         let share_mib = None;
         let encrypt_mib = None;
         let (resolved, _) = self.provision_resolved_prefill()?;
+        resolved.target_partitions(crate::common::SECTOR as u64)?;
         if self.provision.form.label_id.trim().is_empty()
             || self.provision.form.user.trim().is_empty()
             || self.provision.form.dept.trim().is_empty()
@@ -367,16 +372,10 @@ impl AppState {
         {
             return Err("标签标识、用户、部门和标签均不能为空".into());
         }
-        if matches!(mode, 0 | 1 | 3)
-            && !share_opaque
-            && self.provision.form.share_target_password.is_empty()
-        {
+        if matches!(mode, 0 | 1 | 3) && share_target.is_some_and(str::is_empty) {
             return Err("交换密钥域目标密码不能为空".into());
         }
-        if matches!(mode, 0..=2)
-            && !encrypt_opaque
-            && self.provision.form.encrypt_target_password.is_empty()
-        {
+        if matches!(mode, 0..=2) && encrypt_target.is_some_and(str::is_empty) {
             return Err("保密密钥域目标密码不能为空".into());
         }
         let max_share_password_errors = self
@@ -414,18 +413,17 @@ impl AppState {
             user: self.provision.form.user.trim().to_string(),
             dept: self.provision.form.dept.trim().to_string(),
             label: self.provision.form.label.trim().to_string(),
+            lba8_identity: self.provision.form.lba8_identity(),
             key_domains: crate::provision::KeyDomainSecrets::new(
                 crate::provision::KeyDomainSecretPair::new(
                     (!self.provision.form.share_source_password.is_empty())
                         .then_some(self.provision.form.share_source_password.as_bytes()),
-                    (matches!(mode, 0 | 1 | 3) && !share_opaque)
-                        .then_some(self.provision.form.share_target_password.as_bytes()),
+                    share_target.map(str::as_bytes),
                 ),
                 crate::provision::KeyDomainSecretPair::new(
                     (!self.provision.form.encrypt_source_password.is_empty())
                         .then_some(self.provision.form.encrypt_source_password.as_bytes()),
-                    (matches!(mode, 0..=2) && !encrypt_opaque)
-                        .then_some(self.provision.form.encrypt_target_password.as_bytes()),
+                    encrypt_target.map(str::as_bytes),
                 ),
             ),
             volume_label: self.provision.form.volume_label.trim().to_string(),

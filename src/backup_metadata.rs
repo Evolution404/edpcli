@@ -2,8 +2,7 @@
 //!
 //! This module never writes the source device. It derives partition geometry
 //! from the current LBA12 EDPF table, captures bounded filesystem metadata
-//! extents, and preserves the known/unknown tail areas as evidence-only
-//! artifacts.
+//! extents, and preserves identified historical tail backup structures.
 
 use serde::Serialize;
 
@@ -11,8 +10,10 @@ use crate::common::SECTOR;
 use crate::crypto::{a6b0_full, crc32_bare, xor_rolling};
 use crate::diskio::SectorDev;
 use crate::edpb::{
-    ArtifactCompleteness, ArtifactInput, Derivation, Extent, Region, RestorePolicy, SemanticStatus,
+    ArtifactCompleteness, ArtifactInput, Derivation, Extent, ManifestPartition, Region,
+    RestorePolicy, SemanticStatus,
 };
+use crate::partition_table::{PartitionSource, PartitionTableKind};
 use crate::protocol::{
     edpf::{EdpPartitionType, EdpfEntry64, EdpfEntry96},
     lba7::Lba7PartitionMode,
@@ -20,7 +21,6 @@ use crate::protocol::{
 
 pub const PARTITION_PREFIX_SECTORS: u64 = 64;
 pub const PARTITION_SUFFIX_SECTORS: u64 = 8;
-pub const DEVICE_TAIL_WINDOW_SECTORS: u64 = 2048;
 pub const LBA7_COMPAT_EXTENT_SECTORS: u64 = 6;
 pub const LBA7_COMPAT_EXTENT_BYTES: u64 = LBA7_COMPAT_EXTENT_SECTORS * SECTOR as u64;
 pub const LBA7_COMPAT_CHS_TRACK_SECTORS: u64 = 16_065;
@@ -83,6 +83,7 @@ pub struct FilesystemProbe {
 
 #[derive(Clone, Debug, Default)]
 pub struct MetadataAcquisition {
+    pub partitions: Vec<ManifestPartition>,
     pub regions: Vec<Region>,
     pub extents: Vec<Extent>,
     pub artifacts: Vec<ArtifactInput>,
@@ -144,14 +145,6 @@ fn read_extent(
         out.extend_from_slice(&sector);
     }
     Ok(out)
-}
-
-fn extent_id(partition_index: usize, name: &str) -> String {
-    format!("extent.partition.{partition_index}.{name}")
-}
-
-fn artifact_id(partition_index: usize, name: &str) -> String {
-    format!("raw.partition.{partition_index}.{name}")
 }
 
 // Mirrors one raw-evidence record into the extent/artifact model; keeping the
@@ -437,41 +430,25 @@ pub(crate) fn probe_filesystem(partition: &PartitionGeometry, prefix: &[u8]) -> 
         return probe;
     }
 
-    if boot.get(3..11) == Some(b"EXFAT   ") {
-        let bps_shift = boot[108];
-        let spc_shift = boot[109];
-        if bps_shift < 32 && spc_shift < 32 {
-            let bps = 1u32.checked_shl(bps_shift as u32).unwrap_or(0);
-            let spc = 1u32.checked_shl(spc_shift as u32).unwrap_or(0);
-            if bps == SECTOR as u32 && spc != 0 {
-                probe.kind = FilesystemKind::Exfat;
-                probe.bytes_per_sector = Some(bps);
-                probe.sectors_per_cluster = Some(spc);
-                let fat_offset = u32le(boot, 80).unwrap_or(0) as u64;
-                let heap_offset = u32le(boot, 88).unwrap_or(0) as u64;
-                let root_cluster = u32le(boot, 96).unwrap_or(0) as u64;
-                if fat_offset != 0 {
-                    if let Some(lba) = partition.start_sector.checked_add(fat_offset) {
-                        probe.key_lbas.push(lba);
-                    }
-                    probe.notes.push(format!("exFAT FAT offset={fat_offset}"));
-                }
-                if root_cluster >= 2 {
-                    if let Some(lba) = (root_cluster - 2)
-                        .checked_mul(spc as u64)
-                        .and_then(|v| heap_offset.checked_add(v))
-                        .and_then(|rel| partition.start_sector.checked_add(rel))
-                    {
-                        probe.key_lbas.push(lba);
-                        probe
-                            .notes
-                            .push(format!("exFAT root cluster={root_cluster}"));
-                    }
-                }
-                if let Some(lba) = partition.start_sector.checked_add(12) {
-                    probe.key_lbas.push(lba);
-                }
-            }
+    if let Some(layout) = crate::filesystem::exfat_analysis_layout(boot, partition.sector_count) {
+        probe.kind = FilesystemKind::Exfat;
+        probe.bytes_per_sector = Some(layout.bytes_per_sector);
+        probe.sectors_per_cluster = Some(layout.sectors_per_cluster);
+        if let Some(lba) = partition.start_sector.checked_add(layout.fat_offset) {
+            probe.key_lbas.push(lba);
+        }
+        probe
+            .notes
+            .push(format!("exFAT FAT offset={}", layout.fat_offset));
+        if let Some(lba) = partition.start_sector.checked_add(layout.root_relative_lba) {
+            probe.key_lbas.push(lba);
+        }
+        probe.notes.push(format!(
+            "exFAT root relative LBA={}",
+            layout.root_relative_lba
+        ));
+        if let Some(lba) = partition.start_sector.checked_add(12) {
+            probe.key_lbas.push(lba);
         }
         return probe;
     }
@@ -517,36 +494,369 @@ pub(crate) fn probe_filesystem(partition: &PartitionGeometry, prefix: &[u8]) -> 
     probe
 }
 
-fn add_key_sector(
-    out: &mut MetadataAcquisition,
-    dev: &mut dyn SectorDev,
-    partition: &PartitionGeometry,
-    region_id: &str,
-    ordinal: usize,
-    lba: u64,
-) -> Result<(), String> {
-    let partition_end = partition
-        .start_sector
-        .checked_add(partition.sector_count)
-        .ok_or_else(|| format!("partition {} end overflow", partition.index))?;
-    if lba < partition.start_sector || lba >= partition_end {
-        out.notes.push(format!(
-            "filesystem key LBA {lba} falls outside partition {} and was not captured",
-            partition.index
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlainGptHeader {
+    current_lba: u64,
+    backup_lba: u64,
+    first_usable_lba: u64,
+    last_usable_lba: u64,
+    disk_guid: [u8; 16],
+    partition_entries_lba: u64,
+    entry_count: u32,
+    entry_size: u32,
+    partition_array_crc32: u32,
+}
+
+fn parse_plain_gpt_header(raw: &[u8], expected_current_lba: u64) -> Result<PlainGptHeader, String> {
+    if raw.len() != SECTOR || raw.get(..8) != Some(b"EFI PART") {
+        return Err(format!(
+            "GPT header LBA{expected_current_lba} signature/length invalid"
         ));
-        return Ok(());
     }
-    let _ = add_raw_extent(
-        out,
-        dev,
-        region_id,
-        extent_id(partition.index, &format!("fskey{ordinal}")),
-        artifact_id(partition.index, &format!("fskey{ordinal}")),
-        lba,
-        1,
-        "filesystem_key_sector",
-    )?;
+    let header_size = u32le(raw, 12).ok_or_else(|| "GPT header_size missing".to_string())? as usize;
+    if !(92..=SECTOR).contains(&header_size) {
+        return Err(format!(
+            "GPT header LBA{expected_current_lba} header_size invalid"
+        ));
+    }
+    let stored_crc = u32le(raw, 16).ok_or_else(|| "GPT header_crc32 missing".to_string())?;
+    let mut crc_bytes = raw[..header_size].to_vec();
+    crc_bytes[16..20].fill(0);
+    if crate::protocol::lba1::crc32_ieee(&crc_bytes) != stored_crc {
+        return Err(format!("GPT header LBA{expected_current_lba} CRC mismatch"));
+    }
+    let current_lba = u64le(raw, 24).ok_or_else(|| "GPT current_lba missing".to_string())?;
+    if current_lba != expected_current_lba {
+        return Err(format!(
+            "GPT header current_lba={current_lba}, expected {expected_current_lba}"
+        ));
+    }
+    Ok(PlainGptHeader {
+        current_lba,
+        backup_lba: u64le(raw, 32).ok_or_else(|| "GPT backup_lba missing".to_string())?,
+        first_usable_lba: u64le(raw, 40)
+            .ok_or_else(|| "GPT first_usable_lba missing".to_string())?,
+        last_usable_lba: u64le(raw, 48).ok_or_else(|| "GPT last_usable_lba missing".to_string())?,
+        disk_guid: raw[56..72]
+            .try_into()
+            .map_err(|_| "GPT disk_guid missing".to_string())?,
+        partition_entries_lba: u64le(raw, 72)
+            .ok_or_else(|| "GPT partition_entries_lba missing".to_string())?,
+        entry_count: u32le(raw, 80).ok_or_else(|| "GPT entry_count missing".to_string())?,
+        entry_size: u32le(raw, 84).ok_or_else(|| "GPT entry_size missing".to_string())?,
+        partition_array_crc32: u32le(raw, 88)
+            .ok_or_else(|| "GPT partition_array_crc32 missing".to_string())?,
+    })
+}
+
+fn validate_plain_gpt_mirror(dev: &mut dyn SectorDev, total_sectors: u64) -> Result<(), String> {
+    if total_sectors < 4 {
+        return Err("GPT source disk is too small".into());
+    }
+    let primary_raw = read_extent(dev, 1, 1)?;
+    let primary = parse_plain_gpt_header(&primary_raw, 1)?;
+    if primary.backup_lba != total_sectors - 1 {
+        return Err(format!(
+            "GPT primary backup_lba={} conflicts with disk geometry {}",
+            primary.backup_lba,
+            total_sectors - 1
+        ));
+    }
+    let entry_bytes = usize::try_from(primary.entry_count)
+        .ok()
+        .and_then(|count| count.checked_mul(primary.entry_size as usize))
+        .ok_or_else(|| "GPT entry array length overflow".to_string())?;
+    if entry_bytes == 0 || primary.entry_size != 128 {
+        return Err("GPT entry array geometry unsupported".into());
+    }
+    let entry_sectors = entry_bytes.div_ceil(SECTOR) as u64;
+    let mut primary_entries = read_extent(dev, primary.partition_entries_lba, entry_sectors)?;
+    primary_entries.truncate(entry_bytes);
+    if crate::protocol::lba1::crc32_ieee(&primary_entries) != primary.partition_array_crc32 {
+        return Err("GPT primary partition array CRC mismatch".into());
+    }
+
+    let backup_raw = read_extent(dev, primary.backup_lba, 1)?;
+    let backup = parse_plain_gpt_header(&backup_raw, primary.backup_lba)?;
+    if backup.backup_lba != primary.current_lba
+        || backup.first_usable_lba != primary.first_usable_lba
+        || backup.last_usable_lba != primary.last_usable_lba
+        || backup.disk_guid != primary.disk_guid
+        || backup.entry_count != primary.entry_count
+        || backup.entry_size != primary.entry_size
+        || backup.partition_array_crc32 != primary.partition_array_crc32
+    {
+        return Err("GPT backup header geometry/CRC contract conflicts with primary".into());
+    }
+    if backup.partition_entries_lba + entry_sectors != backup.current_lba {
+        return Err("GPT backup partition array is not adjacent to backup header".into());
+    }
+    let mut backup_entries = read_extent(dev, backup.partition_entries_lba, entry_sectors)?;
+    backup_entries.truncate(entry_bytes);
+    if crate::protocol::lba1::crc32_ieee(&backup_entries) != backup.partition_array_crc32 {
+        return Err("GPT backup partition array CRC mismatch".into());
+    }
+    if backup_entries != primary_entries {
+        return Err("GPT primary and backup partition arrays differ".into());
+    }
     Ok(())
+}
+
+fn read_device_sector(dev: &mut dyn SectorDev, lba: u64) -> Result<Vec<u8>, String> {
+    let lba = u32::try_from(lba).map_err(|_| format!("LBA{lba} exceeds SectorDev u32 range"))?;
+    dev.read_sector(lba)
+        .map_err(|error| format!("read LBA{lba} failed: {error}"))
+}
+
+struct PartitionFilesystemReader<'a> {
+    dev: &'a mut dyn SectorDev,
+    start_lba: u64,
+    sector_count: u64,
+}
+
+impl crate::filesystem::FilesystemReader for PartitionFilesystemReader<'_> {
+    fn sector_size(&self) -> u32 {
+        SECTOR as u32
+    }
+
+    fn sector_count(&self) -> u64 {
+        self.sector_count
+    }
+
+    fn read_sector(
+        &mut self,
+        relative_lba: u64,
+    ) -> Result<[u8; SECTOR], crate::filesystem::FilesystemError> {
+        if relative_lba >= self.sector_count {
+            return Err(crate::filesystem::FilesystemError::for_filesystem(
+                crate::filesystem::FilesystemKind::Fat16,
+                crate::filesystem::FilesystemErrorKind::InvalidGeometry,
+                "文件系统读取超出分区范围",
+            ));
+        }
+        let absolute = self.start_lba.checked_add(relative_lba).ok_or_else(|| {
+            crate::filesystem::FilesystemError::for_filesystem(
+                crate::filesystem::FilesystemKind::Fat16,
+                crate::filesystem::FilesystemErrorKind::InvalidGeometry,
+                "文件系统绝对 LBA 溢出",
+            )
+        })?;
+        let bytes = read_device_sector(self.dev, absolute).map_err(|message| {
+            crate::filesystem::FilesystemError::for_filesystem(
+                crate::filesystem::FilesystemKind::Fat16,
+                crate::filesystem::FilesystemErrorKind::ReadFailure,
+                message,
+            )
+        })?;
+        bytes.try_into().map_err(|_| {
+            crate::filesystem::FilesystemError::for_filesystem(
+                crate::filesystem::FilesystemKind::Fat16,
+                crate::filesystem::FilesystemErrorKind::ReadFailure,
+                "文件系统扇区长度不是 512B",
+            )
+        })
+    }
+}
+
+fn probe_filesystem_hints(
+    dev: &mut dyn SectorDev,
+    start_lba: u64,
+    sector_count: u64,
+) -> Result<(Option<String>, Option<String>), String> {
+    let boot = read_device_sector(dev, start_lba)?;
+    if boot.len() != SECTOR {
+        return Err("filesystem boot sector is truncated".into());
+    }
+    let Some(kind) = crate::filesystem::detect_boot_sector(sector_count, &boot)
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok((None, None));
+    };
+    let filesystem = Some(kind.label().to_ascii_lowercase());
+    let label = match kind {
+        crate::filesystem::FilesystemKind::Fat16 => {
+            let mut reader = PartitionFilesystemReader {
+                dev,
+                start_lba,
+                sector_count,
+            };
+            crate::filesystem::FilesystemDriver::read_metadata(
+                &crate::filesystem::FAT16_DRIVER,
+                &mut reader,
+            )
+            .map_err(|error| error.to_string())?
+            .volume_label
+        }
+        crate::filesystem::FilesystemKind::ExFat => {
+            let mut reader = PartitionFilesystemReader {
+                dev,
+                start_lba,
+                sector_count,
+            };
+            crate::filesystem::FilesystemDriver::read_metadata(
+                &crate::filesystem::EXFAT_DRIVER,
+                &mut reader,
+            )
+            .map_err(|error| error.to_string())?
+            .volume_label
+        }
+        crate::filesystem::FilesystemKind::Fat12
+        | crate::filesystem::FilesystemKind::Fat32
+        | crate::filesystem::FilesystemKind::Ntfs => None,
+    };
+    Ok((filesystem, label))
+}
+
+fn probe_plain_filesystem_hints(
+    dev: &mut dyn SectorDev,
+    partition: &crate::partition_table::PhysicalPartition,
+) -> Result<(Option<String>, Option<String>), String> {
+    probe_filesystem_hints(dev, partition.start_lba, partition.sector_count)
+}
+
+fn manifest_partition_from_plain(
+    partition: &crate::partition_table::PhysicalPartition,
+    filesystem_hint: Option<String>,
+    volume_label_hint: Option<String>,
+) -> ManifestPartition {
+    let (role, partition_type) = match &partition.source {
+        PartitionSource::Mbr {
+            partition_type,
+            primary_slot,
+        } => (
+            Some(if primary_slot.is_some() {
+                "mbr_primary".to_string()
+            } else {
+                "mbr_logical".to_string()
+            }),
+            Some(format!("mbr:0x{partition_type:02X}")),
+        ),
+        PartitionSource::Gpt { type_guid, .. } => (
+            Some("gpt_partition".to_string()),
+            Some(format!(
+                "gpt:{}",
+                type_guid
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            )),
+        ),
+    };
+    ManifestPartition {
+        index: partition.index as u32,
+        role,
+        partition_type,
+        start_lba: partition.start_lba,
+        sector_count: partition.sector_count,
+        filesystem_hint,
+        volume_label_hint,
+    }
+}
+
+pub fn acquire_plain_metadata(
+    dev: &mut dyn SectorDev,
+    total_sectors: u64,
+) -> Result<MetadataAcquisition, String> {
+    let table = crate::partition_table::read_partition_table(total_sectors, |lba| {
+        let lba = u32::try_from(lba)
+            .map_err(|_| format!("partition-table LBA{lba} exceeds SectorDev u32 range"))?;
+        dev.read_sector(lba)
+            .map_err(|error| format!("read partition-table LBA{lba} failed: {error}"))
+    })?;
+    if table.kind == PartitionTableKind::Gpt {
+        validate_plain_gpt_mirror(dev, total_sectors)?;
+    }
+
+    let mut out = MetadataAcquisition::default();
+    for partition in &table.partitions {
+        match probe_plain_filesystem_hints(dev, partition) {
+            Ok((filesystem_hint, volume_label_hint)) => {
+                out.partitions.push(manifest_partition_from_plain(
+                    partition,
+                    filesystem_hint,
+                    volume_label_hint,
+                ));
+            }
+            Err(error) => {
+                out.notes.push(format!(
+                    "P{} filesystem hint unavailable: {error}",
+                    partition.index
+                ));
+                out.partitions
+                    .push(manifest_partition_from_plain(partition, None, None));
+            }
+        }
+    }
+    let region_id = "region.plain.partition_table";
+    out.regions.push(Region {
+        id: region_id.into(),
+        role: "plain_partition_table".into(),
+        start_lba: None,
+        sector_count: None,
+        semantic_status: SemanticStatus::Identified,
+    });
+    for (index, extent) in table.table_extents.iter().enumerate() {
+        let data = read_extent(dev, extent.start_lba, extent.sector_count)?;
+        let extent_id = format!("extent.plain.partition_table.{index}");
+        out.extents.push(Extent {
+            id: extent_id.clone(),
+            region_id: region_id.into(),
+            start_lba: extent.start_lba,
+            sector_count: extent.sector_count,
+            purpose: extent.label.clone(),
+        });
+        out.artifacts.push(ArtifactInput {
+            id: format!("raw.plain.partition_table.{index}"),
+            kind: "raw_sectors".into(),
+            media_type: "application/octet-stream".into(),
+            source_extent_ids: vec![extent_id],
+            derivation: None,
+            restore_policy: RestorePolicy::Restorable,
+            completeness: ArtifactCompleteness::Complete,
+            data,
+        });
+    }
+    out.notes.push(match table.kind {
+        PartitionTableKind::Mbr => "Plain MBR metadata only; filesystem/user data excluded".into(),
+        PartitionTableKind::Gpt => {
+            "Plain GPT primary/backup metadata only; filesystem/user data excluded".into()
+        }
+    });
+    Ok(out)
+}
+
+fn manifest_partition_from_edp(
+    mode: Option<Lba7PartitionMode>,
+    partition: &PartitionGeometry,
+    filesystem_hint: Option<String>,
+    volume_label_hint: Option<String>,
+) -> ManifestPartition {
+    let role = match (mode, EdpPartitionType::from_raw(partition.partition_type)) {
+        (Some(mode), Some(partition_type)) => {
+            match crate::provision::official_partition_role(mode, partition.index, partition_type) {
+                crate::provision::PartitionRole::Boot => "boot",
+                crate::provision::PartitionRole::Share => "share",
+                crate::provision::PartitionRole::Encrypt => "encrypt",
+                crate::provision::PartitionRole::BootShareCombined => "boot_share_combined",
+                crate::provision::PartitionRole::CompatibilityReserve => "compatibility_reserve",
+            }
+        }
+        _ => match partition.partition_type {
+            1 => "boot",
+            2 => "share",
+            4 => "encrypt",
+            _ => "unknown",
+        },
+    };
+    ManifestPartition {
+        index: (partition.index + 1) as u32,
+        role: Some(role.into()),
+        partition_type: Some(format!("edp:{}", partition.partition_type)),
+        start_lba: partition.start_sector,
+        sector_count: partition.sector_count,
+        filesystem_hint,
+        volume_label_hint,
+    }
 }
 
 pub fn acquire_metadata(
@@ -559,6 +869,15 @@ pub fn acquire_metadata(
         return Err("source disk is smaller than protocol region".into());
     }
     let partitions = parse_partition_geometry(lba0_12, device_id, total_sectors)?;
+    let partition_types = partitions
+        .iter()
+        .map(|partition| partition.partition_type)
+        .collect::<Vec<_>>();
+    let partition_mode = Lba7PartitionMode::from_partition_types(&partition_types);
+    let (share_protocol_label, encrypt_protocol_label) = lba0_12
+        .get(10 * SECTOR..11 * SECTOR)
+        .map(|raw| crate::protocol::semantic::lba10_volume_labels(raw, device_id))
+        .unwrap_or((None, None));
     let mut out = MetadataAcquisition::default();
 
     let topology_json = serde_json::to_vec_pretty(&partitions)
@@ -583,73 +902,24 @@ pub fn acquire_metadata(
             partition.index, partition.partition_type
         );
         out.regions.push(Region {
-            id: region_id.clone(),
+            id: region_id,
             role: format!("partition.type{}", partition.partition_type),
             start_lba: Some(partition.start_sector),
             sector_count: Some(partition.sector_count),
             semantic_status: SemanticStatus::Identified,
         });
 
-        let prefix_count = partition.sector_count.min(PARTITION_PREFIX_SECTORS);
-        let prefix_start = partition.start_sector;
-        let prefix_extent_id = extent_id(partition.index, "prefix");
-        let prefix_artifact_id = artifact_id(partition.index, "prefix");
-        let prefix = add_raw_extent(
-            &mut out,
-            dev,
-            &region_id,
-            prefix_extent_id.clone(),
-            prefix_artifact_id.clone(),
-            prefix_start,
-            prefix_count,
-            "partition_metadata_prefix",
-        )?;
-
-        if partition.sector_count > prefix_count {
-            let suffix_count = PARTITION_SUFFIX_SECTORS.min(partition.sector_count - prefix_count);
-            if suffix_count > 0 {
-                let suffix_start = partition.start_sector + partition.sector_count - suffix_count;
-                let _ = add_raw_extent(
-                    &mut out,
-                    dev,
-                    &region_id,
-                    extent_id(partition.index, "suffix"),
-                    artifact_id(partition.index, "suffix"),
-                    suffix_start,
-                    suffix_count,
-                    "partition_metadata_suffix",
-                )?;
-            }
-        }
-
-        let probe = probe_filesystem(partition, prefix.as_deref().unwrap_or(&[]));
-        let mut seen = std::collections::BTreeSet::new();
-        for (ordinal, lba) in probe
-            .key_lbas
-            .iter()
-            .copied()
-            .filter(|lba| seen.insert(*lba))
-            .enumerate()
-        {
-            add_key_sector(&mut out, dev, partition, &region_id, ordinal, lba)?;
-        }
-        if prefix.is_some() {
-            let probe_json = serde_json::to_vec_pretty(&probe)
-                .map_err(|e| format!("serialize filesystem probe failed: {e}"))?;
-            out.artifacts.push(ArtifactInput {
-                id: format!("derived.partition.{}.filesystem_probe", partition.index),
-                kind: "filesystem_probe".into(),
-                media_type: "application/json".into(),
-                source_extent_ids: vec![prefix_extent_id],
-                derivation: Some(Derivation {
-                    method: "filesystem_boot_probe_v1".into(),
-                    source_artifact_ids: vec![prefix_artifact_id],
-                }),
-                restore_policy: RestorePolicy::DerivedOnly,
-                completeness: ArtifactCompleteness::Complete,
-                data: probe_json,
-            });
-        }
+        let protocol_label = match partition.partition_type {
+            2 => share_protocol_label.clone(),
+            4 => encrypt_protocol_label.clone(),
+            _ => None,
+        };
+        out.partitions.push(manifest_partition_from_edp(
+            partition_mode,
+            partition,
+            None,
+            protocol_label,
+        ));
     }
 
     match parse_lba7_compatibility_geometry(lba0_12, device_id, total_sectors) {
@@ -675,7 +945,7 @@ pub fn acquire_metadata(
             // This extent is not merely forensic: LBA7 points to it as active protocol
             // state, and official provisioning may rewrite it. Once the pointer geometry has
             // passed parse_lba7_compatibility_geometry(), keep the exact ciphertext restorable
-            // so a Deep EDPB can roll the protocol back coherently with LBA0-12.
+            // so a metadata restore can roll the protocol back coherently with LBA0-12.
             if raw.is_some() {
                 let artifact = out
                     .artifacts
@@ -745,27 +1015,6 @@ pub fn acquire_metadata(
         }
     }
 
-    let tail_count = total_sectors.min(DEVICE_TAIL_WINDOW_SECTORS);
-    let tail_start = total_sectors - tail_count;
-    let tail_region = "region.device_tail_window";
-    out.regions.push(Region {
-        id: tail_region.into(),
-        role: "forensic_tail_window".into(),
-        start_lba: Some(tail_start),
-        sector_count: Some(tail_count),
-        semantic_status: SemanticStatus::Unknown,
-    });
-    let _ = add_raw_extent(
-        &mut out,
-        dev,
-        tail_region,
-        "extent.device_tail_window".into(),
-        "raw.device_tail_window".into(),
-        tail_start,
-        tail_count,
-        "forensic_tail_evidence_window",
-    )?;
-
     if total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS + TAIL_METADATA_MIRROR_SECTORS {
         let mirror_start = total_sectors - TAIL_METADATA_MIRROR_OFFSET_SECTORS;
         let region_id = "region.tail.metadata_mirror_512k";
@@ -776,7 +1025,7 @@ pub fn acquire_metadata(
             sector_count: Some(TAIL_METADATA_MIRROR_SECTORS),
             semantic_status: SemanticStatus::Identified,
         });
-        let _ = add_raw_extent(
+        let raw = add_raw_extent(
             &mut out,
             dev,
             region_id,
@@ -786,6 +1035,13 @@ pub fn acquire_metadata(
             TAIL_METADATA_MIRROR_SECTORS,
             "historical_lba4_lba12_mirror",
         )?;
+        if raw.is_some() {
+            out.artifacts
+                .iter_mut()
+                .find(|artifact| artifact.id == "raw.tail.metadata_mirror_512k")
+                .expect("captured tail metadata mirror artifact")
+                .restore_policy = RestorePolicy::Restorable;
+        }
     }
 
     if total_sectors > TAIL_END4_MIRROR_OFFSET_SECTORS {
@@ -798,7 +1054,7 @@ pub fn acquire_metadata(
             sector_count: Some(1),
             semantic_status: SemanticStatus::Identified,
         });
-        let _ = add_raw_extent(
+        let raw = add_raw_extent(
             &mut out,
             dev,
             region_id,
@@ -808,14 +1064,20 @@ pub fn acquire_metadata(
             1,
             "historical_restore_node_mirror",
         )?;
+        if raw.is_some() {
+            out.artifacts
+                .iter_mut()
+                .find(|artifact| artifact.id == "raw.tail.restore_node_end4")
+                .expect("captured tail restore-node artifact")
+                .restore_policy = RestorePolicy::Restorable;
+        }
     }
 
-    out.notes.push(format!(
-        "metadata capture policy: partition prefix={} sectors, suffix={} sectors, device tail window={} sectors",
-        PARTITION_PREFIX_SECTORS, PARTITION_SUFFIX_SECTORS, tail_count
-    ));
     out.notes.push(
-        "LBA7 compatibility extent is the LBA7-pointed six-sector compatibility block; device tail window is separate forensic evidence"
+        "EDP metadata-only capture: filesystem boot/FAT/directory/user payload excluded".into(),
+    );
+    out.notes.push(
+        "LBA7 compatibility extent and identified historical tail recovery structures are captured as independent restorable protocol extents"
             .into(),
     );
     if !out.issues.is_empty() {
@@ -837,4 +1099,66 @@ pub fn acquire_metadata(
         ));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod manifest_role_tests {
+    use super::{manifest_partition_from_edp, Lba7PartitionMode, PartitionGeometry};
+
+    fn partition(index: usize, partition_type: u32) -> PartitionGeometry {
+        PartitionGeometry {
+            index,
+            partition_type,
+            partition_count: 3,
+            need_disturb: 0,
+            need_encrypt: 0,
+            start_sector: 63 + index as u64 * 1024,
+            sector_size: 512,
+            partition_size: 1024 * 512,
+            sector_count: 1024,
+            user_key_crc: 0,
+            file_key_crc: 0,
+            encrypt_mode: 0,
+        }
+    }
+
+    fn role(mode: Lba7PartitionMode, index: usize, partition_type: u32) -> String {
+        manifest_partition_from_edp(Some(mode), &partition(index, partition_type), None, None)
+            .role
+            .expect("manifest role")
+    }
+
+    #[test]
+    fn all_official_modes_have_semantic_manifest_roles() {
+        assert_eq!(role(Lba7PartitionMode::DefaultThreePartition, 0, 1), "boot");
+        assert_eq!(
+            role(Lba7PartitionMode::DefaultThreePartition, 1, 2),
+            "share"
+        );
+        assert_eq!(
+            role(Lba7PartitionMode::DefaultThreePartition, 2, 4),
+            "encrypt"
+        );
+
+        assert_eq!(
+            role(Lba7PartitionMode::BootShareCombined, 0, 2),
+            "boot_share_combined"
+        );
+        assert_eq!(role(Lba7PartitionMode::BootShareCombined, 1, 4), "encrypt");
+
+        assert_eq!(
+            role(Lba7PartitionMode::WholeDiskEncrypted, 0, 1),
+            "compatibility_reserve"
+        );
+        assert_eq!(role(Lba7PartitionMode::WholeDiskEncrypted, 1, 4), "encrypt");
+
+        assert_eq!(
+            role(Lba7PartitionMode::IntranetExtranetDualPartition, 0, 1),
+            "boot"
+        );
+        assert_eq!(
+            role(Lba7PartitionMode::IntranetExtranetDualPartition, 1, 2),
+            "share"
+        );
+    }
 }

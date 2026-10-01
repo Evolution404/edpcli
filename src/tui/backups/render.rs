@@ -25,70 +25,49 @@ fn backup_table_values(
             ColumnId::Onlyid => (safe(&cells[3]), Style::default()),
             ColumnId::User => (safe(&cells[4]), Style::default()),
             ColumnId::Dept => (safe(&cells[5]), Style::default()),
-            ColumnId::ProvisionKind => (safe(&cells[6]), accent()),
+            ColumnId::ProvisionKind => (
+                safe(&cells[6]),
+                backup
+                    .provision_kind
+                    .map(|kind| crate::tui::theme::current().provision_kind(kind))
+                    .unwrap_or_else(warning),
+            ),
             ColumnId::Health => (health.into(), health_style),
             _ => unreachable!("backup schema only contains backup and identity columns"),
         })
         .collect()
 }
 
-pub(super) fn draw_backup_create_choice(
-    frame: &mut Frame,
-    area: ratatui::layout::Rect,
-    state: &AppState,
-) {
-    let Some(choice) = state.backup_create_choice() else {
-        return;
-    };
-    let options = [
-        ("Metadata", "协议/分区元数据与盘尾证据，速度快"),
-        ("Deep", "进一步采集可验证分区/文件系统证据，耗时更长"),
-    ];
-    let mut lines = vec![
-        Line::from(Span::styled("创建备份", accent())),
-        Line::from(""),
-    ];
-    for (index, (name, description)) in options.into_iter().enumerate() {
-        let active = index == choice.selected;
-        lines.push(Line::from(vec![
-            Span::styled(
-                if active { "▌ " } else { "  " },
-                if active {
-                    selection_marker()
-                } else {
-                    Style::default()
-                },
-            ),
-            Span::styled(name, if active { selected() } else { Style::default() }),
-            Span::raw("  "),
-            Span::styled(description, muted()),
-        ]));
-    }
-    lines.extend([
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("j/k", accent()),
-            Span::raw(" 选择   "),
-            Span::styled("Enter/o", success()),
-            Span::raw(" 确认   "),
-            Span::styled("Esc/q", warning()),
-            Span::raw(" 取消"),
-        ]),
-    ]);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(focused_panel())
-                    .title("备份类型"),
-            )
-            .wrap(Wrap { trim: true }),
-        area,
-    );
-}
-
 pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    if let Some(run) = state.backup_verify_run() {
+        let mut lines = vec![
+            Line::from(Span::styled("备份校验进行中", accent())),
+            Line::from(format!("对象  {}", safe(&run.path.display().to_string()))),
+            Line::from(format!(
+                "当前阶段  {} · {} · {:.2}%",
+                run.latest.phase.label(),
+                run.latest.step.label(),
+                f64::from(run.latest.overall.basis_points()) / 100.0
+            )),
+            Line::from(""),
+            Line::from(Span::styled("运行日志", secondary())),
+        ];
+        lines.extend(run.log.iter().map(|event| {
+            Line::from(safe(&format!(
+                "[{:.2}%] {}  {}",
+                f64::from(event.overall.basis_points()) / 100.0,
+                event.phase.label(),
+                event.detail.as_deref().unwrap_or(event.step.label())
+            )))
+        }));
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(crate::tui::ui::card("备份校验", true))
+                .wrap(Wrap { trim: false }),
+            area,
+        );
+        return;
+    }
     use crate::tui::pane::PaneId;
     use crate::tui::ui::ViewportClass;
     let focused = state.backups_focused_pane();
@@ -127,63 +106,28 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             .constraints([Constraint::Length(3), Constraint::Min(4)])
             .split(list_area);
 
-        let summary_parts = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(40), Constraint::Length(38)])
-            .split(backup_parts[0]);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled("总计 ", muted()),
-                Span::styled(state.backups().len().to_string(), accent()),
-                Span::styled("  ·  已选 ", muted()),
-                Span::styled(state.backup_selection_count().to_string(), warning()),
-            ]))
-            .block(Block::default().borders(Borders::ALL).title("备份概览")),
-            summary_parts[0],
+        let counts = crate::tui::overview::ProvisionKindCounts::from_kinds(
+            state.backups().iter().map(|backup| backup.provision_kind),
         );
-        let search_active = state.input_mode() == InputMode::Search;
-        let search_filtered = state.workspace_filter_active();
-        let search_text = if search_active {
-            format!("/{}▌", safe(state.input_buffer()))
-        } else if let Some(status) = state.search_status() {
-            status
-        } else {
-            "/ 搜索身份、容量、型号、文件名".to_string()
-        };
-        let search_style = if search_active {
-            accent()
-        } else if search_filtered {
-            secondary()
-        } else {
-            muted()
-        };
-        frame.render_widget(
-            Paragraph::new(search_text)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(search_style)
-                        .title(if search_active {
-                            "搜索 · 实时过滤"
-                        } else {
-                            "搜索"
-                        }),
-                )
-                .style(search_style),
-            summary_parts[1],
-        );
+        let metrics = crate::tui::overview::overview_metrics(counts);
+        let search = crate::tui::overview::overview_search(state, "/ 搜索身份、容量、型号、文件名");
+        crate::tui::ui::workspace_overview(frame, backup_parts[0], "备份概览", &metrics, &search);
 
         let title = if state.backup_scan_pending() {
-            format!("备份列表 ({count_label}) · 扫描中…")
+            format!(
+                "备份列表 ({count_label}) · 已选 {} · 扫描中…",
+                state.backup_selection_count()
+            )
         } else {
-            format!("备份列表 ({count_label})")
+            format!(
+                "备份列表 ({count_label}) · 已选 {}",
+                state.backup_selection_count()
+            )
         };
 
         if visible_count == 0 {
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(title)
-                .title_style(secondary());
+            let pane_focused = focused == PaneId::BackupsList;
+            let block = crate::tui::ui::card(title, pane_focused);
             let inner = block.inner(backup_parts[1]);
             frame.render_widget(block, backup_parts[1]);
             let (heading, message, hint) = if state.workspace_filter_active() {
@@ -215,7 +159,8 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             );
         } else {
             use crate::tui::table_layout::{
-                display_width, layout_for, table_column_schema, truncate_cell, TableKind,
+                display_width, render_table_scrollbars, table_column_schema, table_heading,
+                table_position_label, visible_cell, TableKind,
             };
             let columns = table_column_schema(TableKind::Backups).expect("backup schema");
             let headings = columns
@@ -234,14 +179,21 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                     content_widths[index] = content_widths[index].max(display_width(value));
                 }
             }
-            let layout = layout_for(TableKind::Backups);
-            let viewport = layout.layout(
+            let order = state.table_column_order(TableKind::Backups);
+            let layout = state.table_visual_layout(TableKind::Backups);
+            let visual_widths = state.table_visual_widths(TableKind::Backups, &content_widths);
+            let interaction = state.table_interaction(TableKind::Backups);
+            let viewport = layout.layout_with_active(
                 backup_parts[1].width.saturating_sub(4),
-                &content_widths,
-                state.table_scroll_offset(TableKind::Backups),
+                &visual_widths,
+                interaction.viewport_offset(),
+                Some(interaction.active_column()),
             );
+            let pane_focused =
+                state.backups_focused_pane() == crate::tui::pane::PaneId::BackupsList;
             let window = visible_window(state.selected(), visible_count, backup_parts[1].height);
             let window_start = window.start;
+            let window_len = window.len();
             let rows = window
                 .filter_map(|position| state.backup_at_visible(position))
                 .map(|backup| {
@@ -255,13 +207,15 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                             .columns
                             .iter()
                             .map(|column| {
-                                let (value, style) = &values[column.index];
-                                Cell::from(truncate_cell(
-                                    value,
-                                    usize::from(column.width),
-                                    column.truncate_policy,
-                                ))
-                                .style(*style)
+                                let logical = order[column.index];
+                                let (value, style) = &values[logical];
+                                Cell::from(visible_cell(value, column)).style(
+                                    crate::tui::theme::current().table_cell(
+                                        *style,
+                                        column.index == interaction.active_column(),
+                                        pane_focused,
+                                    ),
+                                )
                             })
                             .collect::<Vec<_>>(),
                     )
@@ -271,26 +225,38 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                     .columns
                     .iter()
                     .map(|column| {
-                        truncate_cell(
-                            headings[column.index],
-                            usize::from(column.width),
-                            column.truncate_policy,
-                        )
+                        let logical = order[column.index];
+                        let label = table_heading(headings[logical], logical, interaction);
+                        let style = crate::tui::theme::current().table_header(
+                            column.index == interaction.active_column(),
+                            pane_focused,
+                        );
+                        Cell::from(visible_cell(&label, column)).style(style)
                     })
                     .collect::<Vec<_>>(),
-            )
-            .style(accent());
-            let table_title = format!("{title} · h/l 横向滚动 · {}", viewport.position_label());
+            );
+            let table_title = format!(
+                "{title} · {}",
+                table_position_label(&layout, interaction, &viewport)
+            );
             let table = crate::tui::ui::data_table(
                 &table_title,
                 header,
                 rows,
                 viewport.widths(),
-                state.backups_focused_pane() == crate::tui::pane::PaneId::BackupsList,
+                pane_focused,
             );
             let mut table_state = TableState::default();
             table_state.select(Some(state.selected().saturating_sub(window_start)));
             frame.render_stateful_widget(table, backup_parts[1], &mut table_state);
+            render_table_scrollbars(
+                frame,
+                backup_parts[1],
+                &viewport,
+                visible_count,
+                window_start,
+                window_len,
+            );
         }
     }
     if let Some(detail_area) = detail_area {
@@ -332,13 +298,19 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                     Span::styled(health, health_style.add_modifier(Modifier::BOLD)),
                 ]),
                 Line::from(Span::styled(
-                    "普通用户文件不保证完整备份；恢复前核对覆盖范围。",
+                    "不备份目录和用户文件；恢复仅用于结构与协议元数据。",
                     warning(),
                 )),
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("盘型  ", muted()),
-                    Span::styled(safe(&cells[6]), accent()),
+                    Span::styled(
+                        safe(&cells[6]),
+                        backup
+                            .provision_kind
+                            .map(|kind| crate::tui::theme::current().provision_kind_emphasis(kind))
+                            .unwrap_or_else(warning),
+                    ),
                 ]),
                 Line::from(format!("容量  {}", safe(&cells[0]))),
                 Line::from(format!("VID:PID  {}", safe(&cells[1]))),
@@ -375,7 +347,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             ));
             lines.extend([
                 Line::from(""),
-                Line::from("EDPB 保存协议与选定元数据范围，不保证包含普通分区全部用户文件。"),
+                Line::from("EDPB 仅保存结构与协议元数据；不保存目录或用户文件。"),
                 Line::from(""),
                 Line::from(Span::styled(
                     "可用操作",
@@ -488,7 +460,7 @@ fn draw_backup_coverage(frame: &mut Frame, area: ratatui::layout::Rect, state: &
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "普通用户文件不保证完整备份。",
+        "目录和用户文件不在备份范围内。",
         warning(),
     )));
     frame.render_widget(
@@ -510,57 +482,76 @@ fn draw_backup_coverage(frame: &mut Frame, area: ratatui::layout::Rect, state: &
     );
 }
 
-pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+fn draw_backup_status_modal(frame: &mut Frame, title: &str, lines: Vec<Line<'static>>) {
+    let height = (lines.len() as u16).saturating_add(2).clamp(5, 12);
+    let modal = crate::tui::ui::centered_modal_rect(frame.area(), 78, height);
+    crate::tui::ui::render_modal(frame, modal, title, |frame, inner| {
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+    });
+}
+
+fn backup_status_message(
+    message: Option<&crate::tui::ui::UiMessage>,
+    fallback: &'static str,
+) -> Line<'static> {
+    match message {
+        Some(message) => Line::from(Span::styled(
+            format!("{} {}", message.marker(), safe(message.text())),
+            message.style(),
+        )),
+        None => Line::from(Span::styled(
+            format!("◌ {fallback}"),
+            crate::tui::theme::current().secondary_accent(),
+        )),
+    }
+}
+
+pub(super) fn draw_backup_delete(frame: &mut Frame, state: &AppState) {
     let Some(delete) = state.backup_delete() else {
         return;
     };
-    let mut lines = vec![
-        Line::from(Span::styled("删除备份", danger())),
-        Line::from(vec![
-            Span::styled("文件: ", accent()),
-            Span::raw(safe(&delete.path.display().to_string())),
-        ]),
-        Line::from("安全规则：固定选中时 SHA-256 → 删除前重新扫描 → 内容复核 → 至少保留该盘 1 份备份 → 删除单文件 .edpb"),
-    ];
-    match delete.stage {
-        WizardStage::Confirm => {
-            lines.push(Line::from(Span::styled(
-                "这是不可撤销操作。请输入 YES 确认删除：",
-                warning(),
-            )));
-            lines.push(Line::from(format!("> {}", safe(&delete.confirmation))));
-        }
-        WizardStage::Running => {
-            lines.push(Line::from(
-                "正在复核并删除；q / Esc / Ctrl-C 将延迟到安全结束点。",
-            ));
-        }
-        WizardStage::Result => {
-            lines.push(Line::from("操作已结束；Esc 返回备份列表。"));
-        }
+    if delete.stage == WizardStage::Confirm {
+        crate::tui::ui::render_action_confirmation_modal(
+            frame,
+            crate::tui::ui::ActionConfirmationSpec {
+                title: "删除备份",
+                headline: "永久删除当前备份？",
+                details: vec![
+                    Line::from(vec![
+                        Span::styled("文件  ", muted()),
+                        Span::raw(safe(&delete.path.display().to_string())),
+                    ]),
+                    Line::from("删除前仍会重新扫描并复核固定 SHA-256 与保留底线。"),
+                    Line::from(Span::styled(
+                        "此操作不可撤销，但不是目标介质写入。",
+                        warning(),
+                    )),
+                ],
+                tone: crate::tui::ui::ConfirmationTone::Destructive,
+            },
+        );
+        return;
     }
-    if let Some(message) = &delete.message {
-        lines.push(Line::from(safe(message)));
+    if delete.stage == WizardStage::Running {
+        draw_backup_status_modal(
+            frame,
+            "删除备份 · 执行中",
+            vec![
+                Line::from(format!(
+                    "文件  {}",
+                    safe(&delete.path.display().to_string())
+                )),
+                backup_status_message(delete.message.as_ref(), "正在复核并删除备份…"),
+                Line::from(Span::styled(
+                    "q / Esc / Ctrl-C 将延迟到安全结束点。",
+                    warning(),
+                )),
+            ],
+        );
     }
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(danger())
-                    .title("危险操作 · 删除备份")
-                    .title_style(danger()),
-            )
-            .wrap(Wrap { trim: true }),
-        area,
-    );
 }
 
-pub(super) fn draw_backup_batch_delete(
-    frame: &mut Frame,
-    area: ratatui::layout::Rect,
-    state: &AppState,
-) {
+pub(super) fn draw_backup_batch_delete(frame: &mut Frame, state: &AppState) {
     let Some(batch) = state.backup_batch_delete() else {
         return;
     };
@@ -571,120 +562,81 @@ pub(super) fn draw_backup_batch_delete(
         .as_ref()
         .map(|plan| plan.targets.len())
         .unwrap_or_else(|| state.backup_selection_count());
-    let mut lines = vec![
-        Line::from(Span::styled("批量删除备份", danger())),
-        Line::from(format!("当前勾选: {} 份", state.backup_selection_count())),
-        Line::from("安全规则：新鲜扫描逐项固定路径 + SHA-256 → 一次性保留底线检查 → 固定 DeletePlan → 执行时逐条复核。"),
-        Line::from(""),
-    ];
     match batch.stage {
         BackupBatchDeleteStage::Planning => {
-            lines.push(Line::from(Span::styled(
-                "正在生成固定批量删除计划…",
-                secondary(),
-            )));
-        }
-        BackupBatchDeleteStage::Review => {
-            lines.extend([
-                Line::from(Span::styled(
-                    format!("计划已固定：将删除 {planned} 份备份。"),
-                    warning(),
-                )),
-                Line::from("Enter 进入最终 YES 确认；Esc 取消计划并保留勾选。"),
-            ]);
+            draw_backup_status_modal(
+                frame,
+                "批量删除 · 生成计划",
+                vec![
+                    Line::from(format!("已勾选  {} 份备份", state.backup_selection_count())),
+                    Line::from("正在新鲜扫描并逐项固定路径与 SHA-256…"),
+                    Line::from(Span::styled("计划生成期间不会删除任何文件。", muted())),
+                ],
+            );
         }
         BackupBatchDeleteStage::Confirm => {
-            lines.extend([
-                Line::from(Span::styled(
-                    format!("不可撤销：即将删除 {planned} 份备份。"),
-                    danger(),
-                )),
-                Line::from(vec![
-                    Span::raw("精确输入 "),
-                    Span::styled("YES", danger()),
-                    Span::raw(" 后按 Enter： "),
-                    Span::styled(safe(&batch.confirmation), input_focused()),
-                ]),
-            ]);
+            crate::tui::ui::render_action_confirmation_modal(
+                frame,
+                crate::tui::ui::ActionConfirmationSpec {
+                    title: "批量删除备份",
+                    headline: "确认执行批量删除？",
+                    details: vec![
+                        Line::from(format!("固定计划将删除 {planned} 份备份。")),
+                        Line::from("执行时逐条复核路径、SHA-256 与保留底线。"),
+                        Line::from(Span::styled(
+                            "此操作不可撤销，但不是目标介质写入。",
+                            warning(),
+                        )),
+                    ],
+                    tone: crate::tui::ui::ConfirmationTone::Destructive,
+                },
+            );
         }
         BackupBatchDeleteStage::Running => {
-            lines.push(Line::from(Span::styled(
-                "正在按固定计划逐条复核并删除；退出请求延迟到安全结束点。",
-                warning(),
-            )));
-        }
-        BackupBatchDeleteStage::Result => {
-            lines.push(Line::from(Span::styled(
-                safe(batch.message.as_deref().unwrap_or("批量删除流程结束")),
-                success(),
-            )));
-            lines.push(Line::from("Enter / Esc 返回备份列表。"));
+            draw_backup_status_modal(
+                frame,
+                "批量删除 · 执行中",
+                vec![
+                    Line::from(format!("固定目标  {planned} 份")),
+                    backup_status_message(batch.message.as_ref(), "正在按固定计划逐条复核并删除…"),
+                    Line::from(Span::styled("退出请求会延迟到安全结束点。", warning())),
+                ],
+            );
         }
     }
-    if batch.stage != BackupBatchDeleteStage::Result {
-        if let Some(message) = &batch.message {
-            lines.push(Line::from(Span::styled(safe(message), muted())));
-        }
-    }
-
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(danger())
-                    .title("危险操作 · 批量删除")
-                    .title_style(danger()),
-            )
-            .wrap(Wrap { trim: true }),
-        area,
-    );
 }
 
-pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+pub(super) fn draw_backup_prune(frame: &mut Frame, state: &AppState) {
     let Some(prune) = state.backup_prune() else {
         return;
     };
     use super::super::state::BackupPruneStage;
 
-    let mut lines = vec![
-        Line::from(Span::styled("备份保留策略清理", warning())),
-        Line::from("按同盘组执行 keep-N；原始盘备份与保留底线由 application 层统一保护。"),
-        Line::from(""),
-    ];
     match prune.stage {
         BackupPruneStage::Input => {
-            lines.extend([
-                Line::from(vec![
-                    Span::styled("每组保留最近 N 份快照: ", accent()),
-                    Span::styled(safe(&prune.keep_input), input_focused()),
-                ]),
-                Line::from("仅输入正整数；Enter 生成只读清理计划，Esc 取消。"),
-            ]);
+            draw_backup_status_modal(
+                frame,
+                "备份清理 · keep-N",
+                vec![
+                    Line::from("按同盘组保留最近 N 份快照。"),
+                    Line::from(vec![
+                        Span::styled("每组保留  ", muted()),
+                        Span::styled(safe(&prune.keep_input), input_focused()),
+                    ]),
+                    Line::from("Enter 生成只读清理计划 · Esc 取消"),
+                ],
+            );
         }
         BackupPruneStage::Planning => {
-            lines.push(Line::from(Span::styled(
-                "正在扫描备份并生成固定候选快照…",
-                secondary(),
-            )));
-        }
-        BackupPruneStage::Review => {
-            if let Some(prepared) = prune.prepared.as_ref() {
-                lines.extend([
-                    Line::from(format!("keep-N: {}", prepared.keep)),
-                    Line::from(format!("原盘备份: {} 份", prepared.originals)),
-                    Line::from(format!(
-                        "计划删除: {} 份   清理后快照: {} 份",
-                        prepared.plan.targets.len(),
-                        prepared.retained_snapshots
-                    )),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "Enter 进入 YES 确认；执行时逐条按固定 SHA-256 复核。",
-                        warning(),
-                    )),
-                ]);
-            }
+            draw_backup_status_modal(
+                frame,
+                "备份清理 · 生成计划",
+                vec![
+                    Line::from(format!("keep-N  {}", safe(&prune.keep_input))),
+                    Line::from("正在扫描备份并生成固定候选快照…"),
+                    Line::from(Span::styled("计划生成期间不会删除任何文件。", muted())),
+                ],
+            );
         }
         BackupPruneStage::Confirm => {
             let count = prune
@@ -692,95 +644,50 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
                 .as_ref()
                 .map(|prepared| prepared.plan.targets.len())
                 .unwrap_or(0);
-            lines.extend([
-                Line::from(Span::styled(
-                    format!("即将删除 {count} 份旧备份，这是不可撤销操作。"),
-                    danger(),
-                )),
-                Line::from(vec![
-                    Span::raw("精确输入 "),
-                    Span::styled("YES", danger()),
-                    Span::raw(" 后按 Enter： "),
-                    Span::styled(safe(&prune.confirmation), input_focused()),
-                ]),
-            ]);
+            crate::tui::ui::render_action_confirmation_modal(
+                frame,
+                crate::tui::ui::ActionConfirmationSpec {
+                    title: "备份清理确认",
+                    headline: "确认执行 keep-N 清理？",
+                    details: if let Some(prepared) = prune.prepared.as_ref() {
+                        vec![
+                            Line::from(format!("keep-N  {}", prepared.keep)),
+                            Line::from(format!("受管备份  {} 份", prepared.managed_backups)),
+                            Line::from(format!(
+                                "计划删除  {count} 份 · 清理后保留 {} 份",
+                                prepared.retained_backups
+                            )),
+                            Line::from("删除前逐条复核固定摘要与保留底线。"),
+                            Line::from(Span::styled(
+                                "此操作不可撤销，但不是目标介质写入。",
+                                warning(),
+                            )),
+                        ]
+                    } else {
+                        vec![Line::from("清理计划不可用。")]
+                    },
+                    tone: crate::tui::ui::ConfirmationTone::Destructive,
+                },
+            );
         }
         BackupPruneStage::Running => {
-            lines.push(Line::from(Span::styled(
-                "正在逐条摘要复核并删除；退出请求会延迟到安全结束点。",
-                warning(),
-            )));
+            let count = prune
+                .prepared
+                .as_ref()
+                .map(|prepared| prepared.plan.targets.len())
+                .unwrap_or(0);
+            draw_backup_status_modal(
+                frame,
+                "备份清理 · 执行中",
+                vec![
+                    Line::from(format!("固定目标  {count} 份")),
+                    backup_status_message(
+                        prune.message.as_ref(),
+                        "正在逐条复核摘要并清理固定候选…",
+                    ),
+                    Line::from(Span::styled("退出请求会延迟到安全结束点。", warning())),
+                ],
+            );
         }
-        BackupPruneStage::Result => {
-            lines.push(Line::from(Span::styled(
-                safe(prune.message.as_deref().unwrap_or("清理流程结束")),
-                success(),
-            )));
-            lines.push(Line::from("Enter / Esc 返回备份列表。"));
-        }
-    }
-    if prune.stage != BackupPruneStage::Result {
-        if let Some(message) = &prune.message {
-            lines.push(Line::from(Span::styled(safe(message), danger())));
-        }
-    }
-
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(warning())
-                    .title("备份清理 · keep-N")
-                    .title_style(warning()),
-            )
-            .wrap(Wrap { trim: true }),
-        area,
-    );
-}
-
-/// 把类型化写盘事件映射为向导 Running 阶段的单行显示文本。
-/// 直接从事件类型映射，不经 ANSI 文本反解析；调用方负责经 `safe` 消毒。
-pub(super) fn write_progress_text(event: &crate::application::WriteEvent) -> String {
-    use crate::application::WriteEvent;
-    match event {
-        WriteEvent::BackupCreated { path } => format!(
-            "备份完成：{}",
-            path.file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.to_string_lossy().into_owned())
-        ),
-        WriteEvent::BackupCreatedIsNopwd => {
-            "本份备份为免密状态快照（还原不会回到加密原盘）".to_string()
-        }
-        WriteEvent::RestoreMatchesHeader { onlyid, count, .. } => {
-            format!("onlyid={onlyid} 匹配 {count} 个备份")
-        }
-        WriteEvent::RestoreMatchRow {
-            index,
-            time,
-            is_nopwd,
-            ..
-        } => format!(
-            "[{index}] {time} {}",
-            if *is_nopwd {
-                "免密状态"
-            } else {
-                "加密原盘"
-            }
-        ),
-        WriteEvent::RestoreSelectionRetry { message } => message.clone(),
-        WriteEvent::BackupShaVerified { .. } => "备份 SHA-256 校验通过".to_string(),
-        WriteEvent::RestoreSnapshotNopwdWarning => {
-            "该备份为免密状态快照；dry-run 不作还原".to_string()
-        }
-        WriteEvent::RestoreDryRunNotice { .. } => "[dry-run] 还原预览完成，未写入".to_string(),
-        WriteEvent::RestoreTargetHeader { path } => format!(
-            "还原目标已确认：{}",
-            path.file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.to_string_lossy().into_owned())
-        ),
-        WriteEvent::RestoreWriteCompleted => "已还原，读回校验通过；请拔出重插".to_string(),
     }
 }

@@ -2,13 +2,14 @@ use std::collections::BTreeMap;
 use std::io;
 
 use edpcli::{
-    backup_deep::{analyze_partition, AnalysisStatus, PartitionReader},
     backup_metadata::PartitionGeometry,
     common::SECTOR,
     diskio::{execute_write_transaction, SectorDev, WriteTransactionPlan},
+    filesystem::analysis::{analyze_partition, AnalysisStatus, PartitionReader},
+    filesystem::FilesystemKind,
     provision::{
-        build_plain_provision_write_plan, DiskProvisionKind, OfficialFilesystemFormat,
-        PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
+        build_plain_provision_write_plan, DiskProvisionKind, PlainCleanupExtent,
+        PlainPartitionSpec, PlainProvisionPlan,
     },
 };
 
@@ -54,12 +55,7 @@ impl PartitionReader for PartitionView<'_> {
 }
 
 fn exfat(start_lba: u64, sector_count: u64, label: &str) -> PlainPartitionSpec {
-    PlainPartitionSpec::new(
-        start_lba,
-        sector_count,
-        OfficialFilesystemFormat::ExFat,
-        label,
-    )
+    PlainPartitionSpec::new(start_lba, sector_count, FilesystemKind::ExFat, label)
 }
 
 fn geometry(index: usize, part: &PlainPartitionSpec, count: usize) -> PartitionGeometry {
@@ -111,7 +107,8 @@ fn run_case(partitions: Vec<PlainPartitionSpec>) {
     let lba12 = disk.read_sector(12).unwrap();
     assert_eq!(
         DiskProvisionKind::from_sectors(&lba7, &lba12, "virtual-device"),
-        DiskProvisionKind::Plain
+        None,
+        "EDP detector must not classify a Plain disk as an EDP mode"
     );
 
     let mbr = disk.read_sector(0).unwrap();

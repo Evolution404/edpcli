@@ -53,14 +53,15 @@ pub(super) fn dispatch_nav_command(
                     }
                 }
             } else {
-                state.set_notice("全盘检查需要先选定物理盘或 EDPB 备份。");
+                state.set_warning_notice("全盘检查需要先选定物理盘或 EDPB 备份。");
             }
             StateEffect::None
         }
         NavCommand::BeginRestore => {
-            if let (Some(row), Some(backup)) =
-                (state.selected_device(), state.selected_backup_path())
-            {
+            if let (Some(row), Some(backup)) = (
+                state.selected_device(),
+                state.selected_restore_backup_path(),
+            ) {
                 let disk = row.disk;
                 let identity = row
                     .identity_pin
@@ -74,10 +75,10 @@ pub(super) fn dispatch_nav_command(
                         Some(identity),
                     );
                 } else {
-                    state.set_notice("目标介质身份尚未完成只读采集，请刷新设备后重试。");
+                    state.set_warning_notice("目标介质身份尚未完成只读采集，请刷新设备后重试。");
                 }
             } else {
-                state.set_notice("恢复需要先在设备页选定目标 U 盘，再进入备份页选择备份。");
+                state.set_warning_notice("恢复需要先选定目标 U 盘和一条可操作备份。");
             }
             StateEffect::None
         }
@@ -96,41 +97,20 @@ pub(super) fn dispatch_nav_command(
                         Some(identity),
                     );
                 } else {
-                    state.set_notice("目标介质身份尚未完成只读采集，请刷新设备后重试。");
+                    state.set_warning_notice("目标介质身份尚未完成只读采集，请刷新设备后重试。");
                 }
             } else {
-                state.set_notice("创建备份需要先在设备页选定 U 盘。");
-            }
-            StateEffect::None
-        }
-        NavCommand::BeginBackupCreateDeep => {
-            if let Some(row) = state.selected_device() {
-                let disk = row.disk;
-                let identity = row
-                    .identity_pin
-                    .as_ref()
-                    .map(state::ExpectedIdentity::from_pin);
-                if let Some(identity) = identity {
-                    state.begin_write_wizard_for_identity(
-                        state::WriteKind::BackupCreateDeep,
-                        disk,
-                        None,
-                        Some(identity),
-                    );
-                } else {
-                    state.set_notice("目标介质身份尚未完成只读采集，请刷新设备后重试。");
-                }
-            } else {
-                state.set_notice("深度备份需要先在设备页选定 U 盘。");
+                state.set_warning_notice("创建备份需要先在设备页选定 U 盘。");
             }
             StateEffect::None
         }
         NavCommand::VerifyBackup => {
             if let Some(path) = state.selected_backup_path() {
-                state.set_notice("正在后台校验当前备份…");
+                state.set_progress_notice("正在后台校验当前备份…");
+                state.begin_backup_verify_run(path.clone());
                 tasks.request_backup_verify(path, backup_dir.to_path_buf());
             } else {
-                state.set_notice("当前没有可校验的备份。");
+                state.set_warning_notice("当前没有可校验的备份。");
             }
             StateEffect::None
         }
@@ -138,7 +118,7 @@ pub(super) fn dispatch_nav_command(
             if let Some((path, expected_sha256)) = state.selected_backup_delete_target() {
                 state.begin_backup_delete(path, expected_sha256);
             } else {
-                state.set_notice("当前备份缺少可固定的内容摘要，拒绝删除。");
+                state.set_warning_notice("当前备份缺少可固定的内容摘要，拒绝删除。");
             }
             StateEffect::None
         }
@@ -146,7 +126,7 @@ pub(super) fn dispatch_nav_command(
             if state.workspace() == state::Workspace::Backups {
                 state.toggle_selected_backup();
             } else {
-                state.set_notice("批量选择只在备份页可用。");
+                state.set_warning_notice("批量选择只在备份页可用。");
             }
             StateEffect::None
         }
@@ -168,7 +148,7 @@ pub(super) fn dispatch_nav_command(
                 let _ = state.navigate(NavCommand::WorkspaceBackups, viewport_height);
             }
             if !state.begin_backup_prune() {
-                state.set_notice("已有关键操作或清理向导正在执行。");
+                state.set_warning_notice("已有关键操作或清理向导正在执行。");
             }
             StateEffect::None
         }
@@ -184,7 +164,6 @@ pub(super) fn palette_action_to_nav(action: command::PaletteAction) -> NavComman
         command::PaletteAction::Inspect => NavCommand::OpenInspect,
         command::PaletteAction::Restore => NavCommand::BeginRestore,
         command::PaletteAction::BackupCreate => NavCommand::BeginBackupCreate,
-        command::PaletteAction::BackupCreateDeep => NavCommand::BeginBackupCreateDeep,
         command::PaletteAction::BackupVerify => NavCommand::VerifyBackup,
         command::PaletteAction::BackupDelete => NavCommand::BeginBackupDelete,
         command::PaletteAction::BackupBatchDelete => NavCommand::BeginBackupBatchDelete,
@@ -195,182 +174,65 @@ pub(super) fn palette_action_to_nav(action: command::PaletteAction) -> NavComman
     }
 }
 
-pub(super) fn keymap_action_to_nav(action: keymap::TuiAction) -> Option<NavCommand> {
-    use keymap::TuiAction;
-
-    Some(match action {
-        TuiAction::MoveUp => NavCommand::Up,
-        TuiAction::MoveDown => NavCommand::Down,
-        TuiAction::Top => NavCommand::Top,
-        TuiAction::Bottom => NavCommand::Bottom,
-        TuiAction::HalfPageUp => NavCommand::HalfPageUp,
-        TuiAction::HalfPageDown => NavCommand::HalfPageDown,
-        TuiAction::Back => NavCommand::Escape,
-        TuiAction::Quit => NavCommand::Quit,
-        TuiAction::Help => NavCommand::Help,
-        TuiAction::Search => NavCommand::Search,
-        TuiAction::NextMatch => NavCommand::NextMatch,
-        TuiAction::PreviousMatch => NavCommand::PreviousMatch,
-        TuiAction::Command => NavCommand::CommandPalette,
-        TuiAction::Refresh => NavCommand::Refresh,
-        TuiAction::WorkspaceNext => NavCommand::NextWorkspace,
-        TuiAction::WorkspacePrevious => NavCommand::PreviousWorkspace,
-        _ => return None,
-    })
-}
-
 pub(super) fn dispatch_tui_action(
     state: &mut AppState,
     tasks: &mut TaskHub,
     action: keymap::TuiAction,
+    role: keymap::WidgetRole,
     backup_dir: &std::path::Path,
     viewport_height: usize,
     viewport_width: u16,
 ) -> StateEffect {
-    use keymap::TuiAction;
-
-    if let Some(command) = keymap_action_to_nav(action) {
-        return dispatch_nav_command(state, tasks, command, backup_dir, viewport_height);
+    let mut clipboard = clipboard::ClipboardService;
+    let outcome = controller::dispatch_action(
+        state,
+        action,
+        role,
+        viewport_height,
+        viewport_width,
+        &mut clipboard,
+    );
+    if !outcome.handled {
+        return StateEffect::None;
     }
+    let mut effect = outcome.effect;
+    if let Some(request) = outcome.request {
+        effect = execute_action_request(state, tasks, request, backup_dir, viewport_height);
+    }
+    effect
+}
 
-    match action {
-        TuiAction::TableScrollLeft | TuiAction::TableScrollRight => {
-            if state.workspace() == state::Workspace::Devices
-                && state.devices_focused_pane() != crate::tui::pane::PaneId::DevicesList
-            {
-                return StateEffect::None;
-            }
-            if state.workspace() == state::Workspace::Backups
-                && state.backups_focused_pane() != crate::tui::pane::PaneId::BackupsList
-            {
-                return StateEffect::None;
-            }
-            let kind = match state.workspace() {
-                state::Workspace::Devices => crate::tui::table_layout::TableKind::Devices,
-                state::Workspace::Backups => crate::tui::table_layout::TableKind::Backups,
-                state::Workspace::Provision | state::Workspace::Inspect => {
-                    return StateEffect::None;
-                }
-            };
-            state.scroll_table(kind, action == TuiAction::TableScrollLeft);
-            StateEffect::None
-        }
-        TuiAction::Insert
-            if matches!(
-                state.workspace(),
-                state::Workspace::Devices | state::Workspace::Backups | state::Workspace::Inspect
-            ) =>
-        {
-            dispatch_nav_command(
-                state,
-                tasks,
-                NavCommand::OpenInspect,
-                backup_dir,
-                viewport_height,
-            )
-        }
-        TuiAction::Activate => match state.workspace() {
-            state::Workspace::Devices => {
-                if let Err(message) = state.activate_device_for_viewport(viewport_width) {
-                    state.set_notice(message);
-                }
-                StateEffect::None
-            }
-            state::Workspace::Backups => dispatch_nav_command(
-                state,
-                tasks,
-                NavCommand::OpenInspect,
-                backup_dir,
-                viewport_height,
-            ),
-            state::Workspace::Inspect => dispatch_nav_command(
-                state,
-                tasks,
-                NavCommand::OpenInspect,
-                backup_dir,
-                viewport_height,
-            ),
-            state::Workspace::Provision => StateEffect::None,
-        },
-        TuiAction::Provision if state.workspace() == state::Workspace::Devices => {
-            if let Err(message) = state.begin_provision_for_selected_device() {
-                state.set_notice(message);
-            }
-            StateEffect::None
-        }
-        TuiAction::Open if state.workspace() == state::Workspace::Devices => {
-            let next = if state.devices_focused_pane() == crate::tui::pane::PaneId::DevicesList {
-                crate::tui::pane::PaneId::DevicesSummary
-            } else {
-                crate::tui::pane::PaneId::DevicesList
-            };
-            state.focus_devices_pane(next);
-            StateEffect::None
-        }
-        TuiAction::Toggle if state.workspace() == state::Workspace::Backups => {
-            dispatch_nav_command(
-                state,
-                tasks,
-                NavCommand::ToggleBackupSelection,
-                backup_dir,
-                viewport_height,
-            )
-        }
-        TuiAction::ViewOrVerify if state.workspace() == state::Workspace::Backups => {
-            dispatch_nav_command(
-                state,
-                tasks,
-                NavCommand::VerifyBackup,
-                backup_dir,
-                viewport_height,
-            )
-        }
-        TuiAction::Delete if state.workspace() == state::Workspace::Backups => {
-            let command = if state.backup_selection_count() > 0 {
-                NavCommand::BeginBackupBatchDelete
-            } else {
-                NavCommand::BeginBackupDelete
-            };
+fn execute_action_request(
+    state: &mut AppState,
+    tasks: &mut TaskHub,
+    request: controller::ActionRequest,
+    backup_dir: &std::path::Path,
+    viewport_height: usize,
+) -> StateEffect {
+    match request {
+        controller::ActionRequest::Navigate(command) => {
             dispatch_nav_command(state, tasks, command, backup_dir, viewport_height)
         }
-        TuiAction::BackupCreate
-            if matches!(
-                state.workspace(),
-                state::Workspace::Devices | state::Workspace::Backups
-            ) =>
-        {
-            state.begin_backup_create_choice();
+        controller::ActionRequest::InspectSelection { force_hex } => {
+            open_advanced_inspect_selection(state, tasks, force_hex);
             StateEffect::None
         }
-        TuiAction::Restore if state.workspace() == state::Workspace::Backups => {
-            dispatch_nav_command(
-                state,
-                tasks,
-                NavCommand::BeginRestore,
-                backup_dir,
-                viewport_height,
-            )
-        }
-        TuiAction::PanelLeft
-        | TuiAction::PanelRight
-        | TuiAction::PanelUp
-        | TuiAction::PanelDown
-            if matches!(
-                state.workspace(),
-                state::Workspace::Devices | state::Workspace::Backups
-            ) =>
-        {
-            let (dx, dy) = match action {
-                TuiAction::PanelLeft => (-1, 0),
-                TuiAction::PanelRight => (1, 0),
-                TuiAction::PanelUp => (0, -1),
-                TuiAction::PanelDown => (0, 1),
-                _ => unreachable!(),
-            };
-            state.spatial_workspace_focus(dx, dy);
+        controller::ActionRequest::InspectPreview { source, lba } => {
+            if let Err(message) = tasks.request_advanced_inspect_preview(source, lba) {
+                state.advanced_inspect_sector_finish(lba, Err(message.to_string()));
+            }
             StateEffect::None
         }
-        _ => StateEffect::None,
+        controller::ActionRequest::ProvisionKeyProbe { disk } => {
+            if let Err(message) = tasks.request_provision_key_probe(disk) {
+                state.provision_finish_key_probe(Err(message.to_string()));
+            }
+            StateEffect::None
+        }
+        controller::ActionRequest::ProvisionPlan => {
+            start_provision_plan(state, tasks);
+            StateEffect::None
+        }
     }
 }
 
@@ -413,57 +275,38 @@ pub(super) fn open_advanced_inspect_selection(
 
 pub(super) fn start_provision_source_password_verify(state: &mut AppState, tasks: &mut TaskHub) {
     let Some(disk) = state.selected_device_disk() else {
-        state.provision_mut().message = Some("目标 USB 已不存在，请返回设备页重新选择。".into());
+        state.set_error_notice("目标 USB 已不存在，请返回设备页重新选择。");
         return;
     };
     match state.provision_source_password_verify_request() {
-        Ok(Some((domain, password))) => {
-            state.provision_mut().message = Some(match domain {
-                crate::provision::KeyDomainRole::Share => "正在只读验证交换域来源密码…".into(),
-                crate::provision::KeyDomainRole::Encrypt => "正在只读验证保密域来源密码…".into(),
-            });
+        Ok(Some((domain, password, revision))) => {
             if let Err(message) =
-                tasks.request_provision_source_password_verify(disk, domain, password)
+                tasks.request_provision_source_password_verify(disk, domain, password, revision)
             {
-                state.provision_finish_source_password_verify(domain, Err(message.to_string()));
+                state.provision_finish_source_password_verify(
+                    domain,
+                    revision,
+                    Err(message.to_string()),
+                );
             }
         }
-        Ok(None) => {
-            state.provision_mut().message =
-                Some("当前字段不是来源密码；v 仅验证来源密码域。".into());
-        }
-        Err(message) => {
-            state.provision_mut().message = Some(message);
-        }
+        Ok(None) => {}
+        Err(message) => state.set_error_notice(message),
     }
 }
 
 pub(super) fn start_provision_plan(state: &mut AppState, tasks: &mut TaskHub) {
     let Some(disk) = state.selected_device_disk() else {
-        state.provision_mut().message = Some("目标 USB 已不存在，请返回设备页重新选择。".into());
+        state.set_error_notice("目标 USB 已不存在，请返回设备页重新选择。");
         return;
     };
     let request = if state.provision().kind == state::ProvisionKind::Plain {
         match state.provision_plain_plan() {
-            Ok(plan) => {
-                let mut request =
-                    crate::application::provision::PlainProvisionRequest::from_plan(&plan);
-                request.key_domains = crate::provision::KeyDomainSecrets::new(
-                    crate::provision::KeyDomainSecretPair::new(
-                        (!state.provision().form.share_source_password.is_empty())
-                            .then_some(state.provision().form.share_source_password.as_bytes()),
-                        None::<&[u8]>,
-                    ),
-                    crate::provision::KeyDomainSecretPair::new(
-                        (!state.provision().form.encrypt_source_password.is_empty())
-                            .then_some(state.provision().form.encrypt_source_password.as_bytes()),
-                        None::<&[u8]>,
-                    ),
-                );
-                crate::application::provision::ProvisionRequest::Plain(request)
-            }
+            Ok(plan) => crate::application::provision::ProvisionRequest::Plain(
+                crate::application::provision::PlainProvisionRequest::from_plan(&plan),
+            ),
             Err(message) => {
-                state.provision_mut().message = Some(message);
+                state.set_warning_notice(message);
                 return;
             }
         }
@@ -473,7 +316,7 @@ pub(super) fn start_provision_plan(state: &mut AppState, tasks: &mut TaskHub) {
                 crate::application::provision::ProvisionRequest::Official(Box::new(request))
             }
             Err(message) => {
-                state.provision_mut().message = Some(message);
+                state.set_warning_notice(message);
                 return;
             }
         }

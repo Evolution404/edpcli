@@ -114,7 +114,7 @@ pub(super) fn draw_sector_inspector(
                         .then_some(field.status)
                 });
                 let style = if index == sector.cursor {
-                    selected()
+                    crate::tui::theme::current().cursor()
                 } else if let Some(status) = active_status {
                     inspect_field_status_style(status)
                 } else if sector.mode == SectorInspectMode::Mixed
@@ -250,7 +250,7 @@ pub(super) fn draw_sector_inspector(
 
     frame.render_widget(
         Paragraph::new(Line::from(
-            "h/l byte · j/k ±16B · 0/$ 行首尾 · gg/G 扇区首尾 · Ctrl-u/d 半页 · PgUp/PgDn 整页 · [/] 前后 sector · v mode · Space/o bit · / n/N 搜索 · gl 跳转 · Esc 返回树",
+            "h/l byte · j/k ±16B · 0/$ 行首尾 · gg/G 扇区首尾 · Ctrl-u/d 半页 · PgUp/PgDn 整页 · [/] 前后 sector · v mode · Space/o bit · / n/N 搜索 · J 跳转 · Esc 返回树",
         ))
         .block(Block::default().borders(Borders::TOP)),
         vertical[2],

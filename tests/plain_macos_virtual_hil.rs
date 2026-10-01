@@ -5,10 +5,10 @@ use std::time::Duration;
 use edpcli::{
     common::SECTOR,
     diskio::{execute_write_transaction, FileDev, SectorDev, WriteTransactionPlan},
+    filesystem::FilesystemKind,
     platform,
     provision::{
-        build_plain_provision_write_plan, DiskProvisionKind, OfficialFilesystemFormat,
-        PlainPartitionSpec, PlainProvisionPlan,
+        build_plain_provision_write_plan, DiskProvisionKind, PlainPartitionSpec, PlainProvisionPlan,
     },
     sysinfo::SysRunner,
 };
@@ -38,7 +38,7 @@ fn macos_plain_virtual_disk_provisions_and_reidentifies() {
         vec![PlainPartitionSpec::new(
             2_048,
             total_sectors - 2_048,
-            OfficialFilesystemFormat::ExFat,
+            FilesystemKind::ExFat,
             "EDPCLI-HIL",
         )],
     )
@@ -54,7 +54,7 @@ fn macos_plain_virtual_disk_provisions_and_reidentifies() {
     let lba12 = dev.read_sector(12).expect("read LBA12");
     assert_eq!(
         DiskProvisionKind::from_sectors(&lba7, &lba12, "macos-virtual-hil"),
-        DiskProvisionKind::Plain
+        None
     );
     let mbr = dev.read_sector(0).expect("read MBR");
     assert_eq!(&mbr[510..512], &[0x55, 0xaa]);

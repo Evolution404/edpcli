@@ -86,12 +86,33 @@ fn scan_and_print_all_row_kinds() {
     );
     let runner = FakeRunner { canned: m };
 
+    let mut plain = vec![0u8; 13 * SECTOR];
+    let plain_total_sectors = 64_000_000_000u64 / SECTOR as u64;
+    let entry = 0x1be;
+    plain[entry + 4] = 0x07;
+    plain[entry + 8..entry + 12].copy_from_slice(&2048u32.to_le_bytes());
+    plain[entry + 12..entry + 16].copy_from_slice(
+        &u32::try_from(plain_total_sectors - 2048)
+            .unwrap()
+            .to_le_bytes(),
+    );
+    plain[510..512].copy_from_slice(&[0x55, 0xaa]);
+
     let read_calls = std::cell::RefCell::new(Vec::<(u32, u32)>::new());
     let read_ok = |disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
         read_calls.borrow_mut().push((disk, lba));
-        // disk6 读 netac 夹具; disk4 也读 netac(ioreg 是 Bogus → 识别不出, 与数据无关)
-        let _ = disk;
-        Ok(netac[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
+        let source = if disk == 4 {
+            plain.as_slice()
+        } else {
+            netac.as_slice()
+        };
+        let start = lba as usize * SECTOR;
+        let end = start + SECTOR;
+        if let Some(bytes) = source.get(start..end) {
+            Ok(bytes.to_vec())
+        } else {
+            Ok(vec![0; SECTOR])
+        }
     };
     let bak = TmpDir::new("scan_bak");
     let rows = scan_disks(&runner, &bak.0, &read_ok);
@@ -104,9 +125,8 @@ fn scan_and_print_all_row_kinds() {
         out
     );
     assert!(out.contains("disk7") && out.contains("非 USB"), "{}", out);
-    // 原盘数据: 非免密 + EDPF 3 条(含 Boot/Share/Encrypt)
+    // 原盘数据: 非mode1 + EDPF 3 条(含 Boot/Share/Encrypt)
     let row6 = rows.iter().find(|r| r.disk == 6).unwrap();
-    assert!(!row6.is_nopwd);
     assert_eq!(row6.user.as_deref(), Some("宋旭琳"));
     assert_eq!(row6.label.as_deref(), Some("江苏电力!SAFE6"));
     assert_eq!(row6.force_change_password, Some(true));
@@ -132,18 +152,28 @@ fn scan_and_print_all_row_kinds() {
         "list 同一次设备扫描不应重复读取 LBA12"
     );
 
-    // 旧免密盘镜像应统一显示官方模式1盘型。
-    let (conv, _) = passwordless_image("netac").unwrap();
+    // 旧mode1 盘镜像应统一显示官方模式1盘型。
+    let (conv, _) = mode1_fixture_image("netac").unwrap();
     let converted_read_calls = std::cell::RefCell::new(Vec::<(u32, u32)>::new());
     let read_conv = |disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
         converted_read_calls.borrow_mut().push((disk, lba));
-        Ok(conv[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
+        let source = if disk == 4 {
+            plain.as_slice()
+        } else {
+            conv.as_slice()
+        };
+        let start = lba as usize * SECTOR;
+        let end = start + SECTOR;
+        if let Some(bytes) = source.get(start..end) {
+            Ok(bytes.to_vec())
+        } else {
+            Ok(vec![0; SECTOR])
+        }
     };
     let rows2 = scan_disks(&runner, &bak.0, &read_conv);
     let out2 = print_disk_table(&rows2);
     assert!(out2.contains("mode1 · 二合一"), "{}", out2);
     let row6b = rows2.iter().find(|r| r.disk == 6).unwrap();
-    assert!(row6b.is_nopwd);
     assert_eq!(row6b.label.as_deref(), Some("江苏电力!SAFE6"));
     assert_eq!(row6b.force_change_password, Some(true));
     assert_eq!(row6b.partitions.as_ref().unwrap().len(), 2);
@@ -154,7 +184,7 @@ fn scan_and_print_all_row_kinds() {
             .filter(|&&(disk, lba)| disk == 6 && lba == 12)
             .count(),
         1,
-        "免密盘 list 扫描也不应为状态判断和分区展示重复读取 LBA12"
+        "mode1 盘 list 扫描也不应为状态判断和分区展示重复读取 LBA12"
     );
 
     // 读盘全被拒（权限不足）→ denied 降级行
@@ -190,6 +220,77 @@ fn scan_and_print_all_row_kinds() {
         .contains("预期 512B"));
     let out3 = print_disk_table(&rows3);
     assert!(out3.contains("读取异常"), "{}", out3);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn scan_prefers_live_plain_filesystem_over_stale_edp_protocol_fields() {
+    let Some(mut stale) = load_disk_image("netac") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    const TOTAL: u64 = 122_880_000;
+    stale[..SECTOR].fill(0);
+    let entry = 0x1be;
+    stale[entry + 4] = 0x07;
+    stale[entry + 8..entry + 12].copy_from_slice(&2_048u32.to_le_bytes());
+    stale[entry + 12..entry + 16]
+        .copy_from_slice(&u32::try_from(TOTAL - 2_048).unwrap().to_le_bytes());
+    stale[510..512].copy_from_slice(&[0x55, 0xaa]);
+    let fs =
+        edpcli::filesystem::build_empty_exfat(2_048, TOTAL - 2_048, 0x1234_5678, "PLAIN").unwrap();
+    let boot = fs.sectors().get(&0).unwrap().to_vec();
+
+    let mut m = std::collections::HashMap::new();
+    m.insert(
+        "diskutil list -plist".to_string(),
+        diskutil_list_plist(&["disk6"]),
+    );
+    m.insert(
+        "diskutil info -plist disk6".to_string(),
+        diskutil_info_plist(i64::try_from(TOTAL * SECTOR as u64).unwrap()),
+    );
+    m.insert(
+        "ioreg -r -c IOSCSITargetDevice -l".to_string(),
+        ioreg_scsi(6, "Netac  ", "OnlyDisk", "1.00"),
+    );
+    m.insert(
+        "ioreg -r -c IOUSBHostDevice -l".to_string(),
+        ioreg_usb(6, 0x0DD8, 0x2005),
+    );
+    let runner = FakeRunner { canned: m };
+    let read = |_disk: u32, lba: u32| -> std::io::Result<Vec<u8>> {
+        if lba == 2_048 {
+            return Ok(boot.clone());
+        }
+        if lba < 13 {
+            let start = lba as usize * SECTOR;
+            return Ok(stale[start..start + SECTOR].to_vec());
+        }
+        Ok(vec![0u8; SECTOR])
+    };
+    let bak = TmpDir::new("stale_edp_plain_scan");
+    let rows = scan_disks(&runner, &bak.0, &read);
+    let row = rows.iter().find(|row| row.disk == 6).unwrap();
+
+    assert_eq!(
+        row.provision_kind,
+        edpcli::provision::DiskProvisionKind::Plain
+    );
+    assert_eq!(row.device_id, None);
+    assert_eq!(row.onlyid, None);
+    assert_eq!(row.dept, None);
+    assert_eq!(row.user, None);
+    assert_eq!(row.label, None);
+    assert!(row.partitions.is_none());
+    assert_eq!(row.force_change_password, None);
+    assert!(row.partition_table.is_some());
+    assert_eq!(
+        row.identity_pin
+            .as_ref()
+            .and_then(|pin| pin.snapshot.protocol.provision_kind),
+        Some(edpcli::provision::DiskProvisionKind::Plain)
+    );
 }
 
 #[test]
