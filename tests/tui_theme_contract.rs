@@ -11,7 +11,7 @@ use edpcli::tui::{
 };
 use ratatui::{
     backend::TestBackend,
-    layout::Constraint,
+    layout::{Constraint, Rect},
     style::{Color, Style},
     widgets::Row,
     Terminal,
@@ -29,6 +29,44 @@ fn rust_files(root: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
+}
+
+#[test]
+fn empty_modal_title_keeps_top_border_continuous() {
+    let mut terminal = Terminal::new(TestBackend::new(20, 10)).expect("test terminal");
+    let area = Rect::new(2, 2, 10, 5);
+    terminal
+        .draw(|frame| {
+            edpcli::tui::ui::render_modal(frame, area, "", |_frame, _inner| {});
+        })
+        .expect("draw modal");
+
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(area.x, area.y)].symbol(), "┌");
+    for x in (area.x + 1)..(area.right() - 1) {
+        assert_eq!(
+            buffer[(x, area.y)].symbol(),
+            "─",
+            "empty title must not punch a gap in the modal top border at x={x}"
+        );
+    }
+    assert_eq!(buffer[(area.right() - 1, area.y)].symbol(), "┐");
+}
+
+#[test]
+fn titled_modal_still_renders_title_on_top_border() {
+    let mut terminal = Terminal::new(TestBackend::new(24, 10)).expect("test terminal");
+    let area = Rect::new(2, 2, 16, 5);
+    terminal
+        .draw(|frame| {
+            edpcli::tui::ui::render_modal(frame, area, "标题", |_frame, _inner| {});
+        })
+        .expect("draw modal");
+
+    let top = (area.x..area.right())
+        .map(|x| terminal.backend().buffer()[(x, area.y)].symbol())
+        .collect::<String>();
+    assert!(top.contains('标') && top.contains('题'), "{top:?}");
 }
 
 #[test]
