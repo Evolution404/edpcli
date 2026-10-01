@@ -320,7 +320,7 @@ fn confirmation_projection_is_prepared_only_and_fail_closed() {
     for token in [
         "DiskLayoutModel::canonical_edp",
         "DiskLayoutModel::canonical_plain_plan",
-        "layout.validate_complete()",
+        "validate_complete()",
         "PasswordDisposition::Blocked",
         "matching_segments != 1",
         "prepared.hardware_probe()",
@@ -366,6 +366,32 @@ fn confirmation_renderers_are_presentation_only() {
         assert!(
             !renderers.contains(banned),
             "confirmation renderer must not recompute business semantics: {banned}"
+        );
+    }
+}
+
+#[test]
+fn confirmation_ui_uses_one_handling_vocabulary_and_symbolic_statuses() {
+    let summary = include_str!("../src/tui/provision/review_summary_render.rs");
+    let review = include_str!("../src/tui/provision/review.rs");
+    assert!(summary.contains("status_line("));
+    assert!(summary.contains("\"处理\""));
+    assert!(!summary.contains("动作"));
+    for token in [
+        "● 固定",
+        "● 保留",
+        "○ 空闲",
+        "⚠ 格式化重建",
+        "✓ 保留",
+        "⚠ 清空",
+        "— 不涉及",
+        "✓ 保留原密码域",
+        "↻ 使用目标密码，FileKey 保持",
+        "✓ 保持",
+    ] {
+        assert!(
+            review.contains(token),
+            "missing symbolic confirmation status: {token}"
         );
     }
 }

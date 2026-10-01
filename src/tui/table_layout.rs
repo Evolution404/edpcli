@@ -752,11 +752,24 @@ impl TableViewport {
 #[derive(Debug, Clone)]
 pub struct AdaptiveTableLayout {
     specs: Vec<AdaptiveColumnSpec>,
+    column_spacing: usize,
 }
 
 impl AdaptiveTableLayout {
     pub fn new(specs: Vec<AdaptiveColumnSpec>) -> Self {
-        Self { specs }
+        Self {
+            specs,
+            column_spacing: 1,
+        }
+    }
+
+    pub fn with_column_spacing(mut self, column_spacing: usize) -> Self {
+        self.column_spacing = column_spacing;
+        self
+    }
+
+    pub const fn column_spacing(&self) -> usize {
+        self.column_spacing
     }
 
     pub fn specs(&self) -> &[AdaptiveColumnSpec] {
@@ -767,7 +780,11 @@ impl AdaptiveTableLayout {
         self.specs.len()
     }
 
-    fn natural_widths(&self, content_widths: &[usize], active_column: Option<usize>) -> Vec<usize> {
+    pub(crate) fn natural_widths(
+        &self,
+        content_widths: &[usize],
+        active_column: Option<usize>,
+    ) -> Vec<usize> {
         self.specs
             .iter()
             .enumerate()
@@ -787,7 +804,11 @@ impl AdaptiveTableLayout {
 
     pub fn total_width(&self, content_widths: &[usize], active_column: Option<usize>) -> usize {
         let widths = self.natural_widths(content_widths, active_column);
-        widths.iter().sum::<usize>() + widths.len().saturating_sub(1)
+        widths.iter().sum::<usize>()
+            + widths
+                .len()
+                .saturating_sub(1)
+                .saturating_mul(self.column_spacing)
     }
 
     pub fn max_scroll(
@@ -812,7 +833,7 @@ impl AdaptiveTableLayout {
             .iter()
             .take(index)
             .sum::<usize>()
-            .saturating_add(index);
+            .saturating_add(index.saturating_mul(self.column_spacing));
         (
             start,
             start.saturating_add(widths.get(index).copied().unwrap_or(0)),
@@ -841,7 +862,11 @@ impl AdaptiveTableLayout {
         }
 
         let widths = self.natural_widths(content_widths, active_column);
-        let total_width = widths.iter().sum::<usize>() + widths.len().saturating_sub(1);
+        let total_width = widths.iter().sum::<usize>()
+            + widths
+                .len()
+                .saturating_sub(1)
+                .saturating_mul(self.column_spacing);
         let scroll_x = scroll_x.min(total_width.saturating_sub(viewport_width));
         let viewport_end = scroll_x.saturating_add(viewport_width);
 
@@ -864,7 +889,7 @@ impl AdaptiveTableLayout {
                     },
                 });
             }
-            start = end.saturating_add(1);
+            start = end.saturating_add(self.column_spacing);
             if start >= viewport_end {
                 break;
             }
@@ -877,6 +902,40 @@ impl AdaptiveTableLayout {
             viewport_width,
         }
     }
+}
+
+pub(crate) fn content_driven_layout(headings: &[&str]) -> AdaptiveTableLayout {
+    AdaptiveTableLayout::new(
+        headings
+            .iter()
+            .map(|heading| {
+                let width = display_width(heading).max(1).min(u16::MAX as usize) as u16;
+                AdaptiveColumnSpec {
+                    min_width: width,
+                    preferred_width: width,
+                    max_width: u16::MAX,
+                    priority: 0,
+                    weight: 1,
+                    truncate_policy: TruncatePolicy::Ellipsis,
+                    pinned: false,
+                }
+            })
+            .collect(),
+    )
+}
+
+pub(crate) fn content_widths(headings: &[&str], rows: &[Vec<String>]) -> Vec<usize> {
+    let mut widths = headings
+        .iter()
+        .map(|heading| display_width(heading))
+        .collect::<Vec<_>>();
+    for row in rows {
+        debug_assert_eq!(row.len(), widths.len());
+        for (index, value) in row.iter().enumerate().take(widths.len()) {
+            widths[index] = widths[index].max(display_width(value));
+        }
+    }
+    widths
 }
 
 pub type HorizontalScrollState = TableInteractionState;

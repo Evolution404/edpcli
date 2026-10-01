@@ -719,6 +719,21 @@ impl DiskLayoutDetail {
         }
     }
 
+    pub fn region_header() -> Self {
+        Self {
+            text: String::new(),
+            tone: DiskLayoutDetailTone::Accent,
+            columns: Some([
+                "区域".into(),
+                "容量".into(),
+                "LBA 范围".into(),
+                "处理".into(),
+            ]),
+            region_kind: None,
+            selected: false,
+        }
+    }
+
     pub fn region_columns(
         kind: DiskRegionKind,
         selected: bool,
@@ -816,6 +831,26 @@ impl DiskLayoutModel {
             lines.push(Line::from(""));
         }
         let detail_width = area.width.saturating_sub(2) as usize;
+        let region_headings = ["区域", "容量", "LBA 范围", "处理"];
+        let region_rows = pane
+            .details
+            .iter()
+            .filter_map(|detail| detail.columns.as_ref())
+            .map(|columns| columns.to_vec())
+            .collect::<Vec<_>>();
+        let region_layout = crate::tui::table_layout::content_driven_layout(&region_headings)
+            .with_column_spacing(2);
+        let region_content_widths =
+            crate::tui::table_layout::content_widths(&region_headings, &region_rows);
+        let region_widths = region_layout.natural_widths(&region_content_widths, None);
+        let region_total_width = 1usize.saturating_add(
+            region_widths.iter().sum::<usize>()
+                + region_widths
+                    .len()
+                    .saturating_sub(1)
+                    .saturating_mul(region_layout.column_spacing()),
+        );
+        let compact_region_rows = compact || region_total_width > detail_width;
         for detail in pane.details {
             let style = match detail.tone {
                 DiskLayoutDetailTone::Muted => theme.muted(),
@@ -830,7 +865,18 @@ impl DiskLayoutModel {
                 let region_style = detail
                     .region_kind
                     .map(|kind| theme.disk_region_tree(kind, false));
-                let name_style = region_style.unwrap_or_else(|| theme.muted());
+                let is_header = detail.region_kind.is_none();
+                let name_style = if is_header {
+                    style
+                } else {
+                    region_style.unwrap_or_else(|| theme.muted())
+                };
+                let capacity_style = if is_header {
+                    style
+                } else {
+                    theme.secondary_text()
+                };
+                let range_style = if is_header { style } else { theme.muted() };
                 let marker_style = region_style.unwrap_or_else(|| theme.accent());
                 let marker = if selected_visible { "▌" } else { " " };
                 let row_style = if selected_visible {
@@ -847,43 +893,55 @@ impl DiskLayoutModel {
                     }
                     Line::from(spans).style(row_style)
                 };
-                if compact {
-                    let name = crate::ui::pad_to(name, 17);
-                    let used = 1 + crate::ui::disp_width(&name) + crate::ui::disp_width(status);
+                let gap = region_layout.column_spacing();
+                if compact_region_rows {
+                    let name_width = region_widths.first().copied().unwrap_or_default();
+                    let capacity_width = region_widths.get(1).copied().unwrap_or_default();
+                    let name = crate::ui::pad_to(name, name_width);
+                    let capacity = crate::ui::pad_to(capacity, capacity_width);
+                    let used =
+                        1 + crate::ui::disp_width(&name) + gap + crate::ui::disp_width(status);
                     lines.push(finish_row(
                         vec![
                             Span::styled(marker, marker_style),
                             Span::styled(name, name_style),
+                            Span::raw(" ".repeat(gap)),
                             Span::styled(status.clone(), style),
                         ],
                         used,
                     ));
-                    let used = 4 + crate::ui::disp_width(capacity) + crate::ui::disp_width(range);
+                    let used =
+                        2 + crate::ui::disp_width(&capacity) + gap + crate::ui::disp_width(range);
                     lines.push(finish_row(
                         vec![
                             Span::raw("  "),
-                            Span::styled(capacity.clone(), theme.secondary_text()),
-                            Span::raw("  "),
-                            Span::styled(range.clone(), theme.muted()),
+                            Span::styled(capacity, capacity_style),
+                            Span::raw(" ".repeat(gap)),
+                            Span::styled(range.clone(), range_style),
                         ],
                         used,
                     ));
                 } else {
-                    let name = crate::ui::pad_to(name, 17);
-                    let capacity = crate::ui::pad_to(capacity, 14);
-                    let range = crate::ui::pad_to(range, 24);
+                    let name = crate::ui::pad_to(name, region_widths[0]);
+                    let capacity = crate::ui::pad_to(capacity, region_widths[1]);
+                    let range = crate::ui::pad_to(range, region_widths[2]);
+                    let status = crate::ui::pad_to(status, region_widths[3]);
                     let used = 1
                         + crate::ui::disp_width(&name)
                         + crate::ui::disp_width(&capacity)
                         + crate::ui::disp_width(&range)
-                        + crate::ui::disp_width(status);
+                        + crate::ui::disp_width(&status)
+                        + gap.saturating_mul(3);
                     lines.push(finish_row(
                         vec![
                             Span::styled(marker, marker_style),
                             Span::styled(name, name_style),
-                            Span::styled(capacity, theme.secondary_text()),
-                            Span::styled(range, theme.muted()),
-                            Span::styled(status.clone(), style),
+                            Span::raw(" ".repeat(gap)),
+                            Span::styled(capacity, capacity_style),
+                            Span::raw(" ".repeat(gap)),
+                            Span::styled(range, range_style),
+                            Span::raw(" ".repeat(gap)),
+                            Span::styled(status, style),
                         ],
                         used,
                     ));

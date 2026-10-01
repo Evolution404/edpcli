@@ -146,7 +146,7 @@ impl AppState {
                     ),
                     PasswordIntent::Rewrap => (
                         ProvisionPreflightKind::PendingBackend,
-                        "来源几何缓存不足以确认原位 Rewrap；后台计划将复核来源协议".into(),
+                        "来源几何缓存不足以确认无损改密；后台计划将复核来源协议".into(),
                         true,
                     ),
                     PasswordIntent::Passthrough => (
@@ -172,7 +172,7 @@ impl AppState {
                 reason: if format_selected {
                     "用户已明确选择格式化；目标区域将重建".into()
                 } else {
-                    "来源无相同语义分区；迁移或重建动作需后台计划进一步确认".into()
+                    "来源无相同语义分区；迁移或重建处理需后台计划进一步确认".into()
                 },
                 target_password_requested: false,
             };
@@ -223,7 +223,7 @@ impl AppState {
                     "目标几何已改变；用户已明确授权格式化重建".into()
                 } else {
                     format!(
-                        "{}；原密码域/data extent 无法原样保留，必须明确授权格式化重建",
+                        "{}；原密码域和数据范围无法原样保留，必须明确授权格式化重建",
                         assessment.reason()
                     )
                 },
@@ -263,12 +263,12 @@ impl AppState {
             ),
             PasswordIntent::Rewrap => (
                 ProvisionPreflightKind::Rewrap,
-                "来源 FileKey 已验证；仅 Rewrap 到新密码，data extent 保持不变".into(),
+                "来源 FileKey 已验证；仅更新密码封装，数据范围保持不变".into(),
                 true,
             ),
             PasswordIntent::Passthrough if source_state.is_verified() => (
                 ProvisionPreflightKind::Passthrough,
-                "来源密码与布局均已验证；原密码域、FileKey 与 data extent 透传".into(),
+                "来源密码与布局均已验证；原密码域、FileKey 与数据范围透传".into(),
                 false,
             ),
             PasswordIntent::Passthrough
@@ -279,14 +279,13 @@ impl AppState {
             {
                 (
                     ProvisionPreflightKind::Passthrough,
-                    "来源密码未知但 key profile 与几何兼容；原 key material 与密文区域逐字节透传"
-                        .into(),
+                    "来源密码未知但密钥配置与分区几何兼容；原密钥材料与密文区域逐字节透传".into(),
                     false,
                 )
             }
             PasswordIntent::Passthrough if source_state == SourcePasswordState::Unknown => (
                 ProvisionPreflightKind::PendingBackend,
-                "来源密码状态尚未定论；后台计划将复核 key profile 后决定透传或重建".into(),
+                "来源密码状态尚未定论；后台计划将复核密钥配置后决定透传或重建".into(),
                 false,
             ),
             PasswordIntent::Passthrough => (

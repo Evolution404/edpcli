@@ -1190,7 +1190,7 @@ fn target_plan_surfaces_migration_sources_for_k6_execution() {
         combined.password_disposition,
         Some(PasswordDisposition::Rebuild)
     );
-    assert!(combined.reason.contains("显式转为 Rebuild"));
+    assert!(combined.reason.contains("明确转为重建"));
 }
 
 #[test]

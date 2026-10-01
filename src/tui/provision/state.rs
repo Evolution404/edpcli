@@ -156,6 +156,8 @@ mod plain_editor;
 mod preflight;
 #[path = "review.rs"]
 mod review;
+#[path = "review_region_projection.rs"]
+mod review_region_projection;
 #[path = "run.rs"]
 mod run;
 #[path = "scheme_picker_state.rs"]
@@ -164,7 +166,8 @@ mod scheme_picker_state;
 mod source_password_state;
 pub(crate) use review::{
     ProvisionConfirmationAction, ProvisionConfirmationDataEffect,
-    ProvisionConfirmationFilesystemEffect, ProvisionConfirmationViewModel,
+    ProvisionConfirmationFilesystemEffect, ProvisionConfirmationPasswordEffect,
+    ProvisionConfirmationRegion, ProvisionConfirmationViewModel,
 };
 #[path = "validation.rs"]
 mod validation;

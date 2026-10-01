@@ -153,9 +153,9 @@ impl AppState {
                         (status, tone, decision.reason.clone())
                     }
                     None => (
-                        "待确认".into(),
+                        "? 待确认".into(),
                         Tone::Warning,
-                        "同步 preflight 尚未生成当前区域结论".into(),
+                        "同步检查尚未生成当前区域结论".into(),
                     ),
                 };
                 partition_status.insert(
@@ -166,9 +166,7 @@ impl AppState {
         }
 
         rows.push(Detail::muted(usable_summary));
-        rows.push(Detail::accent(
-            "区域              容量          LBA 范围               处理",
-        ));
+        rows.push(Detail::region_header());
 
         for (index, segment) in visible.segments.iter().enumerate() {
             let role_for_kind = match segment.kind {
@@ -197,15 +195,15 @@ impl AppState {
                 .or_else(fallback_role_status)
                 .unwrap_or_else(|| match segment.kind {
                     DiskRegionKind::Conflict => (
-                        "⚠ 冲突".into(),
+                        "✗ 冲突".into(),
                         Tone::Danger,
                         None,
                         "当前草稿有多个区域覆盖同一 LBA 范围".into(),
                     ),
-                    DiskRegionKind::Reserved => ("保留".into(), Tone::Muted, None, String::new()),
-                    DiskRegionKind::Free => ("空闲".into(), Tone::Muted, None, String::new()),
+                    DiskRegionKind::Reserved => ("● 保留".into(), Tone::Muted, None, String::new()),
+                    DiskRegionKind::Free => ("○ 空闲".into(), Tone::Muted, None, String::new()),
                     DiskRegionKind::Unknown => {
-                        ("待确认".into(), Tone::Warning, None, String::new())
+                        ("? 待确认".into(), Tone::Warning, None, String::new())
                     }
                     DiskRegionKind::Plain => (
                         "⚠ 需重建".into(),
@@ -213,7 +211,7 @@ impl AppState {
                         None,
                         "目标普通分区将重建".into(),
                     ),
-                    _ => ("固定".into(), Tone::Muted, None, String::new()),
+                    _ => ("● 固定".into(), Tone::Muted, None, String::new()),
                 });
             rows.push(Detail::region_columns(
                 segment.kind,
@@ -235,12 +233,12 @@ impl AppState {
                 .get(&(segment.start_lba, segment.sector_count))
                 .cloned()
                 .unwrap_or_else(|| match segment.kind {
-                    DiskRegionKind::Reserved => ("保留".into(), Tone::Muted, None, String::new()),
-                    DiskRegionKind::Free => ("空闲".into(), Tone::Muted, None, String::new()),
+                    DiskRegionKind::Reserved => ("● 保留".into(), Tone::Muted, None, String::new()),
+                    DiskRegionKind::Free => ("○ 空闲".into(), Tone::Muted, None, String::new()),
                     DiskRegionKind::Unknown => {
-                        ("待确认".into(), Tone::Warning, None, String::new())
+                        ("? 待确认".into(), Tone::Warning, None, String::new())
                     }
-                    _ => ("固定".into(), Tone::Muted, None, String::new()),
+                    _ => ("● 固定".into(), Tone::Muted, None, String::new()),
                 });
             rows.push(Detail::muted(""));
             let title = format!("当前区域  {} · {}", segment.label, status);

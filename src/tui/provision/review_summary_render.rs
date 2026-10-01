@@ -1,4 +1,4 @@
-use super::review_render_style::action_style;
+use super::review_render_style::{action_style, data_style, filesystem_style, password_style};
 use super::*;
 use crate::tui::state::ProvisionConfirmationViewModel;
 
@@ -17,19 +17,26 @@ pub(super) fn draw_execution_summary(
             Span::styled("当前区域  ", muted()),
             Span::styled(safe(&region.label), action_style(region.action)),
         ]));
-        lines.push(Line::from(format!("动作      {}", region.action.label())));
-        lines.push(Line::from(format!(
-            "数据      {}",
-            region.data_effect.label()
-        )));
-        lines.push(Line::from(format!(
-            "密码      {}",
-            region.password_effect.label()
-        )));
-        lines.push(Line::from(format!(
-            "文件系统  {}",
-            region.filesystem_effect.label()
-        )));
+        lines.push(status_line(
+            "处理",
+            region.action.label(),
+            action_style(region.action),
+        ));
+        lines.push(status_line(
+            "数据",
+            region.data_effect.label(),
+            data_style(region.data_effect),
+        ));
+        lines.push(status_line(
+            "密码",
+            region.password_effect.label(),
+            password_style(region.password_effect),
+        ));
+        lines.push(status_line(
+            "文件系统",
+            region.filesystem_effect.label(),
+            filesystem_style(region.filesystem_effect),
+        ));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("原因", muted())));
         lines.push(Line::from(safe(&region.reason_summary)));
@@ -53,6 +60,13 @@ pub(super) fn draw_execution_summary(
     );
 }
 
+fn status_line(label: &'static str, value: impl Into<String>, style: Style) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(crate::ui::pad_to(label, 10), muted()),
+        Span::styled(value.into(), style),
+    ])
+}
+
 fn overall_lines(view: &ProvisionConfirmationViewModel) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(Span::styled("总体", secondary()))];
     if view.overall.cleared_regions == 0 {
@@ -73,7 +87,7 @@ fn overall_lines(view: &ProvisionConfirmationViewModel) -> Vec<Line<'static>> {
         lines.push(Line::from(vec![
             Span::styled("迁移      ", muted()),
             Span::styled(
-                format!("{} 个区域迁移数据", view.overall.migrated_regions),
+                format!("→ {} 个区域迁移数据", view.overall.migrated_regions),
                 accent(),
             ),
         ]));
@@ -84,7 +98,7 @@ fn overall_lines(view: &ProvisionConfirmationViewModel) -> Vec<Line<'static>> {
             if view.overall.password_changed_regions == 0 {
                 "✓ 无密码变更".into()
             } else {
-                format!("{} 个密码域变化", view.overall.password_changed_regions)
+                format!("↻ {} 个密码域变化", view.overall.password_changed_regions)
             },
             if view.overall.password_changed_regions == 0 {
                 success()

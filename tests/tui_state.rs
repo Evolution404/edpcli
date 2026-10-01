@@ -1846,7 +1846,7 @@ fn provision_fill_start_finds_minimum_gap_without_mutating_other_form_fields() {
         .any(|detail| {
             detail.region_kind == Some(edpcli::tui::disk_layout::DiskRegionKind::Reserved)
                 && detail.columns.as_ref().is_some_and(|columns| {
-                    columns[0] == "保留区域" && columns[2] == "LBA 13–62" && columns[3] == "保留"
+                    columns[0] == "保留区域" && columns[2] == "LBA 13–62" && columns[3] == "● 保留"
                 })
         }));
 }

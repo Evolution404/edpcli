@@ -280,16 +280,16 @@ impl TargetProvisionPlan {
                                     if password_disposition
                                         == Some(super::super::PasswordDisposition::Blocked)
                                     {
-                                        "来源密码未知且请求了新密码；无法 Rewrap，必须由用户明确授权重建"
+                                        "来源密码未知且请求了新密码；无法执行无损改密，必须由用户明确授权重建"
                                     } else {
-                                        "role/type/extent/physical crypto/key profile 精确兼容；来源密码未知，文件系统不解读，原 key material 与密文区域逐字节透传"
+                                        "分区角色、类型、LBA 范围、物理加密和密钥配置完全兼容；来源密码未知，文件系统不解读，原密钥材料与密文区域逐字节透传"
                                     }
                                 }
                                 RegionDisposition::PreserveVerified => {
-                                    "物理/语义/几何/filesystem 与来源密钥均已验证；原 FileKey 与 data extent 保持不变"
+                                    "物理结构、语义、分区几何、文件系统与来源密钥均已验证；原 FileKey 与数据范围保持不变"
                                 }
                                 RegionDisposition::RewrapVerified => {
-                                    "来源 FileKey 已验证；目标密码变化，只允许重包 wrapper，data extent 保持零写入"
+                                    "来源 FileKey 已验证；目标密码变化，仅更新密码封装，数据范围保持零写入"
                                 }
                                 _ => unreachable!(),
                             }
@@ -298,7 +298,7 @@ impl TargetProvisionPlan {
                         }
                     } else {
                         reason =
-                            "语义、位置、大小、物理加密、文件系统或 key profile 与来源不兼容；不能进入 Preserve family"
+                            "语义、位置、大小、物理加密、文件系统或密钥配置与来源不兼容；不能进入保留类处理"
                                 .into();
                     }
                 }
@@ -319,7 +319,7 @@ impl TargetProvisionPlan {
                         .map(|_| super::super::TargetPasswordPolicy::InitializeNew);
                 preserved_record = None;
                 reason = format!(
-                    "来源区域 {sources} 到目标 {} 使用 K6 文件级 staging/migration",
+                    "来源区域 {sources} 到目标 {} 使用 K6 文件级暂存与迁移",
                     target.role.label()
                 );
             }
@@ -356,7 +356,7 @@ impl TargetProvisionPlan {
                 .map(|_| super::super::PasswordDisposition::Rebuild);
             part.target_password_policy = super::super::KeyDomainRole::from_partition_role(role)
                 .map(|_| super::super::TargetPasswordPolicy::InitializeNew);
-            part.reason = "用户明确选择重新格式化；目标区域执行 Rebuild".into();
+            part.reason = "用户明确选择重新格式化；目标区域执行重建".into();
             return true;
         }
         if !part.disposition.preserves_extent() && part.disposition != RegionDisposition::Migrate {
@@ -372,9 +372,9 @@ impl TargetProvisionPlan {
         part.preserved_record = None;
         part.migration_sources.clear();
         part.reason = if previous == RegionDisposition::Migrate {
-            "用户选择重新格式化；Migrate 已显式转为 Rebuild".into()
+            "用户选择重新格式化；数据迁移已明确转为重建".into()
         } else {
-            "用户选择重新格式化；Preserve family 已显式转为 Rebuild".into()
+            "用户选择重新格式化；保留类处理已明确转为重建".into()
         };
         true
     }

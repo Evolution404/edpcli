@@ -1,8 +1,13 @@
+use super::review_region_projection::{
+    disposition_label, merge_all_regions, partition_reason, password_disposition_label,
+};
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProvisionConfirmationAction {
+    Fixed,
     Preserve,
+    Free,
     Passthrough,
     Rewrap,
     FormatRebuild,
@@ -14,13 +19,15 @@ pub(crate) enum ProvisionConfirmationAction {
 impl ProvisionConfirmationAction {
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Preserve => "保留",
-            Self::Passthrough => "透传",
-            Self::Rewrap => "改密",
-            Self::FormatRebuild => "格式化重建",
-            Self::New => "新建",
-            Self::Migrate => "迁移",
-            Self::Delete => "删除",
+            Self::Fixed => "● 固定",
+            Self::Preserve => "● 保留",
+            Self::Free => "○ 空闲",
+            Self::Passthrough => "✓ 透传",
+            Self::Rewrap => "✓ 改密",
+            Self::FormatRebuild => "⚠ 格式化重建",
+            Self::New => "＋ 新建",
+            Self::Migrate => "→ 迁移",
+            Self::Delete => "✗ 删除",
         }
     }
 }
@@ -36,10 +43,10 @@ pub(crate) enum ProvisionConfirmationDataEffect {
 impl ProvisionConfirmationDataEffect {
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Preserve => "保留",
-            Self::Clear => "清空",
-            Self::Migrate => "迁移",
-            Self::None => "无数据区",
+            Self::Preserve => "✓ 保留",
+            Self::Clear => "⚠ 清空",
+            Self::Migrate => "→ 迁移",
+            Self::None => "— 不涉及",
         }
     }
 }
@@ -55,10 +62,10 @@ pub(crate) enum ProvisionConfirmationPasswordEffect {
 impl ProvisionConfirmationPasswordEffect {
     pub const fn label(self) -> &'static str {
         match self {
-            Self::None => "无密码域",
-            Self::Preserve => "保留原密码域",
-            Self::Rewrap => "使用目标密码，FileKey 保持",
-            Self::NewFileKey => "使用目标密码，生成新 FileKey",
+            Self::None => "— 不涉及",
+            Self::Preserve => "✓ 保留原密码域",
+            Self::Rewrap => "↻ 使用目标密码，FileKey 保持",
+            Self::NewFileKey => "⚠ 使用目标密码，生成新 FileKey",
         }
     }
 }
@@ -75,11 +82,15 @@ pub(crate) enum ProvisionConfirmationFilesystemEffect {
 impl ProvisionConfirmationFilesystemEffect {
     pub fn label(self) -> String {
         match self {
-            Self::Keep => "保持".into(),
-            Self::Format(filesystem) => format!("格式化 {}", filesystem.windows_format_name()),
-            Self::Create(filesystem) => format!("新建 {}", filesystem.windows_format_name()),
-            Self::Migrate(filesystem) => format!("迁移到 {}", filesystem.windows_format_name()),
-            Self::None => "—".into(),
+            Self::Keep => "✓ 保持".into(),
+            Self::Format(filesystem) => {
+                format!("⚠ 格式化 {}", filesystem.windows_format_name())
+            }
+            Self::Create(filesystem) => format!("＋ 新建 {}", filesystem.windows_format_name()),
+            Self::Migrate(filesystem) => {
+                format!("→ 迁移到 {}", filesystem.windows_format_name())
+            }
+            Self::None => "— 不涉及".into(),
         }
     }
 }
@@ -147,10 +158,10 @@ impl ProvisionConfirmationViewModel {
                 let target_plan = official
                     .target_plan
                     .as_ref()
-                    .ok_or("prepared official plan is missing target_plan")?;
+                    .ok_or("计划确认失败：正式制盘计划缺少最终分区计划")?;
                 let (lce_start_lba, lce_sector_count) = prepared
                     .lce_extent()
-                    .ok_or("prepared official plan is missing LCE extent")?;
+                    .ok_or("计划确认失败：正式制盘计划缺少 LCE 范围")?;
                 let partition_segments = target_plan
                     .partitions
                     .iter()
@@ -166,14 +177,17 @@ impl ProvisionConfirmationViewModel {
                     partition_segments,
                     lce_start_lba,
                     lce_sector_count,
-                )?;
-                layout.validate_complete()?;
+                )
+                .map_err(|_| "计划确认失败：无法生成完整的 EDP 最终布局".to_string())?;
+                layout
+                    .validate_complete()
+                    .map_err(|_| "计划确认失败：EDP 最终磁盘布局不完整".to_string())?;
                 if layout
                     .segments
                     .iter()
                     .any(|segment| segment.kind == DiskRegionKind::Conflict)
                 {
-                    return Err("prepared confirmation layout contains a conflict region".into());
+                    return Err("计划确认失败：最终磁盘布局存在区域冲突".into());
                 }
 
                 let mut regions = Vec::with_capacity(target_plan.partitions.len());
@@ -182,7 +196,7 @@ impl ProvisionConfirmationViewModel {
                         == Some(crate::provision::PasswordDisposition::Blocked)
                     {
                         return Err(format!(
-                            "{} remains blocked after prepare",
+                            "计划确认失败：{} 的密码处理条件仍未满足",
                             part.geometry.role.label()
                         ));
                     }
@@ -198,7 +212,7 @@ impl ProvisionConfirmationViewModel {
                         && !format_selected
                     {
                         return Err(format!(
-                            "{} rebuild is missing a selected format target",
+                            "计划确认失败：{} 需要重建，但未找到已选择的格式化目标",
                             part.geometry.role.label()
                         ));
                     }
@@ -207,7 +221,7 @@ impl ProvisionConfirmationViewModel {
                         && !format_selected
                     {
                         return Err(format!(
-                            "{} password rebuild is missing a selected format target",
+                            "计划确认失败：{} 的密码域需要重建，但未找到已选择的格式化目标",
                             part.geometry.role.label()
                         ));
                     }
@@ -217,7 +231,7 @@ impl ProvisionConfirmationViewModel {
                         .geometry
                         .start_lba
                         .checked_add(part.geometry.sector_count)
-                        .ok_or("prepared partition extent overflows")?;
+                        .ok_or("计划确认失败：目标分区 LBA 范围溢出")?;
                     let selection = DiskCapacitySelection {
                         start_lba: part.geometry.start_lba,
                         end_exclusive,
@@ -234,7 +248,7 @@ impl ProvisionConfirmationViewModel {
                         .count();
                     if matching_segments != 1 {
                         return Err(format!(
-                            "{} prepared extent does not map uniquely to final layout",
+                            "计划确认失败：{} 的 LBA 范围无法唯一对应到最终布局",
                             part.geometry.role.label()
                         ));
                     }
@@ -256,7 +270,7 @@ impl ProvisionConfirmationViewModel {
                             ),
                             Some(crate::provision::PasswordDisposition::Rebuild) => {
                                 return Err(format!(
-                                    "{} has unresolved password rebuild semantics",
+                                    "计划确认失败：{} 的密码域重建状态尚未收敛",
                                     part.geometry.role.label()
                                 ))
                             }
@@ -283,7 +297,7 @@ impl ProvisionConfirmationViewModel {
                                 }
                                 crate::provision::RegionDisposition::Rebuild => {
                                     return Err(format!(
-                                        "{} has unresolved rebuild semantics",
+                                        "计划确认失败：{} 的重建状态尚未收敛",
                                         part.geometry.role.label()
                                     ))
                                 }
@@ -314,7 +328,7 @@ impl ProvisionConfirmationViewModel {
                             .or(part.geometry.filesystem)
                             .ok_or_else(|| {
                                 format!(
-                                    "{} selected format target is missing filesystem",
+                                    "计划确认失败：{} 已选择格式化，但缺少文件系统类型",
                                     part.geometry.role.label()
                                 )
                             })?;
@@ -331,12 +345,18 @@ impl ProvisionConfirmationViewModel {
                     } else {
                         ProvisionConfirmationFilesystemEffect::Keep
                     };
-                    let mut technical_basis = vec![format!("disposition={:?}", part.disposition)];
+                    let mut technical_basis = vec![format!(
+                        "区域处理    {}",
+                        disposition_label(part.disposition)
+                    )];
                     if let Some(password) = part.password_disposition {
-                        technical_basis.push(format!("password={password:?}"));
+                        technical_basis.push(format!(
+                            "密码处理    {}",
+                            password_disposition_label(password)
+                        ));
                     }
                     technical_basis.push(format!(
-                        "extent=LBA{}..{}",
+                        "LBA 范围    {}–{}",
                         selection.start_lba,
                         selection.end_exclusive.saturating_sub(1)
                     ));
@@ -349,10 +369,15 @@ impl ProvisionConfirmationViewModel {
                         data_effect,
                         password_effect,
                         filesystem_effect,
-                        reason_summary: part.reason.clone(),
+                        reason_summary: partition_reason(
+                            part.disposition,
+                            part.password_disposition,
+                            format_selected,
+                        ),
                         technical_basis,
                     });
                 }
+                let regions = merge_all_regions(&layout, regions)?;
                 (layout, regions)
             }
             ProvisionPrepared::Plain(plain) => {
@@ -371,13 +396,18 @@ impl ProvisionConfirmationViewModel {
                 let layout = DiskLayoutModel::canonical_plain_plan(
                     plain.plan.total_sectors,
                     partition_segments,
-                )?;
-                layout.validate_complete()?;
+                )
+                .map_err(|_| "计划确认失败：无法生成完整的普通盘最终布局".to_string())?;
+                layout
+                    .validate_complete()
+                    .map_err(|_| "计划确认失败：普通盘最终磁盘布局不完整".to_string())?;
                 let migrating_from_edp =
                     plain.source_kind != crate::provision::DiskProvisionKind::Plain;
                 let mut regions = Vec::with_capacity(plain.plan.partitions.len());
                 for (index, part) in plain.plan.partitions.iter().enumerate() {
-                    let end_exclusive = part.end_exclusive()?;
+                    let end_exclusive = part.end_exclusive().map_err(|_| {
+                        format!("计划确认失败：普通分区 P{} 的 LBA 范围无效", index + 1)
+                    })?;
                     let selection = DiskCapacitySelection {
                         start_lba: part.start_lba,
                         end_exclusive,
@@ -394,7 +424,7 @@ impl ProvisionConfirmationViewModel {
                         .count();
                     if matching_segments != 1 {
                         return Err(format!(
-                            "Plain P{} prepared extent does not map uniquely to final layout",
+                            "计划确认失败：普通分区 P{} 的 LBA 范围无法唯一对应到最终布局",
                             index + 1
                         ));
                     }
@@ -426,12 +456,13 @@ impl ProvisionConfirmationViewModel {
                             "目标普通分区将创建新的空文件系统".into()
                         },
                         technical_basis: vec![format!(
-                            "extent=LBA{}..{}",
+                            "LBA 范围    {}–{}",
                             part.start_lba,
                             end_exclusive.saturating_sub(1)
                         )],
                     });
                 }
+                let regions = merge_all_regions(&layout, regions)?;
                 (layout, regions)
             }
         };
