@@ -801,7 +801,9 @@ fn provision_write_confirmation_is_centered_on_the_full_terminal_viewport() {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal.draw(|frame| render::draw(frame, &state)).unwrap();
 
-        let expected = edpcli::tui::ui::centered_modal_rect(Rect::new(0, 0, width, height), 82, 13);
+        // This fixture intentionally has no prepared plan, so the fail-closed
+        // confirmation renders two detail lines: target identity + YES semantics.
+        let expected = edpcli::tui::ui::centered_modal_rect(Rect::new(0, 0, width, height), 82, 12);
         let buffer = terminal.backend().buffer();
         assert_eq!(
             buffer[(expected.x, expected.y)].symbol(),

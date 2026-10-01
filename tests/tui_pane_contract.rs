@@ -756,37 +756,65 @@ fn plain_device_row_uses_native_hardware_model_when_protocol_device_id_is_absent
 }
 
 #[test]
-fn provision_review_tab_cycle_and_vertical_scroll_are_pane_local() {
+fn provision_review_focus_defaults_to_partition_plan_and_navigation_is_pane_local() {
     let mut state = provision_state();
     state.provision_mut().stage = ProvisionStage::Review;
     state.provision_mut().pane_focus = PaneFocus::provision_review();
-    let selected = state.provision().field_selected;
+    let field_selected = state.provision().field_selected;
 
-    assert_eq!(state.provision_focused_pane(), PaneId::ProvisionSummary);
+    assert_eq!(
+        state.provision_focused_pane(),
+        PaneId::ProvisionPartitionPlan
+    );
     for expected in [
+        PaneId::ProvisionExecutionSummary,
         PaneId::ProvisionDiskLayout,
-        PaneId::ProvisionChanges,
-        PaneId::ProvisionSummary,
+        PaneId::ProvisionPartitionPlan,
     ] {
         state.provision_shift_pane(false);
         assert_eq!(state.provision_focused_pane(), expected);
     }
 
+    state.provision_focus_pane(PaneId::ProvisionPartitionPlan);
+    state.provision_move_focused_vertical(1, 1, 100);
+    assert_eq!(state.provision().field_selected, field_selected);
+    assert_eq!(state.provision_review_selected_region(), 0);
+    assert_eq!(
+        state
+            .pane_viewport(PaneId::ProvisionPartitionPlan)
+            .scroll_y
+            .offset,
+        0
+    );
+
     for pane in [
-        PaneId::ProvisionSummary,
         PaneId::ProvisionDiskLayout,
-        PaneId::ProvisionChanges,
+        PaneId::ProvisionExecutionSummary,
     ] {
         state.provision_focus_pane(pane);
         let before = state.pane_viewport(pane).scroll_y.offset;
         state.provision_move_focused_vertical(1, 1, 100);
-        assert_eq!(state.provision().field_selected, selected, "{pane:?}");
+        assert_eq!(state.provision().field_selected, field_selected, "{pane:?}");
         assert_eq!(
             state.pane_viewport(pane).scroll_y.offset,
             before + 1,
             "{pane:?}"
         );
     }
+}
+
+#[test]
+fn provision_review_spatial_focus_matches_top_plus_lower_pair_geometry() {
+    let mut focus = PaneFocus::provision_review();
+    assert_eq!(focus.focused(), PaneId::ProvisionPartitionPlan);
+    focus.spatial_provision_review(0, -1);
+    assert_eq!(focus.focused(), PaneId::ProvisionDiskLayout);
+    focus.spatial_provision_review(0, 1);
+    assert_eq!(focus.focused(), PaneId::ProvisionPartitionPlan);
+    focus.spatial_provision_review(1, 0);
+    assert_eq!(focus.focused(), PaneId::ProvisionExecutionSummary);
+    focus.spatial_provision_review(-1, 0);
+    assert_eq!(focus.focused(), PaneId::ProvisionPartitionPlan);
 }
 
 #[test]
@@ -804,27 +832,17 @@ fn provision_form_narrow_renders_only_the_focused_pane() {
 }
 
 #[test]
-fn provision_review_wide_has_three_panes_and_narrow_uses_focus() {
+fn provision_review_without_prepared_snapshot_fails_closed() {
     let mut state = provision_state();
     state.provision_mut().stage = ProvisionStage::Review;
     state.provision_mut().pane_focus = PaneFocus::provision_review();
 
-    let wide = render_text(&state, 160, 36);
-    assert!(wide.contains("计划摘要"), "{wide}");
-    assert!(wide.contains("磁盘布局"), "{wide}");
-    assert!(wide.contains("变更明细"), "{wide}");
-
-    state.provision_focus_pane(PaneId::ProvisionSummary);
-    let summary = render_text(&state, 80, 24);
-    assert!(summary.contains("计划摘要"), "{summary}");
-    assert!(!summary.contains("磁盘布局"), "{summary}");
-    assert!(!summary.contains("变更明细"), "{summary}");
-
-    state.provision_focus_pane(PaneId::ProvisionChanges);
-    let changes = render_text(&state, 80, 24);
-    assert!(changes.contains("变更明细"), "{changes}");
-    assert!(!changes.contains("计划摘要"), "{changes}");
-    assert!(!changes.contains("磁盘布局"), "{changes}");
+    for (width, height) in [(160, 36), (80, 24)] {
+        let rendered = render_text(&state, width, height);
+        assert!(rendered.contains("计划确认不可用"), "{rendered}");
+        assert!(!rendered.contains("需要勾选格式化"), "{rendered}");
+        assert!(!rendered.contains("尚未获得格式化授权"), "{rendered}");
+    }
 }
 
 #[test]

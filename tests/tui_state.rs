@@ -226,7 +226,10 @@ fn provision_result_table_supports_edges_and_visual_order_copy_contract() {
 fn provision_review_escape_restores_valid_form_focus_and_insert() {
     use edpcli::tui::pane::{PaneFocus, PaneId};
 
-    for review_pane in [PaneId::ProvisionSummary, PaneId::ProvisionChanges] {
+    for review_pane in [
+        PaneId::ProvisionPartitionPlan,
+        PaneId::ProvisionExecutionSummary,
+    ] {
         let mut state = AppState::new();
         state.replace_devices(vec![device(64_000_000_000)]);
         assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
@@ -255,12 +258,15 @@ fn provision_review_subflows_return_to_exact_review_pane() {
         state.replace_devices(vec![device(64_000_000_000)]);
         assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
         state.provision_mut().pane_focus = PaneFocus::provision_review();
-        state.provision_focus_pane(PaneId::ProvisionChanges);
+        state.provision_focus_pane(PaneId::ProvisionExecutionSummary);
         state.provision_mut().stage = stage;
 
         assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
         assert_eq!(state.provision().stage, ProvisionStage::Review);
-        assert_eq!(state.provision_focused_pane(), PaneId::ProvisionChanges);
+        assert_eq!(
+            state.provision_focused_pane(),
+            PaneId::ProvisionExecutionSummary
+        );
     }
 }
 
@@ -278,7 +284,7 @@ fn provision_review_escape_restores_form_layout_snapshot() {
 
     state.provision_mut().stage = ProvisionStage::Review;
     state.provision_mut().pane_focus = PaneFocus::provision_review();
-    state.provision_focus_pane(PaneId::ProvisionChanges);
+    state.provision_focus_pane(PaneId::ProvisionExecutionSummary);
 
     assert_eq!(state.navigate(NavCommand::Escape, 20), StateEffect::None);
     assert_eq!(state.provision().stage, ProvisionStage::Form);

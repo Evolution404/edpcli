@@ -103,9 +103,11 @@ impl AppState {
             return None;
         }
         let total_bytes = self
-            .selected_device()
-            .map(|row| row.size)
-            .unwrap_or_default();
+            .provision
+            .prepared
+            .as_ref()?
+            .total_sectors()
+            .saturating_mul(crate::common::SECTOR as u64);
         let prepared = self.provision.prepared.take()?;
         self.provision.result_plan = Some(ProvisionResultSnapshot::from_prepared(
             &prepared,

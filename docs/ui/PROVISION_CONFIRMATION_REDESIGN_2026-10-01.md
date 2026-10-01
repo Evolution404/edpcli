@@ -108,7 +108,7 @@ Wide / UltraWide 默认：
 
 继续复用现有 `DiskLayoutModel` 体系，但确认页必须建立 **prepared-only** 的布局投影，例如 `provision_confirmation_layout_model(&PreparedProvision)`；不得直接复用仍会读取表单草稿的 `provision_layout_model()`。
 
-确认页展示的是 **prepared plan 的最终目标结果**，不得重新从 `ProvisionForm`、`PlainProvisionForm`、`selected_device()` 或 renderer 内推导几何动作。Official 应从 prepared 的最终目标分区 + LCE 几何生成 canonical EDP layout；Plain 应从 prepared 的 `PlainProvisionPlan` 生成 canonical plain layout。
+确认页展示的是 **prepared plan 的最终目标结果**，不得重新从 `ProvisionForm`、`PlainProvisionForm`、`selected_device()` 或 renderer 内推导几何动作。Official 应从 prepared 的最终目标分区 + LCE 几何生成标准 EDP 全盘布局；Plain 应从 prepared 的 `PlainProvisionPlan` 生成标准普通盘全盘布局。
 
 必须增加完整性不变量：Official 确认页的 LBA0–12 为协议区，LBA13 到官方首分区起点之间为保留区域，不能被填成“空闲区域”；特别覆盖 LBA12–62 的回归场景。最终布局必须 `validate_complete()` 通过后才允许进入 Review。
 
@@ -116,7 +116,7 @@ Wide / UltraWide 默认：
 
 “分区执行计划”当前选中行必须同步激活容量地图对应区域。
 
-联动主键必须使用共享的精确几何选择键（优先复用 `DiskCapacitySelection`：`start_lba + end_exclusive + kind`），不能只用 `PartitionRole / region kind`，更不能通过字符串名称匹配。`PartitionRole` 只作为语义标签/校验辅助；Plain 可存在多个同为 `DiskRegionKind::Plain` 的分区，必须依靠 extent 才能稳定命中唯一地图区域。
+联动主键必须使用共享的精确几何选择键（优先复用 `DiskCapacitySelection`：`start_lba + end_exclusive + kind`），不能只用 `PartitionRole / region kind`，更不能通过字符串名称匹配。`PartitionRole` 只作为语义标签/校验辅助；Plain 可存在多个同为 `DiskRegionKind::Plain` 的分区，必须依靠精确物理范围才能稳定命中唯一地图区域。
 
 ---
 
@@ -204,9 +204,9 @@ Wide 默认字段：
 - `j/k`、`↑/↓`：移动当前区域，而不是滚动一段 paragraph 文本。
 - 当前行使用共享 table selection 底色，并自动保持在 table viewport 内。
 - 切换行时同步：
-  - 上方容量地图激活精确 extent；
+  - 上方容量地图激活精确物理范围；
   - 右侧“当前区域”详情。
-- 选中行必须有独立的 confirmation view state；进入 Confirm/ExportPath 后返回 Review 时保留当前行、pane focus、展开状态和 viewport；重新生成新 plan 或 Esc 返回表单后清空并重新初始化。
+- 选中行必须有独立的确认页视图状态；进入 `Confirm/ExportPath` 后返回 Review 时保留当前行、Pane 焦点、展开状态和 viewport；重新生成新 plan 或 Esc 返回表单后清空并重新初始化。
 - 不允许选择变化后重新计算底层计划，只切换展示对象。
 
 ---
@@ -397,7 +397,7 @@ struct ProvisionConfirmationRegion {
 
 `ProvisionPreflight` 继续负责 **进入后台计划之前的同步阻塞**，确认页不得重新使用 preflight 推演最终 action。
 
-Confirmation ViewModel 构造必须 fail-closed：prepared 中若仍出现 `PasswordDisposition::Blocked`、Rebuild 与 `format_targets` 不一致、目标 extent 无法唯一映射到最终布局、布局不完整/冲突，均视为内部计划不一致，禁止进入可执行 Review，不允许 renderer 用兜底文案把异常伪装成“可确认”。
+Confirmation ViewModel 构造必须 fail-closed：prepared 中若仍出现 `PasswordDisposition::Blocked`、Rebuild 与 `format_targets` 不一致、目标物理范围无法唯一映射到最终布局、布局不完整/冲突，均视为内部计划不一致，禁止进入可执行 Review，不允许 renderer 用兜底文案把异常伪装成“可确认”。
 
 确认页 renderer 还应禁止读取 `ProvisionForm / PlainProvisionForm / provision_preflight() / selected_device()`；这些都是表单/实时 UI 状态，不是 prepared confirmation 的权威数据源。
 
@@ -532,7 +532,7 @@ ProvisionDiskLayout
 
 - `src/provision/reprovision/plan.rs`
   - 原则上不为 UI 改写；
-  - 仅当缺少明确的最终 data/password/filesystem effect 时，增加无 UI 语义的纯 domain helper。
+  - 仅当缺少明确的最终 `data/password/filesystem effect` 时，增加无 UI 语义的纯 domain helper。
 
 - 共享 table / pane / theme 模块
   - 尽量复用，不创建 review 专属键位系统。
@@ -551,7 +551,7 @@ ProvisionDiskLayout
 - 初始焦点是 `ProvisionPartitionPlan`；
 - Review 任意 Pane 按 Enter 都进入写入确认，不能触发其他详情动作；
 - 确认页禁止“需重建”“需要勾选格式化”等表单文案；
-- 行选择以精确 extent 联动地图和右侧详情；
+- 行选择以精确物理范围联动地图和右侧详情；
 - Review 的布局与目标身份只能来自 prepared snapshot，禁止回读表单草稿/当前设备选择。
 
 ### P1 — Confirmation ViewModel
@@ -643,11 +643,11 @@ cargo build --release --locked
    - 禁止 `尚未获得格式化授权`
    - 禁止把 `Blocked` 作为可执行确认动作。
 12. renderer 架构门禁：`review_render.rs` 不直接匹配 `PasswordDisposition / RegionDisposition` 做业务决策，也不得读取 `ProvisionForm / PlainProvisionForm / provision_preflight() / selected_device()`。
-13. prepared-only 布局：故意让表单草稿与 prepared fixture 不一致，确认页仍必须完全展示 prepared 几何。
+13. prepared-only 布局：故意让表单草稿与 `prepared` 测试样例不一致，确认页仍必须完全展示 prepared 几何。
 14. Official reserved 回归：LBA0–12=协议区，LBA13 到首分区起点=保留区域；LBA12–62 不得渲染为空闲区域。
-15. Plain 多分区：两个及以上 `DiskRegionKind::Plain` 行用精确 extent 联动到各自地图区域，不能因 kind 相同选错。
+15. Plain 多分区：两个及以上 `DiskRegionKind::Plain` 行用精确物理范围联动到各自地图区域，不能因 kind 相同选错。
 16. Review 初始焦点为分区执行计划；三个 Pane 的 Enter 均只进入 Confirm。
-17. Review → Confirm/Export → Review 保持 selected row / pane / expansion；Review → Form → 新 plan 后重新初始化这些 view state。
+17. Review → Confirm/Export → Review 保持当前行 / Pane / 展开状态；Review → Form → 新 plan 后重新初始化这些视图状态。
 
 ---
 

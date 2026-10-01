@@ -5,13 +5,6 @@ use crate::tui::state::{
     AppState, InputMode, NavCommand, ProvisionKind, ProvisionStage, Workspace,
 };
 
-fn show_provision_layout_detail(state: &mut AppState) {
-    let model = state.provision_layout_model();
-    if let Some(detail) = state.disk_layout_detail(&model) {
-        state.set_notice(detail);
-    }
-}
-
 fn move_provision(state: &mut AppState, delta: isize, viewport_height: usize) -> ActionOutcome {
     let content_len = state.provision_focused_content_len();
     state.provision_move_focused_vertical(delta, viewport_height, content_len);
@@ -171,8 +164,12 @@ pub(super) fn dispatch_provision(
             _ => return None,
         },
         ProvisionStage::Review => match action {
-            TuiAction::Open if state.provision_focused_pane() == PaneId::ProvisionDiskLayout => {
-                state.toggle_disk_layout_tail();
+            TuiAction::Open => {
+                if state.provision_focused_pane() == PaneId::ProvisionDiskLayout {
+                    state.toggle_disk_layout_tail();
+                } else {
+                    state.provision_review_toggle_details();
+                }
                 ActionOutcome::handled()
             }
             TuiAction::PanelNext | TuiAction::PanelPrevious => {
@@ -222,11 +219,7 @@ pub(super) fn dispatch_provision(
                 move_provision(state, viewport_height.max(1) as isize, viewport_height)
             }
             TuiAction::Activate => {
-                if state.provision_focused_pane() == PaneId::ProvisionDiskLayout {
-                    show_provision_layout_detail(state);
-                } else {
-                    state.provision_begin_confirm();
-                }
+                state.provision_begin_confirm();
                 ActionOutcome::handled()
             }
             TuiAction::Export => {

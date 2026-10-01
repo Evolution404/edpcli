@@ -710,6 +710,7 @@ mod export;
 mod identity_lineage;
 mod migration;
 mod prepare;
+mod prepared_projection;
 mod progress_projection;
 
 pub use commit::{

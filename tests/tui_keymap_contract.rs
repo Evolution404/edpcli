@@ -620,6 +620,33 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
 }
 
 #[test]
+fn provision_review_enter_is_confirmation_only_and_open_owns_details() {
+    let controller = include_str!("../src/tui/controller/provision.rs");
+    let review = source_section(
+        controller,
+        "ProvisionStage::Review => match action {",
+        "_ => return None,",
+    );
+    assert!(
+        contains_tokens_in_order(
+            review,
+            &[
+                "TuiAction::Open =>",
+                "state.toggle_disk_layout_tail()",
+                "state.provision_review_toggle_details()",
+                "TuiAction::Activate =>",
+                "state.provision_begin_confirm()",
+            ],
+        ),
+        "Provision Review must reserve o/Open for details and Enter/Activate for write confirmation"
+    );
+    assert!(
+        !review.contains("show_provision_layout_detail"),
+        "Provision Review Enter must not change meaning on the disk-layout pane"
+    );
+}
+
+#[test]
 fn user_visible_inspect_hints_point_to_full_disk_tree_entry() {
     let keymap = include_str!("../src/tui/keymap/help.rs");
     let shell = include_str!("../src/tui/shell/mod.rs");

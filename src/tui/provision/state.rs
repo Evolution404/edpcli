@@ -162,7 +162,10 @@ mod run;
 mod scheme_picker_state;
 #[path = "source_password_state.rs"]
 mod source_password_state;
-pub(crate) use review::{ProvisionReviewRowKind, ProvisionReviewTone};
+pub(crate) use review::{
+    ProvisionConfirmationAction, ProvisionConfirmationDataEffect,
+    ProvisionConfirmationFilesystemEffect, ProvisionConfirmationViewModel,
+};
 #[path = "validation.rs"]
 mod validation;
 
@@ -196,6 +199,8 @@ pub struct ProvisionState {
     pub result_workbench: crate::tui::result_workbench::ResultWorkbenchState,
     pub run: Option<crate::application::progress::OperationRunState>,
     pub pane_focus: crate::tui::pane::PaneFocus,
+    pub review_region_selected: usize,
+    pub review_details_expanded: bool,
     form_view_snapshot: Option<ProvisionFormViewSnapshot>,
     review_view_snapshot: Option<ProvisionReviewViewSnapshot>,
     pub(super) target_disk: Option<u32>,
@@ -230,6 +235,8 @@ impl Default for ProvisionState {
             result_workbench: crate::tui::result_workbench::ResultWorkbenchState::default(),
             run: None,
             pane_focus: crate::tui::pane::PaneFocus::provision_form(),
+            review_region_selected: 0,
+            review_details_expanded: false,
             form_view_snapshot: None,
             review_view_snapshot: None,
             target_disk: None,
@@ -292,6 +299,8 @@ impl AppState {
         self.provision.result_workbench =
             crate::tui::result_workbench::ResultWorkbenchState::default();
         self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_form();
+        self.provision.review_region_selected = 0;
+        self.provision.review_details_expanded = false;
         let current_target = self
             .selected_device()
             .map(|row| (row.disk, row.size, row.device_id.clone(), kind));

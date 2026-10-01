@@ -10,40 +10,26 @@ pub(super) fn draw_scheme_picker(frame: &mut Frame, state: &AppState) {
 mod form_render;
 use form_render::draw_provision_form;
 
+#[path = "review_layout_render.rs"]
+mod review_layout_render;
+#[path = "review_plan_render.rs"]
+mod review_plan_render;
 #[path = "review_render.rs"]
 mod review_render;
+#[path = "review_render_style.rs"]
+mod review_render_style;
+#[path = "review_summary_render.rs"]
+mod review_summary_render;
+#[path = "review_target_render.rs"]
+mod review_target_render;
 use review_render::draw_provision_review;
 
 #[path = "result_render.rs"]
 mod result_render;
 use result_render::draw_provision_result;
 
-fn provision_content_layout(
-    area: ratatui::layout::Rect,
-    stage: ProvisionStage,
-) -> (
-    ratatui::layout::Rect,
-    Option<(ratatui::layout::Rect, Option<ratatui::layout::Rect>)>,
-) {
-    if matches!(
-        stage,
-        ProvisionStage::Form
-            | ProvisionStage::Planning
-            | ProvisionStage::Running
-            | ProvisionStage::Result
-    ) {
-        return (area, None);
-    }
-    let class = crate::tui::ui::ViewportClass::for_width(area.width);
-    if !matches!(
-        class,
-        crate::tui::ui::ViewportClass::Wide | crate::tui::ui::ViewportClass::UltraWide
-    ) || area.height < 12
-    {
-        return (area, None);
-    }
-    let columns = Layout::horizontal([Constraint::Min(68), Constraint::Length(40)]).split(area);
-    (columns[0], Some((columns[1], None)))
+fn provision_content_layout(area: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    area
 }
 
 fn draw_provision_breadcrumb(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
@@ -140,55 +126,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
     .split(area);
     draw_provision_breadcrumb(frame, sections[0], state);
     draw_provision_stepper(frame, sections[1], state);
-    let (main_area, sidebar) = provision_content_layout(sections[2], provision.stage);
-
-    let target_lines = if let Some(row) = state.selected_device() {
-        vec![
-            Line::from(vec![
-                Span::styled(format!("disk{}", row.disk), accent()),
-                Span::raw(format!("  {}", crate::common::fmt_capacity(row.size))),
-            ]),
-            Line::from(vec![
-                Span::styled("接口  ", muted()),
-                Span::styled(safe(&row.proto), secondary()),
-                Span::raw("   "),
-                Span::styled(format!("{}:{}", safe(&row.vid), safe(&row.pid)), muted()),
-            ]),
-            Line::from(vec![
-                Span::styled("盘型  ", muted()),
-                Span::styled(
-                    row.confirmed_provision_kind()
-                        .map(|kind| kind.full_name())
-                        .unwrap_or("未知 / 未确认"),
-                    row.confirmed_provision_kind()
-                        .map(|kind| crate::tui::theme::current().provision_kind_emphasis(kind))
-                        .unwrap_or_else(warning),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled("标签  ", muted()),
-                Span::raw(safe(row.onlyid.as_deref().unwrap_or("未读取"))),
-            ]),
-            Line::from(vec![
-                Span::styled("用户  ", muted()),
-                Span::raw(safe(row.user.as_deref().unwrap_or("未读取"))),
-            ]),
-        ]
-    } else {
-        vec![
-            Line::from(Span::styled("未固定目标 USB", danger())),
-            Line::from("请在左侧列表选择可用 USB 目标盘。"),
-        ]
-    };
-
-    if let Some((side_top, _)) = sidebar {
-        frame.render_widget(
-            Paragraph::new(target_lines)
-                .block(crate::tui::ui::card("固定目标", false))
-                .wrap(Wrap { trim: true }),
-            side_top,
-        );
-    }
+    let main_area = provision_content_layout(sections[2]);
 
     match provision.stage {
         ProvisionStage::Form => {
@@ -238,27 +176,75 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
         }
         ProvisionStage::Confirm => {
             draw_provision_review(frame, main_area, state);
-            let target = state
-                .provision_target_disk()
-                .map(|disk| format!("disk{disk}"))
-                .unwrap_or_else(|| "未选择目标".into());
+            let view = state.provision_confirmation_view_model().ok();
+            let target = view
+                .as_ref()
+                .map(|view| {
+                    format!(
+                        "disk{} · {} · {}",
+                        view.target.disk,
+                        crate::common::fmt_capacity(
+                            view.target
+                                .total_sectors
+                                .saturating_mul(crate::common::SECTOR as u64)
+                        ),
+                        view.target.device_id
+                    )
+                })
+                .unwrap_or_else(|| "目标身份不可用".into());
+            let mut details = vec![
+                Line::from(vec![
+                    Span::styled("目标设备  ", muted()),
+                    Span::styled(safe(&target), secondary()),
+                ]),
+                Line::from("输入精确 YES 后立即按已审核计划开始写盘。"),
+            ];
+            if let Some(view) = view.as_ref() {
+                let cleared = view
+                    .regions
+                    .iter()
+                    .filter(|region| {
+                        region.data_effect
+                            == crate::tui::state::ProvisionConfirmationDataEffect::Clear
+                    })
+                    .map(|region| region.label.as_str())
+                    .collect::<Vec<_>>();
+                if cleared.is_empty() {
+                    details.push(Line::from(Span::styled("✓ 数据区域全部保留", success())));
+                } else {
+                    details.push(Line::from(Span::styled(
+                        format!("⚠ 数据将清空：{}", cleared.join("、")),
+                        warning(),
+                    )));
+                }
+                let changed_filesystems = view
+                    .regions
+                    .iter()
+                    .filter(|region| {
+                        matches!(
+                            region.filesystem_effect,
+                            crate::tui::state::ProvisionConfirmationFilesystemEffect::Format(_)
+                                | crate::tui::state::ProvisionConfirmationFilesystemEffect::Create(
+                                    _
+                                )
+                        )
+                    })
+                    .map(|region| format!("{} {}", region.label, region.filesystem_effect.label()))
+                    .collect::<Vec<_>>();
+                if !changed_filesystems.is_empty() {
+                    details.push(Line::from(Span::styled(
+                        format!("文件系统：{}", changed_filesystems.join("；")),
+                        warning(),
+                    )));
+                }
+            }
             crate::tui::ui::render_write_confirmation_modal(
                 frame,
                 crate::tui::ui::WriteConfirmationSpec {
                     kind: crate::tui::ui::MediaWriteConfirmationKind::Provision,
                     title: "制盘写入确认",
                     warning: format!("确认后将直接开始向 {target} 写入"),
-                    details: vec![
-                        Line::from(vec![
-                            Span::styled("目标设备  ", muted()),
-                            Span::styled(target, secondary()),
-                        ]),
-                        Line::from("按已审核计划写入分区结构、文件系统与协议元数据。"),
-                        Line::from(Span::styled(
-                            "当前介质上的相关结构和数据可能被覆盖。",
-                            warning(),
-                        )),
-                    ],
+                    details,
                     confirmation: &provision.confirmation,
                     message: provision.message.as_ref(),
                 },

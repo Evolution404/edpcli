@@ -50,6 +50,10 @@ impl AppState {
 
         match self.provision.pane_focus.focused() {
             PaneId::ProvisionParameters => self.provision_field_count(),
+            PaneId::ProvisionDiskLayout if self.provision.stage == ProvisionStage::Review => self
+                .provision_confirmation_view_model()
+                .map(|view| view.layout.segments.len())
+                .unwrap_or(0),
             PaneId::ProvisionDiskLayout => {
                 let model = self.provision_layout_model();
                 let details = self.provision_layout_editor_details();
@@ -60,8 +64,11 @@ impl AppState {
                 )
                 .pane_line_count("summary", &details)
             }
-            PaneId::ProvisionSummary => self.provision_review_summary_lines().len(),
-            PaneId::ProvisionChanges => self.provision_review_change_lines().len(),
+            PaneId::ProvisionPartitionPlan => self.provision_review_region_count(),
+            PaneId::ProvisionExecutionSummary => self
+                .provision_confirmation_view_model()
+                .map(|view| 8usize.saturating_add(view.regions.len()))
+                .unwrap_or(0),
             _ => 0,
         }
     }
@@ -71,8 +78,14 @@ impl AppState {
         if pane == crate::tui::pane::PaneId::ProvisionParameters {
             let count = self.provision_field_count();
             self.provision_move_field(-(count as isize));
+        } else if pane == crate::tui::pane::PaneId::ProvisionPartitionPlan
+            && self.provision.stage == ProvisionStage::Review
+        {
+            self.provision.review_region_selected = 0;
         } else {
-            if pane == crate::tui::pane::PaneId::ProvisionDiskLayout {
+            if pane == crate::tui::pane::PaneId::ProvisionDiskLayout
+                && self.provision.stage == ProvisionStage::Form
+            {
                 self.disk_layout_move_selection(-(self.disk_layout_selected() as isize), 1);
             }
             self.provision.pane_focus.viewport_mut(pane).scroll_y.top();
@@ -84,8 +97,15 @@ impl AppState {
         if pane == crate::tui::pane::PaneId::ProvisionParameters {
             let count = self.provision_field_count();
             self.provision_move_field(count as isize);
+        } else if pane == crate::tui::pane::PaneId::ProvisionPartitionPlan
+            && self.provision.stage == ProvisionStage::Review
+        {
+            self.provision.review_region_selected =
+                self.provision_review_region_count().saturating_sub(1);
         } else {
-            if pane == crate::tui::pane::PaneId::ProvisionDiskLayout {
+            if pane == crate::tui::pane::PaneId::ProvisionDiskLayout
+                && self.provision.stage == ProvisionStage::Form
+            {
                 let count = self.provision_layout_model().segments.len();
                 self.disk_layout_move_selection(count as isize, count);
             }
@@ -107,6 +127,10 @@ impl AppState {
         let pane = self.provision.pane_focus.focused();
         if pane == crate::tui::pane::PaneId::ProvisionParameters {
             self.provision_move_field(delta);
+        } else if pane == crate::tui::pane::PaneId::ProvisionPartitionPlan
+            && self.provision.stage == ProvisionStage::Review
+        {
+            self.provision_review_move_region(delta);
         } else if pane == crate::tui::pane::PaneId::ProvisionDiskLayout
             && self.provision.stage == ProvisionStage::Form
         {

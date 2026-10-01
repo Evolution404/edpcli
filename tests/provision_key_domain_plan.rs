@@ -284,29 +284,90 @@ fn chapter_12_tui_must_model_share_and_encrypt_passwords_independently() {
 }
 
 #[test]
-fn chapter_12_review_must_expose_domain_disposition_and_password_state() {
+fn chapter_12_review_uses_typed_final_password_effects_without_preflight_vocabulary() {
     let review = include_str!("../src/tui/provision/review.rs");
     for token in [
-        "密码域透传",
-        "仅改密",
-        "密码域重建",
-        "密码域需重建",
-        "密码动作:",
-        "原密码已验证",
-        "原密码未知，布局满足黑盒透传条件",
-        "默认密码已验证",
-        "用户旧密码已验证",
-        "来源密码 Unknown",
+        "ProvisionConfirmationPasswordEffect",
+        "Passthrough",
+        "Rewrap",
+        "NewFileKey",
+        "保留原密码域",
+        "使用目标密码，FileKey 保持",
+        "使用目标密码，生成新 FileKey",
+        "格式化重建",
     ] {
         assert!(
             review.contains(token),
-            "missing Chapter 12 review token: {token}"
+            "missing Chapter 12 confirmation contract token: {token}"
         );
     }
-    assert!(
-        !review.contains("目标密码禁用（Opaque）"),
-        "review must use the unified 透传/改密/重建/需重建 vocabulary"
-    );
+    for banned in [
+        "密码域需重建",
+        "尚未获得格式化授权",
+        "需要勾选格式化",
+        "目标密码禁用（Opaque）",
+    ] {
+        assert!(
+            !review.contains(banned),
+            "confirmation review must not expose preflight vocabulary: {banned}"
+        );
+    }
+}
+
+#[test]
+fn confirmation_projection_is_prepared_only_and_fail_closed() {
+    let review = include_str!("../src/tui/provision/review.rs");
+    for token in [
+        "DiskLayoutModel::canonical_edp",
+        "DiskLayoutModel::canonical_plain_plan",
+        "layout.validate_complete()",
+        "PasswordDisposition::Blocked",
+        "matching_segments != 1",
+        "prepared.hardware_probe()",
+        "prepared.expected_onlyid()",
+    ] {
+        assert!(
+            review.contains(token),
+            "confirmation projection is missing prepared-only contract token: {token}"
+        );
+    }
+    for banned in [
+        "provision_layout_model()",
+        "provision_preflight()",
+        "selected_device()",
+        "ProvisionForm",
+        "PlainProvisionForm",
+    ] {
+        assert!(
+            !review.contains(banned),
+            "confirmation projection must not read live/form state: {banned}"
+        );
+    }
+}
+
+#[test]
+fn confirmation_renderers_are_presentation_only() {
+    let renderers = [
+        include_str!("../src/tui/provision/review_render.rs"),
+        include_str!("../src/tui/provision/review_target_render.rs"),
+        include_str!("../src/tui/provision/review_layout_render.rs"),
+        include_str!("../src/tui/provision/review_plan_render.rs"),
+        include_str!("../src/tui/provision/review_summary_render.rs"),
+    ]
+    .join("\n");
+    for banned in [
+        "PasswordDisposition",
+        "RegionDisposition",
+        "provision_preflight",
+        "selected_device",
+        "ProvisionForm",
+        "PlainProvisionForm",
+    ] {
+        assert!(
+            !renderers.contains(banned),
+            "confirmation renderer must not recompute business semantics: {banned}"
+        );
+    }
 }
 
 #[test]
