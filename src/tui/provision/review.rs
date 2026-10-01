@@ -489,6 +489,9 @@ impl AppState {
     pub(crate) fn provision_confirmation_view_model(
         &self,
     ) -> Result<ProvisionConfirmationViewModel, String> {
+        if let Some(projection) = self.provision.review_projection.as_ref() {
+            return Ok(projection.clone());
+        }
         let prepared = self.provision.prepared.as_ref().ok_or("计划对象尚未准备")?;
         ProvisionConfirmationViewModel::from_prepared(prepared)
     }

@@ -98,6 +98,23 @@ fn demo_fixtures_expose_typed_inspect_layout_backups_and_running_progress() {
 }
 
 #[test]
+fn provision_review_demo_uses_read_only_confirmation_projection() {
+    let state = demo::build_scene("provision-review").unwrap();
+    assert!(state.provision().prepared.is_none());
+
+    let screen = screen_text("provision-review");
+    let compact = screen.replace(' ', "");
+    for expected in ["计划确认", "最终磁盘布局", "区域执行计划", "执行摘要"] {
+        assert!(
+            compact.contains(expected),
+            "missing {expected} in provision review demo"
+        );
+    }
+    assert!(!screen.contains("计划对象尚未准备"));
+    assert!(!screen.contains("计划确认不可用"));
+}
+
+#[test]
 fn provision_result_demo_uses_real_result_workbench_state() {
     let state = demo::build_scene("provision-result-success").unwrap();
     assert!(state.provision().result_plan.is_some());

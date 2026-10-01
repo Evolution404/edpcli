@@ -21,6 +21,7 @@ impl AppState {
         self.provision.confirmation.clear();
         self.provision.message = None;
         self.provision.prepared = None;
+        self.provision.review_projection = None;
         self.provision.result_status = None;
         self.provision.result_outcome = None;
         self.provision.result_plan = None;

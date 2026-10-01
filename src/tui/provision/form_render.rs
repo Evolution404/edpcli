@@ -6,7 +6,9 @@ use std::collections::HashMap;
 
 #[path = "form_special_rows.rs"]
 mod form_special_rows;
-use form_special_rows::{advanced_settings_row, password_domain_row, two_column_widths};
+use form_special_rows::{
+    advanced_settings_row, compact_field_label, password_domain_row, two_column_widths,
+};
 
 const INPUT_EDITING_SLACK: usize = 2;
 
@@ -45,7 +47,8 @@ pub(super) fn draw_provision_form(
         let entry = section_metrics.entry(*section).or_insert((0, 0, 0, 0));
         for (position, index) in indexes.iter().copied().enumerate() {
             let (label, value, secret) = &fields[index];
-            let label_width = crate::ui::disp_width(label);
+            let display_label = compact_field_label(label);
+            let label_width = crate::ui::disp_width(display_label.as_ref());
             let shown_width = if value.is_empty() {
                 crate::ui::disp_width("〈请输入〉")
             } else if *secret {
@@ -120,6 +123,7 @@ pub(super) fn draw_provision_form(
         let two_columns = indexes.len() == 2;
         for (position, index) in indexes.into_iter().enumerate() {
             let (label, value, secret) = &fields[index];
+            let display_label = compact_field_label(label);
             let active = index == provision.field_selected;
             if position > 0 {
                 spans.push(Span::styled(separator, muted()));
@@ -164,7 +168,10 @@ pub(super) fn draw_provision_form(
                     Style::default()
                 },
             ));
-            spans.push(Span::styled(fit_display_width(label, label_width), muted()));
+            spans.push(Span::styled(
+                fit_display_width(display_label.as_ref(), label_width),
+                muted(),
+            ));
             spans.push(Span::raw(" "));
 
             let editable_active = active && state.provision_selected_field_is_editable();

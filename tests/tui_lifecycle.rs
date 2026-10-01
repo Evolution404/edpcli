@@ -367,11 +367,8 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     let format_separator = internal_separator_x("启动区格式化");
     assert_eq!(format_separator, internal_separator_x("交换区格式化"));
     assert_eq!(format_separator, internal_separator_x("保密区格式化"));
-    let password_separator = internal_separator_x("初始化密码强制修改");
-    assert_eq!(
-        password_separator,
-        internal_separator_x("交换区密码最大错误次数")
-    );
+    let password_separator = internal_separator_x("首次改密");
+    assert_eq!(password_separator, internal_separator_x("交换区错误上限"));
     let distinct = [
         identity_separator,
         internal_separator_x("启动区容量"),

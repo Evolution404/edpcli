@@ -173,8 +173,9 @@ mod scheme_picker_state;
 mod source_password_state;
 pub(crate) use review::{
     ProvisionConfirmationAction, ProvisionConfirmationDataEffect,
-    ProvisionConfirmationFilesystemEffect, ProvisionConfirmationPasswordEffect,
-    ProvisionConfirmationRegion, ProvisionConfirmationViewModel,
+    ProvisionConfirmationFilesystemEffect, ProvisionConfirmationOverall,
+    ProvisionConfirmationPasswordEffect, ProvisionConfirmationRegion, ProvisionConfirmationTarget,
+    ProvisionConfirmationViewModel,
 };
 #[path = "validation.rs"]
 mod validation;
@@ -200,6 +201,7 @@ pub struct ProvisionState {
     pub form: ProvisionForm,
     pub plain_form: PlainProvisionForm,
     pub prepared: Option<ProvisionPrepared>,
+    pub(crate) review_projection: Option<ProvisionConfirmationViewModel>,
     pub confirmation: String,
     pub export_path: String,
     pub message: Option<crate::tui::ui::UiMessage>,
@@ -236,6 +238,7 @@ impl Default for ProvisionState {
             form: ProvisionForm::default(),
             plain_form: PlainProvisionForm::default(),
             prepared: None,
+            review_projection: None,
             confirmation: String::new(),
             export_path: String::new(),
             message: None,

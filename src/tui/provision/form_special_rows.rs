@@ -1,5 +1,18 @@
 use super::*;
 
+pub(super) fn compact_field_label(label: &str) -> std::borrow::Cow<'_, str> {
+    match label {
+        "初始化密码强制修改" => "首次改密".into(),
+        "取消密码复杂性验证" => "取消复杂度".into(),
+        "交换区密码最大错误次数" => "交换区错误上限".into(),
+        "保密区密码最大错误次数" => "保密区错误上限".into(),
+        _ => label
+            .strip_suffix("卷标（原样保留）")
+            .map(|prefix| format!("{prefix}原卷标").into())
+            .unwrap_or_else(|| label.into()),
+    }
+}
+
 pub(super) fn two_column_widths(
     content_width: usize,
     separator_width: usize,
