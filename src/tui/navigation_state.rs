@@ -5,6 +5,15 @@ impl AppState {
         if self.shell.workspace == workspace {
             return;
         }
+        let source_workspace = self.shell.workspace;
+        let backup_group_key = (source_workspace == Workspace::Devices
+            && workspace == Workspace::Backups)
+            .then(|| {
+                self.selected_device()
+                    .and_then(|row| row.identity_pin.as_ref())
+                    .and_then(|pin| pin.snapshot.strong_backup_group_key())
+            })
+            .flatten();
         if self.shell.workspace == Workspace::Devices
             && matches!(workspace, Workspace::Backups | Workspace::Inspect)
         {
@@ -34,6 +43,9 @@ impl AppState {
                     .position(|row| row.disk == disk)
                     .unwrap_or(0);
             }
+        }
+        if source_workspace == Workspace::Devices && workspace == Workspace::Backups {
+            self.follow_backup_device_group(backup_group_key);
         }
         let count = match workspace {
             Workspace::Devices => self.devices.rows.len(),

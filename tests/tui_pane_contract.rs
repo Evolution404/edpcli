@@ -395,6 +395,34 @@ fn backup_device_tree_filters_without_renumbering_and_search_stays_scoped() {
 }
 
 #[test]
+fn devices_to_backups_follows_the_selected_physical_device_group() {
+    let mut first = device();
+    first.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
+    confirm_kind(&mut first, edpcli::provision::DiskProvisionKind::Mode0);
+
+    let mut second = device();
+    second.disk = 7;
+    second.device_id = Some("disk&ven_test&prod_second".into());
+    second.onlyid = Some("2402259934".into());
+    second.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
+    confirm_kind(&mut second, edpcli::provision::DiskProvisionKind::Mode0);
+
+    let backups = vec![related_backup(1, &first), related_backup(2, &second)];
+    let mut state = AppState::new();
+    state.replace_devices(vec![first, second]);
+    state.replace_backups(backups);
+    state.navigate(NavCommand::Down, 20);
+    assert_eq!(state.selected_device_disk(), Some(7));
+
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+
+    assert!(state.backup_device_filter_active());
+    assert_eq!(state.visible_backup_count(), 1);
+    assert_eq!(state.backup_at_visible(0).unwrap().index, 2);
+    assert_eq!(state.backup_device_tree_selected(), 2);
+}
+
+#[test]
 fn backup_device_tree_is_a_sidebar_and_enter_target_is_the_backup_list() {
     let mut confirmed = device();
     confirmed.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;

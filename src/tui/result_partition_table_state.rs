@@ -1,5 +1,25 @@
 use super::*;
 
+fn post_restore_key_state(
+    partition: &crate::application::post_restore::PostRestorePartition,
+) -> &'static str {
+    use crate::application::post_restore::PostRestorePartitionState;
+
+    if partition.role.as_deref() == Some("compatibility_reserve") {
+        return "无需处理";
+    }
+    if !partition.requires_original_key {
+        return "无需原密钥";
+    }
+    match partition.state {
+        PostRestorePartitionState::Usable => "沿用原密钥域",
+        PostRestorePartitionState::NeedsFormat => "密钥域已验证",
+        PostRestorePartitionState::PasswordRequired => "需要原密码",
+        PostRestorePartitionState::CryptoMetadataInvalid => "需重建密钥域",
+        PostRestorePartitionState::Unsupported => "原密钥域未知",
+    }
+}
+
 impl AppState {
     pub fn result_partition_table_view(&self) -> Option<crate::tui::table_layout::TableViewData> {
         use crate::tui::table_layout::{table_column_schema, TableKind, TableViewData};
@@ -49,13 +69,7 @@ impl AppState {
                             .or_else(|| partition.filesystem_hint.clone())
                             .unwrap_or_else(|| "—".into())
                     };
-                    let key_state = if compatibility_reserve {
-                        "无需处理"
-                    } else if partition.requires_original_key {
-                        "需要原密钥域"
-                    } else {
-                        "无需原密钥"
-                    };
+                    let key_state = post_restore_key_state(partition);
                     vec![
                         format!("P{}", partition.index),
                         status.into(),
@@ -200,5 +214,61 @@ impl AppState {
         }
         .min(order.len().saturating_sub(1));
         order.get(next).copied()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::post_restore::{PostRestorePartition, PostRestorePartitionState};
+
+    fn partition(
+        state: PostRestorePartitionState,
+        requires_original_key: bool,
+        role: Option<&str>,
+    ) -> PostRestorePartition {
+        PostRestorePartition {
+            index: 1,
+            role: role.map(str::to_string),
+            start_lba: 126,
+            sector_count: 2_048,
+            filesystem_hint: None,
+            detected_filesystem: None,
+            requires_original_key,
+            state,
+            detail: String::new(),
+        }
+    }
+
+    #[test]
+    fn post_restore_key_state_describes_action_instead_of_implying_work_for_usable_partition() {
+        assert_eq!(
+            post_restore_key_state(&partition(PostRestorePartitionState::Usable, true, None)),
+            "沿用原密钥域"
+        );
+        assert_eq!(
+            post_restore_key_state(&partition(
+                PostRestorePartitionState::PasswordRequired,
+                true,
+                None,
+            )),
+            "需要原密码"
+        );
+        assert_eq!(
+            post_restore_key_state(&partition(
+                PostRestorePartitionState::NeedsFormat,
+                true,
+                None
+            )),
+            "密钥域已验证"
+        );
+        assert_eq!(
+            post_restore_key_state(&partition(
+                PostRestorePartitionState::Usable,
+                false,
+                Some("compatibility_reserve"),
+            )),
+            "无需处理"
+        );
     }
 }

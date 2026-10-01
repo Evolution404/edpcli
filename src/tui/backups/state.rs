@@ -323,6 +323,22 @@ impl AppState {
         self.set_item_count(self.visible_backup_indices().len());
     }
 
+    pub(super) fn follow_backup_device_group(&mut self, group_key: Option<String>) {
+        self.backups.device_filter = group_key
+            .filter(|expected| {
+                self.backups
+                    .rows
+                    .iter()
+                    .any(|backup| Self::backup_strong_group_key(backup).as_ref() == Some(expected))
+            })
+            .map(BackupDeviceFilter::Confirmed)
+            .unwrap_or(BackupDeviceFilter::All);
+        self.backups.device_tree_scroll_x = 0;
+        self.reconcile_backup_device_filter();
+        self.shell.selected = 0;
+        self.set_item_count(self.visible_backup_indices().len());
+    }
+
     pub(super) fn reconcile_backup_device_filter(&mut self) {
         let valid = match &self.backups.device_filter {
             BackupDeviceFilter::All => true,
