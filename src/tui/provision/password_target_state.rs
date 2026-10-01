@@ -1,6 +1,32 @@
 use super::*;
 
 impl AppState {
+    pub(crate) fn provision_source_is_plain(&self) -> bool {
+        self.selected_device()
+            .map(|row| {
+                row.confirmed_provision_kind().unwrap_or(row.provision_kind)
+                    == crate::provision::DiskProvisionKind::Plain
+            })
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn provision_source_has_password_domain(
+        &self,
+        domain: crate::provision::KeyDomainRole,
+    ) -> bool {
+        self.selected_device()
+            .and_then(|row| row.confirmed_provision_kind())
+            .is_some_and(|kind| kind.has_key_domain(domain))
+    }
+
+    pub(crate) fn provision_source_password_not_applicable(
+        &self,
+        domain: crate::provision::KeyDomainRole,
+    ) -> bool {
+        self.provision_source_password_state(domain)
+            == password_verification::SourcePasswordState::NotApplicable
+    }
+
     pub(crate) fn provision_target_password_mode(
         &self,
         domain: crate::provision::KeyDomainRole,
@@ -25,6 +51,9 @@ impl AppState {
         &self,
         domain: crate::provision::KeyDomainRole,
     ) -> password_verification::SourcePasswordState {
+        if !self.provision_source_has_password_domain(domain) {
+            return password_verification::SourcePasswordState::NotApplicable;
+        }
         use crate::provision::SourcePasswordKnowledge;
         use password_verification::SourcePasswordState;
 
@@ -128,6 +157,12 @@ impl AppState {
         &mut self,
         domain: crate::provision::KeyDomainRole,
     ) {
+        if self.provision_source_password_state(domain)
+            == password_verification::SourcePasswordState::NotApplicable
+        {
+            self.provision_prepare_target_password_edit(domain);
+            return;
+        }
         use password_verification::TargetPasswordMode;
         match self.provision_target_password_mode(domain) {
             TargetPasswordMode::Passthrough => self.provision_prepare_target_password_edit(domain),
@@ -174,6 +209,12 @@ impl AppState {
     ) {
         use password_verification::TargetPasswordMode;
 
+        if self.provision_source_password_state(domain)
+            == password_verification::SourcePasswordState::NotApplicable
+        {
+            self.provision_set_target_password_mode(domain, TargetPasswordMode::Explicit);
+            return;
+        }
         if self.provision_target_password_mode(domain) != TargetPasswordMode::Explicit {
             return;
         }

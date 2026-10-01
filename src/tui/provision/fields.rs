@@ -154,10 +154,11 @@ impl AppState {
         }
         if matches!(mode, 0 | 1 | 3) {
             let domain = crate::provision::KeyDomainRole::Share;
+            let source_password_editable = self.provision_source_has_password_domain(domain);
             fields.push(descriptor(
                 ProvisionFieldId::SourcePassword(domain),
                 ProvisionFieldSection::PasswordDomain,
-                true,
+                source_password_editable,
                 true,
                 false,
                 false,
@@ -168,17 +169,18 @@ impl AppState {
                 ProvisionFieldSection::PasswordDomain,
                 true,
                 true,
-                true,
+                source_password_editable,
                 false,
                 false,
             ));
         }
         if matches!(mode, 0..=2) {
             let domain = crate::provision::KeyDomainRole::Encrypt;
+            let source_password_editable = self.provision_source_has_password_domain(domain);
             fields.push(descriptor(
                 ProvisionFieldId::SourcePassword(domain),
                 ProvisionFieldSection::PasswordDomain,
-                true,
+                source_password_editable,
                 true,
                 false,
                 false,
@@ -189,7 +191,7 @@ impl AppState {
                 ProvisionFieldSection::PasswordDomain,
                 true,
                 true,
-                true,
+                source_password_editable,
                 false,
                 false,
             ));

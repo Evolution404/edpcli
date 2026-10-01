@@ -9,7 +9,6 @@ pub(crate) enum ProvisionPreflightKind {
     Rebuild,
     BlockedNeedsFormat,
     BlockedNeedsTargetPassword,
-    PendingBackend,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +86,34 @@ impl AppState {
         })
     }
 
+    fn provision_plain_extent_candidate(
+        &self,
+        target: &crate::provision::TargetPartitionGeometry,
+    ) -> bool {
+        if !self.provision_source_is_plain() {
+            return false;
+        }
+        let Some(table) = self
+            .selected_device()
+            .and_then(|row| row.partition_table.as_ref())
+        else {
+            return false;
+        };
+        let extents = table
+            .partitions
+            .iter()
+            .map(|partition| crate::provision::PlainSourceExtent {
+                start_lba: partition.start_lba,
+                sector_count: partition.sector_count,
+                filesystem: partition
+                    .filesystem
+                    .as_deref()
+                    .and_then(crate::filesystem::FilesystemKind::from_config_token),
+            })
+            .collect::<Vec<_>>();
+        crate::provision::plain_extent_preserve_candidate(&extents, target)
+    }
+
     fn provision_partition_preflight(
         &self,
         source: Option<&crate::provision::ExistingProvisionProfile>,
@@ -118,63 +145,83 @@ impl AppState {
         }
 
         if source_part.is_none() {
-            if let Some(domain) = KeyDomainRole::from_partition_role(role) {
-                let intent = self.provision_password_intent(domain, format_selected);
-                let (kind, reason, target_password_requested) = match intent {
-                    PasswordIntent::Waiting => (
-                        ProvisionPreflightKind::Waiting,
-                        format!("{}原密码正在只读验证，请稍候再生成计划", role.label()),
-                        false,
-                    ),
-                    PasswordIntent::BlockedNeedsExplicitPassword => (
-                        ProvisionPreflightKind::BlockedNeedsTargetPassword,
-                        format!(
-                            "{}已选择格式化，但原密码未验证且新密码仍为透传；请先设置新密码",
-                            role.label()
+            if self.provision_source_is_plain() {
+                if let Some(domain) = KeyDomainRole::from_partition_role(role) {
+                    let intent = self.provision_password_intent(domain, format_selected);
+                    let (kind, reason, target_password_requested) = match intent {
+                        PasswordIntent::InitializeNew => (
+                            if format_selected {
+                                ProvisionPreflightKind::Rebuild
+                            } else {
+                                ProvisionPreflightKind::BlockedNeedsFormat
+                            },
+                            if format_selected {
+                                "普通盘无来源密码域；将使用目标密码创建新密码域并生成新 FileKey"
+                                    .into()
+                            } else {
+                                "普通盘无来源密码域；目标密码已准备，需勾选格式化后创建新密码域"
+                                    .into()
+                            },
+                            true,
                         ),
-                        false,
-                    ),
-                    PasswordIntent::BlockedNeedsFormat => (
-                        ProvisionPreflightKind::BlockedNeedsFormat,
-                        "原密码未验证，无法无损改密；必须明确授权格式化重建".into(),
-                        false,
-                    ),
-                    PasswordIntent::Rebuild => (
-                        ProvisionPreflightKind::Rebuild,
-                        "用户已明确选择格式化；目标密码域将重建并生成新密钥".into(),
-                        true,
-                    ),
-                    PasswordIntent::Rewrap => (
-                        ProvisionPreflightKind::PendingBackend,
-                        "来源几何缓存不足以确认无损改密；后台计划将复核来源协议".into(),
-                        true,
-                    ),
-                    PasswordIntent::Passthrough => (
-                        ProvisionPreflightKind::PendingBackend,
-                        "来源几何缓存不足以确认透传/迁移；后台计划将复核来源协议".into(),
-                        false,
-                    ),
-                };
+                        PasswordIntent::BlockedNeedsExplicitPassword => (
+                            ProvisionPreflightKind::BlockedNeedsTargetPassword,
+                            "普通盘无来源密码域；请先设置目标新密码".into(),
+                            false,
+                        ),
+                        _ => (
+                            if format_selected {
+                                ProvisionPreflightKind::Rebuild
+                            } else {
+                                ProvisionPreflightKind::BlockedNeedsFormat
+                            },
+                            "普通盘无可透传密码域；目标区域必须按新密码域重建".into(),
+                            true,
+                        ),
+                    };
+                    return ProvisionPartitionPreflight {
+                        role,
+                        kind,
+                        reason,
+                        target_password_requested,
+                    };
+                }
+
+                let exact_extent = self.provision_plain_extent_candidate(target);
                 return ProvisionPartitionPreflight {
                     role,
-                    kind,
-                    reason,
-                    target_password_requested,
+                    kind: if format_selected {
+                        ProvisionPreflightKind::Rebuild
+                    } else if exact_extent {
+                        ProvisionPreflightKind::Preserve
+                    } else {
+                        ProvisionPreflightKind::BlockedNeedsFormat
+                    },
+                    reason: if format_selected {
+                        "用户已明确选择格式化；普通盘原区域将重建".into()
+                    } else if exact_extent {
+                        "普通盘存在与目标 LBA 范围完全一致的物理分区；数据范围候选保留".into()
+                    } else {
+                        "普通盘不存在与目标 LBA 范围完全一致的物理分区；必须明确授权格式化重建"
+                            .into()
+                    },
+                    target_password_requested: false,
                 };
             }
+
             return ProvisionPartitionPreflight {
                 role,
                 kind: if format_selected {
                     ProvisionPreflightKind::Rebuild
                 } else {
-                    ProvisionPreflightKind::PendingBackend
+                    ProvisionPreflightKind::BlockedNeedsFormat
                 },
                 reason: if format_selected {
                     "用户已明确选择格式化；目标区域将重建".into()
                 } else {
-                    "来源无相同语义分区；迁移或重建处理需后台计划进一步确认".into()
+                    "来源无相同语义分区；目标区域无法原样保留，必须明确授权格式化重建".into()
                 },
-                target_password_requested: false,
+                target_password_requested: KeyDomainRole::from_partition_role(role).is_some(),
             };
         }
 
@@ -208,9 +255,9 @@ impl AppState {
                     PasswordIntent::BlockedNeedsFormat => {
                         (ProvisionPreflightKind::BlockedNeedsFormat, false)
                     }
-                    PasswordIntent::Rebuild | PasswordIntent::Rewrap => {
-                        (ProvisionPreflightKind::Rebuild, true)
-                    }
+                    PasswordIntent::InitializeNew
+                    | PasswordIntent::Rebuild
+                    | PasswordIntent::Rewrap => (ProvisionPreflightKind::Rebuild, true),
                     PasswordIntent::Passthrough => (ProvisionPreflightKind::Rebuild, false),
                 }
             } else {
@@ -238,6 +285,11 @@ impl AppState {
             KeyDomainRole::Encrypt => self.provision.form.encrypt_opaque_profile,
         };
         let (kind, reason, target_password_requested) = match intent {
+            PasswordIntent::InitializeNew => (
+                ProvisionPreflightKind::Rebuild,
+                "无来源密码域；使用目标密码创建新密码域并生成新 FileKey".into(),
+                true,
+            ),
             PasswordIntent::Waiting => (
                 ProvisionPreflightKind::Waiting,
                 format!("{}原密码正在只读验证，请稍候再生成计划", role.label()),
@@ -284,8 +336,8 @@ impl AppState {
                 )
             }
             PasswordIntent::Passthrough if source_state == SourcePasswordState::Unknown => (
-                ProvisionPreflightKind::PendingBackend,
-                "来源密码状态尚未定论；后台计划将复核密钥配置后决定透传或重建".into(),
+                ProvisionPreflightKind::BlockedNeedsFormat,
+                "来源密码未知且密钥配置不满足不解密透传条件；必须明确授权格式化重建".into(),
                 false,
             ),
             PasswordIntent::Passthrough => (

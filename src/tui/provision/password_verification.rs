@@ -24,6 +24,11 @@ impl AppState {
             ),
             _ => return Ok(None),
         };
+        if self.provision_source_password_state(domain)
+            == password_verification::SourcePasswordState::NotApplicable
+        {
+            return Ok(None);
+        }
         if password.is_empty() {
             match domain {
                 crate::provision::KeyDomainRole::Share => {
@@ -55,6 +60,12 @@ impl AppState {
         result: Result<crate::application::provision::ProvisionKeyProbe, String>,
     ) {
         if self.provision.stage != ProvisionStage::Form {
+            return;
+        }
+        if self.provision_source_is_plain() {
+            self.provision.share_source_verification = ProvisionPasswordVerificationState::Idle;
+            self.provision.encrypt_source_verification = ProvisionPasswordVerificationState::Idle;
+            self.provision.message = None;
             return;
         }
         match result {

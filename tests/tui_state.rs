@@ -373,18 +373,154 @@ fn device(size: u64) -> edpcli::disk_scan::Row {
     row
 }
 
+fn official_device(
+    size: u64,
+    kind: edpcli::provision::DiskProvisionKind,
+) -> edpcli::disk_scan::Row {
+    use edpcli::provision::DiskProvisionKind;
+    use edpcli::sectors::EdpfPartition;
+
+    let mut row = device(size);
+    row.provision_kind = kind;
+    row.partitions = Some(match kind {
+        DiskProvisionKind::Mode0 => vec![
+            EdpfPartition {
+                ptype: 1,
+                active: 1,
+                enc: 0,
+                start_lba: 63,
+                size_bytes: 20_417 * 512,
+            },
+            EdpfPartition {
+                ptype: 2,
+                active: 1,
+                enc: 1,
+                start_lba: 20_480,
+                size_bytes: 4_000_000 * 512,
+            },
+            EdpfPartition {
+                ptype: 4,
+                active: 1,
+                enc: 1,
+                start_lba: 4_020_480,
+                size_bytes: 2_097_153 * 512,
+            },
+        ],
+        DiskProvisionKind::Mode1 => vec![
+            EdpfPartition {
+                ptype: 2,
+                active: 1,
+                enc: 0,
+                start_lba: 63,
+                size_bytes: 6_020_417 * 512,
+            },
+            EdpfPartition {
+                ptype: 4,
+                active: 1,
+                enc: 1,
+                start_lba: 6_020_480,
+                size_bytes: 2_097_153 * 512,
+            },
+        ],
+        DiskProvisionKind::Mode2 => vec![
+            EdpfPartition {
+                ptype: 1,
+                active: 1,
+                enc: 0,
+                start_lba: 63,
+                size_bytes: 63 * 512,
+            },
+            EdpfPartition {
+                ptype: 4,
+                active: 1,
+                enc: 1,
+                start_lba: 126,
+                size_bytes: 8_000_000 * 512,
+            },
+        ],
+        DiskProvisionKind::Mode3 => vec![
+            EdpfPartition {
+                ptype: 1,
+                active: 1,
+                enc: 0,
+                start_lba: 63,
+                size_bytes: 20_417 * 512,
+            },
+            EdpfPartition {
+                ptype: 2,
+                active: 1,
+                enc: 1,
+                start_lba: 20_480,
+                size_bytes: 6_000_000 * 512,
+            },
+        ],
+        DiskProvisionKind::Plain => panic!("official_device requires an EDP mode"),
+    });
+    crate::common::confirm_row_identity(&mut row);
+    row
+}
+
+fn mode0_device(size: u64) -> edpcli::disk_scan::Row {
+    official_device(size, edpcli::provision::DiskProvisionKind::Mode0)
+}
+
+fn authorize_all_rebuilds(state: &mut AppState, kind: ProvisionKind) {
+    match kind {
+        ProvisionKind::Mode0 => {
+            state.provision_mut().form.format_boot = true;
+            state.provision_mut().form.format_share = true;
+            state.provision_mut().form.format_encrypt = true;
+        }
+        ProvisionKind::Mode1 => {
+            state.provision_mut().form.format_share = true;
+            state.provision_mut().form.format_encrypt = true;
+        }
+        ProvisionKind::Mode2 => {
+            state.provision_mut().form.format_encrypt = true;
+        }
+        ProvisionKind::Mode3 => {
+            state.provision_mut().form.format_boot = true;
+            state.provision_mut().form.format_share = true;
+        }
+        ProvisionKind::Plain => {}
+    }
+}
+
+fn authorize_plain_mode0_rebuild(state: &mut AppState) {
+    authorize_all_rebuilds(state, ProvisionKind::Mode0);
+}
+
+fn finish_default_key_probe_for_selected_source(state: &mut AppState) {
+    use edpcli::provision::{DiskProvisionKind, SourcePasswordKnowledge};
+
+    let source_kind = state
+        .selected_device()
+        .and_then(|row| row.confirmed_provision_kind())
+        .expect("confirmed source kind");
+    let (share, encrypt) = match source_kind {
+        DiskProvisionKind::Plain => (None, None),
+        DiskProvisionKind::Mode0 | DiskProvisionKind::Mode1 => (
+            Some(SourcePasswordKnowledge::DefaultVerified),
+            Some(SourcePasswordKnowledge::DefaultVerified),
+        ),
+        DiskProvisionKind::Mode2 => (None, Some(SourcePasswordKnowledge::DefaultVerified)),
+        DiskProvisionKind::Mode3 => (Some(SourcePasswordKnowledge::DefaultVerified), None),
+    };
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind,
+        share,
+        share_opaque_profile: share.is_some(),
+        encrypt,
+        encrypt_opaque_profile: encrypt.is_some(),
+    }));
+}
+
 fn enter_provision(state: &mut AppState) -> ProvisionKind {
     assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     let kind = state.provision_begin_selected();
     state.provision_enter_form_workspace();
     if kind != ProvisionKind::Plain {
-        state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
-            source_kind: edpcli::provision::DiskProvisionKind::Mode0,
-            share: None,
-            share_opaque_profile: false,
-            encrypt: None,
-            encrypt_opaque_profile: false,
-        }));
+        finish_default_key_probe_for_selected_source(state);
     }
     kind
 }
@@ -395,13 +531,7 @@ fn enter_provision_kind(state: &mut AppState, index: usize) -> ProvisionKind {
     let kind = state.provision_begin_selected();
     state.provision_enter_form_workspace();
     if kind != ProvisionKind::Plain {
-        state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
-            source_kind: edpcli::provision::DiskProvisionKind::Mode0,
-            share: None,
-            share_opaque_profile: false,
-            encrypt: None,
-            encrypt_opaque_profile: false,
-        }));
+        finish_default_key_probe_for_selected_source(state);
     }
     kind
 }
@@ -422,16 +552,424 @@ fn ch14_partition_layout_has_typed_status_and_concise_selection_summary() {
     let partitions = details
         .iter()
         .filter_map(|row| row.columns.as_ref())
-        .filter(|columns| columns[3] == "… 待计划")
+        .filter(|columns| columns[3] == "⚠ 需重建")
         .collect::<Vec<_>>();
     assert_eq!(partitions.len(), 3);
-    assert!(partitions.iter().all(|columns| columns[3] == "… 待计划"));
+    assert!(partitions.iter().all(|columns| columns[3] == "⚠ 需重建"));
+    assert!(!details
+        .iter()
+        .filter_map(|row| row.columns.as_ref())
+        .any(|columns| { columns[3] == "… 待计划" }));
     assert!(details.iter().any(|row| row.text.starts_with("当前区域  ")));
     assert!(details.iter().any(|row| row.text.starts_with("LBA ")));
     assert!(!details.iter().any(|row| row.text.starts_with("原因      ")));
     assert!(details
         .iter()
         .any(|row| row.tone == DiskLayoutDetailTone::Success));
+}
+
+#[test]
+fn plain_source_to_every_official_mode_has_no_password_probe_or_pending_region() {
+    use edpcli::provision::{KeyDomainRole, DEFAULT_KEY_DOMAIN_PASSWORD};
+
+    let cases = [
+        (0usize, ProvisionKind::Mode0, 3usize, true, true),
+        (1, ProvisionKind::Mode1, 2, true, true),
+        (2, ProvisionKind::Mode2, 2, false, true),
+        (3, ProvisionKind::Mode3, 2, true, false),
+    ];
+
+    for (scheme, kind, partition_count, share_active, encrypt_active) in cases {
+        let mut state = AppState::new();
+        state.replace_devices(vec![device(64_000_000_000)]);
+        assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+        assert!(state.provision_select_scheme_index(scheme));
+        assert_eq!(state.provision_begin_selected(), kind);
+        state.provision_enter_form_workspace();
+
+        let fields = state.provision_visible_fields();
+        let source_passwords = fields
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _, _))| label == "原密码")
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            source_passwords.len(),
+            usize::from(share_active) + usize::from(encrypt_active),
+            "{kind:?} source password rows"
+        );
+        for index in source_passwords {
+            state.provision_mut().field_selected = index;
+            assert!(
+                !state.provision_selected_field_is_editable(),
+                "Plain -> {kind:?} must not edit a non-existent source password"
+            );
+            assert_eq!(
+                state.provision_source_password_verify_request().unwrap(),
+                None,
+                "Plain -> {kind:?} must never request source password verification"
+            );
+        }
+
+        for (_, value, secret) in state
+            .provision_visible_fields()
+            .iter()
+            .filter(|(label, _, _)| label == "新密码")
+        {
+            assert_eq!(
+                *value, "0000aaaa",
+                "Plain -> {kind:?} default target password"
+            );
+            assert!(*secret, "target password must remain a secret field");
+        }
+
+        let before = state.provision_layout_editor_details();
+        assert!(
+            !before
+                .iter()
+                .filter_map(|row| row.columns.as_ref())
+                .any(|columns| columns[3] == "… 待计划"),
+            "Plain -> {kind:?} must be synchronously classifiable"
+        );
+        let destructive = before
+            .iter()
+            .filter_map(|row| row.columns.as_ref())
+            .filter(|columns| matches!(columns[3].as_str(), "⚠ 需重建" | "⚠ 重建"))
+            .count();
+        assert_eq!(
+            destructive, partition_count,
+            "Plain -> {kind:?} region count"
+        );
+
+        authorize_all_rebuilds(&mut state, kind);
+        let after = state.provision_layout_editor_details();
+        let rebuilds = after
+            .iter()
+            .filter_map(|row| row.columns.as_ref())
+            .filter(|columns| columns[3] == "⚠ 重建")
+            .count();
+        assert_eq!(
+            rebuilds, partition_count,
+            "Plain -> {kind:?} authorized rebuilds"
+        );
+
+        let request = state
+            .provision_request()
+            .unwrap_or_else(|error| panic!("Plain -> {kind:?} request failed: {error}"));
+        let assert_domain = |domain: KeyDomainRole, active: bool| {
+            let pair = request.key_domains.pair(domain);
+            if active {
+                assert!(
+                    pair.source_password.is_none(),
+                    "Plain -> {kind:?} source secret"
+                );
+                assert_eq!(
+                    pair.target_password
+                        .as_ref()
+                        .map(|secret| secret.as_bytes()),
+                    Some(DEFAULT_KEY_DOMAIN_PASSWORD),
+                    "Plain -> {kind:?} target password"
+                );
+            } else {
+                assert!(pair.source_password.is_none());
+                assert!(pair.target_password.is_none());
+            }
+        };
+        assert_domain(KeyDomainRole::Share, share_active);
+        assert_domain(KeyDomainRole::Encrypt, encrypt_active);
+    }
+}
+
+#[test]
+fn verified_edp_source_target_matrix_has_no_pending_backend_status() {
+    use edpcli::provision::{DiskProvisionKind, SourcePasswordKnowledge};
+
+    #[derive(Clone, Copy)]
+    struct Case {
+        source: DiskProvisionKind,
+        target_scheme: usize,
+        target_kind: ProvisionKind,
+        preserve: usize,
+        passthrough: usize,
+        rebuild: usize,
+    }
+
+    let cases = [
+        Case {
+            source: DiskProvisionKind::Mode0,
+            target_scheme: 0,
+            target_kind: ProvisionKind::Mode0,
+            preserve: 1,
+            passthrough: 2,
+            rebuild: 0,
+        },
+        Case {
+            source: DiskProvisionKind::Mode0,
+            target_scheme: 1,
+            target_kind: ProvisionKind::Mode1,
+            preserve: 0,
+            passthrough: 1,
+            rebuild: 1,
+        },
+        Case {
+            source: DiskProvisionKind::Mode0,
+            target_scheme: 2,
+            target_kind: ProvisionKind::Mode2,
+            preserve: 0,
+            passthrough: 1,
+            rebuild: 1,
+        },
+        Case {
+            source: DiskProvisionKind::Mode0,
+            target_scheme: 3,
+            target_kind: ProvisionKind::Mode3,
+            preserve: 1,
+            passthrough: 1,
+            rebuild: 0,
+        },
+        Case {
+            source: DiskProvisionKind::Mode1,
+            target_scheme: 0,
+            target_kind: ProvisionKind::Mode0,
+            preserve: 0,
+            passthrough: 1,
+            rebuild: 2,
+        },
+        Case {
+            source: DiskProvisionKind::Mode1,
+            target_scheme: 1,
+            target_kind: ProvisionKind::Mode1,
+            preserve: 0,
+            passthrough: 2,
+            rebuild: 0,
+        },
+        Case {
+            source: DiskProvisionKind::Mode1,
+            target_scheme: 2,
+            target_kind: ProvisionKind::Mode2,
+            preserve: 0,
+            passthrough: 1,
+            rebuild: 1,
+        },
+        Case {
+            source: DiskProvisionKind::Mode1,
+            target_scheme: 3,
+            target_kind: ProvisionKind::Mode3,
+            preserve: 0,
+            passthrough: 0,
+            rebuild: 2,
+        },
+        Case {
+            source: DiskProvisionKind::Mode2,
+            target_scheme: 0,
+            target_kind: ProvisionKind::Mode0,
+            preserve: 0,
+            passthrough: 0,
+            rebuild: 3,
+        },
+        Case {
+            source: DiskProvisionKind::Mode2,
+            target_scheme: 1,
+            target_kind: ProvisionKind::Mode1,
+            preserve: 0,
+            passthrough: 1,
+            rebuild: 1,
+        },
+        Case {
+            source: DiskProvisionKind::Mode2,
+            target_scheme: 2,
+            target_kind: ProvisionKind::Mode2,
+            preserve: 0,
+            passthrough: 1,
+            rebuild: 1,
+        },
+        Case {
+            source: DiskProvisionKind::Mode2,
+            target_scheme: 3,
+            target_kind: ProvisionKind::Mode3,
+            preserve: 0,
+            passthrough: 0,
+            rebuild: 2,
+        },
+        Case {
+            source: DiskProvisionKind::Mode3,
+            target_scheme: 0,
+            target_kind: ProvisionKind::Mode0,
+            preserve: 1,
+            passthrough: 1,
+            rebuild: 1,
+        },
+        Case {
+            source: DiskProvisionKind::Mode3,
+            target_scheme: 1,
+            target_kind: ProvisionKind::Mode1,
+            preserve: 0,
+            passthrough: 0,
+            rebuild: 2,
+        },
+        Case {
+            source: DiskProvisionKind::Mode3,
+            target_scheme: 2,
+            target_kind: ProvisionKind::Mode2,
+            preserve: 0,
+            passthrough: 0,
+            rebuild: 2,
+        },
+        Case {
+            source: DiskProvisionKind::Mode3,
+            target_scheme: 3,
+            target_kind: ProvisionKind::Mode3,
+            preserve: 1,
+            passthrough: 1,
+            rebuild: 0,
+        },
+    ];
+
+    for case in cases {
+        let mut state = AppState::new();
+        state.replace_devices(vec![official_device(64_000_000_000, case.source)]);
+        assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+        assert!(state.provision_select_scheme_index(case.target_scheme));
+        assert_eq!(state.provision_begin_selected(), case.target_kind);
+        state.provision_enter_form_workspace();
+        let (share, encrypt) = match case.source {
+            DiskProvisionKind::Mode0 | DiskProvisionKind::Mode1 => (
+                Some(SourcePasswordKnowledge::DefaultVerified),
+                Some(SourcePasswordKnowledge::DefaultVerified),
+            ),
+            DiskProvisionKind::Mode2 => (None, Some(SourcePasswordKnowledge::DefaultVerified)),
+            DiskProvisionKind::Mode3 => (Some(SourcePasswordKnowledge::DefaultVerified), None),
+            DiskProvisionKind::Plain => unreachable!(),
+        };
+        state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+            source_kind: case.source,
+            share,
+            share_opaque_profile: share.is_some(),
+            encrypt,
+            encrypt_opaque_profile: encrypt.is_some(),
+        }));
+
+        let details = state.provision_layout_editor_details();
+        let statuses = details
+            .iter()
+            .filter_map(|row| row.columns.as_ref())
+            .map(|columns| columns[3].as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            !statuses.contains(&"… 待计划"),
+            "{:?} -> {:?} unexpectedly deferred a synchronous decision: {statuses:?}",
+            case.source,
+            case.target_kind
+        );
+        assert_eq!(
+            statuses
+                .iter()
+                .filter(|status| **status == "✓ 候选保留")
+                .count(),
+            case.preserve,
+            "{:?} -> {:?} preserve count",
+            case.source,
+            case.target_kind
+        );
+        assert_eq!(
+            statuses
+                .iter()
+                .filter(|status| **status == "✓ 透传")
+                .count(),
+            case.passthrough,
+            "{:?} -> {:?} passthrough count",
+            case.source,
+            case.target_kind
+        );
+        assert_eq!(
+            statuses
+                .iter()
+                .filter(|status| matches!(**status, "⚠ 需重建" | "⚠ 重建"))
+                .count(),
+            case.rebuild,
+            "{:?} -> {:?} rebuild count: {statuses:?}",
+            case.source,
+            case.target_kind
+        );
+    }
+}
+
+#[test]
+fn unknown_nonopaque_key_profile_is_rebuild_not_pending_backend() {
+    use edpcli::provision::{DiskProvisionKind, SourcePasswordKnowledge};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![mode0_device(64_000_000_000)]);
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    assert!(state.provision_select_scheme_index(0));
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    state.provision_enter_form_workspace();
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: DiskProvisionKind::Mode0,
+        share: Some(SourcePasswordKnowledge::Unknown),
+        share_opaque_profile: false,
+        encrypt: Some(SourcePasswordKnowledge::DefaultVerified),
+        encrypt_opaque_profile: true,
+    }));
+
+    let statuses = state
+        .provision_layout_editor_details()
+        .into_iter()
+        .filter_map(|row| row.columns)
+        .map(|columns| (columns[0].clone(), columns[3].clone()))
+        .collect::<Vec<_>>();
+    assert!(
+        statuses
+            .iter()
+            .any(|(region, status)| region == "交换区" && status == "⚠ 需重建"),
+        "{statuses:?}"
+    );
+    assert!(
+        statuses.iter().all(|(_, status)| status != "… 待计划"),
+        "unsupported key profiles are synchronously rebuildable: {statuses:?}"
+    );
+}
+
+#[test]
+fn every_source_kind_to_plain_uses_one_clean_plain_plan_without_password_fields() {
+    use edpcli::provision::DiskProvisionKind;
+
+    let sources = [
+        DiskProvisionKind::Plain,
+        DiskProvisionKind::Mode0,
+        DiskProvisionKind::Mode1,
+        DiskProvisionKind::Mode2,
+        DiskProvisionKind::Mode3,
+    ];
+    for source in sources {
+        let row = if source == DiskProvisionKind::Plain {
+            device(64_000_000_000)
+        } else {
+            official_device(64_000_000_000, source)
+        };
+        let mut state = AppState::new();
+        state.replace_devices(vec![row]);
+        assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+        assert!(state.provision_select_scheme_index(4));
+        assert_eq!(state.provision_begin_selected(), ProvisionKind::Plain);
+        state.provision_enter_form_workspace();
+
+        let fields = state.provision_visible_fields();
+        assert!(fields.iter().all(|(label, _, _)| {
+            !label.contains("密码") && !label.contains("FileKey") && !label.contains("迁移")
+        }));
+        let plan = state
+            .provision_plain_plan()
+            .unwrap_or_else(|error| panic!("{source:?} -> Plain: {error}"));
+        assert_eq!(plan.partitions.len(), 1, "{source:?} -> Plain");
+        assert_eq!(plan.partitions[0].start_lba, 2_048, "{source:?} -> Plain");
+        assert_eq!(
+            plan.partitions[0].sector_count,
+            64_000_000_000u64 / edpcli::common::SECTOR as u64 - 2_048,
+            "{source:?} -> Plain"
+        );
+    }
 }
 
 #[test]
@@ -492,6 +1030,7 @@ fn registered_mode0_to_mode1_form_keeps_exact_encrypt_geometry() {
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
     assert_eq!(enter_provision_kind(&mut state, 1), ProvisionKind::Mode1);
+    state.provision_mut().form.format_share = true;
     let form = &state.provision().form;
     assert_eq!(form.share_input_mode, CapacityInputMode::Exact);
     assert_eq!(form.encrypt_input_mode, CapacityInputMode::Exact);
@@ -747,7 +1286,7 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
 #[test]
 fn provision_key_probe_keeps_default_candidates_and_updates_verification_state() {
     let mut state = AppState::new();
-    state.replace_devices(vec![device(64_000_000_000)]);
+    state.replace_devices(vec![mode0_device(64_000_000_000)]);
     enter_provision(&mut state);
 
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
@@ -773,9 +1312,11 @@ fn provision_key_probe_keeps_default_candidates_and_updates_verification_state()
 #[test]
 fn provision_key_probe_never_overwrites_user_entered_source_password() {
     let mut state = AppState::new();
-    state.replace_devices(vec![device(64_000_000_000)]);
+    state.replace_devices(vec![mode0_device(64_000_000_000)]);
     enter_provision(&mut state);
     state.provision_mut().form.share_source_password = "ManualOldPass!".into();
+    state.provision_mut().form.share_source_knowledge =
+        edpcli::provision::SourcePasswordKnowledge::Unknown;
 
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
         source_kind: edpcli::provision::DiskProvisionKind::Mode0,
@@ -798,7 +1339,7 @@ fn provision_key_probe_never_overwrites_user_entered_source_password() {
 #[test]
 fn editing_source_password_invalidates_cached_verification_state() {
     let mut state = AppState::new();
-    state.replace_devices(vec![device(64_000_000_000)]);
+    state.replace_devices(vec![mode0_device(64_000_000_000)]);
     enter_provision(&mut state);
     state.provision_mut().form.share_source_password = "0000aaaa".into();
     state.provision_mut().form.share_source_knowledge =
@@ -853,6 +1394,7 @@ fn mode0_to_mode1_unknown_encrypt_requires_explicit_format_for_password_change()
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
     assert_eq!(enter_provision_kind(&mut state, 1), ProvisionKind::Mode1);
+    state.provision_mut().form.format_share = true;
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
         source_kind: DiskProvisionKind::Mode0,
         share: Some(SourcePasswordKnowledge::Unknown),
@@ -978,7 +1520,7 @@ fn target_password_space_and_insert_model_passthrough_explicit_without_format_si
     use edpcli::provision::{DiskProvisionKind, SourcePasswordKnowledge};
 
     let mut state = AppState::new();
-    state.replace_devices(vec![device(64_000_000_000)]);
+    state.replace_devices(vec![mode0_device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
         source_kind: DiskProvisionKind::Mode0,
@@ -1026,7 +1568,7 @@ fn failed_source_with_explicit_target_equal_to_failed_candidate_is_still_blocked
     use edpcli::provision::{DiskProvisionKind, KeyDomainRole, SourcePasswordKnowledge};
 
     let mut state = AppState::new();
-    state.replace_devices(vec![device(64_000_000_000)]);
+    state.replace_devices(vec![mode0_device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
         source_kind: DiskProvisionKind::Mode0,
@@ -1081,7 +1623,7 @@ fn user_target_password_draft_survives_source_reverification_and_passthrough_nor
     use edpcli::provision::{DiskProvisionKind, KeyDomainRole, SourcePasswordKnowledge};
 
     let mut state = AppState::new();
-    state.replace_devices(vec![device(64_000_000_000)]);
+    state.replace_devices(vec![mode0_device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
         source_kind: DiskProvisionKind::Mode0,
@@ -1168,7 +1710,7 @@ fn verified_equal_target_password_normalizes_back_to_passthrough() {
     use edpcli::provision::{DiskProvisionKind, PartitionRole, SourcePasswordKnowledge};
 
     let mut state = AppState::new();
-    state.replace_devices(vec![device(64_000_000_000)]);
+    state.replace_devices(vec![mode0_device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
         source_kind: DiskProvisionKind::Mode0,
@@ -1206,7 +1748,7 @@ fn verified_different_target_password_requests_rewrap_without_formatting() {
     use edpcli::provision::{DiskProvisionKind, PartitionRole, SourcePasswordKnowledge};
 
     let mut state = AppState::new();
-    state.replace_devices(vec![device(64_000_000_000)]);
+    state.replace_devices(vec![mode0_device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
         source_kind: DiskProvisionKind::Mode0,
@@ -1237,7 +1779,7 @@ fn verified_different_target_password_requests_rewrap_without_formatting() {
 #[test]
 fn source_password_verify_request_is_scoped_to_selected_domain() {
     let mut state = AppState::new();
-    state.replace_devices(vec![device(64_000_000_000)]);
+    state.replace_devices(vec![mode0_device(64_000_000_000)]);
     enter_provision(&mut state);
     state.provision_mut().form.encrypt_source_password = "EncryptOld1!".into();
 
@@ -1383,6 +1925,7 @@ fn provision_capacity_unit_cycles_configured_units_without_geometry_change() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    authorize_plain_mode0_rebuild(&mut state);
 
     state.provision_mut().form.share_input_mode = CapacityInputMode::Quick;
     state.provision_mut().form.share_quick_unit = QuickCapacityUnit::MiB;
@@ -1443,6 +1986,7 @@ fn provision_capacity_h_l_moves_previous_and_next_without_changing_geometry() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    authorize_plain_mode0_rebuild(&mut state);
 
     state.provision_mut().form.share_input_mode = CapacityInputMode::Exact;
     state.provision_mut().form.share_sectors = "13606912".into();
@@ -1502,6 +2046,7 @@ fn editing_generated_giga_text_uses_user_value_even_if_display_text_is_identical
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     enter_provision(&mut state);
+    authorize_plain_mode0_rebuild(&mut state);
     state.provision_mut().form.share_input_mode = CapacityInputMode::Exact;
     state.provision_mut().form.share_sectors = "13606912".into();
     state.provision_mut().field_selected = state
@@ -1546,6 +2091,7 @@ fn provision_exact_sector_capacity_cycles_through_configured_units_losslessly() 
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    authorize_plain_mode0_rebuild(&mut state);
 
     state.provision_mut().form.boot_input_mode = CapacityInputMode::Exact;
     state.provision_mut().form.boot_sectors = "20417".into();
@@ -1812,6 +2358,7 @@ fn provision_fill_selected_capacity_uses_same_maximum_as_layout_and_text_f_is_li
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    authorize_plain_mode0_rebuild(&mut state);
 
     let encrypt = state
         .provision_visible_fields()
@@ -1854,6 +2401,7 @@ fn provision_fill_selected_capacity_recovers_from_empty_capacity_input() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    authorize_plain_mode0_rebuild(&mut state);
 
     let encrypt = state
         .provision_visible_fields()
@@ -2187,6 +2735,7 @@ fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
     assert_eq!(enter_provision_kind(&mut state, 1), ProvisionKind::Mode1);
+    state.provision_mut().form.format_share = true;
     assert_eq!(
         state.provision().form.share_input_mode,
         CapacityInputMode::Exact
@@ -2234,6 +2783,7 @@ fn plain_mode0_preview_reflows_unanchored_share_after_boot_edit() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    authorize_plain_mode0_rebuild(&mut state);
     state.provision_mut().form.boot_sectors = "10000".into();
     state.provision_mut().form.label_id = "1402259934".into();
     state.provision_mut().form.user = "测试用户".into();

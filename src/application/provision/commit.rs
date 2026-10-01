@@ -467,30 +467,31 @@ pub(super) fn validate_key_disposition_plan(
                 }
             }
             RegionDisposition::PreserveVerified => {
-                let record = part.preserved_record.ok_or_else(|| {
-                    err(
+                if let Some(record) = part.preserved_record {
+                    if record.lba12.need_encrypt != 0 {
+                        let expected_lba12 = record
+                            .lba12_key_material()
+                            .map_err(|message| err(EXIT_TARGET, message))?;
+                        if plan.partition_lba7_material[index] != Some(record.lba7_key_material())
+                            || plan.partition_lba12_material[index] != Some(expected_lba12)
+                        {
+                            return Err(err(
+                                EXIT_TARGET,
+                                format!(
+                                    "错误: {} PreserveVerified 改变了来源 key material",
+                                    part.geometry.role.label()
+                                ),
+                            ));
+                        }
+                    }
+                } else if KeyDomainRole::from_partition_role(part.geometry.role).is_some() {
+                    return Err(err(
                         EXIT_TARGET,
                         format!(
-                            "错误: {} PreserveVerified 缺少来源记录",
+                            "错误: {} PreserveVerified 密码域缺少来源记录",
                             part.geometry.role.label()
                         ),
-                    )
-                })?;
-                if record.lba12.need_encrypt != 0 {
-                    let expected_lba12 = record
-                        .lba12_key_material()
-                        .map_err(|message| err(EXIT_TARGET, message))?;
-                    if plan.partition_lba7_material[index] != Some(record.lba7_key_material())
-                        || plan.partition_lba12_material[index] != Some(expected_lba12)
-                    {
-                        return Err(err(
-                            EXIT_TARGET,
-                            format!(
-                                "错误: {} PreserveVerified 改变了来源 key material",
-                                part.geometry.role.label()
-                            ),
-                        ));
-                    }
+                    ));
                 }
                 if selected_format {
                     return Err(err(
@@ -633,9 +634,11 @@ pub(super) fn validate_target_write_set(
         }
     }
     if target_plan.partitions.iter().any(|part| {
-        part.action == PartitionAction::PreserveExact && part.preserved_record.is_none()
+        part.action == PartitionAction::PreserveExact
+            && KeyDomainRole::from_partition_role(part.geometry.role).is_some()
+            && part.preserved_record.is_none()
     }) {
-        return Err(err(EXIT_TARGET, "错误: 保留分区缺少原 key material"));
+        return Err(err(EXIT_TARGET, "错误: 保留密码域缺少原 key material"));
     }
     Ok(())
 }

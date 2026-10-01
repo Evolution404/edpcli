@@ -148,7 +148,6 @@ impl AppState {
                             Kind::BlockedNeedsFormat | Kind::BlockedNeedsTargetPassword => {
                                 ("⚠ 需重建".into(), Tone::Warning)
                             }
-                            Kind::PendingBackend => ("… 待计划".into(), Tone::Accent),
                         };
                         (status, tone, decision.reason.clone())
                     }

@@ -12,9 +12,10 @@ use edpcli::{
         FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
         OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId,
         PartitionAction, PartitionRole, PassInfoPolicy, PassthroughBasis, PasswordDisposition,
-        ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget,
-        QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge, TargetGeometryOverrides,
-        TargetIdentity, TargetProvisionPlan, OFFICIAL_PARTITION_START_SECTOR,
+        PlainSourceExtent, ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
+        ProvisionTarget, QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge,
+        TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
+        OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
@@ -427,6 +428,193 @@ fn prefill_matrix_covers_plain_and_all_four_by_four_transitions() {
                 decide_partition_action(Some(old_encrypt), target_encrypt),
                 PartitionAction::Rebuild
             );
+        }
+    }
+}
+
+#[test]
+fn plain_source_exact_extent_matrix_is_strict_and_boot_only() {
+    const MODES: [OfficialPartitionMode; 4] = [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionMode::WholeDiskEncrypted,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ];
+    let usable_end = 12_000_000;
+
+    for mode in MODES {
+        let targets = prefill_for_target_mode(None, mode, usable_end, SECTOR_SIZE)
+            .unwrap()
+            .target_partitions(SECTOR_SIZE)
+            .unwrap();
+        for target in targets {
+            let exact = PlainSourceExtent {
+                start_lba: target.start_lba,
+                sector_count: target.sector_count,
+                filesystem: target.filesystem,
+            };
+            let should_preserve = target.role == PartitionRole::Boot;
+            assert_eq!(
+                edpcli::provision::plain_extent_preserve_candidate(&[exact], &target),
+                should_preserve,
+                "{mode:?} {:?} exact extent",
+                target.role
+            );
+
+            let wrong_filesystem = PlainSourceExtent {
+                filesystem: Some(if target.filesystem == Some(FilesystemKind::Fat16) {
+                    FilesystemKind::ExFat
+                } else {
+                    FilesystemKind::Fat16
+                }),
+                ..exact
+            };
+            assert!(
+                !edpcli::provision::plain_extent_preserve_candidate(&[wrong_filesystem], &target),
+                "{mode:?} {:?} must reject an exact extent with the wrong filesystem",
+                target.role
+            );
+            let unknown_filesystem = PlainSourceExtent {
+                filesystem: None,
+                ..exact
+            };
+            assert!(
+                !edpcli::provision::plain_extent_preserve_candidate(&[unknown_filesystem], &target),
+                "{mode:?} {:?} must fail closed when the Plain filesystem is unknown",
+                target.role
+            );
+
+            for mismatch in [
+                PlainSourceExtent {
+                    start_lba: target.start_lba.saturating_sub(1),
+                    sector_count: target.sector_count,
+                    filesystem: target.filesystem,
+                },
+                PlainSourceExtent {
+                    start_lba: target.start_lba + 1,
+                    sector_count: target.sector_count,
+                    filesystem: target.filesystem,
+                },
+                PlainSourceExtent {
+                    start_lba: target.start_lba,
+                    sector_count: target.sector_count.saturating_sub(1),
+                    filesystem: target.filesystem,
+                },
+                PlainSourceExtent {
+                    start_lba: target.start_lba,
+                    sector_count: target.sector_count + 1,
+                    filesystem: target.filesystem,
+                },
+            ] {
+                assert!(
+                    !edpcli::provision::plain_extent_preserve_candidate(&[mismatch], &target),
+                    "{mode:?} {:?} must reject off-by-one physical extents",
+                    target.role
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn plain_to_official_plan_matrix_initializes_key_domains_and_only_preserves_exact_boot() {
+    const MODES: [OfficialPartitionMode; 4] = [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionMode::WholeDiskEncrypted,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ];
+    let usable_end = 12_000_000;
+
+    for mode in MODES {
+        let targets = prefill_for_target_mode(None, mode, usable_end, SECTOR_SIZE)
+            .unwrap()
+            .target_partitions(SECTOR_SIZE)
+            .unwrap();
+        let exact_boot = targets
+            .iter()
+            .find(|target| target.role == PartitionRole::Boot)
+            .map(|target| PlainSourceExtent {
+                start_lba: target.start_lba,
+                sector_count: target.sector_count,
+                filesystem: target.filesystem,
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        let plan = TargetProvisionPlan::build_with_plain_extents(
+            None,
+            &exact_boot,
+            mode,
+            &targets,
+            usable_end,
+            &KeyDomainSecrets::default_targets(),
+        )
+        .unwrap();
+
+        for part in &plan.partitions {
+            if part.geometry.role == PartitionRole::Boot && !exact_boot.is_empty() {
+                assert_eq!(part.action, PartitionAction::PreserveExact, "{mode:?}");
+                assert_eq!(
+                    part.disposition,
+                    RegionDisposition::PreserveVerified,
+                    "{mode:?}"
+                );
+                assert_eq!(
+                    part.preserved_record, None,
+                    "plain boot preserve has no EDP key record"
+                );
+                assert_eq!(part.password_disposition, None);
+                assert_eq!(part.target_password_policy, None);
+            } else if KeyDomainRole::from_partition_role(part.geometry.role).is_some() {
+                assert_eq!(
+                    part.action,
+                    PartitionAction::Rebuild,
+                    "{mode:?} {:?}",
+                    part.geometry.role
+                );
+                assert_eq!(part.disposition, RegionDisposition::Rebuild);
+                assert_eq!(
+                    part.password_disposition,
+                    Some(PasswordDisposition::Blocked)
+                );
+                assert_eq!(
+                    part.target_password_policy,
+                    Some(edpcli::provision::TargetPasswordPolicy::InitializeNew)
+                );
+            } else {
+                assert_eq!(
+                    part.action,
+                    PartitionAction::Rebuild,
+                    "{mode:?} {:?}",
+                    part.geometry.role
+                );
+            }
+        }
+
+        let mut authorized = plan.clone();
+        let roles = authorized
+            .partitions
+            .iter()
+            .filter(|part| part.geometry.role != PartitionRole::CompatibilityReserve)
+            .map(|part| part.geometry.role)
+            .collect::<Vec<_>>();
+        for role in roles {
+            authorized.force_rebuild_for_format(role);
+        }
+        for part in &authorized.partitions {
+            if KeyDomainRole::from_partition_role(part.geometry.role).is_some() {
+                assert_eq!(
+                    part.password_disposition,
+                    Some(PasswordDisposition::Rebuild)
+                );
+                assert_eq!(
+                    part.target_password_policy,
+                    Some(edpcli::provision::TargetPasswordPolicy::InitializeNew)
+                );
+            }
+            if part.geometry.role != PartitionRole::CompatibilityReserve {
+                assert_eq!(part.disposition, RegionDisposition::Rebuild);
+            }
         }
     }
 }
@@ -936,6 +1124,108 @@ fn generated_source(
     mode: OfficialPartitionMode,
 ) -> (ProvisionSpec, edpcli::provision::ProvisionImage, String) {
     generated_source_with_force_change(mode, false)
+}
+
+#[test]
+fn target_plan_matrix_matches_geometry_for_all_sixteen_edp_transitions() {
+    const MODES: [OfficialPartitionMode; 4] = [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionMode::WholeDiskEncrypted,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ];
+    let usable_end = 16_000_000;
+
+    for source_mode in MODES {
+        let (_, image, did) = generated_source(source_mode);
+        let mut source = parse_existing_provision(&image, &did, 16_777_216)
+            .unwrap()
+            .unwrap();
+        let roles = source
+            .profile
+            .partitions
+            .iter()
+            .map(|part| part.role)
+            .collect::<Vec<_>>();
+        for role in roles {
+            if role != PartitionRole::CompatibilityReserve {
+                source
+                    .confirm_filesystem(
+                        role,
+                        if role == PartitionRole::Boot {
+                            FilesystemKind::Fat16
+                        } else {
+                            FilesystemKind::ExFat
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+
+        for target_mode in MODES {
+            let targets = prefill_for_target_mode(
+                Some(&source.profile),
+                target_mode,
+                usable_end,
+                SECTOR_SIZE,
+            )
+            .unwrap()
+            .target_partitions(SECTOR_SIZE)
+            .unwrap();
+            let plan = TargetProvisionPlan::build(
+                Some(&source),
+                target_mode,
+                &targets,
+                usable_end,
+                &domain_secrets(Some(b"ProofPass1!"), b"ProofPass1!"),
+            )
+            .unwrap();
+
+            for (target, planned) in targets.iter().zip(&plan.partitions) {
+                let expected =
+                    decide_partition_action(source.profile.partition(target.role), target);
+                assert_eq!(
+                    planned.action, expected,
+                    "{source_mode:?} -> {target_mode:?} {:?}",
+                    target.role
+                );
+                if expected == PartitionAction::Rebuild {
+                    assert_eq!(planned.disposition, RegionDisposition::Rebuild);
+                } else {
+                    assert!(
+                        planned.disposition.preserves_extent(),
+                        "{source_mode:?} -> {target_mode:?} {:?} must preserve the exact extent",
+                        target.role
+                    );
+                }
+                match planned.password_disposition {
+                    Some(PasswordDisposition::Passthrough(PassthroughBasis::Verified)) => {
+                        assert_eq!(
+                            planned.target_password_policy,
+                            Some(edpcli::provision::TargetPasswordPolicy::ReuseVerified),
+                            "{source_mode:?} -> {target_mode:?} {:?} verified passthrough policy",
+                            target.role
+                        );
+                    }
+                    Some(PasswordDisposition::Rewrap) => assert_eq!(
+                        planned.target_password_policy,
+                        Some(edpcli::provision::TargetPasswordPolicy::ReplaceVerified)
+                    ),
+                    Some(PasswordDisposition::Rebuild) => assert_eq!(
+                        planned.target_password_policy,
+                        Some(edpcli::provision::TargetPasswordPolicy::InitializeNew)
+                    ),
+                    Some(PasswordDisposition::Passthrough(PassthroughBasis::OpaqueCompatible)) => {
+                        assert_eq!(
+                            planned.target_password_policy,
+                            Some(edpcli::provision::TargetPasswordPolicy::PreserveOpaque)
+                        );
+                    }
+                    Some(PasswordDisposition::Blocked) | None => {}
+                }
+            }
+        }
+    }
 }
 
 #[test]

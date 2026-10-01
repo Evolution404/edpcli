@@ -154,6 +154,9 @@ mod password_verification;
 mod plain_editor;
 #[path = "preflight.rs"]
 mod preflight;
+#[cfg(test)]
+#[path = "preflight_tests.rs"]
+mod preflight_tests;
 #[path = "review.rs"]
 mod review;
 #[path = "review_region_projection.rs"]

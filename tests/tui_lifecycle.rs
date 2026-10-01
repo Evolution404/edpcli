@@ -508,13 +508,17 @@ fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor(
 }
 
 #[test]
-fn passthrough_target_password_renders_explicit_state_instead_of_empty_secret_placeholder() {
+fn plain_source_renders_no_source_password_and_default_target_password() {
     let mut state = AppState::new();
     state.replace_devices(vec![usb_device()]);
     assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     state.provision_begin_selected();
     state.provision_enter_form_workspace();
-    state.provision_mut().form.share_target_password.clear();
+
+    assert!(state.provision().form.share_source_password.is_empty());
+    assert!(state.provision().form.encrypt_source_password.is_empty());
+    assert_eq!(state.provision().form.share_target_password, "0000aaaa");
+    assert_eq!(state.provision().form.encrypt_target_password, "0000aaaa");
 
     let backend = TestBackend::new(100, 28);
     let mut terminal = Terminal::new(backend).expect("test terminal");
@@ -527,7 +531,9 @@ fn passthrough_target_password_renders_explicit_state_instead_of_empty_secret_pl
         .map(|cell| cell.symbol())
         .collect::<String>();
     let compact = text.replace(' ', "");
-    assert!(compact.contains("新密码透传"), "{text}");
+    assert!(compact.contains("原密码—不涉及"), "{text}");
+    assert!(!compact.contains("新密码透传"), "{text}");
+    assert!(compact.contains("新密码••••••••"), "{text}");
 }
 
 #[test]
