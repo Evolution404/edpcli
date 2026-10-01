@@ -24,6 +24,31 @@ fn kind_label(kind: InspectNodeKind) -> &'static str {
     }
 }
 
+fn semantic_status_label(status: crate::edpb::SemanticStatus) -> &'static str {
+    match status {
+        crate::edpb::SemanticStatus::Identified => "已识别",
+        crate::edpb::SemanticStatus::Unknown => "未知",
+    }
+}
+
+fn decoder_label(kind: crate::application::inspect::InspectDecoderKind) -> &'static str {
+    match kind {
+        crate::application::inspect::InspectDecoderKind::Protocol => "协议",
+        crate::application::inspect::InspectDecoderKind::Lce => "LCE",
+        crate::application::inspect::InspectDecoderKind::Partition => "分区",
+    }
+}
+
+fn parse_state_label(state: crate::application::inspect::InspectParseState) -> &'static str {
+    match state {
+        crate::application::inspect::InspectParseState::Parsed => "已解析",
+        crate::application::inspect::InspectParseState::Ambiguous => "未唯一确定",
+        crate::application::inspect::InspectParseState::MissingContext => "缺少上下文",
+        crate::application::inspect::InspectParseState::Unsupported => "暂不支持",
+        crate::application::inspect::InspectParseState::Invalid => "解析失败",
+    }
+}
+
 fn push(rows: &mut Vec<EvidenceRow>, category: &str, item: &str, value: impl Into<String>) {
     rows.push(EvidenceRow {
         category: category.into(),
@@ -101,9 +126,14 @@ fn evidence_rows(
             format!("0x{:X}..0x{:X}", range.start, range.end_exclusive),
         );
     }
-    push(&mut rows, "状态", "语义状态", format!("{:?}", row.status));
+    push(
+        &mut rows,
+        "状态",
+        "语义状态",
+        semantic_status_label(row.status),
+    );
     if let Some(decoder) = row.decoder {
-        push(&mut rows, "解码", "Decoder", format!("{decoder:?}"));
+        push(&mut rows, "解码", "解码器", decoder_label(decoder));
     }
     if let Some(region) = row.region_semantic {
         push(&mut rows, "归属", "区域语义", format!("{region:?}"));
@@ -122,31 +152,31 @@ fn evidence_rows(
                             .join(" ")
                     };
                     push(&mut rows, "字段", "名称", field.label.clone());
-                    push(&mut rows, "字段", "Value", field.value.clone());
+                    push(&mut rows, "字段", "值", field.value.clone());
                     push(
                         &mut rows,
                         "字段",
-                        "Source LBA",
+                        "来源 LBA",
                         field.range.start_lba().to_string(),
                     );
                     push(
                         &mut rows,
                         "字段",
-                        "Group",
+                        "分组",
                         field.group.clone().unwrap_or_else(|| "—".into()),
                     );
                     push(
                         &mut rows,
                         "字段",
-                        "Offset / Length",
+                        "偏移 / 长度",
                         format!("0x{:X} / {} B", field.range.start, field.range.len()),
                     );
-                    push(&mut rows, "字段", "Raw", hex(&field.raw));
-                    push(&mut rows, "字段", "Decoded", hex(&field.decoded));
+                    push(&mut rows, "字段", "原始", hex(&field.raw));
+                    push(&mut rows, "字段", "解码", hex(&field.decoded));
                     push(
                         &mut rows,
                         "字段",
-                        "FieldLogical",
+                        "逻辑值",
                         field
                             .field_logical
                             .as_deref()
@@ -156,7 +186,7 @@ fn evidence_rows(
                     push(
                         &mut rows,
                         "字段",
-                        "Transform",
+                        "变换",
                         field
                             .transform
                             .map(|value| format!("{value:?}"))
@@ -165,8 +195,12 @@ fn evidence_rows(
                     push(
                         &mut rows,
                         "字段",
-                        "Type / Status",
-                        format!("{:?} / {:?}", field.field_type, field.status),
+                        "类型 / 状态",
+                        format!(
+                            "{:?} / {}",
+                            field.field_type,
+                            crate::tui::state::inspect_field_status_label(field.status)
+                        ),
                     );
                 }
             }
@@ -190,7 +224,12 @@ fn evidence_rows(
         if let Some(error) = item.decode_error.as_deref() {
             push(&mut rows, "解码", "错误", error);
         }
-        push(&mut rows, "解析", "状态", format!("{:?}", item.parse_state));
+        push(
+            &mut rows,
+            "解析",
+            "状态",
+            parse_state_label(item.parse_state),
+        );
         for diagnostic in &item.diagnostics {
             push(
                 &mut rows,

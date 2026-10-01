@@ -1094,6 +1094,25 @@ fn plain_device_row_uses_native_hardware_model_when_protocol_device_id_is_absent
 }
 
 #[test]
+fn standard_width_device_tree_keeps_region_label_and_capacity_on_one_line() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    let lines = render_lines(&state, 80, 24);
+    let normalized = lines
+        .iter()
+        .map(|line| line.replace(' ', ""))
+        .collect::<Vec<_>>();
+    let protocol = normalized
+        .iter()
+        .find(|line| line.contains("EDP主协议区"))
+        .unwrap_or_else(|| panic!("EDP protocol row visible at 80 columns: {normalized:#?}"));
+    assert!(
+        protocol.contains("6.66KB"),
+        "Standard-width device tree must keep region label and capacity together: {protocol:?}"
+    );
+}
+
+#[test]
 fn provision_review_focus_defaults_to_partition_plan_and_navigation_is_pane_local() {
     let mut state = provision_state();
     state.provision_mut().stage = ProvisionStage::Review;

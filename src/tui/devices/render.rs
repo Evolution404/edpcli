@@ -24,7 +24,7 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
     }
 
     let (list_percent, tree_percent) = match class {
-        ViewportClass::Standard => (44, 35),
+        ViewportClass::Standard => (44, 40),
         ViewportClass::Wide | ViewportClass::UltraWide => (40, 30),
         ViewportClass::Compact => unreachable!(),
     };

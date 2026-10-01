@@ -230,22 +230,22 @@ pub(super) fn draw_sector_inspector(
             if sector.pending && item.decoded.is_none() && item.decode_error.is_none() {
                 "读取中"
             } else if item.decode_error.is_some() {
-                "Unavailable"
+                "不可用"
             } else if decode_range.is_some() {
-                "Decoded"
+                "已解码"
             } else {
-                "Plain"
+                "原始"
             };
         details.push(Line::from(match decode_range {
             Some(range) => format!(
-                "Decode {decode_label} · +0x{:03X}..+0x{:03X}",
+                "解码 {decode_label} · +0x{:03X}..+0x{:03X}",
                 range.start, range.end
             ),
-            None => format!("Decode {decode_label}"),
+            None => format!("解码 {decode_label}"),
         }));
         if let Some(error) = item.decode_error.as_deref() {
             details.push(Line::from(Span::styled(
-                format!("Decode Error {}", safe(error)),
+                format!("解码错误 {}", safe(error)),
                 warning(),
             )));
         }
@@ -257,13 +257,13 @@ pub(super) fn draw_sector_inspector(
             let sector_base = sector.lba.saturating_mul(crate::common::SECTOR as u64);
             details.push(Line::from(vec![
                 Span::raw(format!(
-                    "{:?} · Range +0x{:03X}..+0x{:03X} · ",
+                    "{:?} · 范围 +0x{:03X}..+0x{:03X} · ",
                     field.field_type,
                     field.range.start.saturating_sub(sector_base),
                     field.range.end_exclusive.saturating_sub(sector_base)
                 )),
                 Span::styled(
-                    format!("{:?}", field.status),
+                    crate::tui::state::inspect_field_status_label(field.status),
                     inspect_field_status_style(field.status).add_modifier(Modifier::BOLD),
                 ),
             ]));

@@ -199,12 +199,20 @@ fn lba8_sections(fields: &[InspectField]) -> Vec<SummarySection> {
     sections
 }
 
+fn decoder_label(decoder: InspectDecoderKind) -> &'static str {
+    match decoder {
+        InspectDecoderKind::Protocol => "协议",
+        InspectDecoderKind::Lce => "LCE",
+        InspectDecoderKind::Partition => "分区",
+    }
+}
+
 pub fn summarize_node(source: InspectSummarySource<'_>) -> InspectNodeSummary {
     let location = if source.range.sector_count == 1 {
         format!("LBA {} · 512 B", source.range.start_lba)
     } else {
         format!(
-            "{} · {} sectors",
+            "{} · {} 扇区",
             format_lba_closed_range(source.range.start_lba, source.range.end_lba_exclusive())
                 .unwrap_or_else(|| "[空区间]".into()),
             source.range.sector_count
@@ -212,13 +220,13 @@ pub fn summarize_node(source: InspectSummarySource<'_>) -> InspectNodeSummary {
     };
     let subtitle = match source.parse_state {
         InspectParseState::Parsed => "已识别",
-        InspectParseState::Ambiguous => "profile 未唯一确定",
+        InspectParseState::Ambiguous => "解析配置未唯一确定",
         InspectParseState::MissingContext => "缺少解析上下文",
-        InspectParseState::Unsupported => "无已注册 decoder",
+        InspectParseState::Unsupported => "无已注册解码器",
         InspectParseState::Invalid => "解析失败",
     };
     let subtitle = match source.decoder {
-        Some(decoder) => format!("{subtitle} · {decoder:?}"),
+        Some(decoder) => format!("{subtitle} · {}", decoder_label(decoder)),
         None => subtitle.into(),
     };
     let mut sections = if source.kind == InspectNodeKind::Sector && source.range.start_lba == 8 {

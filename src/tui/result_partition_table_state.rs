@@ -12,11 +12,11 @@ fn post_restore_key_state(
         return "无需原密钥";
     }
     match partition.state {
-        PostRestorePartitionState::Usable => "沿用原密钥域",
-        PostRestorePartitionState::NeedsFormat => "密钥域已验证",
+        PostRestorePartitionState::Usable => "沿用密钥域",
+        PostRestorePartitionState::NeedsFormat => "密钥已验证",
         PostRestorePartitionState::PasswordRequired => "需要原密码",
-        PostRestorePartitionState::CryptoMetadataInvalid => "需重建密钥域",
-        PostRestorePartitionState::Unsupported => "原密钥域未知",
+        PostRestorePartitionState::CryptoMetadataInvalid => "需重建密钥",
+        PostRestorePartitionState::Unsupported => "密钥域未知",
     }
 }
 
@@ -244,7 +244,7 @@ mod tests {
     fn post_restore_key_state_describes_action_instead_of_implying_work_for_usable_partition() {
         assert_eq!(
             post_restore_key_state(&partition(PostRestorePartitionState::Usable, true, None)),
-            "沿用原密钥域"
+            "沿用密钥域"
         );
         assert_eq!(
             post_restore_key_state(&partition(
@@ -260,7 +260,7 @@ mod tests {
                 true,
                 None
             )),
-            "密钥域已验证"
+            "密钥已验证"
         );
         assert_eq!(
             post_restore_key_state(&partition(

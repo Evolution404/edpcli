@@ -1376,15 +1376,15 @@ fn ch16_inspect_field_evidence_keeps_every_typed_layer() {
     let text = rendered_lines(&state, 240, 60).join("\n").replace(' ', "");
     for value in [
         "技术证据",
-        "Value",
-        "SourceLBA",
-        "Group",
-        "Offset/Length",
-        "Raw",
-        "Decoded",
-        "FieldLogical",
-        "Transform",
-        "Type/Status",
+        "值",
+        "来源LBA",
+        "分组",
+        "偏移/长度",
+        "原始",
+        "解码",
+        "逻辑值",
+        "变换",
+        "类型/状态",
     ] {
         assert!(text.contains(value), "missing {value} in field evidence");
     }

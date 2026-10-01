@@ -2,18 +2,19 @@ use super::AdvancedInspectStage;
 use crate::tui::state::AppState;
 
 pub const INSPECT_DETAIL_HEADINGS: [&str; 11] = [
-    "Status",
-    "Offset",
-    "Len",
-    "Field",
-    "Value",
-    "Group",
-    "Raw",
-    "Decoded",
-    "Logical",
-    "Type",
-    "Transform",
+    "状态", "偏移", "长度", "字段", "值", "分组", "原始", "解码", "逻辑", "类型", "变换",
 ];
+
+pub fn inspect_field_status_label(
+    status: crate::application::inspect::InspectFieldStatus,
+) -> &'static str {
+    match status {
+        crate::application::inspect::InspectFieldStatus::Known => "已知",
+        crate::application::inspect::InspectFieldStatus::Unknown => "未知",
+        crate::application::inspect::InspectFieldStatus::Reserved => "保留",
+        crate::application::inspect::InspectFieldStatus::Preserved => "原样保留",
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InspectDetailRow {
@@ -69,7 +70,7 @@ impl AppState {
             let offset = field.range.start.saturating_sub(sector_start);
             projected.push(InspectDetailRow {
                 cells: [
-                    format!("{:?}", field.status),
+                    inspect_field_status_label(field.status).into(),
                     format!("0x{offset:03X}"),
                     field.range.len().to_string(),
                     if field.key == crate::inspect::InspectFieldKey::Lba8Elabel {
@@ -119,7 +120,7 @@ impl AppState {
                     };
                     projected.push(InspectDetailRow {
                         cells: [
-                            format!("{:?}", field.status),
+                            inspect_field_status_label(field.status).into(),
                             offset,
                             len,
                             format!("  {}", child.label),

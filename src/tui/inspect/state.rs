@@ -17,7 +17,7 @@ mod sector_state;
 #[path = "tree_state.rs"]
 mod tree_state;
 
-pub use detail_state::{InspectDetailRow, INSPECT_DETAIL_HEADINGS};
+pub use detail_state::{inspect_field_status_label, InspectDetailRow, INSPECT_DETAIL_HEADINGS};
 use tree_state::InspectTreeViewModel;
 pub use tree_state::{AdvancedInspectTreeAction, AdvancedInspectTreeRow};
 
