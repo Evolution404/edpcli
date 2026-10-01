@@ -649,6 +649,7 @@ pub fn prepare_target_provision(
     Ok(PreparedNewProvision {
         disk,
         device_id,
+        source_kind,
         mode: selected_mode,
         force_change_password,
         pass_info_policy,
