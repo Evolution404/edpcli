@@ -1,7 +1,7 @@
 use edpcli::common::SECTOR;
 use edpcli::filesystem::{
-    build_empty_exfat, build_empty_fat16, detect_boot_sector,
-    detect_boot_sector_with_geometry, FilesystemKind,
+    build_empty_exfat, build_empty_fat16, detect_boot_sector, detect_boot_sector_with_geometry,
+    FilesystemKind,
 };
 
 fn put16(bytes: &mut [u8], offset: usize, value: u16) {
