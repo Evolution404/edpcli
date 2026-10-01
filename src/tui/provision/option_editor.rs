@@ -69,19 +69,42 @@ impl AppState {
                 true
             }
             Some(ProvisionFieldId::FormatEnabled(role)) => {
+                let disposition = self
+                    .provision_preflight()
+                    .ok()
+                    .and_then(|preflight| preflight.format_disposition(role));
+                let requested = match disposition {
+                    Some(preflight::ProvisionFormatDisposition::RequiredRebuild) => {
+                        self.provision.message = Some(crate::tui::ui::UiMessage::warning(format!(
+                            "{}必须重建，格式化不可取消",
+                            role.label()
+                        )));
+                        return true;
+                    }
+                    Some(preflight::ProvisionFormatDisposition::Preserve) => true,
+                    Some(preflight::ProvisionFormatDisposition::UserRequestedRebuild) => false,
+                    Some(preflight::ProvisionFormatDisposition::NotApplicable) => return false,
+                    None => {
+                        if role == crate::provision::PartitionRole::CompatibilityReserve {
+                            return false;
+                        }
+                        !self.provision_explicit_format_selected(role)
+                    }
+                };
                 match role {
                     crate::provision::PartitionRole::Boot => {
-                        self.provision.form.format_boot = !self.provision.form.format_boot;
+                        self.provision.form.format_boot = requested;
                     }
                     crate::provision::PartitionRole::Share
                     | crate::provision::PartitionRole::BootShareCombined => {
-                        self.provision.form.format_share = !self.provision.form.format_share;
+                        self.provision.form.format_share = requested;
                     }
                     crate::provision::PartitionRole::Encrypt => {
-                        self.provision.form.format_encrypt = !self.provision.form.format_encrypt;
+                        self.provision.form.format_encrypt = requested;
                     }
-                    crate::provision::PartitionRole::CompatibilityReserve => {}
+                    crate::provision::PartitionRole::CompatibilityReserve => return false,
                 }
+                self.provision.message = None;
                 true
             }
             Some(ProvisionFieldId::TargetPassword(domain)) => {

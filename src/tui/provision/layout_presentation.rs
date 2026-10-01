@@ -146,7 +146,22 @@ impl AppState {
                             Kind::Passthrough => ("✓ 透传".into(), Tone::Success),
                             Kind::Rewrap => ("✓ 改密".into(), Tone::Success),
                             Kind::Preserve => ("✓ 候选保留".into(), Tone::Success),
-                            Kind::Rebuild => ("⚠ 重建".into(), Tone::Warning),
+                            Kind::Rebuild => {
+                                let required = preflight
+                                    .as_ref()
+                                    .ok()
+                                    .and_then(|value| value.format_disposition(part.role))
+                                    == Some(preflight::ProvisionFormatDisposition::RequiredRebuild);
+                                (
+                                    if required {
+                                        "⚠ 需重建"
+                                    } else {
+                                        "⚠ 重建"
+                                    }
+                                    .into(),
+                                    Tone::Warning,
+                                )
+                            }
                             Kind::BlockedNeedsFormat | Kind::BlockedNeedsTargetPassword => {
                                 ("⚠ 需重建".into(), Tone::Warning)
                             }

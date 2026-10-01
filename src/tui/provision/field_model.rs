@@ -88,7 +88,7 @@ impl ProvisionFieldSection {
             Self::AdvancedIdentity => "",
             Self::PartitionLayout => "分区布局",
             Self::PasswordDomain => "密码域",
-            Self::Formatting => "格式化（可选）",
+            Self::Formatting => "格式化",
             Self::PasswordPolicy => "密码策略",
             Self::PlainPartition(0) => "普通分区 P1",
             Self::PlainPartition(1) => "普通分区 P2",

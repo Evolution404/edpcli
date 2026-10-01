@@ -258,13 +258,25 @@ impl AppState {
                 ));
             }
         }
+        let preflight = self.provision_preflight().ok();
         for target in self.provision_format_template() {
+            let disposition = preflight
+                .as_ref()
+                .and_then(|value| value.format_disposition(target.role))
+                .unwrap_or_else(|| {
+                    if self.provision_explicit_format_selected(target.role) {
+                        preflight::ProvisionFormatDisposition::UserRequestedRebuild
+                    } else {
+                        preflight::ProvisionFormatDisposition::Preserve
+                    }
+                });
+            let format_selected = target.format_capable && disposition.selected();
             fields.push(descriptor(
                 ProvisionFieldId::FormatEnabled(target.role),
                 ProvisionFieldSection::Formatting,
                 false,
                 false,
-                target.format_capable,
+                target.format_capable && disposition.toggle_allowed(),
                 false,
                 false,
             ));
@@ -274,14 +286,14 @@ impl AppState {
                     ProvisionFieldSection::Formatting,
                     false,
                     false,
-                    true,
+                    format_selected,
                     false,
                     false,
                 ));
                 fields.push(descriptor(
                     ProvisionFieldId::VolumeLabel(target.role),
                     ProvisionFieldSection::Formatting,
-                    true,
+                    format_selected,
                     false,
                     false,
                     false,

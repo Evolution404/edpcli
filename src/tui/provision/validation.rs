@@ -291,6 +291,10 @@ impl AppState {
         };
         let preflight = self.provision_preflight()?;
         preflight.validate_for_submit()?;
+        let format_boot = preflight.format_selected(crate::provision::PartitionRole::Boot);
+        let format_share = preflight.format_selected(crate::provision::PartitionRole::Share)
+            || preflight.format_selected(crate::provision::PartitionRole::BootShareCombined);
+        let format_encrypt = preflight.format_selected(crate::provision::PartitionRole::Encrypt);
         let share_target_requested =
             preflight.target_password_requested(crate::provision::KeyDomainRole::Share);
         let encrypt_target_requested =
@@ -428,9 +432,9 @@ impl AppState {
             ),
             volume_label: self.provision.form.volume_label.trim().to_string(),
             format: crate::application::provision::FormatOptions {
-                boot: self.provision.form.format_boot,
-                share: self.provision.form.format_share,
-                encrypt: self.provision.form.format_encrypt,
+                boot: format_boot,
+                share: format_share,
+                encrypt: format_encrypt,
                 boot_label: self.provision.form.volume_label.trim().to_string(),
                 share_label: self.provision.form.share_label.trim().to_string(),
                 encrypt_label: self.provision.form.encrypt_label.trim().to_string(),

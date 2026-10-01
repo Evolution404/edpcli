@@ -293,7 +293,7 @@ impl PartitionRole {
             Self::Share => "交换区",
             Self::Encrypt => "保密区",
             Self::BootShareCombined => "启动/交换区",
-            Self::CompatibilityReserve => "0x7E00兼容保留区",
+            Self::CompatibilityReserve => "模式2兼容区",
         }
     }
 }

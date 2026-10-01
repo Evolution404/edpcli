@@ -585,6 +585,31 @@ fn format_test_plan(mode: OfficialPartitionMode, key: &[u8; 16]) -> OfficialProv
 }
 
 #[test]
+fn combined_boot_share_uses_boot_label_while_reusing_share_format_toggle() {
+    let key = [0x42; 16];
+    let plan = format_test_plan(OfficialPartitionMode::BootShareCombined, &key);
+    let choices = plan_format_targets(
+        &plan,
+        &FormatOptions {
+            share: true,
+            boot_label: "启动区".into(),
+            share_label: "交换区".into(),
+            ..FormatOptions::default()
+        },
+        &[1, 2],
+        &key,
+    )
+    .unwrap();
+
+    let combined = choices
+        .iter()
+        .find(|choice| choice.target.role == PartitionRole::BootShareCombined)
+        .unwrap();
+    assert!(combined.selected);
+    assert_eq!(combined.volume_label, "启动区");
+}
+
+#[test]
 fn format_executor_uses_the_same_matrix_and_preserves_protocol_sectors() {
     let key = [0x42; 16];
     for mode in [

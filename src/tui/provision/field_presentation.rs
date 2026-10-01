@@ -183,39 +183,59 @@ impl AppState {
                 false,
             ));
         }
+        let preflight = self.provision_preflight().ok();
         for target in self.provision_format_template() {
             let role = target.role;
             if !target.format_capable {
-                out.push((role.label().into(), "固定，不格式化", false));
+                out.push((
+                    role.label().into(),
+                    if role == crate::provision::PartitionRole::CompatibilityReserve {
+                        "固定 63 sector · 不格式化"
+                    } else {
+                        "固定，不格式化"
+                    },
+                    false,
+                ));
                 continue;
             }
-            let (selected, label) = match role {
-                crate::provision::PartitionRole::Boot => (
-                    self.provision.form.format_boot,
-                    self.provision.form.volume_label.as_str(),
-                ),
-                crate::provision::PartitionRole::Share
-                | crate::provision::PartitionRole::BootShareCombined => (
-                    self.provision.form.format_share,
-                    self.provision.form.share_label.as_str(),
-                ),
-                crate::provision::PartitionRole::Encrypt => (
-                    self.provision.form.format_encrypt,
-                    self.provision.form.encrypt_label.as_str(),
-                ),
+            let disposition = preflight
+                .as_ref()
+                .and_then(|value| value.format_disposition(role))
+                .unwrap_or_else(|| {
+                    if self.provision_explicit_format_selected(role) {
+                        preflight::ProvisionFormatDisposition::UserRequestedRebuild
+                    } else {
+                        preflight::ProvisionFormatDisposition::Preserve
+                    }
+                });
+            let target_label = match role {
+                crate::provision::PartitionRole::Boot
+                | crate::provision::PartitionRole::BootShareCombined => {
+                    self.provision.form.volume_label.as_str()
+                }
+                crate::provision::PartitionRole::Share => self.provision.form.share_label.as_str(),
+                crate::provision::PartitionRole::Encrypt => {
+                    self.provision.form.encrypt_label.as_str()
+                }
                 crate::provision::PartitionRole::CompatibilityReserve => unreachable!(),
             };
-            out.push((
-                format!("{}格式化", role.label()),
-                if selected { "☑ 是" } else { "☐ 否" },
-                false,
-            ));
+            let format_status = match disposition {
+                preflight::ProvisionFormatDisposition::Preserve => "☐ 否 · 原样保留",
+                preflight::ProvisionFormatDisposition::RequiredRebuild => "☑ 必须",
+                preflight::ProvisionFormatDisposition::UserRequestedRebuild => "☑ 重新格式化",
+                preflight::ProvisionFormatDisposition::NotApplicable => "固定，不格式化",
+            };
+            out.push((format!("{}格式化", role.label()), format_status, false));
             out.push((
                 format!("{}文件系统", role.label()),
                 target.filesystem.unwrap().windows_format_name(),
                 false,
             ));
-            out.push((format!("{}卷标", role.label()), label, false));
+            if disposition.selected() {
+                out.push((format!("{}格式化后卷标", role.label()), target_label, false));
+            } else {
+                out.push((format!("{}卷标", role.label()), "原样保留 · 未读取", false));
+            }
         }
         out.push((
             "初始化密码强制修改".into(),

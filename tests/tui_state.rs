@@ -646,21 +646,32 @@ fn plain_source_to_every_official_mode_has_no_password_probe_or_pending_region()
             "Plain -> {kind:?} region count"
         );
 
-        authorize_all_rebuilds(&mut state, kind);
-        let after = state.provision_layout_editor_details();
-        let rebuilds = after
-            .iter()
-            .filter_map(|row| row.columns.as_ref())
-            .filter(|columns| columns[3] == "⚠ 重建")
-            .count();
-        assert_eq!(
-            rebuilds, partition_count,
-            "Plain -> {kind:?} authorized rebuilds"
-        );
-
         let request = state
             .provision_request()
             .unwrap_or_else(|error| panic!("Plain -> {kind:?} request failed: {error}"));
+        match kind {
+            ProvisionKind::Mode0 => {
+                assert!(request.format.boot);
+                assert!(request.format.share);
+                assert!(request.format.encrypt);
+            }
+            ProvisionKind::Mode1 => {
+                assert!(!request.format.boot);
+                assert!(request.format.share);
+                assert!(request.format.encrypt);
+            }
+            ProvisionKind::Mode2 => {
+                assert!(!request.format.boot);
+                assert!(!request.format.share);
+                assert!(request.format.encrypt);
+            }
+            ProvisionKind::Mode3 => {
+                assert!(request.format.boot);
+                assert!(request.format.share);
+                assert!(!request.format.encrypt);
+            }
+            ProvisionKind::Plain => unreachable!(),
+        }
         let assert_domain = |domain: KeyDomainRole, active: bool| {
             let pair = request.key_domains.pair(domain);
             if active {
@@ -1440,16 +1451,11 @@ fn mode0_to_mode1_unknown_encrypt_requires_explicit_format_for_password_change()
     assert!(!state.provision_end_insert());
     assert!(
         !state.provision().form.format_encrypt,
-        "editing a new password must never auto-enable destructive formatting"
+        "raw checkbox state records only an explicit user request"
     );
-    let error = state.provision_request().expect_err(
-        "unknown source password plus edited target password must require explicit format",
-    );
-    assert!(error.contains("主动勾选保密区格式化"), "{error}");
-    state.provision_mut().form.format_encrypt = true;
     let request = state
         .provision_request()
-        .expect("explicit format choice should permit rebuild with the new password");
+        .expect("unknown source plus edited target password must auto-select required rebuild");
     assert!(request.format.encrypt);
     assert_eq!(
         request
@@ -1516,11 +1522,25 @@ fn unknown_source_password_geometry_change_is_blocked_synchronously_by_same_pref
             .is_some_and(|columns| columns[0] == "交换区" && columns[3] == "⚠ 需重建")
     }));
 
-    let error = state
+    let error = state.provision_request().expect_err(
+        "required rebuild still needs an explicit target password when source is unknown",
+    );
+    assert!(error.contains("交换区"), "{error}");
+    assert!(error.contains("设置新密码"), "{error}");
+
+    let target = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "新密码")
+        .expect("share target password");
+    state.provision_mut().field_selected = target;
+    assert!(state.provision_toggle_selected_option());
+    state.provision_mut().form.share_target_password = "NewSharePass1!".into();
+    let request = state
         .provision_request()
-        .expect_err("the same preflight shown by the layout must block before background planning");
-    assert!(error.contains("交换区当前为“需重建”"), "{error}");
-    assert!(error.contains("格式化授权"), "{error}");
+        .expect("required rebuild should proceed once the target password is explicit");
+    assert!(request.format.share);
+    assert!(!state.provision().form.format_share);
 }
 
 #[test]
@@ -1620,10 +1640,16 @@ fn failed_source_with_explicit_target_equal_to_failed_candidate_is_still_blocked
     assert!(!state.provision_end_insert());
     assert!(!state.provision().form.format_share);
 
-    let error = state.provision_request().expect_err(
-        "explicit new-password intent must be blocked whenever source verification failed",
+    let request = state
+        .provision_request()
+        .expect("failed source verification plus an explicit target password must auto-rebuild");
+    assert!(request.format.share);
+    assert_eq!(
+        request
+            .key_domains
+            .target_password(edpcli::provision::PartitionRole::Share),
+        Some(b"0000aaa".as_slice())
     );
-    assert!(error.contains("主动勾选交换区格式化"), "{error}");
 }
 
 #[test]
@@ -1840,11 +1866,11 @@ fn provision_format_controls_follow_current_mode_targets() {
     let fields = state.provision_visible_fields();
     assert!(fields
         .iter()
-        .any(|(label, value, _)| label.contains("兼容保留区") && *value == "固定，不格式化"));
+        .any(|(label, value, _)| label == "模式2兼容区" && *value == "固定 63 sector · 不格式化"));
     assert!(!fields.iter().any(|(label, _, _)| label == "启动区格式化"));
     let reserve_index = fields
         .iter()
-        .position(|(label, _, _)| label.contains("兼容保留区"))
+        .position(|(label, _, _)| label == "模式2兼容区")
         .unwrap();
     state.provision_mut().field_selected = reserve_index;
     assert!(!state.provision_toggle_selected_option());
@@ -2581,13 +2607,7 @@ fn provision_form_sections_are_compact_and_user_facing() {
     }
     assert_eq!(
         sections,
-        vec![
-            "身份信息",
-            "密码域",
-            "分区布局",
-            "格式化（可选）",
-            "密码策略",
-        ]
+        vec!["身份信息", "密码域", "分区布局", "格式化", "密码策略",]
     );
 }
 

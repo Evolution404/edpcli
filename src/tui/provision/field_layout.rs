@@ -90,17 +90,33 @@ impl AppState {
             ProvisionFieldId::SourcePassword(_) => {
                 Some("修改原密码后，Enter / Esc 结束输入会自动只读验证".into())
             }
-            ProvisionFieldId::TargetPassword(domain) => Some(match domain {
-                crate::provision::KeyDomainRole::Share => {
-                    "Space 切换透传/设置密码；透传时按 i 直接编辑。原密码已验证且新密码相同会自动归一化为透传；原密码未验证时改密需用户主动勾选交换区格式化".into()
-                }
-                crate::provision::KeyDomainRole::Encrypt => {
-                    "Space 切换透传/设置密码；透传时按 i 直接编辑。原密码已验证且新密码相同会自动归一化为透传；原密码未验证时改密需用户主动勾选保密区格式化".into()
-                }
-            }),
+            ProvisionFieldId::TargetPassword(_) => Some(
+                "Space 切换透传/设置密码；原密码已验证且新密码相同会自动归一化为透传；无法无损改密时系统会自动转为必须重建并格式化".into(),
+            ),
+            ProvisionFieldId::FormatEnabled(role) => {
+                let hint = self
+                    .provision_preflight()
+                    .ok()
+                    .and_then(|preflight| preflight.format_disposition(role))
+                    .map(|disposition| match disposition {
+                        preflight::ProvisionFormatDisposition::Preserve => {
+                            "Space 主动重新格式化"
+                        }
+                        preflight::ProvisionFormatDisposition::RequiredRebuild => {
+                            "当前区域必须重建，格式化不可取消"
+                        }
+                        preflight::ProvisionFormatDisposition::UserRequestedRebuild => {
+                            "Space 取消重新格式化并恢复原样保留"
+                        }
+                        preflight::ProvisionFormatDisposition::NotApplicable => {
+                            "固定协议区域，不格式化"
+                        }
+                    })
+                    .unwrap_or("格式化状态暂不可判定");
+                Some(hint.into())
+            }
             ProvisionFieldId::ForceChangePassword
             | ProvisionFieldId::CancelPasswordComplexityCheck
-            | ProvisionFieldId::FormatEnabled(_)
             | ProvisionFieldId::Filesystem(_) => Some("Space 切换".into()),
             ProvisionFieldId::StartLba(_) => Some("f 自动寻找最小可用起点".into()),
             ProvisionFieldId::MaxPasswordErrors(_) => Some("范围 0–255".into()),

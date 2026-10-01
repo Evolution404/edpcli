@@ -211,9 +211,8 @@ impl FormatOptions {
     fn choice(&self, role: PartitionRole) -> (bool, &str) {
         match role {
             PartitionRole::Boot => (self.boot, &self.boot_label),
-            PartitionRole::Share | PartitionRole::BootShareCombined => {
-                (self.share, &self.share_label)
-            }
+            PartitionRole::Share => (self.share, &self.share_label),
+            PartitionRole::BootShareCombined => (self.share, &self.boot_label),
             PartitionRole::Encrypt => (self.encrypt, &self.encrypt_label),
             PartitionRole::CompatibilityReserve => (false, ""),
         }

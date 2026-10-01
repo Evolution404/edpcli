@@ -11,6 +11,24 @@ pub(crate) enum ProvisionPreflightKind {
     BlockedNeedsTargetPassword,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProvisionFormatDisposition {
+    Preserve,
+    RequiredRebuild,
+    UserRequestedRebuild,
+    NotApplicable,
+}
+
+impl ProvisionFormatDisposition {
+    pub(crate) const fn selected(self) -> bool {
+        matches!(self, Self::RequiredRebuild | Self::UserRequestedRebuild)
+    }
+
+    pub(crate) const fn toggle_allowed(self) -> bool {
+        matches!(self, Self::Preserve | Self::UserRequestedRebuild)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProvisionPartitionPreflight {
     pub(crate) role: crate::provision::PartitionRole,
@@ -22,6 +40,7 @@ pub(crate) struct ProvisionPartitionPreflight {
 #[derive(Debug, Clone)]
 pub(crate) struct ProvisionPreflight {
     partitions: Vec<ProvisionPartitionPreflight>,
+    format_dispositions: Vec<(crate::provision::PartitionRole, ProvisionFormatDisposition)>,
     geometry_error: Option<String>,
 }
 
@@ -33,6 +52,20 @@ impl ProvisionPreflight {
         self.partitions.iter().find(|part| part.role == role)
     }
 
+    pub(crate) fn format_disposition(
+        &self,
+        role: crate::provision::PartitionRole,
+    ) -> Option<ProvisionFormatDisposition> {
+        self.format_dispositions
+            .iter()
+            .find_map(|(candidate, disposition)| (*candidate == role).then_some(*disposition))
+    }
+
+    pub(crate) fn format_selected(&self, role: crate::provision::PartitionRole) -> bool {
+        self.format_disposition(role)
+            .is_some_and(ProvisionFormatDisposition::selected)
+    }
+
     pub(crate) fn validate_for_submit(&self) -> Result<(), String> {
         if let Some(message) = &self.geometry_error {
             return Err(message.clone());
@@ -42,8 +75,7 @@ impl ProvisionPreflight {
                 ProvisionPreflightKind::Waiting => return Err(part.reason.clone()),
                 ProvisionPreflightKind::BlockedNeedsFormat => {
                     return Err(format!(
-                        "{}当前为“需重建”，但尚未获得用户的格式化授权；请主动勾选{}格式化后再继续",
-                        part.role.label(),
+                        "内部状态异常：{}需要重建，但未归一化为强制格式化",
                         part.role.label()
                     ));
                 }
@@ -76,12 +108,19 @@ impl AppState {
         let parts = resolved.draft_partitions(crate::common::SECTOR as u64)?;
         let geometry_error =
             crate::provision::validate_target_geometry(&parts, resolved.usable_end_lba).err();
-        let partitions = parts
+        let evaluated = parts
             .iter()
             .map(|part| self.provision_partition_preflight(source.as_ref(), part))
+            .collect::<Vec<_>>();
+        let (partitions, dispositions): (Vec<_>, Vec<_>) = evaluated.into_iter().unzip();
+        let format_dispositions = partitions
+            .iter()
+            .zip(dispositions)
+            .map(|(part, disposition)| (part.role, disposition))
             .collect();
         Ok(ProvisionPreflight {
             partitions,
+            format_dispositions,
             geometry_error,
         })
     }
@@ -114,10 +153,89 @@ impl AppState {
         crate::provision::plain_extent_preserve_candidate(&extents, target)
     }
 
+    pub(super) fn provision_explicit_format_selected(
+        &self,
+        role: crate::provision::PartitionRole,
+    ) -> bool {
+        use crate::provision::PartitionRole;
+        match role {
+            PartitionRole::Boot => self.provision.form.format_boot,
+            PartitionRole::Share | PartitionRole::BootShareCombined => {
+                self.provision.form.format_share
+            }
+            PartitionRole::Encrypt => self.provision.form.format_encrypt,
+            PartitionRole::CompatibilityReserve => false,
+        }
+    }
+
     fn provision_partition_preflight(
         &self,
         source: Option<&crate::provision::ExistingProvisionProfile>,
         target: &crate::provision::TargetPartitionGeometry,
+    ) -> (ProvisionPartitionPreflight, ProvisionFormatDisposition) {
+        use crate::provision::{KeyDomainRole, PartitionRole};
+
+        let role = target.role;
+        if role == PartitionRole::CompatibilityReserve {
+            return (
+                ProvisionPartitionPreflight {
+                    role,
+                    kind: ProvisionPreflightKind::Rebuild,
+                    reason: "兼容保留区按协议固定重建".into(),
+                    target_password_requested: false,
+                },
+                ProvisionFormatDisposition::NotApplicable,
+            );
+        }
+
+        let source_part = source.and_then(|profile| profile.partition(role));
+        let assessment =
+            crate::application::provision::PreserveAssessment::for_partition(source_part, target);
+        let structural_rebuild_required = if source_part.is_none() {
+            if self.provision_source_is_plain()
+                && KeyDomainRole::from_partition_role(role).is_none()
+            {
+                !self.provision_plain_extent_candidate(target)
+            } else {
+                true
+            }
+        } else {
+            !assessment.candidate
+        };
+
+        let baseline = self.provision_partition_preflight_for_format(source, target, false);
+        let required = structural_rebuild_required
+            || matches!(
+                baseline.kind,
+                ProvisionPreflightKind::BlockedNeedsFormat | ProvisionPreflightKind::Rebuild
+            );
+        if required {
+            let baseline_reason = baseline.reason.clone();
+            let mut resolved = self.provision_partition_preflight_for_format(source, target, true);
+            resolved.reason = if resolved.kind == ProvisionPreflightKind::BlockedNeedsTargetPassword
+            {
+                format!("{baseline_reason}；格式化为必需操作，且必须先设置目标新密码")
+            } else {
+                format!("{baseline_reason}；格式化为必需操作")
+            };
+            return (resolved, ProvisionFormatDisposition::RequiredRebuild);
+        }
+
+        if self.provision_explicit_format_selected(role) {
+            return (
+                self.provision_partition_preflight_for_format(source, target, true),
+                ProvisionFormatDisposition::UserRequestedRebuild,
+            );
+        }
+
+        (baseline, ProvisionFormatDisposition::Preserve)
+    }
+
+    fn provision_partition_preflight_for_format(
+        &self,
+        source: Option<&crate::provision::ExistingProvisionProfile>,
+        target: &crate::provision::TargetPartitionGeometry,
+        format_selected: bool,
     ) -> ProvisionPartitionPreflight {
         use crate::provision::{KeyDomainRole, PartitionRole};
         use password_verification::{PasswordIntent, SourcePasswordState};
@@ -126,14 +244,6 @@ impl AppState {
         let source_part = source.and_then(|profile| profile.partition(role));
         let assessment =
             crate::application::provision::PreserveAssessment::for_partition(source_part, target);
-        let format_selected = match role {
-            PartitionRole::Boot => self.provision.form.format_boot,
-            PartitionRole::Share | PartitionRole::BootShareCombined => {
-                self.provision.form.format_share
-            }
-            PartitionRole::Encrypt => self.provision.form.format_encrypt,
-            PartitionRole::CompatibilityReserve => false,
-        };
 
         if role == PartitionRole::CompatibilityReserve {
             return ProvisionPartitionPreflight {
@@ -159,7 +269,7 @@ impl AppState {
                                 "普通盘无来源密码域；将使用目标密码创建新密码域并生成新 FileKey"
                                     .into()
                             } else {
-                                "普通盘无来源密码域；目标密码已准备，需勾选格式化后创建新密码域"
+                                "普通盘无来源密码域；目标密码已准备，需要格式化并创建新密码域"
                                     .into()
                             },
                             true,
@@ -202,8 +312,7 @@ impl AppState {
                     } else if exact_extent {
                         "普通盘存在与目标 LBA 范围完全一致的物理分区；数据范围候选保留".into()
                     } else {
-                        "普通盘不存在与目标 LBA 范围完全一致的物理分区；必须明确授权格式化重建"
-                            .into()
+                        "普通盘不存在与目标 LBA 范围完全一致的物理分区；必须格式化重建".into()
                     },
                     target_password_requested: false,
                 };
@@ -219,7 +328,7 @@ impl AppState {
                 reason: if format_selected {
                     "用户已明确选择格式化；目标区域将重建".into()
                 } else {
-                    "来源无相同语义分区；目标区域无法原样保留，必须明确授权格式化重建".into()
+                    "来源无相同语义分区；目标区域无法原样保留，必须格式化重建".into()
                 },
                 target_password_requested: KeyDomainRole::from_partition_role(role).is_some(),
             };
@@ -270,7 +379,7 @@ impl AppState {
                     "目标几何已改变；用户已明确授权格式化重建".into()
                 } else {
                     format!(
-                        "{}；原密码域和数据范围无法原样保留，必须明确授权格式化重建",
+                        "{}；原密码域和数据范围无法原样保留，必须格式化重建",
                         assessment.reason()
                     )
                 },
@@ -305,7 +414,7 @@ impl AppState {
             ),
             PasswordIntent::BlockedNeedsFormat => (
                 ProvisionPreflightKind::BlockedNeedsFormat,
-                "原密码未验证，无法无损改密；必须明确授权格式化重建".into(),
+                "原密码未验证，无法无损改密；必须格式化重建".into(),
                 false,
             ),
             PasswordIntent::Rebuild => (
@@ -337,12 +446,12 @@ impl AppState {
             }
             PasswordIntent::Passthrough if source_state == SourcePasswordState::Unknown => (
                 ProvisionPreflightKind::BlockedNeedsFormat,
-                "来源密码未知且密钥配置不满足不解密透传条件；必须明确授权格式化重建".into(),
+                "来源密码未知且密钥配置不满足不解密透传条件；必须格式化重建".into(),
                 false,
             ),
             PasswordIntent::Passthrough => (
                 ProvisionPreflightKind::BlockedNeedsFormat,
-                "当前密码域不满足透传条件；必须明确授权格式化重建".into(),
+                "当前密码域不满足透传条件；必须格式化重建".into(),
                 false,
             ),
         };

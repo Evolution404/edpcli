@@ -163,9 +163,11 @@ fn mode0_plain_state(partition: Option<(u64, u64, Option<&str>)>) -> AppState {
 }
 
 #[test]
-fn plain_boot_preflight_requires_an_exact_63_to_20479_physical_extent() {
+fn plain_boot_preflight_auto_formats_required_rebuilds_and_preserves_exact_extent() {
     use crate::provision::PartitionRole;
-    use preflight::ProvisionPreflightKind as Kind;
+    use preflight::{
+        ProvisionFormatDisposition as FormatDisposition, ProvisionPreflightKind as Kind,
+    };
 
     let cases = [
         ("no partition", None, false),
@@ -186,49 +188,56 @@ fn plain_boot_preflight_requires_an_exact_63_to_20479_physical_extent() {
         let preflight = state.provision_preflight().unwrap();
         assert_eq!(
             preflight.partition(PartitionRole::Boot).unwrap().kind,
-            if exact {
-                Kind::Preserve
-            } else {
-                Kind::BlockedNeedsFormat
-            },
+            if exact { Kind::Preserve } else { Kind::Rebuild },
             "{name}"
         );
         assert_eq!(
-            preflight.partition(PartitionRole::Share).unwrap().kind,
-            Kind::BlockedNeedsFormat,
-            "{name}: share"
+            preflight.format_disposition(PartitionRole::Boot),
+            Some(if exact {
+                FormatDisposition::Preserve
+            } else {
+                FormatDisposition::RequiredRebuild
+            }),
+            "{name}: boot format disposition"
         );
-        assert_eq!(
-            preflight.partition(PartitionRole::Encrypt).unwrap().kind,
-            Kind::BlockedNeedsFormat,
-            "{name}: encrypt"
-        );
-        for role in [
-            PartitionRole::Boot,
-            PartitionRole::Share,
-            PartitionRole::Encrypt,
-        ] {
-            assert!(
-                matches!(
-                    preflight.partition(role).unwrap().kind,
-                    Kind::Preserve | Kind::BlockedNeedsFormat | Kind::Rebuild
-                ),
-                "{name}: {role:?} must be synchronously classified"
+        for role in [PartitionRole::Share, PartitionRole::Encrypt] {
+            assert_eq!(
+                preflight.partition(role).unwrap().kind,
+                Kind::Rebuild,
+                "{name}: {role:?}"
+            );
+            assert_eq!(
+                preflight.format_disposition(role),
+                Some(FormatDisposition::RequiredRebuild),
+                "{name}: {role:?} must auto-format"
             );
         }
 
         if exact {
             state.provision_mut().form.format_boot = true;
+            let preflight = state.provision_preflight().unwrap();
             assert_eq!(
-                state
-                    .provision_preflight()
-                    .unwrap()
-                    .partition(PartitionRole::Boot)
-                    .unwrap()
-                    .kind,
+                preflight.partition(PartitionRole::Boot).unwrap().kind,
                 Kind::Rebuild,
                 "explicit format must override exact preservation"
             );
+            assert_eq!(
+                preflight.format_disposition(PartitionRole::Boot),
+                Some(FormatDisposition::UserRequestedRebuild)
+            );
         }
     }
+}
+
+#[test]
+fn plain_mode0_request_enables_required_formats_without_manual_checkboxes() {
+    let mut state = mode0_plain_state(None);
+    let request = state.provision_request().unwrap();
+    assert!(request.format.boot);
+    assert!(request.format.share);
+    assert!(request.format.encrypt);
+    let form = &state.provision_mut().form;
+    assert!(!form.format_boot);
+    assert!(!form.format_share);
+    assert!(!form.format_encrypt);
 }

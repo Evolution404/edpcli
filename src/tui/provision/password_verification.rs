@@ -173,7 +173,7 @@ impl AppState {
                 self.provision.share_source_verification =
                     ProvisionPasswordVerificationState::Failed;
                 self.set_warning_notice(format!(
-                    "{message}；未自动启用格式化。可保持兼容布局透传；如需改密请主动勾选交换区格式化"
+                    "{message}；若保持兼容布局可按条件透传；如需改密，请设置目标新密码，系统会自动将交换区转为必须重建并格式化"
                 ));
             }
             (crate::provision::KeyDomainRole::Encrypt, Err(message)) => {
@@ -182,7 +182,7 @@ impl AppState {
                 self.provision.encrypt_source_verification =
                     ProvisionPasswordVerificationState::Failed;
                 self.set_warning_notice(format!(
-                    "{message}；未自动启用格式化。可保持兼容布局透传；如需改密请主动勾选保密区格式化"
+                    "{message}；若保持兼容布局可按条件透传；如需改密，请设置目标新密码，系统会自动将保密区转为必须重建并格式化"
                 ));
             }
         }
