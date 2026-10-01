@@ -290,10 +290,12 @@ fn chapter_12_review_uses_typed_final_password_effects_without_preflight_vocabul
         "ProvisionConfirmationPasswordEffect",
         "Passthrough",
         "Rewrap",
-        "NewFileKey",
+        "InitializeNew",
+        "Rebuild",
         "保留原密码域",
         "使用目标密码，FileKey 保持",
-        "使用目标密码，生成新 FileKey",
+        "新建密码域",
+        "重建密码域，生成新 FileKey",
         "格式化重建",
     ] {
         assert!(
@@ -387,6 +389,8 @@ fn confirmation_ui_uses_one_handling_vocabulary_and_symbolic_statuses() {
         "— 不涉及",
         "✓ 保留原密码域",
         "↻ 使用目标密码，FileKey 保持",
+        "+ 新建密码域",
+        "⚠ 重建密码域，生成新 FileKey",
         "✓ 保持",
     ] {
         assert!(
