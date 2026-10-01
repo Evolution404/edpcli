@@ -20,6 +20,10 @@ use detail_render::draw_inspect_object_panes;
 mod sector_render;
 use sector_render::draw_sector_inspector;
 
+#[cfg(test)]
+#[path = "sector_render_tests.rs"]
+mod sector_render_tests;
+
 fn draw_inspect_jump_modal(frame: &mut Frame, state: &AppState) {
     let Some(AdvancedInspectPrompt::Jump { input, error, .. }) = state.advanced_inspect_prompt()
     else {

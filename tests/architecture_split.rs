@@ -500,7 +500,7 @@ fn large_modules_are_split_by_domain_boundary() {
     );
     assert!(
         lines("src/tui/inspect/sector_state.rs") < 450,
-        "Sector Inspector state must stay responsibility-bounded"
+        "扇区检查状态模块必须保持职责边界"
     );
     assert!(
         lines("src/tui/inspect/render.rs") < 400,
@@ -520,7 +520,7 @@ fn large_modules_are_split_by_domain_boundary() {
     );
     assert!(
         lines("src/tui/inspect/sector_render.rs") < 350,
-        "Sector Inspector renderer must stay responsibility-bounded"
+        "扇区检查渲染模块必须保持职责边界"
     );
     assert!(lines("src/inspect.rs") < 150);
     assert!(lines("src/inspect_adapter.rs") < 150);

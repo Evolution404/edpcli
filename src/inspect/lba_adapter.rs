@@ -32,28 +32,21 @@ pub fn analyze_sector_with_context(
     let mut diagnostics = Vec::new();
     let mut decoded = raw.to_vec();
     let mut decode_ranges = Vec::new();
+    macro_rules! buffers {
+        () => {
+            LbaRenderBuffers {
+                fields: &mut fields,
+                notes: &mut notes,
+                decoded: &mut decoded,
+                decode_ranges: &mut decode_ranges,
+                diagnostics: &mut diagnostics,
+            }
+        };
+    }
 
     let method = match lba {
-        0..=4 => super::lba_early::render_lba0_4(
-            lba,
-            raw_sector,
-            protocol_image,
-            &mut fields,
-            &mut notes,
-            &mut decoded,
-            &mut decode_ranges,
-            &mut diagnostics,
-        ),
-        5..=8 => super::lba_middle::render_lba5_8(
-            lba,
-            raw_sector,
-            meta,
-            &mut fields,
-            &mut notes,
-            &mut decoded,
-            &mut decode_ranges,
-            &mut diagnostics,
-        ),
+        0..=4 => super::lba_early::render_lba0_4(lba, raw_sector, protocol_image, buffers!()),
+        5..=8 => super::lba_middle::render_lba5_8(lba, raw_sector, meta, buffers!()),
         9..=12 => super::lba_late::render_lba9_12(
             lba,
             raw_sector,
@@ -61,11 +54,7 @@ pub fn analyze_sector_with_context(
                 meta,
                 protocol_image,
             },
-            &mut fields,
-            &mut notes,
-            &mut decoded,
-            &mut decode_ranges,
-            &mut diagnostics,
+            buffers!(),
         ),
         _ => {
             diagnostics.push(InspectDiagnostic::new(

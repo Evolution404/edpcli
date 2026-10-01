@@ -3,8 +3,8 @@
 ## 1. 文档关系
 
 专项计划：
-- `docs/ui/INSPECT_GOVERNANCE_2026-10-01.md`
-- `docs/architecture/FAT_CAPABILITY_AND_PROVISION_FORMAT_PLAN_2026-10-01.md`
+- `audit/ai-progress/2026-10-01/INSPECT_GOVERNANCE_2026-10-01.md`
+- `audit/ai-progress/2026-10-01/FAT_CAPABILITY_AND_PROVISION_FORMAT_PLAN_2026-10-01.md`
 
 本文件只负责阶段依赖、提交边界和最终门禁。
 

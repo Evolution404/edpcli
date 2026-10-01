@@ -48,6 +48,14 @@ use edpf_fields::edpf96_fields;
 use metadata::*;
 use model::*;
 
+struct LbaRenderBuffers<'a> {
+    fields: &'a mut Vec<SectorField>,
+    notes: &'a mut Vec<String>,
+    decoded: &'a mut Vec<u8>,
+    decode_ranges: &'a mut Vec<DecodeRange>,
+    diagnostics: &'a mut Vec<InspectDiagnostic>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

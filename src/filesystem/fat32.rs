@@ -206,7 +206,7 @@ fn root_volume_label(
     };
     for relative in 0..u64::from(geometry.sectors_per_cluster) {
         let sector = source.read_sector(start + relative)?;
-        for entry in sector.chunks_exact(32) {
+        for entry in sector.chunks(32) {
             match entry[0] {
                 0x00 => return Ok(None),
                 0xe5 => continue,

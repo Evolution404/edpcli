@@ -4,12 +4,15 @@ pub(super) fn render_lba5_8(
     lba: u32,
     raw_sector: &[u8; SECTOR],
     meta: &InspectMeta,
-    fields: &mut Vec<SectorField>,
-    notes: &mut Vec<String>,
-    decoded: &mut Vec<u8>,
-    decode_ranges: &mut Vec<DecodeRange>,
-    diagnostics: &mut Vec<InspectDiagnostic>,
+    buffers: LbaRenderBuffers<'_>,
 ) -> String {
+    let LbaRenderBuffers {
+        fields,
+        notes,
+        decoded,
+        decode_ranges,
+        diagnostics,
+    } = buffers;
     match lba {
         5 => {
             let view = lba5::parse_lba5(raw_sector);

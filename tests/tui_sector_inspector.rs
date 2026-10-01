@@ -1327,7 +1327,7 @@ fn narrow_sector_inspector_keeps_selected_byte_visible_without_mutating_cursor()
 
     assert!(
         text.contains("+0x1F0"),
-        "narrow Sector Inspector must keep the selected byte row visible: {text}"
+        "窄屏扇区检查必须保持当前字节所在行可见: {text}"
     );
     assert_eq!(
         state.advanced_inspect_sector().unwrap().cursor,

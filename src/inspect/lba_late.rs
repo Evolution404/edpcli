@@ -9,12 +9,15 @@ pub(super) fn render_lba9_12(
     lba: u32,
     raw_sector: &[u8; SECTOR],
     context: LbaLateContext<'_>,
-    fields: &mut Vec<SectorField>,
-    notes: &mut Vec<String>,
-    decoded: &mut Vec<u8>,
-    decode_ranges: &mut Vec<DecodeRange>,
-    diagnostics: &mut Vec<InspectDiagnostic>,
+    buffers: LbaRenderBuffers<'_>,
 ) -> String {
+    let LbaRenderBuffers {
+        fields,
+        notes,
+        decoded,
+        decode_ranges,
+        diagnostics,
+    } = buffers;
     let LbaLateContext {
         meta,
         protocol_image,

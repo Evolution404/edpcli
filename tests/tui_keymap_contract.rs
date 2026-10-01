@@ -790,10 +790,7 @@ fn sector_inspector_dispatches_the_documented_vim_actions() {
         "TuiAction::NextMatch",
         "TuiAction::PreviousMatch",
     ] {
-        assert!(
-            source.contains(action),
-            "Sector Inspector event loop missing {action}"
-        );
+        assert!(source.contains(action), "扇区检查事件循环缺少 {action}");
     }
     let render = include_str!("../src/tui/inspect/sector_render.rs");
     assert!(render.contains("0/$"));
