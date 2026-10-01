@@ -383,6 +383,7 @@ fn manufacturer_lba3_is_copied_verbatim_into_the_write_plan() {
     let mut prepared = PreparedNewProvision {
         disk: 4,
         device_id: "disk&ven_netac&prod_onlydisk".into(),
+        source_kind: DiskProvisionKind::Mode1,
         mode: OfficialPartitionMode::BootShareCombined,
         force_change_password: false,
         pass_info_policy: PassInfoPolicy::default(),
@@ -648,6 +649,7 @@ fn sparse_export_includes_selected_format_images() {
     let prepared = PreparedNewProvision {
         disk: 4,
         device_id: "disk&ven_aigo&prod_u335".into(),
+        source_kind: DiskProvisionKind::Mode0,
         mode: plan.mode,
         force_change_password: false,
         pass_info_policy: PassInfoPolicy::default(),
@@ -772,6 +774,7 @@ fn protocol_readback_gate_rejects_changed_onlyid_and_layout() {
     let prepared = PreparedNewProvision {
         disk: 4,
         device_id,
+        source_kind: DiskProvisionKind::Mode0,
         mode: plan.mode,
         force_change_password: false,
         pass_info_policy: PassInfoPolicy::default(),
