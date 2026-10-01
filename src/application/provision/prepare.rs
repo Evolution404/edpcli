@@ -76,10 +76,9 @@ pub(super) fn read_plain_source_extents(
                 ),
             )
         })?;
-        let filesystem =
-            crate::filesystem::detect_boot_sector(partition.sector_count, &boot)
-                .ok()
-                .flatten();
+        let filesystem = crate::filesystem::detect_boot_sector(partition.sector_count, &boot)
+            .ok()
+            .flatten();
         extents.push(crate::provision::PlainSourceExtent {
             start_lba: partition.start_lba,
             sector_count: partition.sector_count,
