@@ -52,7 +52,8 @@ pub(crate) enum ProvisionConfirmationPasswordEffect {
     None,
     Preserve,
     Rewrap,
-    NewFileKey,
+    InitializeNew,
+    Rebuild,
 }
 
 impl ProvisionConfirmationPasswordEffect {
@@ -61,7 +62,8 @@ impl ProvisionConfirmationPasswordEffect {
             Self::None => "— 不涉及",
             Self::Preserve => "✓ 保留原密码域",
             Self::Rewrap => "↻ 使用目标密码，FileKey 保持",
-            Self::NewFileKey => "⚠ 使用目标密码，生成新 FileKey",
+            Self::InitializeNew => "+ 新建密码域",
+            Self::Rebuild => "⚠ 重建密码域，生成新 FileKey",
         }
     }
 }
@@ -304,7 +306,16 @@ impl ProvisionConfirmationViewModel {
                             ProvisionConfirmationPasswordEffect::Rewrap
                         }
                         Some(crate::provision::PasswordDisposition::Rebuild) => {
-                            ProvisionConfirmationPasswordEffect::NewFileKey
+                            let source_has_domain =
+                                crate::provision::KeyDomainRole::from_partition_role(
+                                    part.geometry.role,
+                                )
+                                .is_some_and(|domain| official.source_kind.has_key_domain(domain));
+                            if source_has_domain {
+                                ProvisionConfirmationPasswordEffect::Rebuild
+                            } else {
+                                ProvisionConfirmationPasswordEffect::InitializeNew
+                            }
                         }
                         Some(crate::provision::PasswordDisposition::Blocked) => unreachable!(),
                         None => ProvisionConfirmationPasswordEffect::None,
@@ -459,7 +470,8 @@ impl ProvisionConfirmationViewModel {
                     matches!(
                         region.password_effect,
                         ProvisionConfirmationPasswordEffect::Rewrap
-                            | ProvisionConfirmationPasswordEffect::NewFileKey
+                            | ProvisionConfirmationPasswordEffect::InitializeNew
+                            | ProvisionConfirmationPasswordEffect::Rebuild
                     )
                 })
                 .count(),
