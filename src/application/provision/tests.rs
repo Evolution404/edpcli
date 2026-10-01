@@ -458,8 +458,7 @@ fn plain_extent_reader_recovers_exact_fat16_boot_evidence_from_live_media() {
         )],
     )
     .unwrap();
-    let write_plan =
-        build_plain_provision_write_plan(&plan, None, &[0x1234_5678]).unwrap();
+    let write_plan = build_plain_provision_write_plan(&plan, None, &[0x1234_5678]).unwrap();
     let mut dev = MemoryDev::default();
     for (&lba, sector) in &write_plan.writes {
         dev.sectors.insert(lba, sector.bytes.to_vec());
@@ -475,7 +474,6 @@ fn plain_extent_reader_recovers_exact_fat16_boot_evidence_from_live_media() {
         }]
     );
 }
-
 
 #[test]
 fn plain_prewrite_snapshot_rejects_stale_lba7_metadata() {
