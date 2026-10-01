@@ -346,7 +346,7 @@ impl AppState {
             let count = match self.shell.workspace {
                 Workspace::Devices => self.devices.rows.len(),
                 Workspace::Inspect => 0,
-                Workspace::Backups => self.backups.rows.len(),
+                Workspace::Backups => self.backup_device_filtered_count(),
                 Workspace::Provision => ProvisionKind::ALL.len(),
             };
             self.shell.selected = 0;
@@ -373,7 +373,12 @@ impl AppState {
             Workspace::Provision => {}
         }
         self.shell.selected = 0;
-        self.set_item_count(self.shell.search_matches.len());
+        let count = if self.shell.workspace == Workspace::Backups {
+            self.visible_backup_indices().len()
+        } else {
+            self.shell.search_matches.len()
+        };
+        self.set_item_count(count);
     }
 
     fn activate_search_match(&mut self, match_index: usize) {
@@ -1531,13 +1536,18 @@ impl AppState {
     }
 
     pub fn visible_backup_indices(&self) -> Vec<usize> {
-        let indices = if self.shell.workspace == Workspace::Backups
-            && !self.active_search_query().is_empty()
-        {
-            self.shell.search_matches.clone()
-        } else {
-            (0..self.backups.rows.len()).collect()
-        };
+        let search_active =
+            self.shell.workspace == Workspace::Backups && !self.active_search_query().is_empty();
+        let indices = self
+            .backups
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, backup)| self.backup_matches_device_filter(backup))
+            .filter_map(|(index, _)| {
+                (!search_active || self.shell.search_matches.contains(&index)).then_some(index)
+            })
+            .collect::<Vec<_>>();
         self.backups.table_view.sorted_indices(
             indices,
             self.table_interaction(super::table_layout::TableKind::Backups),
@@ -1652,20 +1662,16 @@ impl AppState {
         self.backups.scan_pending = false;
         if self.shell.workspace == Workspace::Backups {
             self.rebuild_workspace_filter();
+            self.reconcile_backup_device_filter();
             if let Some(path) = selected_path {
                 let source_index = self.backups.rows.iter().position(|row| row.path == path);
+                let visible = self.visible_backup_indices();
                 self.shell.selected = source_index
-                    .and_then(|index| {
-                        if self.workspace_filter_active() {
-                            self.shell
-                                .search_matches
-                                .iter()
-                                .position(|value| *value == index)
-                        } else {
-                            Some(index)
-                        }
-                    })
+                    .and_then(|index| visible.iter().position(|value| *value == index))
                     .unwrap_or(0);
+                self.set_item_count(visible.len());
+            } else {
+                self.set_item_count(self.visible_backup_indices().len());
             }
         }
     }

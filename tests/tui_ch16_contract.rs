@@ -81,6 +81,7 @@ fn lba8_state() -> AppState {
         topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
         disk_layout: None,
         disk_layout_issue: None,
+        backup_manifest: None,
     };
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));

@@ -1,5 +1,9 @@
 mod provision;
 
+#[cfg(test)]
+#[path = "controller/tests.rs"]
+mod tests;
+
 use super::clipboard::ClipboardBackend;
 use super::keymap::{TuiAction, WidgetRole};
 use super::pane::PaneId;
@@ -273,6 +277,12 @@ pub(super) fn active_widget_role(state: &AppState) -> WidgetRole {
         return WidgetRole::Picker;
     }
 
+    if state.workspace() == Workspace::Backups
+        && state.backups_focused_pane() == PaneId::BackupDevices
+    {
+        return WidgetRole::Tree;
+    }
+
     if state.active_table_kind().is_some() {
         WidgetRole::Table
     } else {
@@ -361,9 +371,54 @@ pub(super) fn dispatch_action(
         }
     }
 
+    if state.workspace() == Workspace::Backups
+        && state.backups_focused_pane() == PaneId::BackupDevices
+    {
+        let outcome = match action {
+            TuiAction::MoveUp => {
+                state.backup_device_tree_move(-1);
+                Some(ActionOutcome::handled())
+            }
+            TuiAction::MoveDown => {
+                state.backup_device_tree_move(1);
+                Some(ActionOutcome::handled())
+            }
+            TuiAction::Top => {
+                state.backup_device_tree_jump(false);
+                Some(ActionOutcome::handled())
+            }
+            TuiAction::Bottom => {
+                state.backup_device_tree_jump(true);
+                Some(ActionOutcome::handled())
+            }
+            TuiAction::TableScrollLeft => {
+                state.scroll_backup_device_tree(true, viewport_width);
+                Some(ActionOutcome::handled())
+            }
+            TuiAction::TableScrollRight => {
+                state.scroll_backup_device_tree(false, viewport_width);
+                Some(ActionOutcome::handled())
+            }
+            TuiAction::Open => {
+                state.backup_device_tree_toggle();
+                Some(ActionOutcome::handled())
+            }
+            TuiAction::Activate => {
+                state.backup_device_tree_focus_list();
+                Some(ActionOutcome::handled())
+            }
+            _ => None,
+        };
+        if let Some(outcome) = outcome {
+            return outcome;
+        }
+    }
+
     match action {
         TuiAction::Insert
-            if matches!(state.workspace(), Workspace::Devices | Workspace::Backups) =>
+            if state.workspace() == Workspace::Devices
+                || (state.workspace() == Workspace::Backups
+                    && state.backups_focused_pane() == PaneId::BackupsList) =>
         {
             ActionOutcome::request(ActionRequest::Navigate(NavCommand::OpenInspect))
         }
@@ -378,9 +433,10 @@ pub(super) fn dispatch_action(
                 }
                 ActionOutcome::handled()
             }
-            Workspace::Backups => {
+            Workspace::Backups if state.backups_focused_pane() == PaneId::BackupsList => {
                 ActionOutcome::request(ActionRequest::Navigate(NavCommand::OpenInspect))
             }
+            Workspace::Backups => ActionOutcome::handled(),
             Workspace::Inspect | Workspace::Provision => ActionOutcome::unhandled(),
         },
         TuiAction::Provision if state.workspace() == Workspace::Devices => {
@@ -397,13 +453,22 @@ pub(super) fn dispatch_action(
             }
             ActionOutcome::handled()
         }
-        TuiAction::Toggle if state.workspace() == Workspace::Backups => {
+        TuiAction::Toggle
+            if state.workspace() == Workspace::Backups
+                && state.backups_focused_pane() == PaneId::BackupsList =>
+        {
             ActionOutcome::request(ActionRequest::Navigate(NavCommand::ToggleBackupSelection))
         }
-        TuiAction::ViewOrVerify if state.workspace() == Workspace::Backups => {
+        TuiAction::ViewOrVerify
+            if state.workspace() == Workspace::Backups
+                && state.backups_focused_pane() == PaneId::BackupsList =>
+        {
             ActionOutcome::request(ActionRequest::Navigate(NavCommand::VerifyBackup))
         }
-        TuiAction::Delete if state.workspace() == Workspace::Backups => {
+        TuiAction::Delete
+            if state.workspace() == Workspace::Backups
+                && state.backups_focused_pane() == PaneId::BackupsList =>
+        {
             let command = if state.backup_selection_count() > 0 {
                 NavCommand::BeginBackupBatchDelete
             } else {
@@ -417,7 +482,8 @@ pub(super) fn dispatch_action(
             ActionOutcome::request(ActionRequest::Navigate(NavCommand::BeginBackupCreate))
         }
         TuiAction::Restore
-            if state.workspace() == Workspace::Backups
+            if (state.workspace() == Workspace::Backups
+                && state.backups_focused_pane() == PaneId::BackupsList)
                 || (state.workspace() == Workspace::Devices
                     && state.devices_focused_pane() == PaneId::DevicesDetail
                     && matches!(

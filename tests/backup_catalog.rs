@@ -164,6 +164,7 @@ fn v3_raw_serial_can_form_strong_group_without_persisted_serial_digest() {
         lba8: None,
         content_sha256: None,
         coverage: None,
+        manifest: None,
     };
 
     let a = make_entry("a.edpb", first);
@@ -171,9 +172,28 @@ fn v3_raw_serial_can_form_strong_group_without_persisted_serial_digest() {
     assert_eq!(backup_group_key(&a), backup_group_key(&b));
     assert!(backup_group_key(&a).is_some());
 
+    let mut legacy_digest = second.clone();
+    legacy_digest.hardware.serial = None;
+    legacy_digest.hardware.serial_sha256 = Some(edpcli::sha256::sha256_hex(b"RAW-SERIAL-123"));
+    let legacy = make_entry("legacy.edpb", legacy_digest);
+    assert_eq!(
+        backup_group_key(&a),
+        backup_group_key(&legacy),
+        "v3 raw serial and legacy serial digest must converge when geometry is identical"
+    );
+
+    let mut different_capacity = second.clone();
+    different_capacity.hardware.total_sectors = Some(15_728_640);
+    let c = make_entry("c.edpb", different_capacity);
+    assert_ne!(
+        backup_group_key(&a),
+        backup_group_key(&c),
+        "a cloned USB serial across different physical capacities must never share a device/prune group"
+    );
+
     second.hardware.serial = Some("RAW-SERIAL-OTHER".into());
-    let c = make_entry("c.edpb", second);
-    assert_ne!(backup_group_key(&a), backup_group_key(&c));
+    let d = make_entry("d.edpb", second);
+    assert_ne!(backup_group_key(&a), backup_group_key(&d));
 }
 
 #[test]

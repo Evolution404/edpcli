@@ -731,6 +731,7 @@ fn fake_entry(name: &str, onlyid: &str, mtime: i64) -> BackupEntry {
         lba8: None,
         content_sha256: None,
         coverage: None,
+        manifest: None,
     }
 }
 

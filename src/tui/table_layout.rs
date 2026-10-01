@@ -1034,7 +1034,7 @@ pub fn visible_cell(text: &str, column: &VisibleColumn) -> String {
     slice_display_cells(&base, column.clip_left, usize::from(column.width))
 }
 
-fn slice_display_cells(text: &str, start: usize, width: usize) -> String {
+pub fn slice_display_cells(text: &str, start: usize, width: usize) -> String {
     if width == 0 {
         return String::new();
     }

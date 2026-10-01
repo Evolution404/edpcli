@@ -226,7 +226,13 @@ impl AppState {
     ) -> u16 {
         use crate::tui::table_layout::TableKind;
         match kind {
-            TableKind::Devices | TableKind::Backups => terminal_width.saturating_sub(4),
+            TableKind::Devices => terminal_width.saturating_sub(4),
+            TableKind::Backups => {
+                let class = crate::tui::ui::ViewportClass::for_width(terminal_width);
+                terminal_width
+                    .saturating_sub(class.backup_device_sidebar_width().unwrap_or(0))
+                    .saturating_sub(4)
+            }
             TableKind::RelatedBackups => terminal_width
                 .saturating_mul(7)
                 .saturating_div(10)
@@ -472,5 +478,25 @@ impl AppState {
             .entry(kind)
             .or_default()
             .scroll_viewport(&layout, &widths, viewport_width, reverse)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backup_table_interaction_width_matches_rendered_table_after_device_sidebar() {
+        let state = AppState::new();
+        use crate::tui::table_layout::TableKind;
+
+        assert_eq!(state.table_viewport_width(TableKind::Backups, 100, 40), 66);
+        assert_eq!(state.table_viewport_width(TableKind::Backups, 140, 40), 100);
+        assert_eq!(state.table_viewport_width(TableKind::Backups, 200, 40), 156);
+        assert_eq!(
+            state.table_viewport_width(TableKind::Backups, 79, 40),
+            75,
+            "compact mode has no side-by-side device tree"
+        );
     }
 }

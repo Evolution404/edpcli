@@ -5,6 +5,12 @@ use std::path::PathBuf;
 use edpcli::application::inspect::load_backup_inspect;
 use edpcli::common::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
 use edpcli::edpb::{self, CoreCapture};
+use edpcli::tui::{
+    pane::PaneId,
+    render,
+    state::{AdvancedInspectSource, AppState},
+};
+use ratatui::{backend::TestBackend, Terminal};
 
 fn netac_edpb(tag: &str) -> Option<(common::TmpDir, PathBuf)> {
     let data = common::load_disk_image("netac")?;
@@ -39,12 +45,63 @@ fn backup_inspect_reuses_domain_analyzer_for_all_metadata_lbas() {
     };
     let workspace = load_backup_inspect(&path).expect("inspect backup");
     assert_eq!(workspace.items.len(), METADATA_SECTOR_COUNT);
+    let manifest = workspace
+        .backup_manifest
+        .as_ref()
+        .expect("backup Inspect must retain verified EDPB manifest");
+    assert!(!manifest.schema.is_empty());
+    assert!(!manifest.regions.is_empty());
+    assert!(!manifest.extents.is_empty());
+    assert!(!manifest.artifacts.is_empty());
     for (lba, item) in workspace.items.iter().enumerate() {
         assert_eq!(item.lba, lba as u64);
         assert_eq!(item.raw.len(), 512);
         assert_eq!(item.decoded.as_ref().map(Vec::len), Some(512));
         assert!(item.method.is_some());
     }
+}
+
+#[test]
+fn backup_inspect_renders_manifest_technical_evidence_outside_backup_main_page() {
+    let Some((_tmp, path)) = netac_edpb("inspect_manifest_render") else {
+        eprintln!("跳过: 真实备份不可用");
+        return;
+    };
+    let workspace = load_backup_inspect(&path).expect("inspect backup");
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Backup(path)));
+    state.advanced_inspect_finish(Ok(workspace));
+
+    let mut terminal = Terminal::new(TestBackend::new(160, 45)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let initial = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(initial.contains("EDPBManifest"), "{initial}");
+    assert!(initial.contains("Region"), "{initial}");
+    assert!(initial.contains("Extent"), "{initial}");
+    assert!(initial.contains("Artifact"), "{initial}");
+
+    state.advanced_inspect_focus_pane(PaneId::InspectDetail);
+    state.advanced_inspect_focused_bottom();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let bottom = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(
+        bottom.contains("source_extent_ids") || bottom.contains("policy="),
+        "{bottom}"
+    );
 }
 
 #[test]

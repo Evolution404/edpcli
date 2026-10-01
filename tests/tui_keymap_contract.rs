@@ -316,6 +316,19 @@ fn tab_is_context_focus_and_ctrl_w_owns_panel_switching() {
 }
 
 #[test]
+fn production_shell_uses_the_actual_focused_widget_role_for_panel_navigation() {
+    let shell = include_str!("../src/tui/runtime_input/shell.rs");
+    assert!(
+        shell.contains("controller::active_widget_role(state)"),
+        "production input must use the focused pane role instead of hard-coding Table"
+    );
+    assert!(
+        !shell.contains("map_for_role(state.input_mode(), keymap::WidgetRole::Table, key)"),
+        "hard-coded Table role breaks tree-specific input and pane routing"
+    );
+}
+
+#[test]
 fn tab_focus_actions_remain_available_in_nested_workspaces() {
     let inspect = include_str!("../src/tui/runtime_input/inspect.rs");
     let provision = include_str!("../src/tui/runtime_input/provision.rs");
@@ -407,7 +420,9 @@ fn normal_mode_keeps_inspect_and_backup_as_single_key_actions() {
         controller,
         &[
             "TuiAction::Insert",
-            "if matches!(state.workspace(), Workspace::Devices | Workspace::Backups)",
+            "state.workspace() == Workspace::Devices",
+            "state.workspace() == Workspace::Backups",
+            "state.backups_focused_pane() == PaneId::BackupsList",
             "ActionRequest::Navigate(NavCommand::OpenInspect)",
         ],
     ));

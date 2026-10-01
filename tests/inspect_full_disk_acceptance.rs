@@ -70,6 +70,7 @@ fn workspace(context: &InspectDiskContext) -> AdvancedInspectWorkspace {
         topology: build_inspect_topology(context),
         disk_layout: None,
         disk_layout_issue: None,
+        backup_manifest: None,
     }
 }
 

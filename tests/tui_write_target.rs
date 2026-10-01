@@ -63,6 +63,7 @@ fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
         ),
         coverage: None,
+        restore_preview: None,
     }
 }
 

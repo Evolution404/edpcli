@@ -16,6 +16,9 @@ mod field_table_render;
 mod detail_render;
 use detail_render::draw_inspect_object_panes;
 
+#[path = "backup_manifest_render.rs"]
+mod backup_manifest_render;
+
 #[path = "sector_render.rs"]
 mod sector_render;
 use sector_render::draw_sector_inspector;

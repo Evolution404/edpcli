@@ -1,6 +1,14 @@
-use edpcli::application::{backup_coverage::BackupCoverage, BackupWorkspaceItem};
+use edpcli::application::{
+    backup_coverage::BackupCoverage,
+    backup_restore_preview::{
+        BackupRestorePreview, BackupRestoreRegionKind, BackupRestoreRegionStatus,
+    },
+    disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind},
+    BackupWorkspaceItem,
+};
 use edpcli::edpb::{
-    Artifact, ArtifactCompleteness, ChunkStorage, Extent, Region, RestorePolicy, SemanticStatus,
+    Artifact, ArtifactCompleteness, ChunkStorage, Extent, Region, RestoreContract, RestorePolicy,
+    SemanticStatus,
 };
 use edpcli::tui::{
     pane::PaneId,
@@ -65,6 +73,64 @@ fn coverage() -> BackupCoverage {
     BackupCoverage::from_parts(&regions, &extents, &artifacts)
 }
 
+fn restore_preview() -> BackupRestorePreview {
+    let layout = DiskLayoutModel::canonical_edp(
+        200_000,
+        vec![
+            DiskLayoutSegment {
+                label: "启动区".into(),
+                start_lba: 63,
+                sector_count: 20_417,
+                kind: DiskRegionKind::Boot,
+            },
+            DiskLayoutSegment {
+                label: "交换区".into(),
+                start_lba: 20_480,
+                sector_count: 20_000,
+                kind: DiskRegionKind::Share,
+            },
+            DiskLayoutSegment {
+                label: "保密区".into(),
+                start_lba: 40_480,
+                sector_count: 20_000,
+                kind: DiskRegionKind::Encrypt,
+            },
+        ],
+        180_000,
+        6,
+    )
+    .unwrap();
+    BackupRestorePreview {
+        total_sectors: Some(200_000),
+        layout: Some(layout),
+        layout_error: None,
+        region_statuses: vec![
+            BackupRestoreRegionStatus {
+                label: "EDP 协议 LBA0-12".into(),
+                kind: BackupRestoreRegionKind::CompleteBytes,
+                detail: Some("13 sector".into()),
+            },
+            BackupRestoreRegionStatus {
+                label: "启动区".into(),
+                kind: BackupRestoreRegionKind::StructureOnly,
+                detail: Some("数据内容未备份".into()),
+            },
+            BackupRestoreRegionStatus {
+                label: "LCE".into(),
+                kind: BackupRestoreRegionKind::CompleteBytes,
+                detail: Some("6 sector".into()),
+            },
+            BackupRestoreRegionStatus {
+                label: "用户文件".into(),
+                kind: BackupRestoreRegionKind::OutOfScope,
+                detail: Some("目录与用户文件不在备份范围".into()),
+            },
+        ],
+        restore_contract: Some(RestoreContract::metadata_only(true)),
+        is_plain: false,
+    }
+}
+
 fn state() -> AppState {
     let mut state = AppState::new();
     state.replace_backups(vec![BackupWorkspaceItem {
@@ -85,6 +151,7 @@ fn state() -> AppState {
         size_ok: true,
         content_sha256: Some("a".repeat(64)),
         coverage: Some(coverage()),
+        restore_preview: Some(restore_preview()),
     }]);
     state.navigate(NavCommand::WorkspaceBackups, 20);
     state
@@ -106,17 +173,28 @@ fn backup_workspace_shows_detail_coverage_and_no_animation_sidebar() {
     let state = state();
     let wide = text(&state, 160, 45).replace(' ', "");
     for value in [
+        "设备",
+        "全部备份",
         "备份列表",
-        "备份详情",
-        "区域覆盖",
-        "EDP主协议区",
-        "12/20sector",
-        "目录和用户文件不在备份范围内",
+        "备份信息",
+        "恢复范围",
+        "容量地图",
+        "完整恢复",
+        "结构恢复",
+        "不在备份范围",
         "身份未验证",
     ] {
-        assert!(wide.contains(value), "missing {value}");
+        assert!(wide.contains(value), "missing {value}: {wide}");
     }
-    assert!(!wide.contains("EDPCORE·LIVE"));
+    for stale in [
+        "区域覆盖",
+        "12/20sector",
+        "Extent",
+        "Artifact",
+        "EDPCORE·LIVE",
+    ] {
+        assert!(!wide.contains(stale), "stale {stale}: {wide}");
+    }
 }
 
 #[test]
@@ -140,7 +218,8 @@ fn compact_backup_detail_and_coverage_remain_reachable_and_escape_returns() {
     assert!(detail.contains("目录和用户文件"));
     state.focus_backups_pane(PaneId::BackupCoverage);
     let coverage = text(&state, 40, 10).replace(' ', "");
-    assert!(coverage.contains("区域覆盖"));
+    assert!(coverage.contains("恢复范围"));
+    assert!(coverage.contains("容量地图"));
     state.navigate(NavCommand::Escape, 10);
     assert_eq!(state.backups_focused_pane(), PaneId::BackupsList);
 }

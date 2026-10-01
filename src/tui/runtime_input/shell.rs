@@ -70,13 +70,14 @@ pub(super) fn handle_shell_key(
         return KeyOutcome::NextIteration;
     }
 
-    if let Some(action) = keys.map_for_role(state.input_mode(), keymap::WidgetRole::Table, key) {
+    let role = controller::active_widget_role(state);
+    if let Some(action) = keys.map_for_role(state.input_mode(), role, key) {
         let viewport_height = terminal_size.height.saturating_sub(9) as usize;
         match dispatch_tui_action(
             state,
             tasks,
             action,
-            keymap::WidgetRole::Table,
+            role,
             backup_dir,
             viewport_height,
             terminal_size.width,

@@ -38,6 +38,102 @@ fn backup_table_values(
         .collect()
 }
 
+fn backup_tree_scroll_offset(
+    content_len: usize,
+    selected_index: usize,
+    visible_rows: usize,
+) -> usize {
+    let visible_rows = visible_rows.max(1);
+    let max_offset = content_len.saturating_sub(visible_rows);
+    if selected_index < visible_rows {
+        0
+    } else {
+        selected_index
+            .saturating_add(1)
+            .saturating_sub(visible_rows)
+            .min(max_offset)
+    }
+}
+
+fn draw_backup_device_tree(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    use crate::tui::pane::PaneId;
+
+    let focused = state.backups_focused_pane() == PaneId::BackupDevices;
+    let block = crate::tui::ui::card("设备", focused);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let nodes = state.backup_device_tree_nodes();
+    let selected = state
+        .backup_device_tree_selected()
+        .min(nodes.len().saturating_sub(1));
+    let mut lines = Vec::with_capacity(nodes.len().max(1));
+
+    let inner_width = usize::from(inner.width);
+    let marker_width = 2usize;
+    let body_width = inner_width.saturating_sub(marker_width).max(1);
+    let selected_content_width = state
+        .backup_device_tree_row_parts(selected)
+        .map(|(prefix, label, count)| {
+            crate::tui::table_layout::display_width(prefix)
+                .saturating_add(crate::tui::table_layout::display_width(&safe(&label)))
+                .saturating_add(1)
+                .saturating_add(crate::tui::table_layout::display_width(&count.to_string()))
+        })
+        .unwrap_or(body_width);
+    let canvas_width = body_width.max(selected_content_width);
+    let scroll_x = state
+        .backup_device_tree_scroll_offset()
+        .min(canvas_width.saturating_sub(body_width));
+    let theme = crate::tui::theme::current();
+
+    for (index, node) in nodes.iter().enumerate() {
+        let active = index == selected;
+        let marker = if active && focused { "▌ " } else { "  " };
+        let Some((prefix, label, count)) = state.backup_device_tree_row_parts(index) else {
+            continue;
+        };
+        let label = safe(&label);
+        let count_text = count.to_string();
+        let used = crate::tui::table_layout::display_width(prefix)
+            .saturating_add(crate::tui::table_layout::display_width(&label))
+            .saturating_add(crate::tui::table_layout::display_width(&count_text));
+        let gap = canvas_width.saturating_sub(used).max(1);
+        let full_body = format!("{prefix}{label}{}{count_text}", " ".repeat(gap));
+        let mut body =
+            crate::tui::table_layout::slice_display_cells(&full_body, scroll_x, body_width);
+        let visible_width = crate::tui::table_layout::display_width(&body);
+        if visible_width < body_width {
+            body.push_str(&" ".repeat(body_width - visible_width));
+        }
+
+        let base = if node.depth == 0 {
+            secondary().add_modifier(Modifier::BOLD)
+        } else {
+            theme.table_text()
+        };
+        let row_style = if active {
+            theme.apply_selection(theme.table_cell(base, true, focused), true, focused)
+        } else {
+            base
+        };
+        lines.push(Line::from(vec![
+            Span::styled(marker, row_style),
+            Span::styled(body, row_style),
+        ]));
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled("暂无备份设备", muted())));
+    }
+    let visible_rows = usize::from(inner.height).max(1);
+    let scroll_offset = backup_tree_scroll_offset(nodes.len(), selected, visible_rows);
+    frame.render_widget(
+        Paragraph::new(lines).scroll((scroll_offset.min(u16::MAX as usize) as u16, 0)),
+        inner,
+    );
+}
+
 pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     if let Some(run) = state.backup_verify_run() {
         let mut lines = vec![
@@ -96,7 +192,8 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
     if let Some(list_area) = list_area {
         let visible_count = state.visible_backup_count();
         let total_count = state.backups().len();
-        let count_label = if state.workspace_filter_active() {
+        let count_label = if state.workspace_filter_active() || state.backup_device_filter_active()
+        {
             format!("{visible_count}/{total_count}")
         } else {
             total_count.to_string()
@@ -113,6 +210,27 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
         let search = crate::tui::overview::overview_search(state, "/ 搜索身份、容量、型号、文件名");
         crate::tui::ui::workspace_overview(frame, backup_parts[0], "备份概览", &metrics, &search);
 
+        let (tree_area, table_area) = if class == ViewportClass::Compact {
+            if focused == PaneId::BackupDevices {
+                (Some(backup_parts[1]), None)
+            } else {
+                (None, Some(backup_parts[1]))
+            }
+        } else {
+            let sidebar_width = class
+                .backup_device_sidebar_width()
+                .expect("non-compact backups layout must have a sidebar");
+            let body = Layout::horizontal([Constraint::Length(sidebar_width), Constraint::Min(24)])
+                .split(backup_parts[1]);
+            (Some(body[0]), Some(body[1]))
+        };
+        if let Some(tree_area) = tree_area {
+            draw_backup_device_tree(frame, tree_area, state);
+        }
+        let Some(table_area) = table_area else {
+            return;
+        };
+
         let title = if state.backup_scan_pending() {
             format!(
                 "备份列表 ({count_label}) · 已选 {} · 扫描中…",
@@ -128,8 +246,8 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
         if visible_count == 0 {
             let pane_focused = focused == PaneId::BackupsList;
             let block = crate::tui::ui::card(title, pane_focused);
-            let inner = block.inner(backup_parts[1]);
-            frame.render_widget(block, backup_parts[1]);
+            let inner = block.inner(table_area);
+            frame.render_widget(block, table_area);
             let (heading, message, hint) = if state.workspace_filter_active() {
                 (
                     "没有匹配记录",
@@ -184,14 +302,14 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             let visual_widths = state.table_visual_widths(TableKind::Backups, &content_widths);
             let interaction = state.table_interaction(TableKind::Backups);
             let viewport = layout.layout_with_active(
-                backup_parts[1].width.saturating_sub(4),
+                table_area.width.saturating_sub(4),
                 &visual_widths,
                 interaction.viewport_offset(),
                 Some(interaction.active_column()),
             );
             let pane_focused =
                 state.backups_focused_pane() == crate::tui::pane::PaneId::BackupsList;
-            let window = visible_window(state.selected(), visible_count, backup_parts[1].height);
+            let window = visible_window(state.selected(), visible_count, table_area.height);
             let window_start = window.start;
             let window_len = window.len();
             let rows = window
@@ -248,10 +366,10 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             );
             let mut table_state = TableState::default();
             table_state.select(Some(state.selected().saturating_sub(window_start)));
-            frame.render_stateful_widget(table, backup_parts[1], &mut table_state);
+            frame.render_stateful_widget(table, table_area, &mut table_state);
             render_table_scrollbars(
                 frame,
-                backup_parts[1],
+                table_area,
                 &viewport,
                 visible_count,
                 window_start,
@@ -376,7 +494,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
         } else {
             Paragraph::new(vec![
                 Line::from(Span::styled(
-                    "备份详情",
+                    "备份信息",
                     secondary().add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
@@ -384,7 +502,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             ])
         }
         .block(crate::tui::ui::card(
-            "备份详情",
+            "备份信息",
             focused == crate::tui::pane::PaneId::BackupSummary,
         ))
         .scroll((
@@ -404,69 +522,155 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
 }
 
 fn draw_backup_coverage(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+    use crate::application::backup_restore_preview::BackupRestoreRegionKind;
+    use crate::tui::disk_layout::{DiskCapacityMap, DiskCapacityMapProfile};
+
     let mut lines = Vec::new();
     match state.selected_backup() {
-        Some(backup) => match backup.coverage.as_ref() {
-            Some(coverage) => {
-                lines.push(Line::from(format!(
-                    "{} 区域 · {} Extent · {} Artifact",
-                    coverage.regions.len(),
-                    coverage.extent_count,
-                    coverage.artifact_count
+        Some(backup) => match backup.restore_preview.as_ref() {
+            Some(preview) => {
+                lines.push(Line::from(Span::styled(
+                    "容量地图",
+                    secondary().add_modifier(Modifier::BOLD),
                 )));
-                for region in &coverage.regions {
-                    let label = match region.role.as_str() {
-                        "protocol" => "EDP 主协议区",
-                        "data" | "front" => "数据前部",
-                        "lce" => "LCE",
-                        "tail" => "盘尾",
-                        "filesystem" => "文件系统",
-                        _ => region.role.as_str(),
+                match preview.layout.as_ref() {
+                    Some(layout) => {
+                        let map_width = area.width.saturating_sub(4) as usize;
+                        let profile = if map_width >= 36 {
+                            DiskCapacityMapProfile::Compact
+                        } else {
+                            DiskCapacityMapProfile::Mini
+                        };
+                        lines.extend(
+                            DiskCapacityMap::new(layout, profile)
+                                .with_marker(false)
+                                .lines(map_width),
+                        );
+                    }
+                    None => lines.push(Line::from(Span::styled(
+                        safe(preview.layout_error.as_deref().unwrap_or("容量布局不可用")),
+                        warning(),
+                    ))),
+                }
+
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "区域恢复状态",
+                    secondary().add_modifier(Modifier::BOLD),
+                )));
+                for region in &preview.region_statuses {
+                    let (status, status_style) = match region.kind {
+                        BackupRestoreRegionKind::CompleteBytes => ("✓ 完整恢复", success()),
+                        BackupRestoreRegionKind::StructureOnly => ("✓ 结构恢复", accent()),
+                        BackupRestoreRegionKind::OutOfScope => ("— 不在备份范围", muted()),
+                        BackupRestoreRegionKind::PartialOrInvalid => ("⚠ 不完整", danger()),
                     };
-                    let (bar, count) = match region.total_sectors {
-                        Some(total) if total > 0 => {
-                            let cells = (region.captured_sectors.min(total).saturating_mul(10)
-                                / total) as usize;
-                            (
-                                format!("{}{}", "█".repeat(cells), "░".repeat(10 - cells)),
-                                format!("{}/{} sector", region.captured_sectors, total),
-                            )
-                        }
-                        _ => (
-                            "??????????".into(),
-                            format!("{} sector / 总量未知", region.captured_sectors),
-                        ),
-                    };
-                    let (status, tone) = match region.completeness {
-                        crate::edpb::ArtifactCompleteness::Complete => {
-                            ("完整", crate::tui::ui::BadgeTone::Success)
-                        }
-                        crate::edpb::ArtifactCompleteness::Partial => {
-                            ("部分", crate::tui::ui::BadgeTone::Warning)
-                        }
-                        crate::edpb::ArtifactCompleteness::NotCaptured => {
-                            ("未采集", crate::tui::ui::BadgeTone::Neutral)
-                        }
-                    };
-                    lines.push(Line::from(format!("{}  {}  {}", safe(label), bar, count)));
-                    lines.push(crate::tui::ui::status_badge(status, tone));
+                    let mut spans = vec![
+                        Span::styled(format!("{}  ", safe(&region.label)), Style::default()),
+                        Span::styled(status, status_style.add_modifier(Modifier::BOLD)),
+                    ];
+                    if let Some(detail) = region.detail.as_deref() {
+                        spans.push(Span::styled(format!(" · {}", safe(detail)), muted()));
+                    }
+                    lines.push(Line::from(spans));
+                }
+
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "恢复能力",
+                    secondary().add_modifier(Modifier::BOLD),
+                )));
+                if let Some(contract) = preview.restore_contract.as_ref() {
+                    lines.push(Line::from(Span::styled(
+                        if contract.restores_partition_structure {
+                            "✓ 分区结构"
+                        } else {
+                            "— 分区结构 · 不在恢复合同"
+                        },
+                        if contract.restores_partition_structure {
+                            success()
+                        } else {
+                            muted()
+                        },
+                    )));
+                    if preview.is_plain {
+                        lines.push(Line::from(Span::styled("— EDP 协议 · 不适用", muted())));
+                        lines.push(Line::from(Span::styled("— LCE · 不适用", muted())));
+                    } else {
+                        lines.push(Line::from(Span::styled(
+                            if contract.restores_edp_protocol {
+                                "✓ EDP 协议元数据"
+                            } else {
+                                "— EDP 协议 · 不在恢复合同"
+                            },
+                            if contract.restores_edp_protocol {
+                                success()
+                            } else {
+                                muted()
+                            },
+                        )));
+                        let lce_restorable = preview.region_statuses.iter().any(|region| {
+                            region.label == "LCE"
+                                && region.kind == BackupRestoreRegionKind::CompleteBytes
+                        });
+                        lines.push(Line::from(Span::styled(
+                            if lce_restorable {
+                                "✓ LCE"
+                            } else {
+                                "⚠ LCE · 不完整或不可恢复"
+                            },
+                            if lce_restorable { success() } else { warning() },
+                        )));
+                    }
+                    lines.push(Line::from(Span::styled(
+                        if contract.restores_filesystem {
+                            "✓ 原文件系统状态"
+                        } else {
+                            "— 原文件系统状态 · 不包含"
+                        },
+                        if contract.restores_filesystem {
+                            success()
+                        } else {
+                            muted()
+                        },
+                    )));
+                    lines.push(Line::from(Span::styled(
+                        if contract.restores_user_data {
+                            "✓ 用户文件内容"
+                        } else {
+                            "— 目录树 / 用户文件内容 · 不包含"
+                        },
+                        if contract.restores_user_data {
+                            success()
+                        } else {
+                            muted()
+                        },
+                    )));
+                    if contract.post_restore_assessment_required {
+                        lines.push(Line::from(Span::styled(
+                            "⚠ 恢复后需要执行后置评估",
+                            warning(),
+                        )));
+                    }
+                } else {
+                    lines.push(Line::from(Span::styled(
+                        "恢复合同不可用；不能声明可恢复范围。",
+                        warning(),
+                    )));
                 }
             }
-            None => lines.push(Line::from("Manifest 覆盖范围不可用；备份完整性未确认。")),
+            None => lines.push(Line::from(Span::styled(
+                "恢复范围不可用；备份未提供可验证的恢复合同。",
+                warning(),
+            ))),
         },
-        None => lines.push(Line::from(
-            "选择一条备份查看 Region / Extent / Artifact 覆盖范围。",
-        )),
+        None => lines.push(Line::from("选择一条备份查看恢复后的容量布局和恢复能力。")),
     }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "目录和用户文件不在备份范围内。",
-        warning(),
-    )));
+
     frame.render_widget(
         Paragraph::new(lines)
             .block(crate::tui::ui::card(
-                "区域覆盖 · Manifest",
+                "恢复范围",
                 state.backups_focused_pane() == crate::tui::pane::PaneId::BackupCoverage,
             ))
             .scroll((

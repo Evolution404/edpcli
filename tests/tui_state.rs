@@ -3069,6 +3069,7 @@ fn advanced_inspect_lazy_sector_window_is_bounded_and_pageable() {
         topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
         disk_layout: None,
         disk_layout_issue: None,
+        backup_manifest: None,
     }));
 
     let rows = state.advanced_inspect_tree_rows();
@@ -3178,6 +3179,7 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
         topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
         disk_layout: None,
         disk_layout_issue: None,
+        backup_manifest: None,
     }));
 
     let rows = state.advanced_inspect_tree_rows();

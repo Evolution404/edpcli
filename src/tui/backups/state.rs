@@ -1,5 +1,21 @@
 use super::*;
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum BackupDeviceFilter {
+    #[default]
+    All,
+    Confirmed(String),
+    Unresolved,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupDeviceTreeNode {
+    pub filter: BackupDeviceFilter,
+    pub label: String,
+    pub count: usize,
+    pub depth: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct BackupDeleteState {
     pub stage: WizardStage,
@@ -59,6 +75,10 @@ pub struct BackupsState {
     pub(super) batch_delete: Option<BackupBatchDeleteState>,
     pub(super) selection: std::collections::BTreeSet<std::path::PathBuf>,
     pub(super) prune: Option<BackupPruneState>,
+    pub(super) device_filter: BackupDeviceFilter,
+    pub(super) device_tree_selected: usize,
+    pub(super) device_tree_scroll_x: usize,
+    pub(super) device_tree_expanded: bool,
     pub(super) pane_focus: crate::tui::pane::PaneFocus,
 }
 
@@ -73,12 +93,298 @@ impl Default for BackupsState {
             batch_delete: None,
             selection: std::collections::BTreeSet::new(),
             prune: None,
+            device_filter: BackupDeviceFilter::All,
+            device_tree_selected: 0,
+            device_tree_scroll_x: 0,
+            device_tree_expanded: true,
             pane_focus: crate::tui::pane::PaneFocus::backups(),
         }
     }
 }
 
 impl AppState {
+    fn backup_strong_group_key(backup: &crate::application::BackupWorkspaceItem) -> Option<String> {
+        backup.identity.as_ref()?.strong_backup_group_key()
+    }
+
+    fn backup_group_display_label(backup: &crate::application::BackupWorkspaceItem) -> String {
+        use crate::media_identity::SerialQuality;
+
+        let view = crate::application::identity::WorkspaceIdentity::from_backup(backup);
+        let model = view.model();
+        let identity = backup.identity.as_ref();
+        let suffix = identity
+            .filter(|identity| identity.hardware.serial_quality == SerialQuality::Usable)
+            .and_then(|identity| identity.hardware.serial.as_deref())
+            .map(|serial| {
+                let trimmed = serial.trim();
+                if trimmed.chars().count() > 12 {
+                    trimmed.chars().take(12).collect::<String>()
+                } else {
+                    trimmed.to_string()
+                }
+            })
+            .or_else(|| backup.onlyid.clone())
+            .or_else(|| {
+                let vid_pid = view.vid_pid();
+                (vid_pid != "—").then_some(vid_pid)
+            });
+        let base = match (model.as_str(), suffix) {
+            ("—", Some(suffix)) => format!("设备 · {suffix}"),
+            ("—", None) => "已确认设备".into(),
+            (_, Some(suffix)) => format!("{model} · {suffix}"),
+            (_, None) => model,
+        };
+        backup
+            .size_bytes
+            .map(crate::common::fmt_capacity)
+            .map(|capacity| format!("{base} · {capacity}"))
+            .unwrap_or(base)
+    }
+
+    pub fn backup_device_tree_nodes(&self) -> Vec<BackupDeviceTreeNode> {
+        let mut nodes = vec![BackupDeviceTreeNode {
+            filter: BackupDeviceFilter::All,
+            label: "全部备份".into(),
+            count: self.backups.rows.len(),
+            depth: 0,
+        }];
+        if !self.backups.device_tree_expanded {
+            return nodes;
+        }
+
+        let mut groups: Vec<(String, String, usize)> = Vec::new();
+        let mut positions = std::collections::BTreeMap::<String, usize>::new();
+        let mut unresolved = 0usize;
+        for backup in &self.backups.rows {
+            let Some(key) = Self::backup_strong_group_key(backup) else {
+                unresolved += 1;
+                continue;
+            };
+            if let Some(index) = positions.get(&key).copied() {
+                groups[index].2 += 1;
+            } else {
+                positions.insert(key.clone(), groups.len());
+                groups.push((key, Self::backup_group_display_label(backup), 1));
+            }
+        }
+        nodes.extend(
+            groups
+                .into_iter()
+                .map(|(key, label, count)| BackupDeviceTreeNode {
+                    filter: BackupDeviceFilter::Confirmed(key),
+                    label,
+                    count,
+                    depth: 1,
+                }),
+        );
+        if unresolved > 0 {
+            nodes.push(BackupDeviceTreeNode {
+                filter: BackupDeviceFilter::Unresolved,
+                label: "身份未确认".into(),
+                count: unresolved,
+                depth: 1,
+            });
+        }
+        nodes
+    }
+
+    pub fn backup_device_filter(&self) -> &BackupDeviceFilter {
+        &self.backups.device_filter
+    }
+
+    pub fn backup_device_filter_active(&self) -> bool {
+        !matches!(self.backups.device_filter, BackupDeviceFilter::All)
+    }
+
+    pub fn backup_matches_device_filter(
+        &self,
+        backup: &crate::application::BackupWorkspaceItem,
+    ) -> bool {
+        match &self.backups.device_filter {
+            BackupDeviceFilter::All => true,
+            BackupDeviceFilter::Confirmed(expected) => {
+                Self::backup_strong_group_key(backup).as_ref() == Some(expected)
+            }
+            BackupDeviceFilter::Unresolved => Self::backup_strong_group_key(backup).is_none(),
+        }
+    }
+
+    pub fn backup_device_filtered_count(&self) -> usize {
+        self.backups
+            .rows
+            .iter()
+            .filter(|backup| self.backup_matches_device_filter(backup))
+            .count()
+    }
+
+    pub fn backup_device_filter_label(&self) -> String {
+        match &self.backups.device_filter {
+            BackupDeviceFilter::All => "全部备份".into(),
+            BackupDeviceFilter::Unresolved => "身份未确认".into(),
+            BackupDeviceFilter::Confirmed(key) => self
+                .backups
+                .rows
+                .iter()
+                .find(|backup| Self::backup_strong_group_key(backup).as_ref() == Some(key))
+                .map(Self::backup_group_display_label)
+                .unwrap_or_else(|| "已确认设备".into()),
+        }
+    }
+
+    pub fn backup_device_tree_selected(&self) -> usize {
+        self.backups.device_tree_selected
+    }
+
+    pub fn backup_device_tree_expanded(&self) -> bool {
+        self.backups.device_tree_expanded
+    }
+
+    pub(crate) fn backup_device_tree_row_parts(
+        &self,
+        index: usize,
+    ) -> Option<(&'static str, String, usize)> {
+        let nodes = self.backup_device_tree_nodes();
+        let node = nodes.get(index)?;
+        if node.depth == 0 {
+            if self.backups.device_tree_expanded {
+                Some(("▾ ", node.label.clone(), node.count))
+            } else if self.backup_device_filter_active() {
+                Some((
+                    "▸ ",
+                    self.backup_device_filter_label(),
+                    self.backup_device_filtered_count(),
+                ))
+            } else {
+                Some(("▸ ", node.label.clone(), node.count))
+            }
+        } else {
+            Some(("  ", node.label.clone(), node.count))
+        }
+    }
+
+    fn backup_device_tree_active_width(&self) -> usize {
+        let selected = self.backup_device_tree_selected();
+        let Some((prefix, label, count)) = self.backup_device_tree_row_parts(selected) else {
+            return 0;
+        };
+        crate::tui::table_layout::display_width(prefix)
+            .saturating_add(crate::tui::table_layout::display_width(&label))
+            .saturating_add(1)
+            .saturating_add(crate::tui::table_layout::display_width(&count.to_string()))
+    }
+
+    pub fn backup_device_tree_scroll_offset(&self) -> usize {
+        self.backups.device_tree_scroll_x
+    }
+
+    pub fn scroll_backup_device_tree(&mut self, reverse: bool, terminal_width: u16) -> bool {
+        let inner_width = usize::from(
+            crate::tui::ui::ViewportClass::for_width(terminal_width)
+                .backup_device_tree_inner_width(terminal_width),
+        );
+        let marker_width = 2usize;
+        let viewport_width = inner_width.saturating_sub(marker_width).max(1);
+        let max_scroll = self
+            .backup_device_tree_active_width()
+            .saturating_sub(viewport_width);
+        let current = self.backups.device_tree_scroll_x.min(max_scroll);
+        let next = if reverse {
+            current.saturating_sub(2)
+        } else {
+            current.saturating_add(2).min(max_scroll)
+        };
+        let changed = next != self.backups.device_tree_scroll_x;
+        self.backups.device_tree_scroll_x = next;
+        changed
+    }
+
+    fn apply_backup_device_tree_selection(&mut self) {
+        let nodes = self.backup_device_tree_nodes();
+        let Some(node) = nodes.get(self.backups.device_tree_selected) else {
+            return;
+        };
+        self.backups.device_filter = node.filter.clone();
+        self.backups.device_tree_scroll_x = 0;
+        self.shell.selected = 0;
+        self.set_item_count(self.visible_backup_indices().len());
+    }
+
+    pub(super) fn reconcile_backup_device_filter(&mut self) {
+        let valid = match &self.backups.device_filter {
+            BackupDeviceFilter::All => true,
+            BackupDeviceFilter::Confirmed(expected) => self
+                .backups
+                .rows
+                .iter()
+                .any(|backup| Self::backup_strong_group_key(backup).as_ref() == Some(expected)),
+            BackupDeviceFilter::Unresolved => self
+                .backups
+                .rows
+                .iter()
+                .any(|backup| Self::backup_strong_group_key(backup).is_none()),
+        };
+        if !valid {
+            self.backups.device_filter = BackupDeviceFilter::All;
+        }
+        if self.backups.device_tree_expanded {
+            let nodes = self.backup_device_tree_nodes();
+            self.backups.device_tree_selected = nodes
+                .iter()
+                .position(|node| node.filter == self.backups.device_filter)
+                .unwrap_or(0);
+        } else {
+            self.backups.device_tree_selected = 0;
+        }
+    }
+
+    pub fn backup_device_tree_move(&mut self, delta: isize) {
+        if !self.backups.device_tree_expanded {
+            self.backups.device_tree_selected = 0;
+            return;
+        }
+        let nodes = self.backup_device_tree_nodes();
+        if nodes.is_empty() {
+            return;
+        }
+        let current = self.backups.device_tree_selected.min(nodes.len() - 1);
+        self.backups.device_tree_selected = if delta < 0 {
+            current.saturating_sub(delta.unsigned_abs())
+        } else {
+            current.saturating_add(delta as usize).min(nodes.len() - 1)
+        };
+        self.apply_backup_device_tree_selection();
+    }
+
+    pub fn backup_device_tree_jump(&mut self, to_end: bool) {
+        if !self.backups.device_tree_expanded {
+            self.backups.device_tree_selected = 0;
+            return;
+        }
+        let nodes = self.backup_device_tree_nodes();
+        if nodes.is_empty() {
+            return;
+        }
+        self.backups.device_tree_selected = if to_end { nodes.len() - 1 } else { 0 };
+        self.apply_backup_device_tree_selection();
+    }
+
+    pub fn backup_device_tree_toggle(&mut self) {
+        self.backups.device_tree_expanded = !self.backups.device_tree_expanded;
+        self.backups.device_tree_scroll_x = 0;
+        if self.backups.device_tree_expanded {
+            self.reconcile_backup_device_filter();
+        } else {
+            self.backups.device_tree_selected = 0;
+        }
+    }
+
+    pub fn backup_device_tree_focus_list(&mut self) {
+        self.backups
+            .pane_focus
+            .focus(crate::tui::pane::PaneId::BackupsList);
+    }
+
     pub fn backup_delete(&self) -> Option<&BackupDeleteState> {
         self.backups.delete.as_ref()
     }

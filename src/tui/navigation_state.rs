@@ -37,7 +37,7 @@ impl AppState {
         }
         let count = match workspace {
             Workspace::Devices => self.devices.rows.len(),
-            Workspace::Backups => self.backups.rows.len(),
+            Workspace::Backups => self.backup_device_filtered_count(),
             Workspace::Inspect => 0,
             Workspace::Provision => 0,
         };
@@ -132,7 +132,11 @@ impl AppState {
             Workspace::Backups => {
                 let focus = self.backups.pane_focus.focused();
                 let next = match (focus, dx.signum(), dy.signum()) {
-                    (PaneId::BackupsList, _, 1) => Some(PaneId::BackupSummary),
+                    (PaneId::BackupDevices, 1, _) => Some(PaneId::BackupsList),
+                    (PaneId::BackupsList, -1, _) => Some(PaneId::BackupDevices),
+                    (PaneId::BackupDevices | PaneId::BackupsList, _, 1) => {
+                        Some(PaneId::BackupSummary)
+                    }
                     (PaneId::BackupSummary | PaneId::BackupCoverage, _, -1) => {
                         Some(PaneId::BackupsList)
                     }

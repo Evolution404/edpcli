@@ -228,7 +228,16 @@ impl AppState {
                 let Some(row) = rows.get(state.tree_selected) else {
                     return 2;
                 };
-                8 + usize::from(row.range.byte_range.is_some()) + usize::from(row.decoder.is_some())
+                let manifest_lines = state
+                    .result
+                    .as_ref()
+                    .and_then(|workspace| workspace.backup_manifest.as_ref())
+                    .map_or(0, |manifest| {
+                        4 + usize::from(manifest.restore_contract.is_some())
+                    });
+                8 + usize::from(row.range.byte_range.is_some())
+                    + usize::from(row.decoder.is_some())
+                    + manifest_lines
             }
             PaneId::InspectDetail => {
                 let detail_count = self.advanced_inspect_detail_rows().len();
@@ -273,6 +282,16 @@ impl AppState {
                     InspectNodeKind::Group => 2,
                     _ => 2,
                 };
+                if let Some(manifest) = state
+                    .result
+                    .as_ref()
+                    .and_then(|workspace| workspace.backup_manifest.as_ref())
+                {
+                    count += 4
+                        + manifest.regions.len()
+                        + manifest.extents.len()
+                        + manifest.artifacts.len().saturating_mul(3);
+                }
                 if state.prompt.is_some() {
                     count += 5;
                 }

@@ -314,6 +314,51 @@ fn neutral_table_columns_brighten_without_becoming_accent_blue() {
 }
 
 #[test]
+fn new_selection_renderers_must_not_turn_active_rows_accent_blue() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
+    let mut files = Vec::new();
+    rust_files(&root, &mut files);
+
+    const LEGACY_DEVICE_TREE: &str =
+        "let style = region_style.unwrap_or_else(|| if active { accent() } else { secondary() });";
+
+    for path in files {
+        if path.file_name().and_then(|name| name.to_str()) == Some("theme.rs") {
+            continue;
+        }
+        let mut source = fs::read_to_string(&path).unwrap();
+        if path.ends_with("devices/tree_render.rs") {
+            let count = source.matches(LEGACY_DEVICE_TREE).count();
+            assert_eq!(
+                count, 1,
+                "historical device-tree exception changed; review it explicitly before updating the gate"
+            );
+            source = source.replacen(LEGACY_DEVICE_TREE, "", 1);
+        }
+
+        for needle in ["if active", "if selected"] {
+            for (offset, _) in source.match_indices(needle) {
+                let end = (offset + 260).min(source.len());
+                let window = &source[offset..end];
+                assert!(
+                    !window.contains("accent()"),
+                    "{} introduces accent/blue foreground in an active-selection branch; use selection_overlay/apply_selection + table_cell so selection is expressed by subtle background and brightness",
+                    path.strip_prefix(env!("CARGO_MANIFEST_DIR"))
+                        .unwrap_or(&path)
+                        .display()
+                );
+            }
+        }
+    }
+
+    let backups = fs::read_to_string(root.join("backups/render.rs")).unwrap();
+    assert!(
+        backups.contains("theme.apply_selection(theme.table_cell("),
+        "backup device tree must share table-style selection semantics"
+    );
+}
+
+#[test]
 fn shared_surfaces_default_to_soft_body_text_not_heading_white() {
     let theme = Theme::truecolor_dark();
     let palette = theme.palette();

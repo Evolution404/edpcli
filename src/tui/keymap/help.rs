@@ -115,6 +115,11 @@ pub const BACKUPS_HELP: &[HelpBinding] = &[
         action: TuiAction::MoveDown,
     },
     HelpBinding {
+        keys: "H/L",
+        label: "设备树 / 表格平滑横移",
+        action: TuiAction::TableScrollRight,
+    },
+    HelpBinding {
         keys: "Space",
         label: "勾选 / 取消勾选",
         action: TuiAction::Toggle,

@@ -295,6 +295,7 @@ pub(super) fn backup(
         size_ok: healthy,
         content_sha256: Some("0123456789abcdef".repeat(4)),
         coverage: Some(coverage()),
+        restore_preview: None,
     }
 }
 
@@ -426,5 +427,6 @@ pub(super) fn inspect_workspace(
         topology: crate::application::inspect_tree::build_inspect_topology(&context),
         disk_layout,
         disk_layout_issue: None,
+        backup_manifest: None,
     }
 }

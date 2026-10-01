@@ -111,6 +111,34 @@ pub struct MediaIdentitySnapshot {
 
 impl MediaIdentitySnapshot {
     /// Construct canonical Plain identity without inventing an observed EDP protocol identity.
+    pub(crate) fn strong_backup_group_key(&self) -> Option<String> {
+        let sectors = self.hardware.total_sectors?;
+        let logical_sector_size = self.hardware.logical_sector_size?;
+        let vid = self.hardware.vid?;
+        let pid = self.hardware.pid?;
+        let geometry =
+            format!("vid:{vid:04x}:pid:{pid:04x}:sectors:{sectors}:lss:{logical_sector_size}");
+
+        if self.hardware.serial_quality == SerialQuality::Usable {
+            if let Some(serial) = self.hardware.serial.as_deref() {
+                return Some(format!(
+                    "serial:{}:{geometry}",
+                    crate::sha256::sha256_hex(serial.as_bytes())
+                ));
+            }
+            if let Some(serial) = self.hardware.serial_sha256.as_deref() {
+                return Some(format!("serial:{serial}:{geometry}"));
+            }
+        }
+        match (
+            self.protocol.device_id.as_deref(),
+            self.protocol.onlyid.as_deref(),
+        ) {
+            (Some(device_id), Some(onlyid)) => Some(format!("edp:{device_id}:{onlyid}:{geometry}")),
+            _ => None,
+        }
+    }
+
     pub fn plain(
         hardware: HardwareIdentityEvidence,
         derived: DerivedProtocolEvidence,

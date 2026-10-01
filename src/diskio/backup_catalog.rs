@@ -149,6 +149,8 @@ pub struct BackupEntry {
     pub content_sha256: Option<String>,
     /// Typed region/extent/artifact coverage projected during the background scan.
     pub coverage: Option<crate::backup_coverage::BackupCoverage>,
+    /// Verified manifest retained for higher-level read-side restore projection.
+    pub manifest: Option<crate::edpb::Manifest>,
 }
 
 fn strip_numeric_suffix<'a>(s: &'a str, marker: &str) -> Option<(&'a str, String)> {
@@ -328,6 +330,9 @@ pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
         lba8,
         content_sha256,
         coverage,
+        manifest: verified
+            .as_ref()
+            .map(|container| container.manifest.clone()),
     })
 }
 
@@ -366,31 +371,19 @@ pub fn scan_backup_names(dir: &Path) -> Vec<PathBuf> {
 
 /// Automatic prune grouping requires strong canonical identity evidence.
 ///
-/// Prefer usable USB serial evidence (physical media). v3 carries the reviewed raw serial;
-/// v1/v2 retain the historical digest. Without either, require an observed EDP device_id + onlyid
-/// pair (EDP instance). Model/capacity-only evidence and filename-derived metadata never form an
-/// automatic deletion group.
+/// Prefer usable USB serial evidence, but never trust a serial in isolation: some controllers
+/// clone the same USB serial across physically different capacities. Strong grouping therefore also
+/// requires matching VID:PID + exact total_sectors + logical_sector_size. v3 carries the reviewed
+/// raw serial; v1/v2 retain the historical digest. Without either, require an observed EDP
+/// device_id + onlyid pair plus the same hardware geometry. Model/capacity-only evidence and
+/// filename-derived metadata never form an automatic deletion group.
 pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
-    use crate::media_identity::SerialQuality;
-
-    let identity = entry.meta.as_ref()?.identity.as_ref()?;
-    if identity.hardware.serial_quality == SerialQuality::Usable {
-        if let Some(serial) = identity.hardware.serial.as_deref() {
-            // The digest is ephemeral grouping material only. It is never written back into a
-            // v3 manifest or canonical identity as serial_sha256.
-            return Some(format!("serial:{}", sha256_hex(serial.as_bytes())));
-        }
-        if let Some(serial) = identity.hardware.serial_sha256.as_deref() {
-            return Some(format!("serial:{serial}"));
-        }
-    }
-    match (
-        identity.protocol.device_id.as_deref(),
-        identity.protocol.onlyid.as_deref(),
-    ) {
-        (Some(device_id), Some(onlyid)) => Some(format!("edp:{device_id}:{onlyid}")),
-        _ => None,
-    }
+    entry
+        .meta
+        .as_ref()?
+        .identity
+        .as_ref()?
+        .strong_backup_group_key()
 }
 
 /// Non-destructive list grouping is intentionally broader than prune grouping.

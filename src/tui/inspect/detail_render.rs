@@ -1,3 +1,4 @@
+use super::backup_manifest_render;
 use super::*;
 use crate::application::inspect::AdvancedInspectWorkspace;
 use crate::application::inspect_tree::InspectNodeKind;
@@ -97,6 +98,9 @@ pub(super) fn draw_inspect_object_panes(
             Span::styled("来源  ", muted()),
             Span::styled(safe(&workspace.source), muted()),
         ]));
+        if let Some(manifest) = workspace.backup_manifest.as_ref() {
+            overview_lines.extend(backup_manifest_render::overview_lines(manifest));
+        }
 
         match row.kind {
             InspectNodeKind::Sector => {
@@ -233,6 +237,10 @@ pub(super) fn draw_inspect_object_panes(
         overview_lines.push(Line::from("当前没有可选节点。"));
         detail_lines.push(Line::from("当前没有可选节点。"));
     }
+    if let Some(manifest) = workspace.backup_manifest.as_ref() {
+        detail_lines.extend(backup_manifest_render::detail_lines(manifest));
+    }
+
     if let Some(AdvancedInspectPrompt::Search { input }) = advanced.prompt.as_ref() {
         detail_lines.push(Line::from(""));
         detail_lines.push(Line::from(Span::styled(

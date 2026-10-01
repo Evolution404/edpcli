@@ -23,6 +23,7 @@ fn inspect_workspace() -> AdvancedInspectWorkspace {
         topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
         disk_layout: Some(disk_layout),
         disk_layout_issue: None,
+        backup_manifest: None,
     }
 }
 
@@ -66,6 +67,8 @@ fn confirm_kind(row: &mut edpcli::disk_scan::Row, kind: edpcli::provision::DiskP
     };
     let snapshot = MediaIdentitySnapshot {
         hardware: HardwareIdentityEvidence {
+            vid: u16::from_str_radix(&row.vid, 16).ok(),
+            pid: u16::from_str_radix(&row.pid, 16).ok(),
             total_sectors: Some(row.size / 512),
             logical_sector_size: Some(512),
             ..HardwareIdentityEvidence::default()
@@ -111,6 +114,7 @@ fn backup(
         size_ok: true,
         content_sha256: Some("a".repeat(64)),
         coverage: None,
+        restore_preview: None,
     }
 }
 
@@ -288,6 +292,289 @@ fn devices_and_backups_share_overview_layout_and_hide_zero_kind_counts() {
     ] {
         assert!(!backups.contains(old_hint), "{backups}");
     }
+}
+
+#[test]
+fn backup_device_tree_filters_without_renumbering_and_search_stays_scoped() {
+    let mut first = device();
+    first.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
+    confirm_kind(&mut first, edpcli::provision::DiskProvisionKind::Mode0);
+
+    let mut second = device();
+    second.disk = 7;
+    second.device_id = Some("disk&ven_test&prod_second".into());
+    second.onlyid = Some("2402259934".into());
+    second.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
+    confirm_kind(&mut second, edpcli::provision::DiskProvisionKind::Mode0);
+
+    let mut first_old = related_backup(1, &first);
+    first_old.file_name = "first-old.edpb".into();
+    let mut first_new = related_backup(3, &first);
+    first_new.file_name = "first-new.edpb".into();
+    let mut second_backup = related_backup(8, &second);
+    second_backup.file_name = "second.edpb".into();
+    let mut unresolved = backup(11, Some(edpcli::provision::DiskProvisionKind::Plain));
+    unresolved.file_name = "unknown.edpb".into();
+
+    let mut state = AppState::new();
+    state.replace_backups(vec![first_old, first_new, second_backup, unresolved]);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+
+    let nodes = state.backup_device_tree_nodes();
+    assert_eq!(nodes.len(), 4);
+    assert_eq!(nodes[0].label, "全部备份");
+    assert_eq!(nodes[0].count, 4);
+    assert_eq!(nodes[1].count, 2);
+    assert_eq!(nodes[2].count, 1);
+    assert_eq!(nodes[3].label, "身份未确认");
+    assert_eq!(nodes[3].count, 1);
+
+    state.focus_backups_pane(PaneId::BackupDevices);
+    state.backup_device_tree_move(1);
+    assert!(state.backup_device_filter_active());
+    assert_eq!(state.visible_backup_count(), 2);
+    assert_eq!(state.backup_at_visible(0).unwrap().index, 1);
+    assert_eq!(state.backup_at_visible(1).unwrap().index, 3);
+
+    use edpcli::tui::table_layout::TableKind;
+    state.focus_backups_pane(PaneId::BackupsList);
+    assert!(state.move_table_column_for_viewport(TableKind::Backups, false, 160, 45));
+    state.toggle_table_sort(TableKind::Backups);
+    let mut sorted_group = (0..state.visible_backup_count())
+        .map(|position| state.backup_at_visible(position).unwrap().index)
+        .collect::<Vec<_>>();
+    sorted_group.sort_unstable();
+    assert_eq!(sorted_group, vec![1, 3]);
+    let selected_path = state.selected_backup().unwrap().path.clone();
+    state.toggle_selected_backup();
+    assert_eq!(
+        state.selected_backup_batch_targets(),
+        vec![(selected_path, "a".repeat(64))]
+    );
+    assert!(state.clear_table_sort(TableKind::Backups));
+    state.focus_backups_pane(PaneId::BackupDevices);
+
+    state.navigate(NavCommand::Search, 20);
+    for ch in "first-new".chars() {
+        state.push_input_char(ch);
+    }
+    state.submit_search();
+    assert_eq!(state.visible_backup_count(), 1);
+    assert_eq!(state.backup_at_visible(0).unwrap().index, 3);
+    assert!(state.backup_device_filter_active());
+
+    state.navigate(NavCommand::Search, 20);
+    for _ in 0.."first-new".chars().count() {
+        state.backspace_input();
+    }
+    state.submit_search();
+    assert_eq!(state.visible_backup_count(), 2);
+    assert!(state.backup_device_filter_active());
+
+    state.backup_device_tree_toggle();
+    assert!(!state.backup_device_tree_expanded());
+    assert_eq!(
+        (0..state.visible_backup_count())
+            .map(|position| state.backup_at_visible(position).unwrap().index)
+            .collect::<Vec<_>>(),
+        vec![1, 3]
+    );
+    state.backup_device_tree_jump(true);
+    assert_eq!(state.visible_backup_count(), 2);
+
+    state.backup_device_tree_toggle();
+    assert!(state.backup_device_tree_expanded());
+    assert_eq!(state.backup_device_tree_selected(), 1);
+
+    state.backup_device_tree_jump(true);
+    assert_eq!(state.visible_backup_count(), 1);
+    assert_eq!(state.backup_at_visible(0).unwrap().index, 11);
+    state.backup_device_tree_jump(false);
+    assert_eq!(state.visible_backup_count(), 4);
+}
+
+#[test]
+fn backup_device_tree_is_a_sidebar_and_enter_target_is_the_backup_list() {
+    let mut confirmed = device();
+    confirmed.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
+    confirm_kind(&mut confirmed, edpcli::provision::DiskProvisionKind::Mode0);
+    let mut state = AppState::new();
+    state.replace_backups(vec![
+        related_backup(5, &confirmed),
+        backup(9, Some(edpcli::provision::DiskProvisionKind::Plain)),
+    ]);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    state.focus_backups_pane(PaneId::BackupDevices);
+
+    let rendered = render_text(&state, 160, 45).replace(' ', "");
+    for expected in ["设备", "全部备份2", "身份未确认1", "备份列表"] {
+        assert!(
+            rendered.contains(expected),
+            "missing {expected}: {rendered}"
+        );
+    }
+
+    state.backup_device_tree_focus_list();
+    assert_eq!(state.backups_focused_pane(), PaneId::BackupsList);
+}
+
+#[test]
+fn backup_device_tree_hl_scroll_reveals_full_active_identity_without_ellipsis() {
+    let mut confirmed = device();
+    confirmed.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
+    confirm_kind(&mut confirmed, edpcli::provision::DiskProvisionKind::Mode0);
+    let mut item = related_backup(5, &confirmed);
+    item.device_id =
+        Some("disk&ven_vendorco&prod_productcode_with_a_very_long_model_WRAP_SENTINEL_TAIL".into());
+    item.identity
+        .as_mut()
+        .expect("EDP identity")
+        .protocol
+        .device_id = item.device_id.clone();
+
+    let mut state = AppState::new();
+    state.replace_backups(vec![item]);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    state.focus_backups_pane(PaneId::BackupDevices);
+    state.backup_device_tree_move(1);
+
+    let initial = render_lines(&state, 160, 45);
+    let initial_sidebar = initial
+        .iter()
+        .filter_map(|line| line.split_once("┃│").map(|(left, _)| left))
+        .collect::<Vec<_>>();
+    assert!(
+        !initial_sidebar
+            .iter()
+            .any(|line| line.contains("WRAP_SENTINEL_TAIL")),
+        "long active identity should initially be clipped by the viewport, not wrapped: {initial_sidebar:#?}"
+    );
+    assert!(
+        !initial_sidebar.iter().any(|line| line.contains('…')),
+        "device-tree clipping must not replace hidden content with ellipsis: {initial_sidebar:#?}"
+    );
+
+    while state.scroll_backup_device_tree(false, 160) {}
+    assert!(state.backup_device_tree_scroll_offset() > 0);
+    let scrolled = render_lines(&state, 160, 45);
+    let scrolled_sidebar = scrolled
+        .iter()
+        .filter_map(|line| line.split_once("┃│").map(|(left, _)| left))
+        .collect::<Vec<_>>();
+    assert!(
+        scrolled_sidebar
+            .iter()
+            .any(|line| line.contains("SENTINEL_TAIL")),
+        "H/L must reach the real unabridged right tail of the active device identity: {scrolled_sidebar:#?}"
+    );
+    assert!(
+        !scrolled_sidebar.iter().any(|line| line.contains('…')),
+        "active device content must remain real text after horizontal scrolling: {scrolled_sidebar:#?}"
+    );
+
+    while state.scroll_backup_device_tree(true, 160) {}
+    assert_eq!(state.backup_device_tree_scroll_offset(), 0);
+}
+
+#[test]
+fn backup_device_tree_keeps_selected_device_visible_when_moving_beyond_viewport() {
+    let mut backups = Vec::new();
+    for index in 0..32usize {
+        let mut row = device();
+        row.disk = 10 + index as u32;
+        row.device_id = Some(format!("disk&ven_vendor{index:02}&prod_model{index:02}"));
+        row.onlyid = Some(format!("ID{index:04}"));
+        row.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
+        confirm_kind(&mut row, edpcli::provision::DiskProvisionKind::Mode0);
+        let mut item = related_backup(index + 1, &row);
+        item.device_id = row.device_id.clone();
+        item.onlyid = row.onlyid.clone();
+        backups.push(item);
+    }
+
+    let mut state = AppState::new();
+    state.replace_backups(backups);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    state.focus_backups_pane(PaneId::BackupDevices);
+    for _ in 0..26 {
+        state.backup_device_tree_move(1);
+    }
+
+    let selected = state.backup_device_tree_selected();
+    let selected_label = state.backup_device_tree_nodes()[selected].label.clone();
+    let lines = render_lines(&state, 160, 32);
+    let sidebar = lines
+        .iter()
+        .filter_map(|line| line.split_once("┃│").map(|(left, _)| left))
+        .collect::<Vec<_>>();
+
+    let selected_prefix = selected_label
+        .split(" · ")
+        .next()
+        .unwrap_or(selected_label.as_str());
+    assert!(
+        sidebar
+            .iter()
+            .any(|line| line.contains('▌') && line.contains(selected_prefix)),
+        "selected device must remain visible after automatic tree scrolling: {selected_label}\n{sidebar:#?}"
+    );
+    assert!(
+        !sidebar.iter().any(|line| line.contains("全部备份")),
+        "tree should have scrolled away from the root once selection moves far below the viewport: {sidebar:#?}"
+    );
+}
+
+#[test]
+fn backup_horizontal_scroll_reaches_real_right_edge_with_device_sidebar() {
+    use edpcli::tui::table_layout::TableKind;
+
+    let mut item = backup(1, Some(edpcli::provision::DiskProvisionKind::Mode1));
+    item.dept = Some("江苏省电力有限公司/南京供电公司/输电运检中心/超长部门字段".into());
+    item.user = Some("测试用户姓名很长".into());
+    item.onlyid = Some("19877183881234567890".into());
+    item.file_name =
+        "disk5_245760000_vid3535_pid6300_extremely_long_backup_filename_for_scroll.edpb".into();
+
+    let mut state = AppState::new();
+    state.replace_backups(vec![item]);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    state.focus_backups_pane(PaneId::BackupsList);
+
+    let terminal_width = 200u16;
+    let terminal_height = 45usize;
+    while state.scroll_table_for_viewport(
+        TableKind::Backups,
+        false,
+        terminal_width,
+        terminal_height,
+    ) {}
+
+    let view = state
+        .table_view_data(TableKind::Backups)
+        .expect("backup table view");
+    let layout = state.table_visual_layout(TableKind::Backups);
+    let widths = state.table_visual_widths(TableKind::Backups, &view.content_widths);
+    let active = state.table_interaction(TableKind::Backups).active_column();
+    let expected_viewport = terminal_width
+        .saturating_sub(
+            edpcli::tui::ui::ViewportClass::for_width(terminal_width)
+                .backup_device_sidebar_width()
+                .unwrap(),
+        )
+        .saturating_sub(4);
+    let expected_max = layout.max_scroll(&widths, Some(active), expected_viewport);
+
+    assert_eq!(
+        state.table_scroll_offset(TableKind::Backups),
+        expected_max,
+        "H/L viewport movement must use the actual right-table width after subtracting the device tree"
+    );
+
+    let rendered = render_text(&state, terminal_width, terminal_height as u16);
+    assert!(
+        rendered.contains("名称"),
+        "rightmost backup column must become reachable at the final horizontal viewport: {rendered}"
+    );
 }
 
 #[test]

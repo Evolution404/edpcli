@@ -7,6 +7,7 @@ pub enum PaneId {
     DevicesList,
     DevicesTree,
     DevicesDetail,
+    BackupDevices,
     BackupsList,
     BackupSummary,
     BackupCoverage,
@@ -26,8 +27,12 @@ pub enum PaneId {
 impl PaneId {
     pub const DEVICES_ORDER: [Self; 3] =
         [Self::DevicesList, Self::DevicesTree, Self::DevicesDetail];
-    pub const BACKUPS_ORDER: [Self; 3] =
-        [Self::BackupsList, Self::BackupSummary, Self::BackupCoverage];
+    pub const BACKUPS_ORDER: [Self; 4] = [
+        Self::BackupDevices,
+        Self::BackupsList,
+        Self::BackupSummary,
+        Self::BackupCoverage,
+    ];
     pub const INSPECT_ORDER: [Self; 3] = [
         Self::InspectTree,
         Self::InspectOverview,
@@ -74,7 +79,7 @@ impl PaneId {
     pub const fn is_backups(self) -> bool {
         matches!(
             self,
-            Self::BackupsList | Self::BackupSummary | Self::BackupCoverage
+            Self::BackupDevices | Self::BackupsList | Self::BackupSummary | Self::BackupCoverage
         )
     }
 

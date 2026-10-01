@@ -181,4 +181,6 @@ pub struct AdvancedInspectWorkspace {
     pub topology: super::super::inspect_tree::InspectTopology,
     pub disk_layout: Option<super::super::disk_layout::DiskLayoutModel>,
     pub disk_layout_issue: Option<String>,
+    /// Verified EDPB manifest for backup-source technical inspection.
+    pub backup_manifest: Option<std::sync::Arc<crate::edpb::Manifest>>,
 }

@@ -6,6 +6,7 @@
 
 pub mod backup;
 pub mod backup_coverage;
+pub mod backup_restore_preview;
 pub mod device;
 pub mod disk_layout;
 pub mod evidence;
@@ -112,6 +113,7 @@ pub struct BackupWorkspaceItem {
     pub size_ok: bool,
     pub content_sha256: Option<String>,
     pub coverage: Option<backup_coverage::BackupCoverage>,
+    pub restore_preview: Option<backup_restore_preview::BackupRestorePreview>,
 }
 
 /// Load the canonical selector used by every backup frontend.
@@ -167,6 +169,10 @@ pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {
                 size_ok: entry.size_ok,
                 content_sha256: entry.content_sha256.clone(),
                 coverage: entry.coverage.clone(),
+                restore_preview: entry
+                    .manifest
+                    .as_ref()
+                    .map(backup_restore_preview::BackupRestorePreview::from_manifest),
             }
         })
         .collect()

@@ -250,6 +250,13 @@ fn plain_protocol_context(path: &Path, manifest: &Manifest) -> Result<Vec<u8>, E
 }
 
 impl EvidenceSource {
+    pub fn backup_manifest(&self) -> Option<&Manifest> {
+        match &self.reader {
+            EvidenceReader::Backup(reader) => Some(&reader.manifest),
+            EvidenceReader::Disk(_) => None,
+        }
+    }
+
     pub fn open_backup(path: &Path) -> Result<Self, EvidenceError> {
         let verified =
             crate::edpb::verify_file(path).map_err(|error| EvidenceError::BackupVerify {

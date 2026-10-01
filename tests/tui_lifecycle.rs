@@ -589,6 +589,7 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         ),
         disk_layout: None,
         disk_layout_issue: None,
+        backup_manifest: None,
     }));
     assert_eq!(
         state.advanced_inspect().unwrap().stage,

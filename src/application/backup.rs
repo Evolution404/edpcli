@@ -332,6 +332,7 @@ mod tests {
             lba8: None,
             content_sha256: None,
             coverage: None,
+            manifest: None,
         }
     }
 

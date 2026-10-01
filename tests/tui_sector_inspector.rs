@@ -23,6 +23,7 @@ fn workspace(items: Vec<AdvancedInspectItem>) -> AdvancedInspectWorkspace {
         topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
         disk_layout: None,
         disk_layout_issue: None,
+        backup_manifest: None,
     }
 }
 
@@ -37,6 +38,7 @@ fn workspace_with_partition(items: Vec<AdvancedInspectItem>) -> AdvancedInspectW
         topology: edpcli::application::inspect_tree::build_inspect_topology(&context),
         disk_layout: None,
         disk_layout_issue: None,
+        backup_manifest: None,
     }
 }
 

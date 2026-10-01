@@ -177,6 +177,7 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
         topology,
         disk_layout,
         disk_layout_issue,
+        backup_manifest: None,
     })
 }
 
@@ -184,6 +185,7 @@ pub(super) fn run_evidence_source(
     mut evidence: EvidenceSource,
     request: &AdvancedInspectRequest,
 ) -> Result<AdvancedInspectWorkspace, InspectError> {
+    let backup_manifest = evidence.backup_manifest().cloned().map(std::sync::Arc::new);
     let identity = evidence.identity().clone();
     let mut meta = InspectMeta {
         device_id: identity.device_id,
@@ -229,5 +231,7 @@ pub(super) fn run_evidence_source(
         partition_table_issue,
     );
     let source = evidence.source_label().to_string();
-    run_advanced_source(source, meta, context, request, &mut evidence)
+    let mut workspace = run_advanced_source(source, meta, context, request, &mut evidence)?;
+    workspace.backup_manifest = backup_manifest;
+    Ok(workspace)
 }

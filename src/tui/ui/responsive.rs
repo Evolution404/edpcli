@@ -18,6 +18,22 @@ impl ViewportClass {
         }
     }
 
+    pub const fn backup_device_sidebar_width(self) -> Option<u16> {
+        match self {
+            Self::Compact => None,
+            Self::Standard => Some(30),
+            Self::Wide => Some(36),
+            Self::UltraWide => Some(40),
+        }
+    }
+
+    pub fn backup_device_tree_inner_width(self, terminal_width: u16) -> u16 {
+        self.backup_device_sidebar_width()
+            .unwrap_or(terminal_width)
+            .saturating_sub(2)
+            .max(1)
+    }
+
     pub const fn has_secondary(self) -> bool {
         !matches!(self, Self::Compact)
     }
