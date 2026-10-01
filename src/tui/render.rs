@@ -4,9 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        Block, Borders, Cell, Clear, Paragraph, Row as TableRow, Table, TableState, Tabs, Wrap,
-    },
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row as TableRow, Table, TableState, Wrap},
     Frame,
 };
 
@@ -36,7 +34,7 @@ use backups_render::{
     draw_backup_batch_delete, draw_backup_delete, draw_backup_prune, draw_backups,
 };
 use devices_render::draw_devices;
-use inspect_render::draw_advanced_inspect;
+use inspect_render::{draw_advanced_inspect, draw_advanced_inspect_overlay};
 use operation_progress_render::draw_operation_progress;
 use provision_render::{draw_provision, draw_scheme_picker};
 use restore_confirmation_render::draw_restore_write_confirmation;
@@ -218,14 +216,6 @@ fn muted() -> Style {
 
 fn selection_marker() -> Style {
     super::theme::current().selection_marker()
-}
-
-fn tab() -> Style {
-    super::theme::current().tab()
-}
-
-fn active_tab() -> Style {
-    super::theme::current().active_tab()
 }
 
 fn input_focused() -> Style {
@@ -857,7 +847,7 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     );
     let core_mode = if state.is_critical_operation() {
         CoreMode::Guard
-    } else if (state.workspace() == Workspace::Inspect && state.advanced_inspect().is_some())
+    } else if state.advanced_inspect().is_some()
         || state.active_scan_pending()
         || state.wizard().is_some()
         || state.workspace() == Workspace::Provision
@@ -929,6 +919,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     if write_confirmation_open {
         draw_wizard(frame, content_area, state);
     }
+
+    draw_advanced_inspect_overlay(frame, state);
 
     if footer_height > 0 {
         super::shell::message_bar(frame, chunks[3], notice, status.as_deref());

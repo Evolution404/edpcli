@@ -550,6 +550,11 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         state.advanced_inspect().unwrap().stage,
         AdvancedInspectStage::Running
     );
+    assert_eq!(
+        state.workspace(),
+        edpcli::tui::state::Workspace::Devices,
+        "Inspect loading must stay on the source workspace until the worker succeeds"
+    );
 
     for (width, height) in [(40, 10), (80, 24), (160, 60)] {
         let backend = TestBackend::new(width, height);
@@ -607,18 +612,9 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         .collect::<String>();
     let palette = edpcli::tui::theme::current().palette();
     let selection = palette.selection;
-    let active_tab = buffer
-        .content()
-        .iter()
-        .filter(|cell| {
-            cell.style().fg == Some(palette.accent)
-                && cell.style().add_modifier.contains(Modifier::UNDERLINED)
-        })
-        .map(|cell| cell.symbol())
-        .collect::<String>();
     assert!(
-        active_tab.replace(' ', "").contains("1业务字段"),
-        "active Inspect panel tab should use active-tab style: {active_tab}"
+        !text.replace(' ', "").contains("业务字段"),
+        "legacy Inspect browser tabs must not render: {text}"
     );
     let pane_title_markers = buffer
         .content()
@@ -720,42 +716,22 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
             .map(|cell| cell.symbol())
             .collect::<String>();
         let compact = text.replace(' ', "");
-        assert!(compact.contains("字段详情"), "{text}");
+        assert!(compact.contains("字段/证据"), "{text}");
         if width >= 80 {
             assert!(compact.contains("结构树"), "{text}");
-            assert!(compact.contains("对象快照"), "{text}");
+            assert!(compact.contains("对象摘要"), "{text}");
             assert!(compact.contains("磁盘概览"), "{text}");
         }
-        let active_tab = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .filter(|cell| {
-                cell.style().fg == Some(palette.accent)
-                    && cell.style().add_modifier.contains(Modifier::UNDERLINED)
-            })
-            .map(|cell| cell.symbol())
-            .collect::<String>();
         assert_eq!(
             state.advanced_inspect().unwrap().panel,
             AdvancedInspectPanel::Detail
         );
-        if width >= 80 {
-            assert!(
-                active_tab.replace(' ', "").contains("1业务字段"),
-                "Pane focus must not implicitly switch the explicit Inspect view tab: {active_tab}"
-            );
-            assert_eq!(
-                state.advanced_inspect_view_mode(),
-                Some(edpcli::tui::state::InspectViewMode::Business)
-            );
-        } else {
-            assert!(
-                !active_tab.trim().is_empty(),
-                "narrow Inspect tabs must still expose the active-tab style"
-            );
-        }
+        assert_eq!(
+            state.advanced_inspect_view_mode(),
+            Some(edpcli::tui::state::InspectViewMode::Browser)
+        );
+        assert!(!compact.contains("业务字段"), "{text}");
+        assert!(!compact.contains("原始字段"), "{text}");
     }
 
     state.advanced_inspect_shift_panel(true);

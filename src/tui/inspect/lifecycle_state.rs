@@ -7,11 +7,9 @@ impl AppState {
             self.set_warning_notice("关键操作仍在执行，完成前不能启动全盘检查。");
             return false;
         }
-        self.push_navigation_frame(NavigationLocation::from_workspace(self.shell.workspace));
         if let AdvancedInspectSource::Disk(disk) = &source {
             self.shell.pinned_disk = Some(*disk);
         }
-        self.shell.workspace = crate::tui::state::Workspace::Inspect;
         let mut expanded = std::collections::BTreeSet::new();
         expanded.insert("device".to_string());
         self.inspect.advanced = Some(AdvancedInspectState {
@@ -20,7 +18,7 @@ impl AppState {
             result: None,
             tree_selected: 0,
             panel: AdvancedInspectPanel::Tree,
-            view_mode: InspectViewMode::Business,
+            view_mode: InspectViewMode::Browser,
             pane_focus: crate::tui::pane::PaneFocus::inspect(),
             expanded,
             lazy_offsets: std::collections::BTreeMap::new(),
@@ -82,27 +80,35 @@ impl AppState {
         &mut self,
         result: Result<crate::application::inspect::AdvancedInspectWorkspace, String>,
     ) {
-        let Some(state) = self.inspect.advanced.as_mut() else {
-            return;
-        };
-        state.stage = AdvancedInspectStage::Browser;
-        state.tree_selected = 0;
-        reset_inspect_selected_context(state);
-        state.sector = None;
-        state.sector_cache_order.clear();
-        state.preview_load.clear();
-        state.detail_expanded.clear();
-        state.tree_revision = state.tree_revision.wrapping_add(1);
-        state.prompt = None;
-        state.search_query.clear();
-        state.search_matches.clear();
-        state.search_cursor = 0;
         match result {
             Ok(workspace) => {
+                self.push_navigation_frame(NavigationLocation::from_workspace(
+                    self.shell.workspace,
+                ));
+                self.shell.workspace = crate::tui::state::Workspace::Inspect;
+                let Some(state) = self.inspect.advanced.as_mut() else {
+                    return;
+                };
+                state.stage = AdvancedInspectStage::Browser;
+                state.tree_selected = 0;
+                reset_inspect_selected_context(state);
+                state.sector = None;
+                state.sector_cache_order.clear();
+                state.preview_load.clear();
+                state.detail_expanded.clear();
+                state.tree_revision = state.tree_revision.wrapping_add(1);
+                state.prompt = None;
+                state.search_query.clear();
+                state.search_matches.clear();
+                state.search_cursor = 0;
                 state.result = Some(workspace);
                 state.message = None;
             }
             Err(message) => {
+                let Some(state) = self.inspect.advanced.as_mut() else {
+                    return;
+                };
+                state.stage = AdvancedInspectStage::Failed;
                 state.result = None;
                 state.message = Some(crate::tui::ui::UiMessage::error(message));
             }
@@ -110,14 +116,18 @@ impl AppState {
     }
 
     pub fn close_advanced_inspect(&mut self) {
-        if self
-            .inspect
-            .advanced
-            .as_ref()
-            .is_some_and(|state| state.stage != AdvancedInspectStage::Running)
-        {
-            self.inspect.advanced = None;
-            self.restore_workspace_frame();
+        let Some(stage) = self.inspect.advanced.as_ref().map(|state| state.stage) else {
+            return;
+        };
+        match stage {
+            AdvancedInspectStage::Running => {}
+            AdvancedInspectStage::Failed => {
+                self.inspect.advanced = None;
+            }
+            AdvancedInspectStage::Browser => {
+                self.inspect.advanced = None;
+                self.restore_workspace_frame();
+            }
         }
     }
 }

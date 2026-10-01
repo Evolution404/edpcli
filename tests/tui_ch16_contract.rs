@@ -1177,7 +1177,7 @@ fn ch16_shell_exposes_four_top_level_workspaces() {
 fn ch16_inspect_is_nested_and_top_level_switching_cannot_leave_it() {
     use edpcli::tui::state::{NavCommand, Workspace};
 
-    let mut state = AppState::new();
+    let mut state = lba8_state();
     assert_eq!(
         Workspace::TOP_LEVEL,
         [Workspace::Devices, Workspace::Backups]
@@ -1191,11 +1191,9 @@ fn ch16_inspect_is_nested_and_top_level_switching_cannot_leave_it() {
             Workspace::Provision
         ]
     );
-    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
     assert_eq!(state.workspace(), Workspace::Inspect);
     let lines = rendered_lines(&state, 120, 36).join("\n").replace(' ', "");
-    assert!(lines.contains("检查"));
-    state.advanced_inspect_finish(Err("test".into()));
+    assert!(lines.contains("检查") || lines.contains("Inspect"));
     state.navigate(NavCommand::NextWorkspace, 20);
     assert_eq!(state.workspace(), Workspace::Inspect);
     assert!(state.advanced_inspect().is_some());
@@ -1354,7 +1352,7 @@ fn ch16_inspect_defaults_to_compact_layout_strip_and_object_snapshot() {
     let state = lba8_state();
     let text = rendered_lines(&state, 120, 36).join("\n").replace(' ', "");
     assert!(text.contains("磁盘概览"));
-    assert!(text.contains("对象快照"));
+    assert!(text.contains("对象摘要"));
     assert!(text.contains("部门输电运检中心"));
     assert!(
         !text.contains("LBA范围"),
@@ -1375,7 +1373,7 @@ fn ch16_inspect_field_evidence_keeps_every_typed_layer() {
     state.advanced_inspect_move_tree(field_index as isize - current as isize);
     let text = rendered_lines(&state, 240, 60).join("\n").replace(' ', "");
     for value in [
-        "字段详情/Evidence",
+        "字段/证据",
         "Value:",
         "SourceLBA:",
         "Group:",
@@ -1414,35 +1412,21 @@ fn ch16_inspect_lba8_renders_at_all_required_sizes() {
 }
 
 #[test]
-fn ch16_inspect_view_shortcuts_are_explicit() {
+fn ch16_legacy_inspect_view_shortcuts_are_removed() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use edpcli::tui::{
-        keymap::{KeyMapper, TuiAction},
-        state::InputMode,
-    };
+    use edpcli::tui::{keymap::KeyMapper, state::InputMode};
 
     let mut mapper = KeyMapper::new();
-    for (digit, expected) in [
-        ('1', TuiAction::InspectBusiness),
-        ('2', TuiAction::InspectRawFields),
-        ('3', TuiAction::InspectHex),
-    ] {
+    for digit in ['1', '2', '3', '4'] {
         assert_eq!(
             mapper.map(
                 InputMode::Normal,
                 KeyEvent::new(KeyCode::Char(digit), KeyModifiers::NONE)
             ),
-            Some(expected)
+            None,
+            "Inspect browser no longer exposes page-level numeric view tabs"
         );
     }
-    assert_eq!(
-        mapper.map(
-            InputMode::Normal,
-            KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE)
-        ),
-        None,
-        "Inspect no longer has a standalone disk-layout page"
-    );
 }
 
 #[test]

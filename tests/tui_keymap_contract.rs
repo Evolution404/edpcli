@@ -874,14 +874,17 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
 #[test]
 fn help_critical_shortcuts_match_live_keymap_actions() {
     let mut mapper = KeyMapper::new();
-    for (code, action) in [
-        (KeyCode::Char('1'), TuiAction::InspectBusiness),
-        (KeyCode::Char('2'), TuiAction::InspectRawFields),
-        (KeyCode::Char('3'), TuiAction::InspectHex),
-        (KeyCode::Char('J'), TuiAction::InspectJump),
-    ] {
-        assert_eq!(mapper.map(InputMode::Normal, key(code)), Some(action));
+    for code in [KeyCode::Char('1'), KeyCode::Char('2'), KeyCode::Char('3')] {
+        assert_eq!(
+            mapper.map(InputMode::Normal, key(code)),
+            None,
+            "legacy Inspect view shortcut {code:?} must remain removed"
+        );
     }
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('J'))),
+        Some(TuiAction::InspectJump)
+    );
 
     for (code, action) in [
         (KeyCode::Char('h'), TuiAction::TableColumnLeft),

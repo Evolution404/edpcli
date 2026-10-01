@@ -82,7 +82,7 @@ pub(super) fn draw_inspect_field_table(
             .collect::<Vec<_>>(),
     );
     let title = format!(
-        "字段详情 · 行 {}–{} / {} · {}",
+        "字段 / 证据 · 行 {}–{} / {} · {}",
         if values.is_empty() { 0 } else { row_start + 1 },
         row_end,
         values.len(),

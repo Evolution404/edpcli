@@ -213,8 +213,8 @@ fn execute_action_request(
         controller::ActionRequest::Navigate(command) => {
             dispatch_nav_command(state, tasks, command, backup_dir, viewport_height)
         }
-        controller::ActionRequest::InspectSelection { force_hex } => {
-            open_advanced_inspect_selection(state, tasks, force_hex);
+        controller::ActionRequest::InspectSelection => {
+            open_advanced_inspect_selection(state, tasks);
             StateEffect::None
         }
         controller::ActionRequest::InspectPreview { source, lba } => {
@@ -236,18 +236,12 @@ fn execute_action_request(
     }
 }
 
-pub(super) fn open_advanced_inspect_selection(
-    state: &mut AppState,
-    tasks: &mut TaskHub,
-    force_hex: bool,
-) {
+pub(super) fn open_advanced_inspect_selection(state: &mut AppState, tasks: &mut TaskHub) {
     let detail_selected = state.advanced_inspect_focused_pane()
         == Some(crate::tui::pane::PaneId::InspectDetail)
         && state.advanced_inspect_detail_selected_row().is_some();
     let request = if detail_selected {
         state.advanced_inspect_detail_open_selected()
-    } else if force_hex && state.advanced_inspect_selected_field().is_some() {
-        state.advanced_inspect_open_selected_field()
     } else if state.advanced_inspect_selected_sector_lba().is_some() {
         state.advanced_inspect_open_selected_sector()
     } else if let Some(field) = state.advanced_inspect_selected_field() {

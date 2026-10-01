@@ -272,7 +272,7 @@ fn selecting_lba12_shows_canonical_fields_before_enter() {
     let current = state.advanced_inspect().unwrap().tree_selected;
     state.advanced_inspect_move_tree(lba12 as isize - current as isize);
     assert!(state.advanced_inspect_sector().is_none());
-    state.advanced_inspect_set_view_mode(edpcli::tui::state::InspectViewMode::RawFields);
+    state.advanced_inspect_set_view_mode(edpcli::tui::state::InspectViewMode::Browser);
 
     let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
@@ -550,7 +550,7 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
     state.advanced_inspect_finish(Ok(workspace(vec![entry])));
     select_protocol_lba0(&mut state);
-    state.advanced_inspect_set_view_mode(InspectViewMode::RawFields);
+    state.advanced_inspect_set_view_mode(InspectViewMode::Browser);
     state.advanced_inspect_focus_pane(PaneId::InspectDetail);
     state
         .pane_viewport_mut(PaneId::InspectDetail)
@@ -572,7 +572,7 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
     assert!(text.contains("/30"), "{text}");
     assert!(text.contains("列"), "{text}");
     assert!(text.contains("Field20"), "{text}");
-    let detail = text.split("字段详情").nth(1).expect("field detail pane");
+    let detail = text.split("字段/证据").nth(1).expect("field evidence pane");
     assert!(!detail.contains("Field00"), "{detail}");
 }
 
@@ -970,7 +970,7 @@ fn jump_prompt_accepts_decimal_and_hex_lba_and_preserves_view_context() {
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
     state.advanced_inspect_finish(Ok(workspace_with_partition(Vec::new())));
     state.advanced_inspect_focus_pane(PaneId::InspectOverview);
-    state.advanced_inspect_set_view_mode(InspectViewMode::RawFields);
+    state.advanced_inspect_set_view_mode(InspectViewMode::Browser);
     let initial_selection = state.advanced_inspect().unwrap().tree_selected;
 
     state.advanced_inspect_begin_jump();
@@ -980,7 +980,7 @@ fn jump_prompt_accepts_decimal_and_hex_lba_and_preserves_view_context() {
     );
     assert_eq!(
         state.advanced_inspect_view_mode(),
-        Some(InspectViewMode::RawFields)
+        Some(InspectViewMode::Browser)
     );
     assert_eq!(
         state.advanced_inspect().unwrap().tree_selected,
@@ -1011,7 +1011,7 @@ fn jump_prompt_accepts_decimal_and_hex_lba_and_preserves_view_context() {
     assert_eq!(rows[selected].range.start_lba, 2_177);
     assert_eq!(
         state.advanced_inspect_view_mode(),
-        Some(InspectViewMode::RawFields)
+        Some(InspectViewMode::Browser)
     );
     assert_eq!(
         state.advanced_inspect_focused_pane(),

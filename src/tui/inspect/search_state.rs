@@ -63,6 +63,7 @@ impl AppState {
             .filter(|state| state.stage == AdvancedInspectStage::Browser)
         {
             state.sector = None;
+            state.view_mode = InspectViewMode::Browser;
             state.panel = AdvancedInspectPanel::Tree;
             state
                 .pane_focus

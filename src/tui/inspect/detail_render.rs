@@ -3,7 +3,6 @@ use crate::application::inspect::AdvancedInspectWorkspace;
 use crate::application::inspect_tree::InspectNodeKind;
 use crate::tui::state::{
     AdvancedInspectPanel, AdvancedInspectPrompt, AdvancedInspectState, AdvancedInspectTreeRow,
-    InspectViewMode,
 };
 
 pub(super) fn draw_inspect_object_panes(
@@ -263,7 +262,7 @@ pub(super) fn draw_inspect_object_panes(
         frame.render_widget(
             Paragraph::new(overview_lines)
                 .block(crate::tui::ui::card(
-                    "对象快照",
+                    "对象摘要",
                     advanced.panel == AdvancedInspectPanel::Overview,
                 ))
                 .scroll((overview_scroll.min(u16::MAX as usize) as u16, 0))
@@ -279,10 +278,7 @@ pub(super) fn draw_inspect_object_panes(
             .scroll_y
             .offset;
         let field_item = selected_row
-            .filter(|row| {
-                advanced.view_mode == InspectViewMode::RawFields
-                    && row.kind == InspectNodeKind::Sector
-            })
+            .filter(|row| row.kind == InspectNodeKind::Sector)
             .and_then(|row| {
                 workspace
                     .items
@@ -303,7 +299,7 @@ pub(super) fn draw_inspect_object_panes(
             let detail_scroll = detail_offset.min(detail_lines.len().saturating_sub(1));
             frame.render_widget(
                 Paragraph::new(detail_lines)
-                    .block(crate::tui::ui::card("字段详情 / Evidence", detail_focus))
+                    .block(crate::tui::ui::card("字段 / 证据", detail_focus))
                     .wrap(Wrap { trim: false })
                     .scroll((detail_scroll.min(u16::MAX as usize) as u16, 0)),
                 detail_area,

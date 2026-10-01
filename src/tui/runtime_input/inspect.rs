@@ -27,6 +27,9 @@ pub(super) fn handle_inspect_key(
                 }
                 return Some(KeyOutcome::NextIteration);
             }
+            AdvancedInspectStage::Failed => {
+                return Some(KeyOutcome::NextIteration);
+            }
             AdvancedInspectStage::Browser => {
                 if let Some(prompt) = state.advanced_inspect_prompt() {
                     let mode = if matches!(prompt, state::AdvancedInspectPrompt::Jump { .. }) {
@@ -166,15 +169,6 @@ pub(super) fn handle_inspect_key(
                         }
                         TuiAction::InspectJump => {
                             state.advanced_inspect_begin_jump();
-                        }
-                        TuiAction::InspectBusiness => {
-                            state.advanced_inspect_set_view_mode(state::InspectViewMode::Business);
-                        }
-                        TuiAction::InspectRawFields => {
-                            state.advanced_inspect_set_view_mode(state::InspectViewMode::RawFields);
-                        }
-                        TuiAction::InspectHex => {
-                            state.advanced_inspect_set_view_mode(state::InspectViewMode::Hex);
                         }
                         TuiAction::Search => {
                             state.advanced_inspect_begin_search();
