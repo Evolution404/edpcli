@@ -247,7 +247,8 @@ fn chapter_12_five_by_five_conversion_golden_is_complete() {
         .iter()
         .find(|cell| cell.source == State::Mode1 && cell.target == State::Mode3)
         .unwrap();
-    assert!(m1_m3.contract.contains("combined-not-share"));
+    assert!(m1_m3.contract.contains("combined-rebuild"));
+    assert!(m1_m3.contract.contains("encrypt-drop"));
 }
 
 #[test]
