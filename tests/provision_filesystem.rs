@@ -5,7 +5,8 @@ use edpcli::{
     backup_metadata::PartitionGeometry,
     filesystem::{
         analysis::{analyze_partition, AnalysisStatus, PartitionReader},
-        build_empty_exfat, build_empty_fat16, FilesystemKind, SparseFilesystemImage,
+        build_empty_exfat, build_empty_fat16, build_empty_fat32, FilesystemKind,
+        SparseFilesystemImage,
     },
     partition_transform::{decrypt_mode2, EdpSm4Transform},
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
@@ -139,6 +140,83 @@ fn canonical_fat16_producer_stays_inside_consumer_domain() {
     let report = analyze_partition(&geometry(volume), &mut reader);
     assert_eq!(report.status, AnalysisStatus::Parsed, "{}", report.reason);
     assert_eq!(report.filesystem.as_deref(), Some("fat16"));
+}
+
+#[test]
+fn canonical_fat32_producer_round_trips_through_shared_fat_analyzer() {
+    let volume = 1_000_000;
+    let image = build_empty_fat32(2_048, volume, 0x89ab_cdef, "DATA").unwrap();
+    let mut partition = geometry(volume);
+    partition.start_sector = 2_048;
+    let mut reader = ImageReader {
+        image: &image,
+        decrypt_key: None,
+    };
+    let report = analyze_partition(&partition, &mut reader);
+    assert_eq!(report.status, AnalysisStatus::Parsed, "{}", report.reason);
+    assert_eq!(report.filesystem.as_deref(), Some("fat32"));
+    assert_eq!(report.file_count, Some(0));
+    assert_eq!(report.directory_count, Some(0));
+    assert_eq!(
+        report
+            .entries
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect::<Vec<_>>(),
+        ["/"]
+    );
+}
+
+fn empty_fat12_image() -> SparseFilesystemImage {
+    const TOTAL: u64 = 4_096;
+    const FAT_SECTORS: u16 = 2;
+    let mut boot = [0u8; 512];
+    boot[0..3].copy_from_slice(&[0xeb, 0x3c, 0x90]);
+    boot[3..11].copy_from_slice(b"MSDOS5.0");
+    boot[11..13].copy_from_slice(&512u16.to_le_bytes());
+    boot[13] = 8;
+    boot[14..16].copy_from_slice(&1u16.to_le_bytes());
+    boot[16] = 2;
+    boot[17..19].copy_from_slice(&512u16.to_le_bytes());
+    boot[19..21].copy_from_slice(&(TOTAL as u16).to_le_bytes());
+    boot[21] = 0xf8;
+    boot[22..24].copy_from_slice(&FAT_SECTORS.to_le_bytes());
+    boot[510..512].copy_from_slice(&[0x55, 0xaa]);
+
+    let mut fat0 = [0u8; 512];
+    fat0[..3].copy_from_slice(&[0xf8, 0xff, 0xff]);
+    let zero = [0u8; 512];
+    SparseFilesystemImage::from_writes(
+        TOTAL,
+        [(0, boot), (1, fat0), (2, zero), (3, fat0), (4, zero)],
+    )
+}
+
+#[test]
+fn fat12_round_trips_through_shared_fat_analyzer() {
+    const TOTAL: u64 = 4_096;
+    let image = empty_fat12_image();
+    let mut reader = ImageReader {
+        image: &image,
+        decrypt_key: None,
+    };
+    let report = analyze_partition(&geometry(TOTAL), &mut reader);
+    assert_eq!(report.status, AnalysisStatus::Parsed, "{}", report.reason);
+    assert_eq!(report.filesystem.as_deref(), Some("fat12"));
+    assert_eq!(report.file_count, Some(0));
+    assert_eq!(report.directory_count, Some(0));
+    assert_eq!(
+        report
+            .entries
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect::<Vec<_>>(),
+        ["/"]
+    );
 }
 
 #[test]

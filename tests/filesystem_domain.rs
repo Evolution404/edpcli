@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use edpcli::filesystem::{
     DetectionConfidence, DetectionResult, DriverRegistry, FilesystemCapabilities, FilesystemDriver,
     FilesystemError, FilesystemErrorKind, FilesystemGeometry, FilesystemKind, FilesystemReader,
-    FormatRequest, EXFAT_DRIVER, FAT16_DRIVER,
+    FormatRequest, EXFAT_DRIVER, FAT16_DRIVER, FAT32_DRIVER,
 };
 
 struct MemoryReader {
@@ -153,6 +153,11 @@ fn fat16_driver_owns_format_metadata_detection_and_verification() {
         .map(|write| (write.relative_lba, write.data))
         .collect::<BTreeMap<_, _>>();
     assert_eq!(
+        &writes.get(&0).expect("FAT16 boot sector")[3..11],
+        b"MSDOS5.0",
+        "FAT16 formatter must use the observed first-party OEM field, never an edpcli product marker"
+    );
+    assert_eq!(
         &writes,
         legacy.sectors(),
         "迁移适配入口必须与 driver 字节一致"
@@ -219,6 +224,91 @@ fn fat16_driver_uses_none_as_the_only_no_user_label_semantic() {
             .unwrap_err()
             .kind,
         FilesystemErrorKind::InvalidVolumeLabel
+    );
+}
+
+#[test]
+fn fat32_driver_owns_format_metadata_geometry_and_verification() {
+    let geometry = FilesystemGeometry::new(2_048, 1_000_000, 512);
+    let request = FormatRequest {
+        filesystem: FilesystemKind::Fat32,
+        volume_label: Some("DATA".into()),
+        volume_serial: Some(0x89ab_cdef),
+    };
+    let capabilities = FAT32_DRIVER.capabilities();
+    assert!(capabilities.detect);
+    assert!(capabilities.read_metadata);
+    assert!(capabilities.format);
+    assert!(capabilities.verify_format);
+    assert!(capabilities.analyze);
+
+    let plan = FAT32_DRIVER
+        .build_format_plan(geometry, &request)
+        .expect("FAT32 driver format plan");
+    let writes = plan
+        .writes
+        .iter()
+        .map(|write| (write.relative_lba, write.data))
+        .collect::<BTreeMap<_, _>>();
+    let legacy = edpcli::filesystem::build_empty_fat32(
+        geometry.partition_offset,
+        geometry.sector_count,
+        0x89ab_cdef,
+        "DATA",
+    )
+    .unwrap();
+    assert_eq!(&writes, legacy.sectors());
+
+    let mut reader = PlanReader {
+        sector_count: geometry.sector_count,
+        sectors: writes.clone(),
+    };
+    assert_eq!(
+        FAT32_DRIVER.detect(&mut reader).unwrap().confidence,
+        DetectionConfidence::Exact
+    );
+    assert!(FAT32_DRIVER
+        .matches_geometry(&mut reader, geometry)
+        .unwrap());
+    let metadata = FAT32_DRIVER.read_metadata(&mut reader).unwrap();
+    assert_eq!(metadata.kind, FilesystemKind::Fat32);
+    assert_eq!(metadata.volume_label.as_deref(), Some("DATA"));
+    assert_eq!(metadata.volume_serial, Some(0x89ab_cdef));
+    let verified = FAT32_DRIVER
+        .verify_format(&mut reader, geometry, &plan.expected_metadata)
+        .unwrap();
+    assert_eq!(verified.metadata, metadata);
+
+    let boot = writes.get(&0).unwrap();
+    assert_eq!(&boot[3..11], b"MSDOS5.0");
+    assert_eq!(u16::from_le_bytes(boot[48..50].try_into().unwrap()), 1);
+    assert_eq!(u16::from_le_bytes(boot[50..52].try_into().unwrap()), 6);
+    assert_eq!(&boot[82..90], b"FAT32   ");
+
+    let mut stale_geometry = PlanReader {
+        sector_count: geometry.sector_count,
+        sectors: writes.clone(),
+    };
+    stale_geometry.sectors.get_mut(&0).unwrap()[28..32].copy_from_slice(&2_049u32.to_le_bytes());
+    assert_eq!(
+        FAT32_DRIVER
+            .verify_format(&mut stale_geometry, geometry, &plan.expected_metadata)
+            .unwrap_err()
+            .kind,
+        FilesystemErrorKind::InvalidGeometry
+    );
+
+    let mut corrupt_fsinfo = PlanReader {
+        sector_count: geometry.sector_count,
+        sectors: writes,
+    };
+    corrupt_fsinfo.sectors.get_mut(&1).unwrap()[0] ^= 1;
+    assert_eq!(
+        FAT32_DRIVER
+            .verify_format(&mut corrupt_fsinfo, geometry, &plan.expected_metadata)
+            .unwrap_err()
+            .kind,
+        FilesystemErrorKind::InvalidMetadata
     );
 }
 

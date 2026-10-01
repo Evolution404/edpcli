@@ -126,18 +126,24 @@ pub(super) fn parse(
         return Err("FAT volume exceeds partition or has invalid data region".into());
     }
     let clusters = (total - data) / spc;
-    // Explicit work budget: 4M clusters / 16MiB FAT, 64MiB read evidence.
-    if !(4085..=4_194_304).contains(&clusters) {
-        return Err("unsupported FAT12 or cluster count exceeds filesystem analysis budget".into());
+    // Explicit work budget: at most 4M clusters. FAT12/16 root directories
+    // are fixed regions; FAT32 uses a normal root cluster chain.
+    if clusters == 0 || clusters > 4_194_304 {
+        return Err("FAT cluster count exceeds filesystem analysis budget".into());
     }
-    let is32 = clusters >= 65525;
+    let is12 = clusters < 4_085;
+    let is32 = clusters >= 65_525;
+    let is16 = !is12 && !is32;
     if (is32 && (fat16 != 0 || root_entries != 0 || u16le(boot, 42) != 0))
-        || (!is32 && (fat16 == 0 || root_entries == 0 || !root_entries.is_multiple_of(16)))
+        || ((is12 || is16) && (fat16 == 0 || root_entries == 0 || !root_entries.is_multiple_of(16)))
     {
         return Err("inconsistent FAT type and BPB".into());
     }
-    let width = if is32 { 4 } else { 2 };
-    let required = (clusters + 2) * width;
+    let required = if is12 {
+        ((clusters + 2) * 3).div_ceil(2)
+    } else {
+        (clusters + 2) * if is32 { 4 } else { 2 }
+    };
     if required > fat_sectors * 512 {
         return Err("FAT too small for cluster count".into());
     }
@@ -161,18 +167,38 @@ pub(super) fn parse(
     }
     let values: Vec<u32> = (0..clusters as usize + 2)
         .map(|i| {
-            if is32 {
-                u32le(&bytes, i * 4) & 0x0fffffff
+            if is12 {
+                let offset = i * 3 / 2;
+                let word = u16le(&bytes, offset);
+                if i.is_multiple_of(2) {
+                    u32::from(word & 0x0fff)
+                } else {
+                    u32::from(word >> 4)
+                }
+            } else if is32 {
+                u32le(&bytes, i * 4) & 0x0fff_ffff
             } else {
-                u16le(&bytes, i * 2) as u32
+                u32::from(u16le(&bytes, i * 2))
             }
         })
         .collect();
     let fat = Fat {
         values,
         count: clusters as u32,
-        eoc: if is32 { 0x0ffffff8 } else { 0xfff8 },
-        reserved: if is32 { 0x0ffffff0 } else { 0xfff0 },
+        eoc: if is12 {
+            0x0ff8
+        } else if is32 {
+            0x0fff_fff8
+        } else {
+            0xfff8
+        },
+        reserved: if is12 {
+            0x0ff0
+        } else if is32 {
+            0x0fff_fff0
+        } else {
+            0xfff0
+        },
     };
     let free = fat.values[2..].iter().filter(|&&v| v == 0).count() as u64 * spc * 512;
     let mut claimed = BTreeSet::new();
@@ -322,7 +348,13 @@ pub(super) fn parse(
     }
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(Inventory {
-        kind: if is32 { "fat32" } else { "fat16" },
+        kind: if is12 {
+            "fat12"
+        } else if is32 {
+            "fat32"
+        } else {
+            "fat16"
+        },
         total: total * 512,
         free,
         entries,

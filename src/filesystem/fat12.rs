@@ -69,7 +69,7 @@ impl FilesystemDriver for Fat12Driver {
             read_metadata: true,
             format: false,
             verify_format: false,
-            analyze: false,
+            analyze: true,
         }
     }
 
