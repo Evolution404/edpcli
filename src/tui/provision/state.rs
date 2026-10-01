@@ -132,6 +132,8 @@ mod insert_mode;
 mod key_domains;
 #[path = "option_editor.rs"]
 mod option_editor;
+#[path = "plan_completion.rs"]
+mod plan_completion;
 #[path = "transitions.rs"]
 mod transitions;
 use transitions::{ProvisionFormViewSnapshot, ProvisionReviewViewSnapshot};
