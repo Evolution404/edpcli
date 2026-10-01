@@ -117,7 +117,6 @@ pub(super) const fn disposition_label(disposition: RegionDisposition) -> &'stati
         RegionDisposition::PreserveOpaque => "原样保留",
         RegionDisposition::PreserveVerified => "验证后保留",
         RegionDisposition::RewrapVerified => "验证后改密",
-        RegionDisposition::Migrate => "数据迁移",
         RegionDisposition::Rebuild => "重建",
         RegionDisposition::Drop => "删除",
     }
@@ -166,7 +165,6 @@ pub(super) fn partition_reason(
         RegionDisposition::RewrapVerified => {
             "该区域已验证，仅更新密码封装，原数据范围保持不变。".into()
         }
-        RegionDisposition::Migrate => "来源数据将迁移到新的目标区域。".into(),
         RegionDisposition::Rebuild => "该区域将按最终目标布局重建。".into(),
         RegionDisposition::Drop => "该来源区域不会保留在最终布局中。".into(),
     }
@@ -260,7 +258,6 @@ mod tests {
             RegionDisposition::PreserveOpaque,
             RegionDisposition::PreserveVerified,
             RegionDisposition::RewrapVerified,
-            RegionDisposition::Migrate,
             RegionDisposition::Rebuild,
             RegionDisposition::Drop,
         ] {

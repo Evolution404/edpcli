@@ -83,15 +83,6 @@ fn overall_lines(view: &ProvisionConfirmationViewModel) -> Vec<Line<'static>> {
             ),
         ]));
     }
-    if view.overall.migrated_regions > 0 {
-        lines.push(Line::from(vec![
-            Span::styled("迁移      ", muted()),
-            Span::styled(
-                format!("→ {} 个区域迁移数据", view.overall.migrated_regions),
-                accent(),
-            ),
-        ]));
-    }
     lines.push(Line::from(vec![
         Span::styled("密码      ", muted()),
         Span::styled(

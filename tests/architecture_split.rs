@@ -8,6 +8,11 @@ fn lines(path: &str) -> usize {
         .count()
 }
 
+fn read_source(path: &str) -> String {
+    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
+        .unwrap_or_else(|error| panic!("read {path}: {error}"))
+}
+
 fn exists(path: &str) {
     assert!(
         Path::new(env!("CARGO_MANIFEST_DIR")).join(path).is_file(),
@@ -947,43 +952,6 @@ fn real_usb_password_hil_keeps_secrets_off_argv_and_is_default_off() {
 }
 
 #[test]
-fn real_usb_k6_verify_is_read_only_and_identity_bound() {
-    let source = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/real_usb_k6_verify.rs"),
-    )
-    .expect("real USB K6 verifier must exist");
-
-    for required in [
-        "EXPECTED_VID",
-        "EXPECTED_PID",
-        "EXPECTED_TOTAL_SECTORS",
-        "EXPECTED_DEVICE_ID",
-        "guard_usb_disk",
-        "FileDev::open_rdonly",
-        "stream_file_payload",
-        "DEFAULT_KEY_DOMAIN_PASSWORD",
-        "aggregate_sha256",
-    ] {
-        assert!(
-            source.contains(required),
-            "missing K6 verifier safety token: {required}"
-        );
-    }
-    for forbidden in [
-        "open_rdwr",
-        "write_sector(",
-        "execute_write_transaction",
-        "atomic_write",
-        "Command::new",
-    ] {
-        assert!(
-            !source.contains(forbidden),
-            "K6 verifier must stay read-only: found {forbidden}"
-        );
-    }
-}
-
-#[test]
 fn inspect_cli_uses_typed_application_error_kinds() {
     let source =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/inspect_cli.rs"))
@@ -1854,15 +1822,64 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
         }
     }
 
+    for path in [
+        "src/application/provision.rs",
+        "src/application/provision/prepare.rs",
+        "src/application/provision/commit.rs",
+        "src/provision/plain.rs",
+        "src/provision/reprovision/plan.rs",
+        "src/tui/provision/review.rs",
+    ] {
+        let text = source(path);
+        for forbidden in [
+            "RegionDisposition::Migrate",
+            "migration_sources",
+            "prepare_migrations",
+            "prepare_existing_to_plain",
+            "prepare_plain_to_official",
+            "build_migrated_filesystem",
+            "build_plain_migrated_provision_write_plan",
+            "文件级 staging",
+            "K6 Plain→EDP",
+            "K6 EDP→Plain",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "Provision file migration must stay removed: {path} contains {forbidden}"
+            );
+        }
+    }
+    for path in [
+        "src/application/provision/migration.rs",
+        "src/provision/migration.rs",
+        "src/filesystem/migration.rs",
+        "examples/real_usb_k6_verify.rs",
+    ] {
+        assert!(
+            !root.join(path).exists(),
+            "file-level migration artifact must stay removed: {path}"
+        );
+    }
     let prepare = source("src/application/provision/prepare.rs");
-    let commit = source("src/application/provision/commit.rs");
-    assert!(prepare.contains("RegionDisposition::Migrate =>"));
-    assert!(commit.contains("RegionDisposition::Migrate =>"));
-    assert!(prepare.contains("K6"));
-    assert!(prepare.contains("prepare_migrations"));
-    assert!(prepare.contains("build_migrated_filesystem"));
-    assert!(!commit.contains("Migrate 当前 unsupported"));
-    assert!(commit.contains("Migrate 写集合缺少目标文件系统引导扇区"));
+    let plain_prepare = prepare
+        .split("pub fn prepare_plain_provision(")
+        .nth(1)
+        .expect("Plain prepare boundary");
+    assert!(plain_prepare.contains("build_plain_provision_write_plan("));
+    for forbidden in [
+        "key_domains",
+        "parse_existing_provision(",
+        "analyze_partition(",
+        "stream_file_payload(",
+        "migration",
+    ] {
+        assert!(
+            !plain_prepare.contains(forbidden),
+            "EDP→Plain must not read/migrate files: found {forbidden}"
+        );
+    }
+    let restore_result = source("src/tui/restore_result_render.rs");
+    assert!(restore_result.contains("文件数据未恢复"));
 }
 
 #[test]
@@ -1902,6 +1919,45 @@ fn passive_capacity_display_uses_one_global_unit_system() {
                 "{path} hardcodes capacity conversion {forbidden}"
             );
         }
+    }
+}
+
+#[test]
+fn provision_capacity_editor_follows_global_unit_system() {
+    let form = read_source("src/tui/provision/form.rs");
+    let presentation = read_source("src/tui/provision/field_presentation.rs");
+    let hints = read_source("src/tui/provision/field_layout.rs");
+
+    assert!(form.contains("CAPACITY_UNIT_SYSTEM"));
+    assert!(form.contains("CapacityUnitSystem::Decimal"));
+    assert!(form.contains("CapacityUnitSystem::Binary"));
+    for forbidden in ["容量 (MiB)", "容量 (GiB)", "Space 切换 MiB / GiB"] {
+        assert!(
+            !presentation.contains(forbidden) && !hints.contains(forbidden),
+            "Provision capacity UI must not hardcode binary unit text: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn provisioning_docs_keep_file_migration_out_of_the_product_contract() {
+    let provisioning = read_source("docs/provisioning/PROVISIONING.md");
+    let architecture = read_source("docs/architecture/ARCHITECTURE.md");
+    let usage = read_source("docs/user/USAGE.md");
+    let release = read_source("docs/user/RELEASE.md");
+
+    assert!(provisioning.contains("Provision 不提供文件级迁移"));
+    assert!(architecture.contains("Provision 不读取、暂存或搬运用户文件"));
+    assert!(usage.contains("Provision 不读取或搬运来源文件"));
+    assert!(release.contains("Provision 明确不提供文件级迁移"));
+    for forbidden in ["K6", "`Migrate`", "迁移预检", "迁移数据"] {
+        assert!(
+            !provisioning.contains(forbidden)
+                && !architecture.contains(forbidden)
+                && !usage.contains(forbidden)
+                && !release.contains(forbidden),
+            "current product docs must not advertise removed file migration: {forbidden}"
+        );
     }
 }
 

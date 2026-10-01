@@ -413,7 +413,9 @@ fn parse_new_provision_opts(
             || user.is_some()
             || dept.is_some()
             || label.is_some()
+            || share_source_password.is_some()
             || share_target_password.is_some()
+            || encrypt_source_password.is_some()
             || encrypt_target_password.is_some()
             || volume_label.is_some()
             || format_boot
@@ -431,7 +433,7 @@ fn parse_new_provision_opts(
             || max_encrypt_password_errors.is_some();
         if has_official_only {
             return Err(
-                "错误: --target plain 只接受 --disk/--partition/--share-source-password/--encrypt-source-password/--out/--yes/--backup-dir；官方目标参数不能混用"
+                "错误: --target plain 只接受 --disk/--partition/--out/--yes/--backup-dir；密码及官方目标参数不能混用"
                     .into(),
             );
         }
@@ -453,9 +455,9 @@ fn parse_new_provision_opts(
                 user: String::new(),
                 dept: String::new(),
                 label: String::new(),
-                share_source_password: share_source_password.unwrap_or_default(),
+                share_source_password: String::new(),
                 share_target_password: String::new(),
-                encrypt_source_password: encrypt_source_password.unwrap_or_default(),
+                encrypt_source_password: String::new(),
                 encrypt_target_password: String::new(),
                 volume_label: String::new(),
                 format_boot: false,

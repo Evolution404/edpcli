@@ -3,6 +3,51 @@ use edpcli::tui::state::{
     Workspace,
 };
 
+fn configured_quick_unit_label(unit: edpcli::provision::QuickCapacityUnit) -> &'static str {
+    use edpcli::common::{CapacityUnitSystem, CAPACITY_UNIT_SYSTEM};
+    use edpcli::provision::QuickCapacityUnit;
+    match (CAPACITY_UNIT_SYSTEM, unit) {
+        (CapacityUnitSystem::Decimal, QuickCapacityUnit::MiB) => "MB",
+        (CapacityUnitSystem::Decimal, QuickCapacityUnit::GiB) => "GB",
+        (CapacityUnitSystem::Binary, QuickCapacityUnit::MiB) => "MiB",
+        (CapacityUnitSystem::Binary, QuickCapacityUnit::GiB) => "GiB",
+    }
+}
+
+fn configured_quick_unit_bytes(unit: edpcli::provision::QuickCapacityUnit) -> u64 {
+    use edpcli::common::{CapacityUnitSystem, CAPACITY_UNIT_SYSTEM};
+    use edpcli::provision::QuickCapacityUnit;
+    match (CAPACITY_UNIT_SYSTEM, unit) {
+        (CapacityUnitSystem::Decimal, QuickCapacityUnit::MiB) => 1_000_000,
+        (CapacityUnitSystem::Decimal, QuickCapacityUnit::GiB) => 1_000_000_000,
+        (CapacityUnitSystem::Binary, QuickCapacityUnit::MiB) => 1_048_576,
+        (CapacityUnitSystem::Binary, QuickCapacityUnit::GiB) => 1_073_741_824,
+    }
+}
+
+fn configured_capacity_3(sectors: u64, unit: edpcli::provision::QuickCapacityUnit) -> String {
+    let bytes = sectors as u128 * edpcli::common::SECTOR as u128;
+    let unit_bytes = configured_quick_unit_bytes(unit) as u128;
+    let scaled = (bytes * 1_000 + unit_bytes / 2) / unit_bytes;
+    format!("{}.{:03}", scaled / 1_000, scaled % 1_000)
+}
+
+fn configured_text_to_sectors(value: &str, unit: edpcli::provision::QuickCapacityUnit) -> u64 {
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+    let denominator = 10u128.pow(fraction.len() as u32);
+    let numerator = whole.parse::<u128>().unwrap() * denominator
+        + if fraction.is_empty() {
+            0
+        } else {
+            fraction.parse::<u128>().unwrap()
+        };
+    let scaled_bytes = numerator * configured_quick_unit_bytes(unit) as u128;
+    let sector_denominator = denominator * edpcli::common::SECTOR as u128;
+    let quotient = scaled_bytes / sector_denominator;
+    let remainder = scaled_bytes % sector_denominator;
+    u64::try_from(quotient + u128::from(remainder * 2 >= sector_denominator)).unwrap()
+}
+
 #[test]
 fn chapter_11_provision_escape_restores_device_selection() {
     use edpcli::tui::table_layout::TableKind;
@@ -684,7 +729,10 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     assert_eq!(form.encrypt_target_password, "0000aaaa");
     assert_eq!(form.volume_label, "启动区");
     assert_eq!(form.boot_sectors, "20417");
-    assert_eq!(form.encrypt_mib, "1024");
+    assert_eq!(
+        form.encrypt_mib,
+        configured_capacity_3(2_097_152, edpcli::provision::QuickCapacityUnit::GiB)
+    );
     assert!(edpcli::provision::OnlyId::parse(&form.label_id).is_ok());
     assert!(!form.force_change_password);
     assert!(!form.format_boot && !form.format_share && !form.format_encrypt);
@@ -1295,12 +1343,13 @@ fn provision_uses_only_per_partition_quick_exact_inputs() {
     assert!(fields
         .iter()
         .any(|(label, _, _)| label == "启动区容量 (sector)"));
+    let giga_label = configured_quick_unit_label(edpcli::provision::QuickCapacityUnit::GiB);
     assert!(fields
         .iter()
-        .any(|(label, _, _)| label == "交换区容量 (MiB)"));
+        .any(|(label, _, _)| label == &format!("交换区容量 ({giga_label})")));
     assert!(fields
         .iter()
-        .any(|(label, _, _)| label == "保密区容量 (MiB)"));
+        .any(|(label, _, _)| label == &format!("保密区容量 ({giga_label})")));
 }
 
 #[test]
@@ -1328,7 +1377,7 @@ fn provision_text_field_cursor_edits_in_place() {
 }
 
 #[test]
-fn provision_capacity_unit_cycles_mib_gib_sector_without_geometry_change() {
+fn provision_capacity_unit_cycles_configured_units_without_geometry_change() {
     use edpcli::provision::{CapacityInputMode, QuickCapacityUnit};
 
     let mut state = AppState::new();
@@ -1337,7 +1386,8 @@ fn provision_capacity_unit_cycles_mib_gib_sector_without_geometry_change() {
 
     state.provision_mut().form.share_input_mode = CapacityInputMode::Quick;
     state.provision_mut().form.share_quick_unit = QuickCapacityUnit::MiB;
-    state.provision_mut().form.share_mib = "6644".into();
+    let sectors = 13_606_912u64;
+    state.provision_mut().form.share_mib = configured_capacity_3(sectors, QuickCapacityUnit::MiB);
     let capacity_index = state
         .provision_visible_fields()
         .iter()
@@ -1350,21 +1400,26 @@ fn provision_capacity_unit_cycles_mib_gib_sector_without_geometry_change() {
         state.provision().form.share_quick_unit,
         QuickCapacityUnit::GiB
     );
-    assert_eq!(state.provision().form.share_mib, "6.488");
+    let giga_value = configured_capacity_3(sectors, QuickCapacityUnit::GiB);
+    let giga_label = configured_quick_unit_label(QuickCapacityUnit::GiB);
+    assert_eq!(state.provision().form.share_mib, giga_value);
     assert!(state
         .provision_visible_fields()
         .iter()
-        .any(|(label, value, _)| label == "交换区容量 (GiB)" && *value == "6.488"));
-    let request = state.provision_request().expect("GiB request");
+        .any(
+            |(label, value, _)| label == &format!("交换区容量 ({giga_label})")
+                && *value == giga_value
+        ));
+    let request = state.provision_request().expect("configured giga request");
     assert_eq!(request.share_mib, None);
-    assert_eq!(request.share_sectors, Some(13_606_912));
+    assert_eq!(request.share_sectors, Some(sectors));
 
     assert!(state.provision_toggle_selected_option());
     assert_eq!(
         state.provision().form.share_input_mode,
         CapacityInputMode::Exact
     );
-    assert_eq!(state.provision().form.share_sectors, "13606912");
+    assert_eq!(state.provision().form.share_sectors, sectors.to_string());
 
     assert!(state.provision_toggle_selected_option());
     assert_eq!(
@@ -1375,7 +1430,10 @@ fn provision_capacity_unit_cycles_mib_gib_sector_without_geometry_change() {
         state.provision().form.share_quick_unit,
         QuickCapacityUnit::MiB
     );
-    assert_eq!(state.provision().form.share_mib, "6644.000");
+    assert_eq!(
+        state.provision().form.share_mib,
+        configured_capacity_3(sectors, QuickCapacityUnit::MiB)
+    );
 }
 
 #[test]
@@ -1438,7 +1496,7 @@ fn provision_capacity_h_l_moves_previous_and_next_without_changing_geometry() {
 }
 
 #[test]
-fn editing_generated_gib_text_uses_user_value_even_if_display_text_is_identical() {
+fn editing_generated_giga_text_uses_user_value_even_if_display_text_is_identical() {
     use edpcli::provision::{CapacityInputMode, QuickCapacityUnit};
 
     let mut state = AppState::new();
@@ -1457,26 +1515,32 @@ fn editing_generated_gib_text_uses_user_value_even_if_display_text_is_identical(
         state.provision().form.share_quick_unit,
         QuickCapacityUnit::GiB
     );
-    assert_eq!(state.provision().form.share_mib, "6.488");
+    let generated = configured_capacity_3(13_606_912, QuickCapacityUnit::GiB);
+    assert_eq!(state.provision().form.share_mib, generated);
     assert_eq!(
         state.provision_request().unwrap().share_sectors,
         Some(13_606_912)
     );
 
+    let last = generated.chars().last().unwrap();
     state.provision_cursor_end();
     state.provision_backspace();
-    state.provision_push_char('8');
-    assert_eq!(state.provision().form.share_mib, "6.488");
+    state.provision_push_char(last);
+    assert_eq!(state.provision().form.share_mib, generated);
+    let edited_sectors = configured_text_to_sectors(&generated, QuickCapacityUnit::GiB);
     assert_eq!(
         state.provision_request().unwrap().share_sectors,
-        Some(13_606_322)
+        Some(edited_sectors)
     );
     assert!(state.provision_toggle_selected_option());
-    assert_eq!(state.provision().form.share_sectors, "13606322");
+    assert_eq!(
+        state.provision().form.share_sectors,
+        edited_sectors.to_string()
+    );
 }
 
 #[test]
-fn provision_exact_sector_capacity_cycles_through_decimal_mib_and_gib_losslessly() {
+fn provision_exact_sector_capacity_cycles_through_configured_units_losslessly() {
     use edpcli::provision::{CapacityInputMode, QuickCapacityUnit};
 
     let mut state = AppState::new();
@@ -1501,12 +1565,17 @@ fn provision_exact_sector_capacity_cycles_through_decimal_mib_and_gib_losslessly
         state.provision().form.boot_quick_unit,
         QuickCapacityUnit::MiB
     );
-    assert_eq!(state.provision().form.boot_mib, "9.969");
+    let mega_value = configured_capacity_3(20_417, QuickCapacityUnit::MiB);
+    let mega_label = configured_quick_unit_label(QuickCapacityUnit::MiB);
+    assert_eq!(state.provision().form.boot_mib, mega_value);
     assert!(state
         .provision_visible_fields()
         .iter()
-        .any(|(label, value, _)| label == "启动区容量 (MiB)" && *value == "9.969"));
-    let request = state.provision_request().expect("decimal MiB request");
+        .any(
+            |(label, value, _)| label == &format!("启动区容量 ({mega_label})")
+                && *value == mega_value
+        ));
+    let request = state.provision_request().expect("configured mega request");
     assert_eq!(request.boot_mib, None);
     assert_eq!(request.boot_sectors, Some(20_417));
 
@@ -1515,10 +1584,11 @@ fn provision_exact_sector_capacity_cycles_through_decimal_mib_and_gib_losslessly
         state.provision().form.boot_quick_unit,
         QuickCapacityUnit::GiB
     );
+    let giga_label = configured_quick_unit_label(QuickCapacityUnit::GiB);
     assert!(state
         .provision_visible_fields()
         .iter()
-        .any(|(label, _, _)| label == "启动区容量 (GiB)"));
+        .any(|(label, _, _)| label == &format!("启动区容量 ({giga_label})")));
 
     assert!(state.provision_toggle_selected_option());
     assert_eq!(
@@ -1546,7 +1616,14 @@ fn provision_capacity_hints_match_each_partition() {
     let boot = hint_for("启动区容量");
     let share = hint_for("交换区容量");
     let encrypt = hint_for("保密区容量");
-    assert_eq!(boot, "Space 切换 MiB / GiB / sector · f 最大可用容量");
+    assert_eq!(
+        boot,
+        format!(
+            "Space 切换 {} / {} / sector · f 最大可用容量",
+            configured_quick_unit_label(edpcli::provision::QuickCapacityUnit::MiB),
+            configured_quick_unit_label(edpcli::provision::QuickCapacityUnit::GiB)
+        )
+    );
     assert_eq!(share, boot);
     assert_eq!(encrypt, boot);
 }
@@ -2197,15 +2274,22 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
         )
         .unwrap();
     let usable_sectors = lce.start_lba - edpcli::provision::OFFICIAL_PARTITION_START_SECTOR;
-    let expected_share_mib = (usable_sectors - 20_417 - 1024 * 2048) / 2048;
+    let encrypt_sectors = 1024 * 2048;
+    let expected_share_mib = (usable_sectors - 20_417 - encrypt_sectors) / 2048;
+    let expected_share_sectors = expected_share_mib * 2048;
+    let format_giga_3 =
+        |sectors: u64| configured_capacity_3(sectors, edpcli::provision::QuickCapacityUnit::GiB);
 
     assert_eq!(state.provision().form.boot_sectors, "20417");
-    assert_eq!(state.provision().form.encrypt_mib, "1024.000");
+    assert_eq!(
+        state.provision().form.encrypt_mib,
+        format_giga_3(encrypt_sectors)
+    );
     assert_eq!(
         state.provision().form.share_mib,
-        format!("{expected_share_mib}.000")
+        format_giga_3(expected_share_sectors)
     );
-    let expected_remainder = usable_sectors - 20_417 - expected_share_mib * 2048 - 1024 * 2048;
+    let expected_remainder = usable_sectors - 20_417 - expected_share_sectors - encrypt_sectors;
     assert!(state
         .provision_geometry_preview_lines()
         .iter()
@@ -2215,30 +2299,45 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
     state.provision_mut().field_selected = state
         .provision_visible_fields()
         .iter()
-        .position(|(label, _, _)| label == "保密区容量 (MiB)")
+        .position(|(label, _, _)| {
+            label
+                == &format!(
+                    "保密区容量 ({})",
+                    configured_quick_unit_label(edpcli::provision::QuickCapacityUnit::GiB)
+                )
+        })
         .expect("encrypt field");
     state.provision_cursor_end();
     let current_len = state.provision().form.encrypt_mib.chars().count();
     for _ in 0..current_len {
         state.provision_backspace();
     }
-    for ch in "512".chars() {
+    for ch in "0.500".chars() {
         state.provision_push_char(ch);
     }
-    assert_eq!(state.provision().form.encrypt_mib, "512");
+    let edited_encrypt_sectors =
+        configured_text_to_sectors("0.500", edpcli::provision::QuickCapacityUnit::GiB);
+    assert_eq!(state.provision().form.encrypt_mib, "0.500");
     assert_eq!(state.provision().form.share_mib, original_share);
     assert!(state
         .provision_geometry_preview_lines()
         .iter()
-        .any(|line| line == &format!("未分配  {} sector", expected_remainder + 512 * 2048)));
+        .any(|line| line
+            == &format!(
+                "未分配  {} sector",
+                expected_remainder + encrypt_sectors - edited_encrypt_sectors
+            )));
 
     state.provision_begin_selected();
-    assert_eq!(state.provision().form.encrypt_mib, "512");
+    assert_eq!(state.provision().form.encrypt_mib, "0.500");
     assert_eq!(state.provision().form.share_mib, original_share);
 
     state.replace_devices(vec![device(32_000_000_000)]);
     state.provision_begin_selected();
-    assert_eq!(state.provision().form.encrypt_mib, "1024.000");
+    assert_eq!(
+        state.provision().form.encrypt_mib,
+        format_giga_3(encrypt_sectors)
+    );
     assert_ne!(state.provision().form.share_mib, original_share);
 }
 

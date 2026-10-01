@@ -56,7 +56,6 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
                 source_password_knowledge: None,
                 target_password_policy: Some(TargetPasswordPolicy::InitializeNew),
                 reason: "geometry changed".into(),
-                migration_sources: vec![],
                 preserved_record: None,
             },
             TargetPartitionPlan {
@@ -76,7 +75,6 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
                 source_password_knowledge: Some(SourcePasswordKnowledge::Unknown),
                 target_password_policy: Some(TargetPasswordPolicy::PreserveOpaque),
                 reason: "exact source match".into(),
-                migration_sources: vec![],
                 preserved_record: None,
             },
         ],
@@ -662,17 +660,26 @@ fn disk_table_rendering() {
     );
     // EDPF 明细行: 类型 + 大小 + LBA 范围
     let edpf = lines.iter().find(|l| l.contains("EDPF")).unwrap();
+    let share_capacity = crate::common::fmt_capacity((116_700_881 - 63 + 1) * 512);
+    let encrypt_capacity = crate::common::fmt_capacity((122_847_487 - 116_707_328 + 1) * 512);
+    let boot_capacity = crate::common::fmt_capacity((63 - 32 + 1) * 512);
     assert!(
-        edpf.contains("Share 59.75GB (LBA 63~116,700,881)"),
+        edpf.contains(&format!("Share {share_capacity} (LBA 63~116,700,881)")),
         "{}",
         edpf
     );
     assert!(
-        edpf.contains("Encrypt 3.14GB (LBA 116,707,328~122,847,487)"),
+        edpf.contains(&format!(
+            "Encrypt {encrypt_capacity} (LBA 116,707,328~122,847,487)"
+        )),
         "{}",
         edpf
     );
-    assert!(edpf.contains("Boot 16.38KB (LBA 32~63)"), "{}", edpf);
+    assert!(
+        edpf.contains(&format!("Boot {boot_capacity} (LBA 32~63)")),
+        "{}",
+        edpf
+    );
     let meta = lines.iter().find(|l| l.contains("onlyid")).unwrap();
     assert!(
         meta.contains("onlyid=1402259934")
@@ -721,7 +728,11 @@ fn menus_are_numbered() {
         "{}",
         m
     );
-    assert!(m.contains("disk4") && m.contains("64.00GB") && m.contains("0951:1666"));
+    assert!(
+        m.contains("disk4")
+            && m.contains(&crate::common::fmt_capacity(64_000_000_000))
+            && m.contains("0951:1666")
+    );
 
     let b = backup_menu_str(&["2026-09-16 23:36".into(), "2026-08-27 22:25".into()]);
     assert!(b.contains("编号") && b.contains("时间"), "{}", b);

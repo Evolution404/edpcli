@@ -58,13 +58,6 @@ impl ParsedExistingProvision {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct MigrationSource {
-    pub source_index: usize,
-    pub region: SourceRegion,
-    pub transform: MigrationTransform,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TargetPartitionPlan {
     pub geometry: TargetPartitionGeometry,
@@ -74,9 +67,6 @@ pub struct TargetPartitionPlan {
     pub source_password_knowledge: Option<super::super::SourcePasswordKnowledge>,
     pub target_password_policy: Option<super::super::TargetPasswordPolicy>,
     pub reason: String,
-    /// Source regions that require file-level/data migration into this target.
-    /// Execution remains fail-closed unless application preflight/staging completes.
-    pub migration_sources: Vec<MigrationSource>,
     /// Only present when a verified source key record belongs to this exact
     /// target geometry. The writer re-encodes it for the target slot.
     pub preserved_record: Option<ExistingPartitionRecord>,
@@ -101,28 +91,11 @@ impl TargetProvisionPlan {
             return Err("target partition count does not match official mode".into());
         }
         let gap = validate_target_geometry(targets, usable_end_lba)?;
-        let migration_plan = if let Some(source) = source {
+        if let Some(source) = source {
             if source.profile.partitions.len() != source.records.len() {
                 return Err("source partition/record count mismatch".into());
             }
-            let source_regions = source
-                .profile
-                .partitions
-                .iter()
-                .copied()
-                .zip(source.records.iter().copied())
-                .map(|(partition, record)| SourceRegion::from_existing(partition, record))
-                .collect::<Vec<_>>();
-            let target_regions = targets
-                .iter()
-                .copied()
-                .map(TargetRegion::from_target)
-                .collect::<Vec<_>>();
-            let plan = RegionMappingPlanner::map(&source_regions, &target_regions);
-            Some((source_regions, plan))
-        } else {
-            None
-        };
+        }
         let mut partitions = Vec::with_capacity(targets.len());
         for (index, target) in targets.iter().enumerate() {
             if target.partition_type != mode.partition_types()[index] {
@@ -140,29 +113,6 @@ impl TargetProvisionPlan {
                     .map(|_| super::super::TargetPasswordPolicy::InitializeNew);
             let mut reason = "无全兼容来源分区；目标区域必须重建".to_string();
             let mut preserved_record = None;
-            let migration_sources = migration_plan
-                .as_ref()
-                .map(|(source_regions, plan)| {
-                    plan.mappings
-                        .iter()
-                        .filter(|mapping| {
-                            mapping.target_index == Some(index)
-                                && mapping.kind == RegionMappingKind::Migrate
-                        })
-                        .filter_map(|mapping| {
-                            let source_index = mapping.source_index?;
-                            let transform = mapping.migration_transform?;
-                            source_regions.get(source_index).copied().map(|region| {
-                                MigrationSource {
-                                    source_index,
-                                    region,
-                                    transform,
-                                }
-                            })
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
             if let Some(source) = source {
                 if let Some((source_index, old)) = source
                     .profile
@@ -303,26 +253,6 @@ impl TargetProvisionPlan {
                     }
                 }
             }
-            if !migration_sources.is_empty() {
-                let sources = migration_sources
-                    .iter()
-                    .map(|source| source.region.role.label())
-                    .collect::<Vec<_>>()
-                    .join(" + ");
-                disposition = RegionDisposition::Migrate;
-                password_disposition =
-                    super::super::KeyDomainRole::from_partition_role(target.role)
-                        .map(|_| super::super::PasswordDisposition::Rebuild);
-                source_password_knowledge = None;
-                target_password_policy =
-                    super::super::KeyDomainRole::from_partition_role(target.role)
-                        .map(|_| super::super::TargetPasswordPolicy::InitializeNew);
-                preserved_record = None;
-                reason = format!(
-                    "来源区域 {sources} 到目标 {} 使用 K6 文件级暂存与迁移",
-                    target.role.label()
-                );
-            }
             let action = disposition.legacy_action();
             partitions.push(TargetPartitionPlan {
                 geometry: *target,
@@ -332,7 +262,6 @@ impl TargetProvisionPlan {
                 source_password_knowledge,
                 target_password_policy,
                 reason,
-                migration_sources,
                 preserved_record,
             });
         }
@@ -359,10 +288,9 @@ impl TargetProvisionPlan {
             part.reason = "用户明确选择重新格式化；目标区域执行重建".into();
             return true;
         }
-        if !part.disposition.preserves_extent() && part.disposition != RegionDisposition::Migrate {
+        if !part.disposition.preserves_extent() {
             return false;
         }
-        let previous = part.disposition;
         part.action = PartitionAction::Rebuild;
         part.disposition = RegionDisposition::Rebuild;
         part.password_disposition = super::super::KeyDomainRole::from_partition_role(role)
@@ -370,12 +298,7 @@ impl TargetProvisionPlan {
         part.target_password_policy = super::super::KeyDomainRole::from_partition_role(role)
             .map(|_| super::super::TargetPasswordPolicy::InitializeNew);
         part.preserved_record = None;
-        part.migration_sources.clear();
-        part.reason = if previous == RegionDisposition::Migrate {
-            "用户选择重新格式化；数据迁移已明确转为重建".into()
-        } else {
-            "用户选择重新格式化；保留类处理已明确转为重建".into()
-        };
+        part.reason = "用户选择重新格式化；保留类处理已明确转为重建".into();
         true
     }
 

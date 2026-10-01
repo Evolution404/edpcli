@@ -24,7 +24,6 @@ fn disposition_label(disposition: crate::provision::RegionDisposition) -> &'stat
         D::PreserveOpaque => "原样保留",
         D::PreserveVerified => "验证保留",
         D::RewrapVerified => "密钥已更新",
-        D::Migrate => "数据已迁移",
         D::Rebuild => "已重建",
         D::Drop => "已移除",
     }

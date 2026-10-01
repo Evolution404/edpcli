@@ -2,8 +2,8 @@ use edpcli::{
     protocol::edpf::EdpPartitionType,
     provision::{
         CompatibilityFailure, Extent, FileKeyWrapMode, FilesystemProfile, KeyDomainRole,
-        MigrationTransform, PartitionRole, PhysicalCryptoProfile, RegionKeyProfile,
-        RegionMappingKind, RegionMappingPlanner, SourceRegion, TargetRegion,
+        PartitionRole, PhysicalCryptoProfile, RegionKeyProfile, RegionMappingKind,
+        RegionMappingPlanner, SourceRegion, TargetRegion,
     },
 };
 
@@ -80,7 +80,7 @@ fn exact_region_is_a_preserve_candidate_before_password_policy() {
 }
 
 #[test]
-fn mode0_to_mode1_marks_boot_and_share_as_migrate_but_encrypt_as_preserve() {
+fn mode0_to_mode1_rebuilds_combined_instead_of_migrating_files() {
     let source = [
         source(
             PartitionRole::Boot,
@@ -130,22 +130,11 @@ fn mode0_to_mode1_marks_boot_and_share_as_migrate_but_encrypt_as_preserve() {
     let combined = plan
         .mappings
         .iter()
-        .filter(|mapping| mapping.target_index == Some(0))
-        .collect::<Vec<_>>();
-    assert_eq!(combined.len(), 2);
-    assert!(combined
-        .iter()
-        .all(|mapping| mapping.kind == RegionMappingKind::Migrate));
-    assert_eq!(
-        combined
-            .iter()
-            .map(|mapping| (mapping.source_index, mapping.migration_transform))
-            .collect::<Vec<_>>(),
-        vec![
-            (Some(0), Some(MigrationTransform::BootToBootShareCombined)),
-            (Some(1), Some(MigrationTransform::ShareToBootShareCombined)),
-        ]
-    );
+        .find(|mapping| mapping.target_index == Some(0))
+        .unwrap();
+    assert_eq!(combined.kind, RegionMappingKind::Rebuild);
+    assert_eq!(combined.source_index, None);
+    assert_eq!(combined.failure, Some(CompatibilityFailure::SemanticRole));
     assert_eq!(
         plan.mappings
             .iter()
@@ -154,10 +143,18 @@ fn mode0_to_mode1_marks_boot_and_share_as_migrate_but_encrypt_as_preserve() {
             .kind,
         RegionMappingKind::PreserveCandidate
     );
+    assert_eq!(
+        plan.mappings
+            .iter()
+            .filter(|mapping| mapping.kind == RegionMappingKind::Drop)
+            .map(|mapping| mapping.source_index)
+            .collect::<Vec<_>>(),
+        vec![Some(0), Some(1)]
+    );
 }
 
 #[test]
-fn mode2_encrypt_to_mode3_share_is_never_an_opaque_preserve() {
+fn mode2_encrypt_to_mode3_share_requires_rebuild_and_drops_old_region() {
     let source = [source(
         PartitionRole::Encrypt,
         EdpPartitionType::Encrypt,
@@ -175,13 +172,21 @@ fn mode2_encrypt_to_mode3_share_is_never_an_opaque_preserve() {
         Some(KeyDomainRole::Share),
     )];
     let plan = RegionMappingPlanner::map(&source, &target);
+    let target_mapping = plan
+        .mappings
+        .iter()
+        .find(|mapping| mapping.target_index == Some(0))
+        .unwrap();
+    assert_eq!(target_mapping.kind, RegionMappingKind::Rebuild);
+    assert_eq!(target_mapping.source_index, None);
+    assert_eq!(
+        target_mapping.failure,
+        Some(CompatibilityFailure::SemanticRole)
+    );
     assert!(plan
         .mappings
         .iter()
-        .any(|mapping| mapping.kind == RegionMappingKind::Migrate));
-    assert!(plan.mappings.iter().any(|mapping| {
-        mapping.migration_transform == Some(MigrationTransform::EncryptToShare)
-    }));
+        .any(|mapping| mapping.kind == RegionMappingKind::Drop && mapping.source_index == Some(0)));
     assert!(!plan
         .mappings
         .iter()

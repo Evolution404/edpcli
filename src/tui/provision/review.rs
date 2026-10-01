@@ -12,7 +12,6 @@ pub(crate) enum ProvisionConfirmationAction {
     Rewrap,
     FormatRebuild,
     New,
-    Migrate,
     Delete,
 }
 
@@ -25,8 +24,7 @@ impl ProvisionConfirmationAction {
             Self::Passthrough => "✓ 透传",
             Self::Rewrap => "✓ 改密",
             Self::FormatRebuild => "⚠ 格式化重建",
-            Self::New => "＋ 新建",
-            Self::Migrate => "→ 迁移",
+            Self::New => "+ 新建",
             Self::Delete => "✗ 删除",
         }
     }
@@ -36,7 +34,6 @@ impl ProvisionConfirmationAction {
 pub(crate) enum ProvisionConfirmationDataEffect {
     Preserve,
     Clear,
-    Migrate,
     None,
 }
 
@@ -45,7 +42,6 @@ impl ProvisionConfirmationDataEffect {
         match self {
             Self::Preserve => "✓ 保留",
             Self::Clear => "⚠ 清空",
-            Self::Migrate => "→ 迁移",
             Self::None => "— 不涉及",
         }
     }
@@ -75,7 +71,6 @@ pub(crate) enum ProvisionConfirmationFilesystemEffect {
     Keep,
     Format(crate::filesystem::FilesystemKind),
     Create(crate::filesystem::FilesystemKind),
-    Migrate(crate::filesystem::FilesystemKind),
     None,
 }
 
@@ -86,10 +81,7 @@ impl ProvisionConfirmationFilesystemEffect {
             Self::Format(filesystem) => {
                 format!("⚠ 格式化 {}", filesystem.windows_format_name())
             }
-            Self::Create(filesystem) => format!("＋ 新建 {}", filesystem.windows_format_name()),
-            Self::Migrate(filesystem) => {
-                format!("→ 迁移到 {}", filesystem.windows_format_name())
-            }
+            Self::Create(filesystem) => format!("+ 新建 {}", filesystem.windows_format_name()),
             Self::None => "— 不涉及".into(),
         }
     }
@@ -123,7 +115,6 @@ pub(crate) struct ProvisionConfirmationRegion {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProvisionConfirmationOverall {
     pub cleared_regions: usize,
-    pub migrated_regions: usize,
     pub reformatted_regions: usize,
     pub password_changed_regions: usize,
 }
@@ -282,10 +273,6 @@ impl ProvisionConfirmationViewModel {
                                     ProvisionConfirmationAction::Preserve,
                                     ProvisionConfirmationDataEffect::Preserve,
                                 ),
-                                crate::provision::RegionDisposition::Migrate => (
-                                    ProvisionConfirmationAction::Migrate,
-                                    ProvisionConfirmationDataEffect::Migrate,
-                                ),
                                 crate::provision::RegionDisposition::Rebuild
                                     if part.geometry.role
                                         == crate::provision::PartitionRole::CompatibilityReserve =>
@@ -333,11 +320,6 @@ impl ProvisionConfirmationViewModel {
                                 )
                             })?;
                         ProvisionConfirmationFilesystemEffect::Format(filesystem)
-                    } else if part.disposition == crate::provision::RegionDisposition::Migrate {
-                        part.geometry
-                            .filesystem
-                            .map(ProvisionConfirmationFilesystemEffect::Migrate)
-                            .unwrap_or(ProvisionConfirmationFilesystemEffect::None)
                     } else if part.geometry.role
                         == crate::provision::PartitionRole::CompatibilityReserve
                     {
@@ -401,8 +383,6 @@ impl ProvisionConfirmationViewModel {
                 layout
                     .validate_complete()
                     .map_err(|_| "计划确认失败：普通盘最终磁盘布局不完整".to_string())?;
-                let migrating_from_edp =
-                    plain.source_kind != crate::provision::DiskProvisionKind::Plain;
                 let mut regions = Vec::with_capacity(plain.plan.partitions.len());
                 for (index, part) in plain.plan.partitions.iter().enumerate() {
                     let end_exclusive = part.end_exclusive().map_err(|_| {
@@ -428,38 +408,29 @@ impl ProvisionConfirmationViewModel {
                             index + 1
                         ));
                     }
-                    let migrates_here = migrating_from_edp && index == 0;
+                    let from_edp = plain.source_kind != crate::provision::DiskProvisionKind::Plain;
                     regions.push(ProvisionConfirmationRegion {
                         label: format!("P{}", index + 1),
                         role: None,
                         selection,
                         sector_count: part.sector_count,
-                        action: if migrates_here {
-                            ProvisionConfirmationAction::Migrate
-                        } else {
-                            ProvisionConfirmationAction::New
-                        },
-                        data_effect: if migrates_here {
-                            ProvisionConfirmationDataEffect::Migrate
-                        } else {
-                            ProvisionConfirmationDataEffect::Clear
-                        },
+                        action: ProvisionConfirmationAction::New,
+                        data_effect: ProvisionConfirmationDataEffect::Clear,
                         password_effect: ProvisionConfirmationPasswordEffect::None,
-                        filesystem_effect: if migrates_here {
-                            ProvisionConfirmationFilesystemEffect::Migrate(part.filesystem)
+                        filesystem_effect: ProvisionConfirmationFilesystemEffect::Create(part.filesystem),
+                        reason_summary: if from_edp {
+                            "当前 EDP 盘将重新初始化为普通盘；不会读取或迁移来源文件，目标普通分区创建新的空文件系统。".into()
                         } else {
-                            ProvisionConfirmationFilesystemEffect::Create(part.filesystem)
+                            "目标普通分区将创建新的空文件系统，原文件不保留。".into()
                         },
-                        reason_summary: if migrates_here {
-                            "EDP 来源数据将迁移到目标普通分区".into()
-                        } else {
-                            "目标普通分区将创建新的空文件系统".into()
-                        },
-                        technical_basis: vec![format!(
-                            "LBA 范围    {}–{}",
-                            part.start_lba,
-                            end_exclusive.saturating_sub(1)
-                        )],
+                        technical_basis: vec![
+                            "文件处理    不读取、不迁移来源文件".into(),
+                            format!(
+                                "LBA 范围    {}–{}",
+                                part.start_lba,
+                                end_exclusive.saturating_sub(1)
+                            ),
+                        ],
                     });
                 }
                 let regions = merge_all_regions(&layout, regions)?;
@@ -471,10 +442,6 @@ impl ProvisionConfirmationViewModel {
             cleared_regions: regions
                 .iter()
                 .filter(|region| region.data_effect == ProvisionConfirmationDataEffect::Clear)
-                .count(),
-            migrated_regions: regions
-                .iter()
-                .filter(|region| region.data_effect == ProvisionConfirmationDataEffect::Migrate)
                 .count(),
             reformatted_regions: regions
                 .iter()

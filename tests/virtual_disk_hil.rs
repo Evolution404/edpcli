@@ -7,25 +7,18 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use edpcli::backup_metadata::PartitionGeometry;
 use edpcli::common::{METADATA_SECTOR_COUNT, SECTOR};
-use edpcli::diskio::{
-    atomic_write_sectors, execute_write_transaction, FileDev, SectorDev, SectorWriteStage,
-    WriteTransactionPlan,
-};
-use edpcli::filesystem::analysis::{
-    analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
-};
-use edpcli::filesystem::{build_migrated_filesystem, FilesystemKind, FilesystemMigrationEntry};
+use edpcli::diskio::{atomic_write_sectors, FileDev, SectorDev};
+use edpcli::filesystem::FilesystemKind;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use edpcli::provision::{
     generate_official_image, parse_existing_provision, prefill_for_target_mode,
     unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
-    KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, MigrationStagedEntry, MigrationTransform,
-    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId, PartitionAction,
-    PartitionRole, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
-    ProvisionSpec, RegionDisposition, SourcePasswordKnowledge, TargetIdentity, TargetProvisionPlan,
+    KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, OfficialPartitionMode,
+    OfficialPartitionSizes, OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole,
+    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
+    RegionDisposition, SourcePasswordKnowledge, TargetIdentity, TargetProvisionPlan,
 };
 
 static HIL_LOCK: Mutex<()> = Mutex::new(());
@@ -150,29 +143,6 @@ fn part<'a>(
         .iter()
         .find(|part| part.geometry.role == role)
         .unwrap_or_else(|| panic!("missing {role:?} target"))
-}
-
-struct HilPartitionReader<'a> {
-    dev: &'a mut dyn SectorDev,
-    start_lba: u64,
-    sector_count: u64,
-}
-
-impl PartitionReader for HilPartitionReader<'_> {
-    fn read_sector(&mut self, relative_lba: u64) -> std::io::Result<Vec<u8>> {
-        if relative_lba >= self.sector_count {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "K6 HIL relative LBA exceeds partition",
-            ));
-        }
-        let absolute = self
-            .start_lba
-            .checked_add(relative_lba)
-            .and_then(|lba| u32::try_from(lba).ok())
-            .ok_or_else(|| std::io::Error::other("K6 HIL absolute LBA overflow"))?;
-        self.dev.read_sector(absolute)
-    }
 }
 
 #[test]
@@ -446,131 +416,6 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
         KeyDomainRole::from_partition_role(combined.role),
         Some(KeyDomainRole::Share)
     );
-
-    // K6 migration HIL: build a populated first-party filesystem, write the exact
-    // sparse write-set to the real loop/VHD, parse it back through raw-device I/O,
-    // and verify the migrated payload byte-for-byte before restoring every touched
-    // sector. Application K6 uses the same atomic write engine for this write-set.
-    let share_target = exact_targets
-        .iter()
-        .find(|part| part.role == PartitionRole::Share)
-        .expect("mode0 Share target for K6 HIL");
-    let payload = b"k6-virtual-hil-payload-".repeat(64);
-    let staged = vec![MigrationStagedEntry {
-        source_index: 0,
-        transform: MigrationTransform::ShareToBootShareCombined,
-        path: "/k6-vhil.bin".into(),
-        is_directory: false,
-        data: payload.clone(),
-        attributes: 0x20,
-        mtime: None,
-        ctime: None,
-    }];
-    let filesystem_entries = staged
-        .iter()
-        .map(FilesystemMigrationEntry::from)
-        .collect::<Vec<_>>();
-    let migrated = build_migrated_filesystem(
-        FilesystemKind::ExFat,
-        share_target.start_lba,
-        share_target.sector_count,
-        0x4b36_4849,
-        "K6VHIL",
-        &filesystem_entries,
-    )
-    .expect("build populated K6 exFAT image");
-    let mut k6_patch = BTreeMap::new();
-    let mut k6_before = BTreeMap::new();
-    for (&relative_lba, sector) in migrated.sectors() {
-        let absolute = share_target
-            .start_lba
-            .checked_add(relative_lba)
-            .and_then(|lba| u32::try_from(lba).ok())
-            .expect("K6 HIL target LBA");
-        k6_before.insert(
-            absolute,
-            dev.read_sector(absolute)
-                .unwrap_or_else(|error| panic!("snapshot K6 HIL LBA{absolute}: {error}")),
-        );
-        k6_patch.insert(absolute, sector.to_vec());
-    }
-    let mut k6_transaction = WriteTransactionPlan::new(total_sectors);
-    for (&lba, data) in &k6_patch {
-        k6_transaction
-            .insert(
-                lba,
-                data.clone(),
-                SectorWriteStage::Data,
-                "K6 migration HIL",
-            )
-            .expect("plan K6 data write");
-    }
-    execute_write_transaction(&mut dev, &k6_transaction)
-        .expect("write K6 populated filesystem to virtual disk");
-    for (&lba, expected) in &k6_patch {
-        assert_eq!(
-            dev.read_sector(lba).unwrap(),
-            *expected,
-            "K6 HIL raw readback mismatch at LBA{lba}"
-        );
-    }
-    let geometry = PartitionGeometry {
-        index: 1,
-        partition_type: 2,
-        partition_count: 3,
-        need_disturb: 0,
-        need_encrypt: 0,
-        start_sector: share_target.start_lba,
-        sector_size: SECTOR as u64,
-        partition_size: share_target.sector_count * SECTOR as u64,
-        sector_count: share_target.sector_count,
-        user_key_crc: 0,
-        file_key_crc: 0,
-        encrypt_mode: 0,
-    };
-    let entry = {
-        let mut reader = HilPartitionReader {
-            dev: &mut dev,
-            start_lba: share_target.start_lba,
-            sector_count: share_target.sector_count,
-        };
-        let report = analyze_partition(&geometry, &mut reader);
-        assert_eq!(report.status, AnalysisStatus::Parsed, "{}", report.reason);
-        report
-            .entries
-            .unwrap()
-            .into_iter()
-            .find(|entry| entry.path == "/k6-vhil.bin")
-            .expect("K6 HIL migrated file")
-    };
-    let mut readback = Vec::new();
-    let mut reader = HilPartitionReader {
-        dev: &mut dev,
-        start_lba: share_target.start_lba,
-        sector_count: share_target.sector_count,
-    };
-    stream_file_payload(&mut reader, &entry, payload.len() as u64, &mut readback)
-        .expect("K6 HIL stream migrated payload");
-    assert_eq!(readback, payload, "K6 HIL logical payload mismatch");
-    let mut k6_restore = WriteTransactionPlan::new(total_sectors);
-    for (&lba, data) in &k6_before {
-        k6_restore
-            .insert(
-                lba,
-                data.clone(),
-                SectorWriteStage::Data,
-                "K6 migration HIL restore",
-            )
-            .expect("plan K6 restore write");
-    }
-    execute_write_transaction(&mut dev, &k6_restore).expect("restore K6 HIL touched sectors");
-    for (&lba, expected) in &k6_before {
-        assert_eq!(
-            dev.read_sector(lba).unwrap(),
-            *expected,
-            "K6 HIL sector restore mismatch at LBA{lba}"
-        );
-    }
 
     // mode2 keeps the canonical 0x7E00-byte / 63-sector compatibility reserve:
     // no user filesystem and no physical encryption.

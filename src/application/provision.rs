@@ -13,27 +13,20 @@ use std::time::Duration;
 use crate::backup_metadata::{parse_lba7_compatibility_geometry, PartitionGeometry};
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_OK, EXIT_TARGET, SECTOR};
 use crate::diskio::{self, SectorDev};
-use crate::filesystem::analysis::{
-    analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
-};
-use crate::filesystem::{
-    build_empty_filesystem, build_migrated_filesystem, FilesystemKind, FilesystemMigrationEntry,
-    SparseFilesystemImage,
-};
-use crate::partition_transform::EdpSm4Transform;
+use crate::filesystem::analysis::{analyze_partition, AnalysisStatus, PartitionReader};
+use crate::filesystem::{build_empty_filesystem, FilesystemKind, SparseFilesystemImage};
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
     apply_target_geometry_overrides, build_official_partition_filesystem,
-    build_official_provision_protocol_image, build_plain_migrated_provision_write_plan,
-    build_plain_provision_write_plan, parse_existing_provision, prefill_for_target_mode,
-    unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
-    CapacitySource, FileKeyWrapMode, KeyDomainRole, KeyDomainSecrets, OfficialPartitionFilesystems,
-    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
-    OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision, PartitionAction,
-    PartitionFilesystemImage, PartitionFormatTarget, PartitionRole, PassInfoPolicy,
-    PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan, PlainProvisionWritePlan,
-    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-    ProvisionTarget, QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge,
+    build_official_provision_protocol_image, build_plain_provision_write_plan,
+    parse_existing_provision, prefill_for_target_mode, unwrap_legacy_lba7_file_key, wrap_file_key,
+    wrap_legacy_lba7_file_key, CapacityInput, CapacitySource, FileKeyWrapMode, KeyDomainRole,
+    KeyDomainSecrets, OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision,
+    PartitionAction, PartitionFilesystemImage, PartitionFormatTarget, PartitionRole,
+    PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
+    PlainProvisionWritePlan, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
+    ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge,
     TargetGeometryOverrides, TargetIdentity, TargetPasswordPolicy, TargetProvisionPlan,
     DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_MODE0_BOOT_SECTORS,
 };
@@ -113,9 +106,6 @@ pub struct PlainPartitionRequest {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PlainProvisionRequest {
     pub partitions: Vec<PlainPartitionRequest>,
-    /// Source-only credentials used when an existing EDP disk is migrated to Plain.
-    /// KeyDomainSecrets keeps Debug output redacted and zeroes secret buffers on drop.
-    pub key_domains: KeyDomainSecrets,
 }
 
 impl PlainProvisionRequest {
@@ -131,7 +121,6 @@ impl PlainProvisionRequest {
                     volume_label: partition.volume_label.clone(),
                 })
                 .collect(),
-            key_domains: KeyDomainSecrets::default(),
         }
     }
 
@@ -708,7 +697,6 @@ fn sizes(
 mod commit;
 mod export;
 mod identity_lineage;
-mod migration;
 mod prepare;
 mod prepared_projection;
 mod progress_projection;

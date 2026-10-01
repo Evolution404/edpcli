@@ -70,9 +70,11 @@ impl AppState {
         if let ProvisionFieldId::Plain { kind, .. } = id {
             return match kind {
                 PlainProvisionFieldKind::StartLba => Some("精确 LBA；不会自动移动其它分区".into()),
-                PlainProvisionFieldKind::Capacity => {
-                    Some("Space 切换 MiB / GiB / sector · f 填满".into())
-                }
+                PlainProvisionFieldKind::Capacity => Some(format!(
+                    "Space 切换 {} / {} / sector · f 填满",
+                    ProvisionForm::quick_unit_label(crate::provision::QuickCapacityUnit::MiB),
+                    ProvisionForm::quick_unit_label(crate::provision::QuickCapacityUnit::GiB)
+                )),
                 PlainProvisionFieldKind::Filesystem => Some("Space 切换 FAT16 / exFAT".into()),
                 PlainProvisionFieldKind::VolumeLabel => Some("普通卷标".into()),
             };
@@ -80,9 +82,11 @@ impl AppState {
         match id {
             ProvisionFieldId::AdvancedSection => None,
             ProvisionFieldId::Lba8Identity(_) => Some("高级身份字段".into()),
-            ProvisionFieldId::Capacity(_) => {
-                Some("Space 切换 MiB / GiB / sector · f 最大可用容量".into())
-            }
+            ProvisionFieldId::Capacity(_) => Some(format!(
+                "Space 切换 {} / {} / sector · f 最大可用容量",
+                ProvisionForm::quick_unit_label(crate::provision::QuickCapacityUnit::MiB),
+                ProvisionForm::quick_unit_label(crate::provision::QuickCapacityUnit::GiB)
+            )),
             ProvisionFieldId::SourcePassword(_) => {
                 Some("修改原密码后，Enter / Esc 结束输入会自动只读验证".into())
             }

@@ -31,10 +31,6 @@ impl SparseFilesystemImage {
         &self.sectors
     }
 
-    pub(crate) fn sectors_mut(&mut self) -> &mut BTreeMap<u64, [u8; SECTOR_SIZE]> {
-        &mut self.sectors
-    }
-
     pub fn sector_or_zero(&self, relative_lba: u64) -> Option<[u8; SECTOR_SIZE]> {
         if relative_lba >= self.volume_sectors {
             return None;

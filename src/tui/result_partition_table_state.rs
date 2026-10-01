@@ -74,7 +74,6 @@ impl AppState {
                         crate::provision::RegionDisposition::PreserveOpaque => "原样保留",
                         crate::provision::RegionDisposition::PreserveVerified => "验证保留",
                         crate::provision::RegionDisposition::RewrapVerified => "密钥已更新",
-                        crate::provision::RegionDisposition::Migrate => "数据已迁移",
                         crate::provision::RegionDisposition::Rebuild => "已重建",
                         crate::provision::RegionDisposition::Drop => "已移除",
                     };

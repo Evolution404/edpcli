@@ -85,7 +85,10 @@ impl PlainPartitionForm {
             start_lba: spec.start_lba.to_string(),
             input_mode: crate::provision::CapacityInputMode::Quick,
             quick_unit: crate::provision::QuickCapacityUnit::GiB,
-            quick_capacity: ProvisionForm::format_sector_unit_3(spec.sector_count, 2_097_152),
+            quick_capacity: ProvisionForm::format_sector_unit_3(
+                spec.sector_count,
+                crate::provision::QuickCapacityUnit::GiB,
+            ),
             sector_count: spec.sector_count.to_string(),
             capacity_edited: false,
             filesystem: spec.filesystem,
@@ -114,14 +117,7 @@ impl PlainPartitionForm {
 
     pub(super) fn set_sector_count(&mut self, sectors: u64) {
         self.sector_count = sectors.to_string();
-        self.quick_capacity = match self.quick_unit {
-            crate::provision::QuickCapacityUnit::MiB => {
-                ProvisionForm::format_sector_unit_3(sectors, 2_048)
-            }
-            crate::provision::QuickCapacityUnit::GiB => {
-                ProvisionForm::format_sector_unit_3(sectors, 2_097_152)
-            }
-        };
+        self.quick_capacity = ProvisionForm::format_sector_unit_3(sectors, self.quick_unit);
         self.capacity_edited = false;
     }
 
@@ -133,23 +129,27 @@ impl PlainPartitionForm {
             (true, CapacityInputMode::Exact, _) => {
                 self.input_mode = CapacityInputMode::Quick;
                 self.quick_unit = QuickCapacityUnit::GiB;
-                self.quick_capacity = ProvisionForm::format_sector_unit_3(sectors, 2_097_152);
+                self.quick_capacity =
+                    ProvisionForm::format_sector_unit_3(sectors, QuickCapacityUnit::GiB);
             }
             (true, CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
                 self.input_mode = CapacityInputMode::Exact;
             }
             (true, CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
                 self.quick_unit = QuickCapacityUnit::MiB;
-                self.quick_capacity = ProvisionForm::format_sector_unit_3(sectors, 2_048);
+                self.quick_capacity =
+                    ProvisionForm::format_sector_unit_3(sectors, QuickCapacityUnit::MiB);
             }
             (false, CapacityInputMode::Exact, _) => {
                 self.input_mode = CapacityInputMode::Quick;
                 self.quick_unit = QuickCapacityUnit::MiB;
-                self.quick_capacity = ProvisionForm::format_sector_unit_3(sectors, 2_048);
+                self.quick_capacity =
+                    ProvisionForm::format_sector_unit_3(sectors, QuickCapacityUnit::MiB);
             }
             (false, CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
                 self.quick_unit = QuickCapacityUnit::GiB;
-                self.quick_capacity = ProvisionForm::format_sector_unit_3(sectors, 2_097_152);
+                self.quick_capacity =
+                    ProvisionForm::format_sector_unit_3(sectors, QuickCapacityUnit::GiB);
             }
             (false, CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
                 self.input_mode = CapacityInputMode::Exact;
@@ -252,8 +252,8 @@ impl Default for ProvisionForm {
             share_input_mode: crate::provision::CapacityInputMode::Quick,
             encrypt_input_mode: crate::provision::CapacityInputMode::Quick,
             boot_quick_unit: crate::provision::QuickCapacityUnit::MiB,
-            share_quick_unit: crate::provision::QuickCapacityUnit::MiB,
-            encrypt_quick_unit: crate::provision::QuickCapacityUnit::MiB,
+            share_quick_unit: crate::provision::QuickCapacityUnit::GiB,
+            encrypt_quick_unit: crate::provision::QuickCapacityUnit::GiB,
             boot_capacity_edited: false,
             share_capacity_edited: false,
             encrypt_capacity_edited: false,
@@ -265,9 +265,15 @@ impl Default for ProvisionForm {
             encrypt_start_lba: String::new(),
             boot_mib: "512".into(),
             boot_sectors: crate::provision::DEFAULT_MODE0_BOOT_SECTORS.to_string(),
-            share_mib: "1024".into(),
+            share_mib: ProvisionForm::format_sector_unit_3(
+                2_097_152,
+                crate::provision::QuickCapacityUnit::GiB,
+            ),
             share_sectors: String::new(),
-            encrypt_mib: "1024".into(),
+            encrypt_mib: ProvisionForm::format_sector_unit_3(
+                2_097_152,
+                crate::provision::QuickCapacityUnit::GiB,
+            ),
             encrypt_sectors: String::new(),
             label_id: crate::provision::OnlyId::random_candidate()
                 .map(|value| value.text().to_string())
@@ -306,18 +312,47 @@ impl ProvisionForm {
         self.lba8_identity.clone()
     }
 
-    pub(super) fn format_sector_unit_3(sectors: u64, sectors_per_unit: u64) -> String {
-        let scaled =
-            ((sectors as u128) * 1_000 + (sectors_per_unit as u128 / 2)) / sectors_per_unit as u128;
+    pub(super) const fn quick_unit_label(
+        unit: crate::provision::QuickCapacityUnit,
+    ) -> &'static str {
+        use crate::common::{CapacityUnitSystem, CAPACITY_UNIT_SYSTEM};
+        use crate::provision::QuickCapacityUnit;
+        match (CAPACITY_UNIT_SYSTEM, unit) {
+            (CapacityUnitSystem::Decimal, QuickCapacityUnit::MiB) => "MB",
+            (CapacityUnitSystem::Decimal, QuickCapacityUnit::GiB) => "GB",
+            (CapacityUnitSystem::Binary, QuickCapacityUnit::MiB) => "MiB",
+            (CapacityUnitSystem::Binary, QuickCapacityUnit::GiB) => "GiB",
+        }
+    }
+
+    pub(super) const fn quick_unit_bytes(unit: crate::provision::QuickCapacityUnit) -> u64 {
+        use crate::common::{CapacityUnitSystem, CAPACITY_UNIT_SYSTEM};
+        use crate::provision::QuickCapacityUnit;
+        match (CAPACITY_UNIT_SYSTEM, unit) {
+            (CapacityUnitSystem::Decimal, QuickCapacityUnit::MiB) => 1_000_000,
+            (CapacityUnitSystem::Decimal, QuickCapacityUnit::GiB) => 1_000_000_000,
+            (CapacityUnitSystem::Binary, QuickCapacityUnit::MiB) => 1_048_576,
+            (CapacityUnitSystem::Binary, QuickCapacityUnit::GiB) => 1_073_741_824,
+        }
+    }
+
+    pub(super) fn format_sector_unit_3(
+        sectors: u64,
+        unit: crate::provision::QuickCapacityUnit,
+    ) -> String {
+        let bytes = (sectors as u128) * crate::common::SECTOR as u128;
+        let unit_bytes = Self::quick_unit_bytes(unit) as u128;
+        let scaled = (bytes * 1_000 + unit_bytes / 2) / unit_bytes;
         format!("{}.{:03}", scaled / 1_000, scaled % 1_000)
     }
 
     fn parse_decimal_unit_to_sectors_rounded(
         value: &str,
-        sectors_per_unit: u64,
-        unit_name: &str,
+        unit: crate::provision::QuickCapacityUnit,
         label: &str,
     ) -> Result<u64, String> {
+        let unit_name = Self::quick_unit_label(unit);
+        let unit_bytes = Self::quick_unit_bytes(unit) as u128;
         let value = value.trim();
         if value.is_empty() {
             return Err(format!("{label} {unit_name} 不能为空"));
@@ -350,21 +385,16 @@ impl ProvisionForm {
         if numerator == 0 {
             return Err(format!("{label} {unit_name} 必须大于 0"));
         }
-        let scaled = numerator
-            .checked_mul(sectors_per_unit as u128)
+        let scaled_bytes = numerator
+            .checked_mul(unit_bytes)
             .ok_or_else(|| format!("{label} {unit_name} 容量溢出"))?;
-        let quotient = scaled / denominator;
-        let remainder = scaled % denominator;
-        let rounded = quotient + u128::from(remainder.saturating_mul(2) >= denominator);
+        let sector_denominator = denominator
+            .checked_mul(crate::common::SECTOR as u128)
+            .ok_or_else(|| format!("{label} {unit_name} 容量溢出"))?;
+        let quotient = scaled_bytes / sector_denominator;
+        let remainder = scaled_bytes % sector_denominator;
+        let rounded = quotient + u128::from(remainder.saturating_mul(2) >= sector_denominator);
         u64::try_from(rounded).map_err(|_| format!("{label} {unit_name} 容量溢出"))
-    }
-
-    fn parse_mib_to_sectors(value: &str, label: &str) -> Result<u64, String> {
-        Self::parse_decimal_unit_to_sectors_rounded(value, 2_048, "MiB", label)
-    }
-
-    fn parse_gib_to_sectors(value: &str, label: &str) -> Result<u64, String> {
-        Self::parse_decimal_unit_to_sectors_rounded(value, 2_097_152, "GiB", label)
     }
 
     pub(super) fn resolve_quick_sectors(
@@ -375,22 +405,12 @@ impl ProvisionForm {
         label: &str,
     ) -> Result<u64, String> {
         if let Some(sectors) = exact.parse::<u64>().ok().filter(|_| !edited) {
-            let generated = match unit {
-                crate::provision::QuickCapacityUnit::MiB => {
-                    Self::format_sector_unit_3(sectors, 2_048)
-                }
-                crate::provision::QuickCapacityUnit::GiB => {
-                    Self::format_sector_unit_3(sectors, 2_097_152)
-                }
-            };
+            let generated = Self::format_sector_unit_3(sectors, unit);
             if quick == generated {
                 return Ok(sectors);
             }
         }
-        match unit {
-            crate::provision::QuickCapacityUnit::MiB => Self::parse_mib_to_sectors(quick, label),
-            crate::provision::QuickCapacityUnit::GiB => Self::parse_gib_to_sectors(quick, label),
-        }
+        Self::parse_decimal_unit_to_sectors_rounded(quick, unit, label)
     }
 
     pub(super) fn apply_prefill(&mut self, prefill: &crate::provision::ProvisionPrefill) {
@@ -400,19 +420,21 @@ impl ProvisionForm {
         self.encrypt_capacity_edited = false;
         let set = |input: Option<crate::provision::CapacityInput>,
                    mode: &mut CapacityInputMode,
-                   mib: &mut String,
+                   unit: crate::provision::QuickCapacityUnit,
+                   quick: &mut String,
                    sectors: &mut String,
                    source: &mut crate::provision::CapacitySource| {
             if let Some(input) = input {
                 *mode = input.mode();
                 *sectors = input.sectors().to_string();
                 *source = input.source();
-                *mib = Self::format_sector_unit_3(input.sectors(), 2_048);
+                *quick = Self::format_sector_unit_3(input.sectors(), unit);
             }
         };
         set(
             prefill.boot,
             &mut self.boot_input_mode,
+            self.boot_quick_unit,
             &mut self.boot_mib,
             &mut self.boot_sectors,
             &mut self.boot_capacity_source,
@@ -420,6 +442,7 @@ impl ProvisionForm {
         set(
             prefill.share,
             &mut self.share_input_mode,
+            self.share_quick_unit,
             &mut self.share_mib,
             &mut self.share_sectors,
             &mut self.share_capacity_source,
@@ -427,6 +450,7 @@ impl ProvisionForm {
         set(
             prefill.encrypt,
             &mut self.encrypt_input_mode,
+            self.encrypt_quick_unit,
             &mut self.encrypt_mib,
             &mut self.encrypt_sectors,
             &mut self.encrypt_capacity_source,
@@ -487,7 +511,7 @@ impl ProvisionForm {
                 let sectors = exact
                     .parse::<u64>()
                     .map_err(|_| "请先输入有效的 sector 数".to_string())?;
-                *quick = Self::format_sector_unit_3(sectors, 2_097_152);
+                *quick = Self::format_sector_unit_3(sectors, QuickCapacityUnit::GiB);
                 *mode = CapacityInputMode::Quick;
                 *unit = QuickCapacityUnit::GiB;
             }
@@ -501,14 +525,14 @@ impl ProvisionForm {
                 let sectors =
                     Self::resolve_quick_sectors(quick, exact, *unit, *edited, "当前容量")?;
                 *exact = sectors.to_string();
-                *quick = Self::format_sector_unit_3(sectors, 2_048);
+                *quick = Self::format_sector_unit_3(sectors, QuickCapacityUnit::MiB);
                 *unit = QuickCapacityUnit::MiB;
             }
             (false, CapacityInputMode::Exact, _) => {
                 let sectors = exact
                     .parse::<u64>()
                     .map_err(|_| "请先输入有效的 sector 数".to_string())?;
-                *quick = Self::format_sector_unit_3(sectors, 2_048);
+                *quick = Self::format_sector_unit_3(sectors, QuickCapacityUnit::MiB);
                 *mode = CapacityInputMode::Quick;
                 *unit = QuickCapacityUnit::MiB;
             }
@@ -516,7 +540,7 @@ impl ProvisionForm {
                 let sectors =
                     Self::resolve_quick_sectors(quick, exact, *unit, *edited, "当前容量")?;
                 *exact = sectors.to_string();
-                *quick = Self::format_sector_unit_3(sectors, 2_097_152);
+                *quick = Self::format_sector_unit_3(sectors, QuickCapacityUnit::GiB);
                 *unit = QuickCapacityUnit::GiB;
             }
             (false, CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {

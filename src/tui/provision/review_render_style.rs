@@ -10,7 +10,6 @@ pub(super) fn action_style(action: ProvisionConfirmationAction) -> Style {
         ProvisionConfirmationAction::Preserve
         | ProvisionConfirmationAction::Passthrough
         | ProvisionConfirmationAction::Rewrap => success(),
-        ProvisionConfirmationAction::Migrate => accent(),
         ProvisionConfirmationAction::FormatRebuild | ProvisionConfirmationAction::New => warning(),
         ProvisionConfirmationAction::Delete => danger(),
     }
@@ -20,7 +19,6 @@ pub(super) fn data_style(effect: ProvisionConfirmationDataEffect) -> Style {
     match effect {
         ProvisionConfirmationDataEffect::Preserve => success(),
         ProvisionConfirmationDataEffect::Clear => warning(),
-        ProvisionConfirmationDataEffect::Migrate => accent(),
         ProvisionConfirmationDataEffect::None => muted(),
     }
 }
@@ -39,7 +37,6 @@ pub(super) fn filesystem_style(effect: ProvisionConfirmationFilesystemEffect) ->
         ProvisionConfirmationFilesystemEffect::Keep => success(),
         ProvisionConfirmationFilesystemEffect::Format(_)
         | ProvisionConfirmationFilesystemEffect::Create(_) => warning(),
-        ProvisionConfirmationFilesystemEffect::Migrate(_) => accent(),
         ProvisionConfirmationFilesystemEffect::None => muted(),
     }
 }

@@ -9,7 +9,7 @@ use edpcli::{
         parse_existing_provision, prefill_for_target_mode, wrap_file_key,
         wrap_legacy_lba7_file_key, CapacityInput, CapacityInputMode, CapacitySource,
         DiskProvisionKind, ExistingFileKeyError, ExistingPartition, ExistingProvisionProfile,
-        FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, MigrationTransform,
+        FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
         OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId,
         PartitionAction, PartitionRole, PassInfoPolicy, PassthroughBasis, PasswordDisposition,
         ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget,
@@ -1114,7 +1114,7 @@ fn moving_type4_from_slot_two_to_one_reencodes_headers_and_reuses_only_its_key_m
 }
 
 #[test]
-fn target_plan_surfaces_migration_sources_for_k6_execution() {
+fn incompatible_target_role_requires_rebuild_and_explicit_format_authorization() {
     let (_, source_image, did) = generated_source(OfficialPartitionMode::DefaultThreePartition);
     let source = parse_existing_provision(&source_image, &did, 16_777_216)
         .unwrap()
@@ -1141,39 +1141,20 @@ fn target_plan_surfaces_migration_sources_for_k6_execution() {
         .iter()
         .find(|part| part.geometry.role == PartitionRole::BootShareCombined)
         .expect("mode1 combined target");
-
-    assert_eq!(combined.disposition, RegionDisposition::Migrate);
-    assert_eq!(
-        combined.action,
-        PartitionAction::Rebuild,
-        "legacy two-state action remains Rebuild while typed disposition carries K6 Migrate"
-    );
-    assert_eq!(
-        combined
-            .migration_sources
-            .iter()
-            .map(|source| (source.source_index, source.region.role, source.transform))
-            .collect::<Vec<_>>(),
-        vec![
-            (
-                0,
-                PartitionRole::Boot,
-                MigrationTransform::BootToBootShareCombined,
-            ),
-            (
-                1,
-                PartitionRole::Share,
-                MigrationTransform::ShareToBootShareCombined,
-            ),
-        ]
-    );
+    assert_eq!(combined.disposition, RegionDisposition::Rebuild);
+    assert_eq!(combined.action, PartitionAction::Rebuild);
     assert_eq!(combined.preserved_record, None);
+    assert_eq!(
+        combined.password_disposition,
+        Some(PasswordDisposition::Blocked)
+    );
+    assert_eq!(
+        combined.target_password_policy,
+        Some(edpcli::provision::TargetPasswordPolicy::InitializeNew)
+    );
 
     let mut plan = plan;
-    assert!(
-        plan.force_rebuild_for_format(PartitionRole::BootShareCombined),
-        "explicit filesystem initialization must allow the user to choose Rebuild"
-    );
+    assert!(plan.force_rebuild_for_format(PartitionRole::BootShareCombined));
     let combined = plan
         .partitions
         .iter()
@@ -1181,16 +1162,11 @@ fn target_plan_surfaces_migration_sources_for_k6_execution() {
         .unwrap();
     assert_eq!(combined.disposition, RegionDisposition::Rebuild);
     assert_eq!(combined.action, PartitionAction::Rebuild);
-    assert!(combined.migration_sources.is_empty());
-    assert_eq!(
-        combined.target_password_policy,
-        Some(edpcli::provision::TargetPasswordPolicy::InitializeNew)
-    );
     assert_eq!(
         combined.password_disposition,
         Some(PasswordDisposition::Rebuild)
     );
-    assert!(combined.reason.contains("明确转为重建"));
+    assert!(combined.reason.contains("重新格式化"));
 }
 
 #[test]

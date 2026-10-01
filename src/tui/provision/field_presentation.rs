@@ -14,10 +14,7 @@ impl AppState {
                     crate::provision::CapacityInputMode::Quick => (
                         format!(
                             "P{number} 容量 ({})",
-                            match part.quick_unit {
-                                crate::provision::QuickCapacityUnit::MiB => "MiB",
-                                crate::provision::QuickCapacityUnit::GiB => "GiB",
-                            }
+                            ProvisionForm::quick_unit_label(part.quick_unit)
                         ),
                         part.quick_capacity.as_str(),
                     ),
@@ -121,14 +118,13 @@ impl AppState {
             ));
             out.push((
                 (if exact {
-                    "启动区容量 (sector)"
+                    "启动区容量 (sector)".into()
                 } else {
-                    match self.provision.form.boot_quick_unit {
-                        crate::provision::QuickCapacityUnit::MiB => "启动区容量 (MiB)",
-                        crate::provision::QuickCapacityUnit::GiB => "启动区容量 (GiB)",
-                    }
-                })
-                .into(),
+                    format!(
+                        "启动区容量 ({})",
+                        ProvisionForm::quick_unit_label(self.provision.form.boot_quick_unit)
+                    )
+                }),
                 if exact {
                     self.provision.form.boot_sectors.as_str()
                 } else {
@@ -147,14 +143,13 @@ impl AppState {
             ));
             out.push((
                 (if exact {
-                    "交换区容量 (sector)"
+                    "交换区容量 (sector)".into()
                 } else {
-                    match self.provision.form.share_quick_unit {
-                        crate::provision::QuickCapacityUnit::MiB => "交换区容量 (MiB)",
-                        crate::provision::QuickCapacityUnit::GiB => "交换区容量 (GiB)",
-                    }
-                })
-                .into(),
+                    format!(
+                        "交换区容量 ({})",
+                        ProvisionForm::quick_unit_label(self.provision.form.share_quick_unit)
+                    )
+                }),
                 if exact {
                     self.provision.form.share_sectors.as_str()
                 } else {
@@ -173,14 +168,13 @@ impl AppState {
             ));
             out.push((
                 (if exact {
-                    "保密区容量 (sector)"
+                    "保密区容量 (sector)".into()
                 } else {
-                    match self.provision.form.encrypt_quick_unit {
-                        crate::provision::QuickCapacityUnit::MiB => "保密区容量 (MiB)",
-                        crate::provision::QuickCapacityUnit::GiB => "保密区容量 (GiB)",
-                    }
-                })
-                .into(),
+                    format!(
+                        "保密区容量 ({})",
+                        ProvisionForm::quick_unit_label(self.provision.form.encrypt_quick_unit)
+                    )
+                }),
                 if exact {
                     self.provision.form.encrypt_sectors.as_str()
                 } else {
