@@ -687,6 +687,19 @@ fn probe_filesystem_hints(
             .map_err(|error| error.to_string())?
             .volume_label
         }
+        crate::filesystem::FilesystemKind::Fat32 => {
+            let mut reader = PartitionFilesystemReader {
+                dev,
+                start_lba,
+                sector_count,
+            };
+            crate::filesystem::FilesystemDriver::read_metadata(
+                &crate::filesystem::FAT32_DRIVER,
+                &mut reader,
+            )
+            .map_err(|error| error.to_string())?
+            .volume_label
+        }
         crate::filesystem::FilesystemKind::ExFat => {
             let mut reader = PartitionFilesystemReader {
                 dev,
@@ -700,9 +713,7 @@ fn probe_filesystem_hints(
             .map_err(|error| error.to_string())?
             .volume_label
         }
-        crate::filesystem::FilesystemKind::Fat12
-        | crate::filesystem::FilesystemKind::Fat32
-        | crate::filesystem::FilesystemKind::Ntfs => None,
+        crate::filesystem::FilesystemKind::Fat12 | crate::filesystem::FilesystemKind::Ntfs => None,
     };
     Ok((filesystem, label))
 }

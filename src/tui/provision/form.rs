@@ -237,12 +237,7 @@ pub(super) fn shift_supported_fs(
     value: crate::filesystem::FilesystemKind,
     reverse: bool,
 ) -> crate::filesystem::FilesystemKind {
-    match value {
-        crate::filesystem::FilesystemKind::Fat16 => crate::filesystem::FilesystemKind::ExFat,
-        crate::filesystem::FilesystemKind::ExFat => crate::filesystem::FilesystemKind::Fat16,
-        _ if reverse => crate::filesystem::FilesystemKind::ExFat,
-        _ => crate::filesystem::FilesystemKind::Fat16,
-    }
+    crate::provision::shift_provision_filesystem(value, reverse)
 }
 
 impl Default for ProvisionForm {

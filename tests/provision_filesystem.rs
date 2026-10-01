@@ -555,12 +555,12 @@ fn filesystem_stage_fails_closed_on_wrong_key_or_unsupported_portable_profile() 
 }
 
 #[test]
-fn fat16_and_exfat_can_each_be_physically_encrypted_when_selected() {
+fn fat16_fat32_and_exfat_can_all_flow_through_official_partition_formatting() {
     let plan = official_plan(OfficialPartitionMode::DefaultThreePartition).with_filesystems(
         OfficialPartitionFilesystems {
             boot: FilesystemKind::ExFat,
-            share: FilesystemKind::Fat16,
-            encrypt: FilesystemKind::ExFat,
+            share: FilesystemKind::Fat32,
+            encrypt: FilesystemKind::Fat16,
         },
     );
     let targets = plan.format_targets().unwrap();
@@ -570,6 +570,13 @@ fn fat16_and_exfat_can_each_be_physically_encrypted_when_selected() {
     let share =
         build_official_partition_filesystem(&plan, &targets[1], &FILE_KEY, "交换区", 2).unwrap();
     let raw = share.image.sectors().get(&0).unwrap();
+    assert_ne!(&raw[82..90], b"FAT32   ");
+    let plain = decrypt_mode2(raw, &FILE_KEY).unwrap();
+    assert_eq!(&plain[82..90], b"FAT32   ");
+
+    let encrypt =
+        build_official_partition_filesystem(&plan, &targets[2], &FILE_KEY, "保密区", 3).unwrap();
+    let raw = encrypt.image.sectors().get(&0).unwrap();
     assert_ne!(&raw[54..62], b"FAT16   ");
     let plain = decrypt_mode2(raw, &FILE_KEY).unwrap();
     assert_eq!(&plain[54..62], b"FAT16   ");

@@ -137,6 +137,8 @@ impl PlainProvisionRequest {
 
         let mut partitions = Vec::with_capacity(self.partitions.len());
         for (index, request) in self.partitions.iter().enumerate() {
+            crate::provision::validate_provision_filesystem(request.filesystem)
+                .map_err(|message| format!("P{}: {message}", index + 1))?;
             let next_start = self
                 .partitions
                 .iter()
@@ -289,21 +291,12 @@ fn plan_format_targets_with_keys(
             }
         })
         .collect::<Vec<_>>();
-    let registry = crate::filesystem::default_registry();
     for choice in planned.iter().filter(|choice| choice.target.format_capable) {
         let filesystem = choice
             .filesystem
             .ok_or("format-capable target is missing a filesystem")?;
-        let driver = registry
-            .driver(filesystem)
-            .ok_or_else(|| format!("{} 文件系统没有已注册驱动", choice.target.role.label()))?;
-        let capabilities = driver.capabilities();
-        if !capabilities.format || !capabilities.verify_format {
-            return Err(format!(
-                "{} 文件系统尚无可验证的写入实现",
-                choice.target.role.label()
-            ));
-        }
+        crate::provision::validate_provision_filesystem(filesystem)
+            .map_err(|message| format!("{}: {message}", choice.target.role.label()))?;
     }
     for (index, choice) in planned
         .iter_mut()

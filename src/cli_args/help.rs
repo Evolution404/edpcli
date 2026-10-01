@@ -46,11 +46,11 @@ fn print_topic_help(topic: &str) {
         "provision" => {
             println!("目标: --target mode0|mode1|mode2|mode3|plain");
             println!("    兼容输入: --mode 0|1|2|3；Plain 不是 mode4，--mode 4 永远非法。");
-            println!("    Plain 分区: 可重复 --partition START:SIZE:fat16|exfat[:LABEL]；SIZE 支持 sectors/MiB/GiB/fill。");
+            println!("    Plain 分区: 可重复 --partition START:SIZE:fat16|fat32|exfat[:LABEL]；SIZE 支持 sectors/MiB/GiB/fill。");
             println!("    Plain 未指定 --partition 时默认 P1 从 LBA2048 占满至盘尾。");
             println!("    mode1 若识别到现有 mode0，将保留原 type4 位置/密钥并让 type2 扩满前部。");
             println!("    可选格式化: --format-boot --format-share --format-encrypt");
-            println!("    文件系统: --boot-fs fat16|exfat --share-fs fat16|exfat --encrypt-fs fat16|exfat");
+            println!("    文件系统: --boot-fs fat16|fat32|exfat --share-fs fat16|fat32|exfat --encrypt-fs fat16|fat32|exfat");
             println!("    各区卷标: --boot-label LABEL --share-label LABEL --encrypt-label LABEL");
             println!("新盘身份参数: [--label-id ID] --user USER --dept DEPT [--label LABEL]");
             println!(
@@ -77,7 +77,9 @@ fn print_topic_help(topic: &str) {
                 "    --share-max-password-errors N --encrypt-max-password-errors N   (0..255)"
             );
             println!("分区参数: --boot-mib N / --boot-sectors N、--share-mib N、--encrypt-mib N；mode0 未指定启动区时默认 20417 扇区。");
-            println!("当前可写文件系统为 FAT16/exFAT；加密分区使用已验证的 SM4(mode2) 扇区变换。");
+            println!(
+                "当前可写文件系统为 FAT16/FAT32/exFAT；加密分区使用已验证的 SM4(mode2) 扇区变换。"
+            );
         }
         "completion" => {
             println!("zsh : eval \"$(edpcli completion zsh)\"");

@@ -4,11 +4,12 @@ use edpcli::protocol::{
 };
 use edpcli::provision::{
     build_official_partition_layout, generate_official_image, official_mbr_partition_type,
-    visible_mbr_partition_type, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
-    Lba8Identity, OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    shift_provision_filesystem, validate_provision_filesystem, visible_mbr_partition_type,
+    wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, Lba8Identity,
+    OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
     OfficialProvisionPlan, OfficialProvisionValidator, OnlyId, ProvisionEntropy, ProvisionImage,
     ProvisionMetadata, ProvisionProfile, ProvisionSpec, TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS,
-    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    OFFICIAL_PARTITION_START_SECTOR, PROVISION_FILESYSTEMS, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use edpcli::{
     crypto::{a6b0_full, crc32_bare, lba6_decode, xor_rolling},
@@ -21,6 +22,40 @@ fn types(mode: OfficialPartitionMode) -> Vec<u32> {
         .into_iter()
         .map(|entry| entry.partition_type.raw())
         .collect()
+}
+
+#[test]
+fn provision_filesystem_policy_is_single_source_for_three_writable_formats() {
+    assert_eq!(
+        PROVISION_FILESYSTEMS,
+        [
+            FilesystemKind::Fat16,
+            FilesystemKind::Fat32,
+            FilesystemKind::ExFat,
+        ]
+    );
+    for filesystem in PROVISION_FILESYSTEMS {
+        validate_provision_filesystem(filesystem).unwrap();
+    }
+    for filesystem in [FilesystemKind::Fat12, FilesystemKind::Ntfs] {
+        assert!(validate_provision_filesystem(filesystem).is_err());
+    }
+    assert_eq!(
+        shift_provision_filesystem(FilesystemKind::Fat16, false),
+        FilesystemKind::Fat32
+    );
+    assert_eq!(
+        shift_provision_filesystem(FilesystemKind::Fat32, false),
+        FilesystemKind::ExFat
+    );
+    assert_eq!(
+        shift_provision_filesystem(FilesystemKind::ExFat, false),
+        FilesystemKind::Fat16
+    );
+    assert_eq!(
+        shift_provision_filesystem(FilesystemKind::Fat16, true),
+        FilesystemKind::ExFat
+    );
 }
 
 #[test]

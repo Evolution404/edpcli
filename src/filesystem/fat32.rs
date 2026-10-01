@@ -229,7 +229,7 @@ fn choose_format_geometry(total: u64) -> Option<(u8, u32, u64)> {
             let data = total.checked_sub(overhead)?;
             let clusters = data / spc;
             let next = (clusters + 2).checked_mul(4)?.div_ceil(SECTOR_SIZE as u64);
-            if next == fat_sectors {
+            if next <= fat_sectors {
                 if (65_525..=MAX_VALIDATED_CLUSTERS).contains(&clusters)
                     && fat_sectors <= u32::MAX as u64
                 {

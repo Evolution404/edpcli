@@ -26,13 +26,11 @@ fn parse_provision_target(s: &str) -> Result<crate::provision::ProvisionTarget, 
 }
 
 fn parse_provision_filesystem(value: &str) -> Result<crate::filesystem::FilesystemKind, String> {
-    match value.to_ascii_lowercase().as_str() {
-        "fat16" => Ok(crate::filesystem::FilesystemKind::Fat16),
-        "exfat" => Ok(crate::filesystem::FilesystemKind::ExFat),
-        _ => Err(format!(
-            "错误: 当前仅支持 fat16/exfat 文件系统，得到 {value}"
-        )),
-    }
+    let filesystem = crate::filesystem::FilesystemKind::from_config_token(value)
+        .ok_or_else(|| format!("错误: 当前仅支持 fat16/fat32/exfat 文件系统，得到 {value}"))?;
+    crate::provision::validate_provision_filesystem(filesystem)
+        .map_err(|_| format!("错误: 当前仅支持 fat16/fat32/exfat 文件系统，得到 {value}"))?;
+    Ok(filesystem)
 }
 
 fn parse_plain_partition(

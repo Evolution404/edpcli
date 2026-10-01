@@ -496,7 +496,7 @@ fn provision_format_flags_and_independent_labels_parse() {
         "--share-fs",
         "fat16",
         "--encrypt-fs",
-        "exfat",
+        "fat32",
     ]))
     .unwrap();
     match parsed {
@@ -512,6 +512,7 @@ fn provision_format_flags_and_independent_labels_parse() {
             );
             assert_eq!(opts.boot_fs, edpcli::filesystem::FilesystemKind::ExFat);
             assert_eq!(opts.share_fs, edpcli::filesystem::FilesystemKind::Fat16);
+            assert_eq!(opts.encrypt_fs, edpcli::filesystem::FilesystemKind::Fat32);
         }
         _ => panic!("expected provision write"),
     }
@@ -535,7 +536,7 @@ fn provision_cli_rejects_filesystems_without_a_writer() {
         "--dept",
         "江苏省电力有限公司",
     ];
-    for filesystem in ["fat32", "ntfs"] {
+    for filesystem in ["fat12", "ntfs"] {
         let mut command = base.to_vec();
         command.extend(["--boot-fs", filesystem]);
         assert!(parse_args(&args(&command)).is_err());

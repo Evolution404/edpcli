@@ -364,7 +364,7 @@ CompatibilityReserve -> N/A
 volume_label: Option<String>
 ```
 
-FAT16 / exFAT 已能读取标签；其他文件系统目前并非都能提供。
+FAT16 / FAT32 / exFAT 已能可靠读取卷标；其他文件系统目前并非都能提供。
 
 因此扩展 source evidence 时必须保持 Option：
 
