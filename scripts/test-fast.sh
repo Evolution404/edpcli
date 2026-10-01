@@ -18,4 +18,7 @@ else
     echo "[fast] clippy skipped: no Rust/Cargo inputs changed"
 fi
 
+echo "[gate] table-scroll: all table kinds / both edges / active headers / renderer contract"
+cargo test --locked --test tui_suite table_scroll_gate -- --test-threads=1
+
 exec python3 scripts/test-full.py --profile fast --max-seconds "${EDPCLI_FAST_MAX_SECONDS:-60}" "$@"

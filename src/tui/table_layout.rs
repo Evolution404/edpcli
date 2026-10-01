@@ -18,6 +18,28 @@ pub enum TableKind {
     ResultPartitions,
 }
 
+impl TableKind {
+    /// Exhaustive registry used by the table-scroll gate. Adding a new table kind requires
+    /// updating this registry and the exhaustive index below, otherwise compilation fails.
+    pub const ALL: [Self; 5] = [
+        Self::Devices,
+        Self::Backups,
+        Self::RelatedBackups,
+        Self::InspectFields,
+        Self::ResultPartitions,
+    ];
+
+    pub const fn gate_index(self) -> usize {
+        match self {
+            Self::Devices => 0,
+            Self::Backups => 1,
+            Self::RelatedBackups => 2,
+            Self::InspectFields => 3,
+            Self::ResultPartitions => 4,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnId {
     Device,
@@ -341,7 +363,7 @@ impl TableInteractionState {
         layout: &AdaptiveTableLayout,
         content_widths: &[usize],
         viewport_width: u16,
-        reverse: bool,
+        _reverse: bool,
     ) {
         let viewport_width = usize::from(viewport_width.max(1));
         let (start, end) =
@@ -350,7 +372,9 @@ impl TableInteractionState {
         if start < self.scroll_x {
             self.scroll_x = start;
         } else if end > current_end {
-            self.scroll_x = if end.saturating_sub(start) > viewport_width && reverse {
+            self.scroll_x = if end.saturating_sub(start) > viewport_width {
+                // An oversized active column must open at its header/left edge. Aligning the
+                // right edge would hide the heading and reproduce the historic table bug.
                 start
             } else {
                 end.saturating_sub(viewport_width)
@@ -375,7 +399,11 @@ impl TableInteractionState {
         if start < self.scroll_x {
             self.scroll_x = start;
         } else if end > current_end {
-            self.scroll_x = end.saturating_sub(viewport_width);
+            self.scroll_x = if end.saturating_sub(start) > viewport_width {
+                start
+            } else {
+                end.saturating_sub(viewport_width)
+            };
         }
         self.scroll_x =
             self.scroll_x

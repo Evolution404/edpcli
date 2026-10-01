@@ -1,5 +1,5 @@
 use edpcli::tui::table_layout::{
-    display_width, identity_column_specs, render_table_scrollbars, table_column_schema,
+    display_width, identity_column_specs, layout_for, render_table_scrollbars, table_column_schema,
     table_position_label, table_scrollbar_visibility, truncate_cell, AdaptiveColumnSpec,
     AdaptiveTableLayout, ColumnId, SortDirection, TableInteractionState, TableKind, TableViewport,
     TruncatePolicy,
@@ -360,6 +360,220 @@ fn every_interactive_table_renderer_uses_unified_active_column_layout() {
             source.matches("render_table_scrollbars(").count() >= minimum,
             "{name} must render shared horizontal/vertical table scrollbars for every interactive table"
         );
+    }
+}
+
+fn synthetic_gate_widths(kind: TableKind) -> Vec<usize> {
+    layout_for(kind)
+        .specs()
+        .iter()
+        .enumerate()
+        .map(|(index, spec)| {
+            let preferred = usize::from(spec.preferred_width.max(spec.min_width));
+            if index % 3 == 1 {
+                preferred
+                    .max(usize::from(spec.max_width))
+                    .saturating_add(160)
+            } else {
+                preferred.saturating_add(index * 3)
+            }
+        })
+        .collect()
+}
+
+fn assert_active_column_opens_with_heading_visible(
+    layout: &AdaptiveTableLayout,
+    widths: &[usize],
+    viewport_width: u16,
+    state: TableInteractionState,
+    bounded: bool,
+) {
+    let active = state.active_column();
+    let viewport = layout.layout_with_active(
+        viewport_width,
+        widths,
+        state.viewport_offset(),
+        (!bounded).then_some(active),
+    );
+    let column = viewport
+        .columns
+        .iter()
+        .find(|column| column.index == active)
+        .unwrap_or_else(|| {
+            panic!(
+                "active column {active} must be visible; scroll={} width={viewport_width}",
+                state.viewport_offset()
+            )
+        });
+    assert_eq!(
+        column.clip_left, 0,
+        "activating column {active} must expose its heading/left edge instead of landing inside a long cell"
+    );
+}
+
+#[test]
+fn table_scroll_gate_registry_is_exhaustive_and_stable() {
+    for (index, kind) in TableKind::ALL.into_iter().enumerate() {
+        assert_eq!(
+            kind.gate_index(),
+            index,
+            "every TableKind must be registered exactly once in the scroll gate"
+        );
+    }
+}
+
+#[test]
+fn table_scroll_gate_all_kinds_reach_both_horizontal_edges_with_long_cells() {
+    for kind in TableKind::ALL {
+        let layout = layout_for(kind);
+        let widths = synthetic_gate_widths(kind);
+        let bounded = kind == TableKind::InspectFields;
+        for viewport_width in [12u16, 24, 40, 72, 120] {
+            let mut state = TableInteractionState::default();
+            let expected_max = if bounded {
+                layout.max_scroll(&widths, None, viewport_width)
+            } else {
+                layout.max_scroll(&widths, Some(state.active_column()), viewport_width)
+            };
+
+            let mut guard = 0usize;
+            while if bounded {
+                state.scroll_viewport_bounded(&layout, &widths, viewport_width, false)
+            } else {
+                state.scroll_viewport(&layout, &widths, viewport_width, false)
+            } {
+                guard += 1;
+                assert!(guard < 20_000, "{kind:?}: right-scroll failed to converge");
+            }
+            assert_eq!(
+                state.viewport_offset(),
+                expected_max,
+                "{kind:?}: H/L must reach the true right edge at viewport {viewport_width}"
+            );
+
+            guard = 0;
+            while if bounded {
+                state.scroll_viewport_bounded(&layout, &widths, viewport_width, true)
+            } else {
+                state.scroll_viewport(&layout, &widths, viewport_width, true)
+            } {
+                guard += 1;
+                assert!(guard < 20_000, "{kind:?}: left-scroll failed to converge");
+            }
+            assert_eq!(
+                state.viewport_offset(),
+                0,
+                "{kind:?}: H/L must return exactly to the left edge"
+            );
+        }
+    }
+}
+
+#[test]
+fn table_scroll_gate_every_active_column_keeps_its_heading_visible() {
+    for kind in TableKind::ALL {
+        let layout = layout_for(kind);
+        let widths = synthetic_gate_widths(kind);
+        let bounded = kind == TableKind::InspectFields;
+        for viewport_width in [16u16, 32, 56, 96] {
+            let mut state = TableInteractionState::default();
+            assert_active_column_opens_with_heading_visible(
+                &layout,
+                &widths,
+                viewport_width,
+                state,
+                bounded,
+            );
+            for _ in 1..layout.specs().len() {
+                let moved = if bounded {
+                    state.move_active_bounded(&layout, &widths, viewport_width, false)
+                } else {
+                    state.move_active(&layout, &widths, viewport_width, false)
+                };
+                assert!(moved, "{kind:?}: failed to advance active column");
+                assert_active_column_opens_with_heading_visible(
+                    &layout,
+                    &widths,
+                    viewport_width,
+                    state,
+                    bounded,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn table_scroll_gate_covers_every_interactive_renderer() {
+    let renderers = [
+        (
+            "devices",
+            include_str!("../src/tui/devices/list_render.rs"),
+            false,
+        ),
+        (
+            "backups",
+            include_str!("../src/tui/backups/render.rs"),
+            false,
+        ),
+        (
+            "related-backups",
+            include_str!("../src/tui/devices/detail_render.rs"),
+            false,
+        ),
+        (
+            "inspect-fields",
+            include_str!("../src/tui/inspect/field_table_render.rs"),
+            true,
+        ),
+        (
+            "provision-result",
+            include_str!("../src/tui/provision/result_partition_layout.rs"),
+            false,
+        ),
+        (
+            "restore-result",
+            include_str!("../src/tui/restore_result_partition_layout.rs"),
+            false,
+        ),
+    ];
+
+    for (name, source, bounded) in renderers {
+        assert!(
+            source.contains("layout_with_active("),
+            "{name}: missing shared viewport layout"
+        );
+        assert!(
+            source.contains("interaction.viewport_offset()"),
+            "{name}: renderer must use shared horizontal offset"
+        );
+        assert!(
+            source.contains("table_interaction("),
+            "{name}: renderer must consume TableInteractionState"
+        );
+        assert!(
+            source.contains("table_visual_layout("),
+            "{name}: renderer must use shared table layout"
+        );
+        assert!(
+            source.contains("table_visual_widths("),
+            "{name}: renderer must use shared visual widths"
+        );
+        assert!(
+            source.contains("render_table_scrollbars("),
+            "{name}: renderer must expose the shared scrollbar"
+        );
+        if bounded {
+            assert!(
+                source.contains("interaction.viewport_offset(),\n        None,"),
+                "{name}: bounded evidence columns must not expand from long active-cell content"
+            );
+        } else {
+            assert!(
+                source.contains("Some(interaction.active_column())"),
+                "{name}: active column must participate in renderer geometry"
+            );
+        }
     }
 }
 

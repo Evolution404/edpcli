@@ -49,7 +49,8 @@ fn draw_status_backup_detail(
 ) {
     use crate::application::media_identity::BackupAffinity;
     use crate::tui::table_layout::{
-        table_column_schema, table_heading, table_position_label, visible_cell, ColumnId, TableKind,
+        render_table_scrollbars, table_column_schema, table_heading, table_position_label,
+        visible_cell, ColumnId, TableKind,
     };
 
     let block = crate::tui::ui::card(title, focused);
@@ -173,6 +174,16 @@ fn draw_status_backup_detail(
     let mut table_state = TableState::default();
     table_state.select(state.device_related_backup_selected_index());
     frame.render_stateful_widget(table, sections[1], &mut table_state);
+    render_table_scrollbars(
+        frame,
+        sections[1],
+        &viewport,
+        related.len(),
+        0,
+        related
+            .len()
+            .min(sections[1].height.saturating_sub(3) as usize),
+    );
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
