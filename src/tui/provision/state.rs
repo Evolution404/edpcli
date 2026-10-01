@@ -282,5 +282,4 @@ impl AppState {
             self.set_item_count(0);
         }
     }
-
 }
