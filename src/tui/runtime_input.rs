@@ -31,13 +31,6 @@ pub(super) fn handle_key(
     backup_dir: &Path,
     terminal_size: ratatui::layout::Size,
 ) -> KeyOutcome {
-    if key.code == ct_event::KeyCode::Char('q') && key.modifiers.is_empty() {
-        let effect = state.navigate(NavCommand::Quit, 1);
-        if effect == StateEffect::ExitRequested {
-            return KeyOutcome::Exit;
-        }
-        return KeyOutcome::NextIteration;
-    }
     if let Some(outcome) =
         inspect::handle_inspect_key(state, tasks, keys, key, backup_dir, terminal_size)
     {

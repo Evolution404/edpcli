@@ -14,6 +14,34 @@ fn key(code: KeyCode) -> KeyEvent {
 }
 
 #[test]
+fn printable_normal_mode_shortcuts_are_plain_text_in_text_entry_modes() {
+    let shortcut_chars = [
+        'q', 'g', 'h', 'j', 'k', 'l', 'H', 'L', 's', 'S', 'G', 'o', '/', 'n', 'N', ':', '?', 'i',
+        'r', 'd', 'a', 'b', 'p', 'R', 'f', 'e', 'v', '1', '2', '3', 'J', ' ', 'y', 'Y', '[', ']',
+        '0', '$', '<', '>',
+    ];
+    for mode in [InputMode::Insert, InputMode::Search, InputMode::Command] {
+        for ch in shortcut_chars {
+            let mut mapper = KeyMapper::new();
+            assert_eq!(
+                mapper.map_for_role(mode, WidgetRole::Input, key(KeyCode::Char(ch))),
+                Some(TuiAction::Text(ch)),
+                "{ch:?} must remain text in {mode:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn normal_mode_q_remains_the_global_quit_shortcut() {
+    let mut mapper = KeyMapper::new();
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('q'))),
+        Some(TuiAction::Quit)
+    );
+}
+
+#[test]
 fn h_l_follow_widget_role_without_changing_insert_text() {
     let mut mapper = KeyMapper::new();
     assert_eq!(
@@ -694,6 +722,15 @@ fn event_loop_does_not_parse_text_or_confirmation_chars_outside_keymap() {
     assert!(
         !source.contains("ct_event::KeyCode::Char(ch)"),
         "text/confirmation character handling must go through KeyMapper"
+    );
+}
+
+#[test]
+fn top_level_runtime_input_never_bypasses_keymap_for_printable_characters() {
+    let source = include_str!("../src/tui/runtime_input.rs");
+    assert!(
+        !source.contains("ct_event::KeyCode::Char("),
+        "top-level runtime input must delegate printable characters through KeyMapper"
     );
 }
 
