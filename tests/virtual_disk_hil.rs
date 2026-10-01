@@ -1,6 +1,6 @@
 #![cfg(all(
     feature = "ci-virtual-disk",
-    any(target_os = "linux", target_os = "windows")
+    any(target_os = "linux", target_os = "windows", target_os = "macos")
 ))]
 
 use std::collections::BTreeMap;
@@ -150,14 +150,15 @@ fn part<'a>(
 fn raw_virtual_disk_atomic_roundtrip_and_restore() {
     let _serial = HIL_LOCK.lock().expect("serialize destructive virtual HIL");
     let path = std::env::var("EDPCLI_VIRTUAL_DISK_PATH")
-        .expect("EDPCLI_VIRTUAL_DISK_PATH must point to the disposable loop/VHD");
+        .expect("EDPCLI_VIRTUAL_DISK_PATH must point to the disposable loop/VHD/raw disk image");
     assert!(
         edpcli::platform::is_raw_device_path(&path),
         "HIL path must be a raw device: {path}"
     );
 
     // 先走产品平台层的卸载/锁卷逻辑。ci_prepare_virtual_write 内部还会二次确认：
-    // Linux 必须是 /dev/loopN；Windows 必须是 Virtual/FileBackedVirtual VHD。
+    // Linux 必须是 /dev/loopN；Windows 必须是 Virtual/FileBackedVirtual VHD；
+    // macOS 必须是 WholeDisk + Virtual + BusProtocol=Disk Image 的 /dev/rdiskN。
     let _guard = edpcli::platform::ci_prepare_virtual_write(&path)
         .unwrap_or_else(|error| panic!("prepare virtual write {path}: {error}"));
 
@@ -185,7 +186,7 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
     );
 
     // Chapter 12 semantic HIL: install a real mode0 metadata image on the disposable
-    // loop/VHD, read it back through FileDev, then exercise the per-domain planner
+    // loop/VHD/raw disk image, read it back through FileDev, then exercise the per-domain planner
     // against bytes that actually crossed the raw-device boundary.
     let total_sectors: u64 = std::env::var("EDPCLI_VIRTUAL_DISK_SECTORS")
         .expect("EDPCLI_VIRTUAL_DISK_SECTORS must describe the disposable virtual disk")
@@ -283,7 +284,7 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
     );
 
     // Password-only change is RewrapVerified. Then actually write the rewrapped
-    // protocol image to the loop/VHD and prove the data extent stayed bit-for-bit
+    // protocol image to the loop/VHD/raw disk image and prove the data extent stayed bit-for-bit
     // unchanged while the new password replaces the old password.
     let rewrap = TargetProvisionPlan::build(
         Some(&source),

@@ -1,5 +1,40 @@
 use super::*;
 
+fn source_protocol_device_id(
+    target: &TargetIdentity,
+    source_identity: &crate::media_identity::MediaIdentitySnapshot,
+) -> String {
+    source_identity
+        .protocol
+        .device_id
+        .clone()
+        .unwrap_or_else(|| target.device_id().to_string())
+}
+
+fn effective_target_filesystems(
+    format: &FormatOptions,
+    target_plan: &TargetProvisionPlan,
+) -> crate::provision::OfficialPartitionFilesystems {
+    let mut filesystems = format.filesystems();
+    for part in &target_plan.partitions {
+        if part.disposition == RegionDisposition::Rebuild {
+            continue;
+        }
+        let Some(filesystem) = part.geometry.filesystem else {
+            continue;
+        };
+        match part.geometry.role {
+            PartitionRole::Boot => filesystems.boot = filesystem,
+            PartitionRole::Share | PartitionRole::BootShareCombined => {
+                filesystems.share = filesystem
+            }
+            PartitionRole::Encrypt => filesystems.encrypt = filesystem,
+            PartitionRole::CompatibilityReserve => {}
+        }
+    }
+    filesystems
+}
+
 fn confirmed_filesystem(boot: &[u8], start_lba: u64, sectors: u64) -> Option<FilesystemKind> {
     if boot.len() != SECTOR {
         return None;
@@ -235,6 +270,7 @@ pub fn prepare_target_provision(
             "错误: 来源盘型未确认；拒绝把未知/损坏介质按 Plain 或 EDP 继续制盘",
         )
     })?;
+    let source_device_id = source_protocol_device_id(&target, &source_identity);
     let before_pin = MediaIdentityPin::new(source_identity, &source_metadata);
     let plain_source_extents = if source_kind == crate::provision::DiskProvisionKind::Plain {
         read_plain_source_extents(dev, total_sectors)?
@@ -247,14 +283,14 @@ pub fn prepare_target_provision(
         inspect_source_profile(
             dev,
             &source_metadata,
-            &device_id,
+            &source_device_id,
             total_sectors,
             &request.key_domains,
         )?
     };
     let source_identity = if source.is_some() {
         let base = crate::protocol::semantic::SemanticContext {
-            device_id: Some(device_id.clone()),
+            device_id: Some(source_device_id.clone()),
             vid: None,
             pid: None,
             size_bytes: Some(total_sectors * SECTOR as u64),
@@ -452,19 +488,7 @@ pub fn prepare_target_provision(
     let profile = ProvisionProfile::canonical_v1().with_pass_info_policy(pass_info_policy);
     let spec = ProvisionSpec::new(target, metadata, profile)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘元数据无法编码: {message}")))?;
-    let mut filesystems = request.format.filesystems();
-    for part in &target_plan.partitions {
-        if let Some(format) = part.geometry.filesystem {
-            match part.geometry.role {
-                PartitionRole::Boot => filesystems.boot = format,
-                PartitionRole::Share | PartitionRole::BootShareCombined => {
-                    filesystems.share = format
-                }
-                PartitionRole::Encrypt => filesystems.encrypt = format,
-                PartitionRole::CompatibilityReserve => {}
-            }
-        }
-    }
+    let filesystems = effective_target_filesystems(&request.format, &target_plan);
     let mut plan = OfficialProvisionPlan::new(
         selected_mode,
         sizes(request, selected_mode)?,
@@ -686,7 +710,6 @@ pub fn probe_provision_key_domains_on_disk(
         .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘 USB/SCSI 硬件身份"))?;
     let target = TargetIdentity::from_probe(&probe, total_sectors)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 目标硬件身份不完整: {message}")))?;
-    let device_id = target.device_id().to_string();
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     let source_metadata = read_image(&mut dev)?;
     let source_identity =
@@ -695,6 +718,7 @@ pub fn probe_provision_key_domains_on_disk(
         .protocol
         .provision_kind
         .ok_or_else(|| err(EXIT_TARGET, "错误: 来源盘型未确认；拒绝继续探测密码域"))?;
+    let source_device_id = source_protocol_device_id(&target, &source_identity);
     if source_kind == crate::provision::DiskProvisionKind::Plain {
         return Ok(ProvisionKeyProbe {
             source_kind,
@@ -707,7 +731,7 @@ pub fn probe_provision_key_domains_on_disk(
     let image = ProvisionImage::from_bytes(source_metadata.clone())
         .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
     let parsed =
-        parse_existing_provision(&image, &device_id, total_sectors).map_err(|message| {
+        parse_existing_provision(&image, &source_device_id, total_sectors).map_err(|message| {
             err(
                 EXIT_TARGET,
                 format!("错误: 来源盘注册结构无法可靠解析: {message}"),
@@ -770,9 +794,10 @@ pub fn verify_provision_source_password_on_disk(
             "错误: 当前来源盘已确认是 Plain；不存在可验证的 EDP key domain",
         ));
     }
+    let source_device_id = source_protocol_device_id(&target, &source_identity);
     let image = ProvisionImage::from_bytes(source_metadata)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 来源元数据长度无效: {message}")))?;
-    let source = parse_existing_provision(&image, target.device_id(), total_sectors)
+    let source = parse_existing_provision(&image, &source_device_id, total_sectors)
         .map_err(|message| {
             err(
                 EXIT_TARGET,
@@ -855,24 +880,24 @@ pub fn prepare_plain_provision(
             "错误: 来源盘型未确认；拒绝把未知/损坏介质恢复为 Plain",
         )
     })?;
+    let source_device_id = source_protocol_device_id(&target, &source_identity);
     let before_pin = MediaIdentityPin::new(source_identity, &source_metadata);
-    let source_lce =
-        if source_kind == crate::provision::DiskProvisionKind::Plain {
-            None
-        } else {
-            let geometry =
-                parse_lba7_compatibility_geometry(&source_metadata, &device_id, total_sectors)
-                    .map_err(|message| {
-                        err(
-                EXIT_TARGET,
-                format!("错误: 无法从来源 LBA7 实际 entry 解析 LCE，拒绝恢复普通盘: {message}"),
-            )
-                    })?;
-            Some(PlainCleanupExtent::new(
-                geometry.start_lba,
-                geometry.sector_count,
-            ))
-        };
+    let source_lce = if source_kind == crate::provision::DiskProvisionKind::Plain {
+        None
+    } else {
+        let geometry =
+            parse_lba7_compatibility_geometry(&source_metadata, &source_device_id, total_sectors)
+                .map_err(|message| {
+                err(
+                    EXIT_TARGET,
+                    format!("错误: 无法从来源 LBA7 实际 entry 解析 LCE，拒绝恢复普通盘: {message}"),
+                )
+            })?;
+        Some(PlainCleanupExtent::new(
+            geometry.start_lba,
+            geometry.sector_count,
+        ))
+    };
 
     let mut volume_serials = Vec::with_capacity(plan.partitions.len());
     for _ in &plan.partitions {
@@ -898,4 +923,128 @@ pub fn prepare_plain_provision(
         before_pin,
         expected_probe: probe,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::edpf::EdpPartitionType;
+
+    fn target_part(
+        role: PartitionRole,
+        partition_type: EdpPartitionType,
+        filesystem: FilesystemKind,
+        disposition: RegionDisposition,
+    ) -> crate::provision::TargetPartitionPlan {
+        crate::provision::TargetPartitionPlan {
+            geometry: crate::provision::TargetPartitionGeometry {
+                role,
+                partition_type,
+                start_lba: 63,
+                sector_count: 20_417,
+                physically_encrypted: false,
+                filesystem: Some(filesystem),
+            },
+            action: if disposition == RegionDisposition::Rebuild {
+                PartitionAction::Rebuild
+            } else {
+                PartitionAction::PreserveExact
+            },
+            disposition,
+            password_disposition: None,
+            source_password_knowledge: None,
+            target_password_policy: None,
+            reason: String::new(),
+            preserved_record: None,
+        }
+    }
+
+    #[test]
+    fn observed_protocol_device_id_wins_for_existing_edp_source_parsing() {
+        let probe = crate::platform::HardwareProbe {
+            vid: Some(0x3535),
+            pid: Some(0x6300),
+            transport: crate::platform::NativeTransport::Bot,
+            windows_pnp_instance_id: None,
+            inquiry: Some(crate::platform::InquiryInfo {
+                vendor: "aigo".into(),
+                product: "U335".into(),
+                revision: "1100".into(),
+            }),
+        };
+        let target = TargetIdentity::from_probe(&probe, 15_728_640).unwrap();
+        assert_eq!(target.device_id(), "disk&ven_aigo&prod_u335");
+
+        let mut source_identity = crate::media_identity::MediaIdentitySnapshot::default();
+        source_identity.protocol.device_id = Some("disk&ven_aigo&prod_u335&rev_1100".into());
+        assert_eq!(
+            source_protocol_device_id(&target, &source_identity),
+            "disk&ven_aigo&prod_u335&rev_1100"
+        );
+    }
+
+    #[test]
+    fn rebuild_uses_explicit_requested_filesystems_instead_of_stale_source_geometry() {
+        let format = FormatOptions {
+            boot: true,
+            share: true,
+            encrypt: true,
+            boot_label: "BOOT".into(),
+            share_label: "SHARE".into(),
+            encrypt_label: "ENCRYPT".into(),
+            boot_fs: FilesystemKind::Fat16,
+            share_fs: FilesystemKind::Fat32,
+            encrypt_fs: FilesystemKind::ExFat,
+        };
+        let target_plan = TargetProvisionPlan {
+            mode: OfficialPartitionMode::DefaultThreePartition,
+            partitions: vec![
+                target_part(
+                    PartitionRole::Boot,
+                    EdpPartitionType::Boot,
+                    FilesystemKind::ExFat,
+                    RegionDisposition::Rebuild,
+                ),
+                target_part(
+                    PartitionRole::Share,
+                    EdpPartitionType::Share,
+                    FilesystemKind::ExFat,
+                    RegionDisposition::Rebuild,
+                ),
+                target_part(
+                    PartitionRole::Encrypt,
+                    EdpPartitionType::Encrypt,
+                    FilesystemKind::Fat16,
+                    RegionDisposition::Rebuild,
+                ),
+            ],
+            unallocated_sectors: 0,
+        };
+
+        let filesystems = effective_target_filesystems(&format, &target_plan);
+        assert_eq!(filesystems.boot, FilesystemKind::Fat16);
+        assert_eq!(filesystems.share, FilesystemKind::Fat32);
+        assert_eq!(filesystems.encrypt, FilesystemKind::ExFat);
+    }
+
+    #[test]
+    fn preserved_partition_keeps_verified_source_filesystem() {
+        let format = FormatOptions {
+            share_fs: FilesystemKind::Fat32,
+            ..FormatOptions::default()
+        };
+        let target_plan = TargetProvisionPlan {
+            mode: OfficialPartitionMode::DefaultThreePartition,
+            partitions: vec![target_part(
+                PartitionRole::Share,
+                EdpPartitionType::Share,
+                FilesystemKind::ExFat,
+                RegionDisposition::PreserveVerified,
+            )],
+            unallocated_sectors: 0,
+        };
+
+        let filesystems = effective_target_filesystems(&format, &target_plan);
+        assert_eq!(filesystems.share, FilesystemKind::ExFat);
+    }
 }

@@ -32,7 +32,10 @@ mod macos {
     const EXPECTED_VID: u16 = 0x3535;
     const EXPECTED_PID: u16 = 0x6300;
     const EXPECTED_TOTAL_SECTORS: u64 = 15_728_640;
-    const EXPECTED_DEVICE_ID: &str = "disk&ven_aigo&prod_u335&rev_1100";
+    // Bind to the current first-party canonical write device_id. A revision-bearing
+    // legacy protocol candidate may still identify the source media, but destructive HIL also
+    // requires exact VID:PID, geometry and the explicit serial digest.
+    const EXPECTED_DEVICE_ID: &str = "disk&ven_aigo&prod_u335";
 
     const BOOT_START: u64 = 63;
     const BOOT_SECTORS: u64 = 20_417;

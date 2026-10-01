@@ -249,6 +249,61 @@ fn plain_identity_recheck_accepts_zero_lba4_and_rejects_explicit_edp_onlyid() {
     );
 }
 
+#[test]
+fn edp_identity_recheck_accepts_short_and_revision_candidates_for_same_hardware() {
+    use edpcli::crypto::{crc32_bare, xor_rolling};
+    use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
+    use edpcli::sysinfo::CmdRunner;
+    use std::time::Duration;
+
+    struct NativeRunner;
+    impl CmdRunner for NativeRunner {
+        fn check_output(&self, _cmd: &[&str], _timeout: Duration) -> io::Result<String> {
+            Err(io::Error::other("native-only test runner"))
+        }
+
+        fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
+            Some(HardwareProbe {
+                vid: Some(0x3535),
+                pid: Some(0x6300),
+                transport: NativeTransport::Bot,
+                windows_pnp_instance_id: None,
+                inquiry: Some(InquiryInfo {
+                    vendor: "aigo".into(),
+                    product: "U335".into(),
+                    revision: "1100".into(),
+                }),
+            })
+        }
+    }
+
+    struct EdpDev(Vec<u8>);
+    impl SectorDev for EdpDev {
+        fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+            match lba {
+                7 => Ok(self.0.clone()),
+                _ => Err(io::Error::other("unexpected LBA")),
+            }
+        }
+
+        fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+            unreachable!("identity verification is read-only")
+        }
+    }
+
+    let actual = "disk&ven_aigo&prod_u335&rev_1100";
+    let expected = "disk&ven_aigo&prod_u335";
+    let crc = crc32_bare(actual.as_bytes());
+    let k0 = (crc & 0xffff) ^ (crc >> 16);
+    let mut decoded = vec![0u8; 512];
+    decoded[..4].copy_from_slice(b"EDPF");
+    let raw = xor_rolling(&decoded, k0);
+
+    verify_expected_identity(&NativeRunner, 4, None, Some(expected), &mut EdpDev(raw)).expect(
+        "short/long device_id variants from the same current hardware must not look like a swap",
+    );
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn plain_identity_recheck_accepts_whole_disk_ntfs_with_nonzero_lba4_code() {

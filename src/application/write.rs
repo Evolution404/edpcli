@@ -521,12 +521,19 @@ pub fn verify_expected_identity(
         let actual = identify(runner, disk, &raw).device_id;
         if let Some(actual) = actual {
             if actual != expected {
-                return Err(err(
-                    EXIT_TARGET,
-                    format!(
-                        "错误: 设备在选择/确认期间发生变化(expected device_id={expected}, actual device_id={actual})，拒绝继续"
-                    ),
-                ));
+                let candidates = generate_candidates(runner, disk);
+                let expected_still_matches_hardware =
+                    candidates.iter().any(|candidate| candidate == expected);
+                let actual_still_matches_hardware =
+                    candidates.iter().any(|candidate| candidate == &actual);
+                if !expected_still_matches_hardware || !actual_still_matches_hardware {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: 设备在选择/确认期间发生变化(expected device_id={expected}, actual device_id={actual})，拒绝继续"
+                        ),
+                    ));
+                }
             }
         } else {
             // Plain whole-disk FAT/exFAT/NTFS media may legitimately carry
