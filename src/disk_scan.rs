@@ -316,13 +316,15 @@ pub fn scan_disks(
                                 let Ok(boot) = read_exact(start) else {
                                     continue;
                                 };
-                                partition.filesystem = crate::filesystem::detect_boot_sector(
-                                    partition.sector_count,
-                                    &boot,
-                                )
-                                .ok()
-                                .flatten()
-                                .map(|filesystem| filesystem.label().to_string());
+                                partition.filesystem =
+                                    crate::filesystem::detect_boot_sector_with_geometry(
+                                        partition.start_lba,
+                                        partition.sector_count,
+                                        &boot,
+                                    )
+                                    .ok()
+                                    .flatten()
+                                    .map(|filesystem| filesystem.label().to_string());
                             }
                             row.partition_table = Some(table);
                         }
