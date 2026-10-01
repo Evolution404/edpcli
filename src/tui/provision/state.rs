@@ -143,6 +143,8 @@ use transitions::{ProvisionFormViewSnapshot, ProvisionReviewViewSnapshot};
 mod layout;
 #[path = "layout_presentation.rs"]
 mod layout_presentation;
+#[path = "mode2_geometry_note.rs"]
+mod mode2_geometry_note;
 #[path = "navigation_model.rs"]
 mod navigation_model;
 pub use navigation_model::ProvisionSurface;

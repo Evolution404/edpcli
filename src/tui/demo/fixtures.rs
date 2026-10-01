@@ -286,6 +286,7 @@ pub(super) fn provision_review_projection(row: &Row) -> ProvisionConfirmationVie
             reformatted_regions: 0,
             password_changed_regions: 0,
         },
+        geometry_note: None,
         regions,
     }
 }

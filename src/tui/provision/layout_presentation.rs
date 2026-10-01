@@ -184,6 +184,9 @@ impl AppState {
         }
 
         rows.push(Detail::muted(usable_summary));
+        if let Some(note) = super::mode2_geometry_note::editor_note(self) {
+            rows.push(Detail::accent(format!("说明  {note}")));
+        }
         rows.push(Detail::region_header());
 
         for (index, segment) in visible.segments.iter().enumerate() {

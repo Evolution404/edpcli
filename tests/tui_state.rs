@@ -1044,6 +1044,29 @@ fn ch14_write_progress_batch_reaches_tui_state_without_losing_milestones() {
 }
 
 #[test]
+fn mode2_preserved_encrypt_geometry_explains_unallocated_space_until_user_edits_it() {
+    use edpcli::provision::DiskProvisionKind;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![official_device(
+        64_000_000_000,
+        DiskProvisionKind::Mode0,
+    )]);
+    assert_eq!(enter_provision_kind(&mut state, 2), ProvisionKind::Mode2);
+
+    let details = state.provision_layout_editor_details();
+    assert!(details.iter().any(|detail| {
+        detail.text.contains("保留现有保密区几何") && detail.text.contains("未自动并入")
+    }));
+
+    state.provision_mut().form.encrypt_start_lba = "126".into();
+    let details = state.provision_layout_editor_details();
+    assert!(!details
+        .iter()
+        .any(|detail| detail.text.contains("保留现有保密区几何")));
+}
+
+#[test]
 fn registered_mode0_to_mode1_form_keeps_exact_encrypt_geometry() {
     use edpcli::provision::{CapacityInputMode, DiskProvisionKind};
     use edpcli::sectors::EdpfPartition;

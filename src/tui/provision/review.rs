@@ -126,6 +126,7 @@ pub(crate) struct ProvisionConfirmationViewModel {
     pub target: ProvisionConfirmationTarget,
     pub layout: crate::tui::disk_layout::DiskLayoutModel,
     pub overall: ProvisionConfirmationOverall,
+    pub geometry_note: Option<String>,
     pub regions: Vec<ProvisionConfirmationRegion>,
 }
 
@@ -146,7 +147,7 @@ impl ProvisionConfirmationViewModel {
             target: prepared.target(),
         };
 
-        let (layout, regions) = match prepared {
+        let (layout, regions, geometry_note) = match prepared {
             ProvisionPrepared::Official(official) => {
                 let target_plan = official
                     .target_plan
@@ -370,8 +371,22 @@ impl ProvisionConfirmationViewModel {
                         technical_basis,
                     });
                 }
+                let encrypt_geometry_preserved = target_plan.partitions.iter().any(|part| {
+                    part.geometry.role == crate::provision::PartitionRole::Encrypt
+                        && matches!(
+                            part.disposition,
+                            crate::provision::RegionDisposition::PreserveOpaque
+                                | crate::provision::RegionDisposition::PreserveVerified
+                                | crate::provision::RegionDisposition::RewrapVerified
+                        )
+                });
+                let geometry_note = super::mode2_geometry_note::note_for(
+                    target_plan.mode,
+                    target_plan.unallocated_sectors,
+                    encrypt_geometry_preserved,
+                );
                 let regions = merge_all_regions(&layout, regions)?;
-                (layout, regions)
+                (layout, regions, geometry_note)
             }
             ProvisionPrepared::Plain(plain) => {
                 let partition_segments = plain
@@ -445,7 +460,7 @@ impl ProvisionConfirmationViewModel {
                     });
                 }
                 let regions = merge_all_regions(&layout, regions)?;
-                (layout, regions)
+                (layout, regions, None)
             }
         };
 
@@ -480,6 +495,7 @@ impl ProvisionConfirmationViewModel {
             target,
             layout,
             overall,
+            geometry_note,
             regions,
         })
     }

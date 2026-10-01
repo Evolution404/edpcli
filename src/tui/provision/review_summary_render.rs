@@ -113,5 +113,12 @@ fn overall_lines(view: &ProvisionConfirmationViewModel) -> Vec<Line<'static>> {
             },
         ),
     ]));
+    if let Some(note) = view.geometry_note.as_deref() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("布局说明  ", secondary()),
+            Span::styled(safe(note), secondary()),
+        ]));
+    }
     lines
 }
