@@ -28,7 +28,8 @@ pub(super) fn password_style(effect: ProvisionConfirmationPasswordEffect) -> Sty
         ProvisionConfirmationPasswordEffect::None => muted(),
         ProvisionConfirmationPasswordEffect::Preserve => success(),
         ProvisionConfirmationPasswordEffect::Rewrap => accent(),
-        ProvisionConfirmationPasswordEffect::NewFileKey => warning(),
+        ProvisionConfirmationPasswordEffect::InitializeNew => accent(),
+        ProvisionConfirmationPasswordEffect::Rebuild => warning(),
     }
 }
 
