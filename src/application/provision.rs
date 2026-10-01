@@ -490,6 +490,7 @@ pub struct ProvisionKeyProbe {
 pub struct PreparedNewProvision {
     pub disk: u32,
     pub device_id: String,
+    pub source_kind: crate::provision::DiskProvisionKind,
     pub mode: OfficialPartitionMode,
     pub force_change_password: bool,
     pub pass_info_policy: PassInfoPolicy,
@@ -542,6 +543,7 @@ impl std::fmt::Debug for PreparedNewProvision {
             .debug_struct("PreparedNewProvision")
             .field("disk", &self.disk)
             .field("device_id", &self.device_id)
+            .field("source_kind", &self.source_kind)
             .field("mode", &self.mode)
             .field("force_change_password", &self.force_change_password)
             .field("pass_info_policy", &self.pass_info_policy)
