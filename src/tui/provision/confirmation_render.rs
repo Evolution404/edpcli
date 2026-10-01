@@ -41,10 +41,18 @@ pub(super) fn provision_confirmation_details(
         .filter(|region| region.data_effect == ProvisionConfirmationDataEffect::Clear)
         .map(|region| region.label.as_str())
         .collect::<Vec<_>>();
-    let new_keys = view
+    let initialized = view
         .regions
         .iter()
-        .filter(|region| region.password_effect == ProvisionConfirmationPasswordEffect::NewFileKey)
+        .filter(|region| {
+            region.password_effect == ProvisionConfirmationPasswordEffect::InitializeNew
+        })
+        .map(|region| region.label.as_str())
+        .collect::<Vec<_>>();
+    let rebuilt = view
+        .regions
+        .iter()
+        .filter(|region| region.password_effect == ProvisionConfirmationPasswordEffect::Rebuild)
         .map(|region| region.label.as_str())
         .collect::<Vec<_>>();
     let rewrapped = view
@@ -95,44 +103,40 @@ pub(super) fn provision_confirmation_details(
         )
     });
 
-    lines.push(if new_keys.is_empty() && rewrapped.is_empty() {
-        confirmation_status_line("密码", "✓ 无密码变化".into(), success())
-    } else if !new_keys.is_empty() && rewrapped.is_empty() {
-        confirmation_status_line(
-            "密码",
-            format!(
-                "⚠ {} 个密码域重新初始化：{}",
-                new_keys.len(),
-                new_keys.join("、")
-            ),
-            warning(),
-        )
-    } else if new_keys.is_empty() {
-        confirmation_status_line(
-            "密码",
-            format!(
-                "↻ {} 个密码域改密：{}",
-                rewrapped.len(),
-                rewrapped.join("、")
-            ),
-            accent(),
-        )
-    } else {
-        confirmation_status_line(
-            "密码",
-            format!(
-                "↻ {} 个密码域变化：{}",
-                new_keys.len() + rewrapped.len(),
-                new_keys
-                    .iter()
-                    .chain(rewrapped.iter())
-                    .copied()
-                    .collect::<Vec<_>>()
-                    .join("、")
-            ),
-            accent(),
-        )
-    });
+    lines.push(
+        if initialized.is_empty() && rebuilt.is_empty() && rewrapped.is_empty() {
+            confirmation_status_line("密码", "✓ 无密码变化".into(), success())
+        } else {
+            let mut effects = Vec::new();
+            if !initialized.is_empty() {
+                effects.push(format!(
+                    "+ 新建 {} 个：{}",
+                    initialized.len(),
+                    initialized.join("、")
+                ));
+            }
+            if !rebuilt.is_empty() {
+                effects.push(format!(
+                    "⚠ 重建 {} 个：{}",
+                    rebuilt.len(),
+                    rebuilt.join("、")
+                ));
+            }
+            if !rewrapped.is_empty() {
+                effects.push(format!(
+                    "↻ 改密 {} 个：{}",
+                    rewrapped.len(),
+                    rewrapped.join("、")
+                ));
+            }
+            let style = if rebuilt.is_empty() {
+                accent()
+            } else {
+                warning()
+            };
+            confirmation_status_line("密码", effects.join("；"), style)
+        },
+    );
 
     lines.push(if filesystem_changes.is_empty() {
         confirmation_status_line("文件系统", "✓ 不新建/格式化".into(), success())

@@ -577,9 +577,11 @@ fn parse_new_provision_opts(
                 }
             }),
             share_source_password: share_source_password.unwrap_or_default(),
-            share_target_password: share_target_password.unwrap_or_else(|| "0000aaaa".into()),
+            share_target_password: share_target_password
+                .unwrap_or_else(|| crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.into()),
             encrypt_source_password: encrypt_source_password.unwrap_or_default(),
-            encrypt_target_password: encrypt_target_password.unwrap_or_else(|| "0000aaaa".into()),
+            encrypt_target_password: encrypt_target_password
+                .unwrap_or_else(|| crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.into()),
             volume_label: volume_label.clone(),
             format_boot,
             format_share,

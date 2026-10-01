@@ -125,10 +125,12 @@ impl AppState {
                     "当前草稿有冲突".to_string()
                 }
             );
-            let preflight = self.provision_preflight().ok();
+            let preflight = self.provision_preflight();
+            let preflight_error = preflight.as_ref().err().cloned();
             for part in &parts {
                 let decision = preflight
                     .as_ref()
+                    .ok()
                     .and_then(|preflight| preflight.partition(part.role));
                 let (status, tone, reason) = match decision {
                     Some(decision) => {
@@ -148,14 +150,15 @@ impl AppState {
                             Kind::BlockedNeedsFormat | Kind::BlockedNeedsTargetPassword => {
                                 ("⚠ 需重建".into(), Tone::Warning)
                             }
-                            Kind::PendingBackend => ("… 待计划".into(), Tone::Accent),
                         };
                         (status, tone, decision.reason.clone())
                     }
                     None => (
-                        "? 待确认".into(),
-                        Tone::Warning,
-                        "同步检查尚未生成当前区域结论".into(),
+                        "⚠ 计划异常".into(),
+                        Tone::Danger,
+                        preflight_error.clone().unwrap_or_else(|| {
+                            format!("内部错误：{}缺少同步预检结论", part.role.label())
+                        }),
                     ),
                 };
                 partition_status.insert(
@@ -202,9 +205,12 @@ impl AppState {
                     ),
                     DiskRegionKind::Reserved => ("● 保留".into(), Tone::Muted, None, String::new()),
                     DiskRegionKind::Free => ("○ 空闲".into(), Tone::Muted, None, String::new()),
-                    DiskRegionKind::Unknown => {
-                        ("? 待确认".into(), Tone::Warning, None, String::new())
-                    }
+                    DiskRegionKind::Unknown => (
+                        "⚠ 计划异常".into(),
+                        Tone::Danger,
+                        None,
+                        "目标布局存在未分类区域".into(),
+                    ),
                     DiskRegionKind::Plain => (
                         "⚠ 需重建".into(),
                         Tone::Warning,
@@ -235,9 +241,12 @@ impl AppState {
                 .unwrap_or_else(|| match segment.kind {
                     DiskRegionKind::Reserved => ("● 保留".into(), Tone::Muted, None, String::new()),
                     DiskRegionKind::Free => ("○ 空闲".into(), Tone::Muted, None, String::new()),
-                    DiskRegionKind::Unknown => {
-                        ("? 待确认".into(), Tone::Warning, None, String::new())
-                    }
+                    DiskRegionKind::Unknown => (
+                        "⚠ 计划异常".into(),
+                        Tone::Danger,
+                        None,
+                        "目标布局存在未分类区域".into(),
+                    ),
                     _ => ("● 固定".into(), Tone::Muted, None, String::new()),
                 });
             rows.push(Detail::muted(""));

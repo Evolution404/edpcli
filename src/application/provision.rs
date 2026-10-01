@@ -490,6 +490,7 @@ pub struct ProvisionKeyProbe {
 pub struct PreparedNewProvision {
     pub disk: u32,
     pub device_id: String,
+    pub source_kind: crate::provision::DiskProvisionKind,
     pub mode: OfficialPartitionMode,
     pub force_change_password: bool,
     pub pass_info_policy: PassInfoPolicy,
@@ -542,6 +543,7 @@ impl std::fmt::Debug for PreparedNewProvision {
             .debug_struct("PreparedNewProvision")
             .field("disk", &self.disk)
             .field("device_id", &self.device_id)
+            .field("source_kind", &self.source_kind)
             .field("mode", &self.mode)
             .field("force_change_password", &self.force_change_password)
             .field("pass_info_policy", &self.pass_info_policy)
@@ -707,12 +709,12 @@ pub use commit::{
 pub use export::{
     export_provision_image, export_sparse_plain_provision_image, export_sparse_provision_image,
 };
-#[cfg(test)]
-use prepare::target_encrypt_capacity_override;
 pub use prepare::{
     prepare_plain_provision, prepare_provision, prepare_target_provision,
     probe_provision_key_domains_on_disk, verify_provision_source_password_on_disk,
 };
+#[cfg(test)]
+use prepare::{read_plain_source_extents, target_encrypt_capacity_override};
 
 pub fn prepare_provision_on_disk(
     runner: &dyn CmdRunner,

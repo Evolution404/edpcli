@@ -39,6 +39,59 @@ fn classify_live_source_identity(
     )
 }
 
+pub(super) fn read_plain_source_extents(
+    dev: &mut dyn SectorDev,
+    total_sectors: u64,
+) -> EdpCliResult<Vec<crate::provision::PlainSourceExtent>> {
+    let table = crate::partition_table::read_partition_table(total_sectors, |lba| {
+        let lba =
+            u32::try_from(lba).map_err(|_| format!("Plain partition LBA{lba} exceeds u32"))?;
+        dev.read_sector(lba)
+            .map_err(|error| format!("read Plain partition LBA{lba}: {error}"))
+    })
+    .map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 无法读取普通盘物理分区表: {message}"),
+        )
+    })?;
+
+    let mut extents = Vec::with_capacity(table.partitions.len());
+    for partition in table.partitions {
+        let start = u32::try_from(partition.start_lba).map_err(|_| {
+            err(
+                EXIT_TARGET,
+                format!(
+                    "错误: 普通盘分区起点 LBA{} 超出当前读取范围",
+                    partition.start_lba
+                ),
+            )
+        })?;
+        let boot = dev.read_sector(start).map_err(|error| {
+            err(
+                EXIT_TARGET,
+                format!(
+                    "错误: 无法读取普通盘分区 P{} 启动扇区: {error}",
+                    partition.index
+                ),
+            )
+        })?;
+        let filesystem = crate::filesystem::detect_boot_sector_with_geometry(
+            partition.start_lba,
+            partition.sector_count,
+            &boot,
+        )
+        .ok()
+        .flatten();
+        extents.push(crate::provision::PlainSourceExtent {
+            start_lba: partition.start_lba,
+            sector_count: partition.sector_count,
+            filesystem,
+        });
+    }
+    Ok(extents)
+}
+
 fn resolved_source_password<'a>(
     source: &ParsedExistingProvision,
     key_domains: &'a KeyDomainSecrets,
@@ -183,6 +236,11 @@ pub fn prepare_target_provision(
         )
     })?;
     let before_pin = MediaIdentityPin::new(source_identity, &source_metadata);
+    let plain_source_extents = if source_kind == crate::provision::DiskProvisionKind::Plain {
+        read_plain_source_extents(dev, total_sectors)?
+    } else {
+        Vec::new()
+    };
     let source = if source_kind == crate::provision::DiskProvisionKind::Plain {
         None
     } else {
@@ -290,8 +348,9 @@ pub fn prepare_target_provision(
             }
         }
     }
-    let mut target_plan = TargetProvisionPlan::build(
+    let mut target_plan = TargetProvisionPlan::build_with_plain_extents(
         source.as_ref(),
+        &plain_source_extents,
         selected_mode,
         &targets,
         compatibility.start_lba,
@@ -424,7 +483,7 @@ pub fn prepare_target_provision(
     let mut file_keys = Vec::with_capacity(target_plan.partitions.len());
     for (index, part) in target_plan.partitions.iter().enumerate() {
         match part.disposition {
-            RegionDisposition::PreserveOpaque | RegionDisposition::PreserveVerified => {
+            RegionDisposition::PreserveOpaque => {
                 let record = part.preserved_record.ok_or_else(|| {
                     err(
                         EXIT_TARGET,
@@ -445,6 +504,30 @@ pub fn prepare_target_provision(
                                 .map_err(|message| err(EXIT_TARGET, message))?,
                         )
                         .map_err(|message| err(EXIT_TARGET, message))?;
+                }
+            }
+            RegionDisposition::PreserveVerified => {
+                file_keys.push([0; 16]);
+                if let Some(record) = part.preserved_record {
+                    if record.lba12.need_encrypt != 0 {
+                        plan = plan
+                            .with_partition_key_material(
+                                index,
+                                record.lba7_key_material(),
+                                record
+                                    .lba12_key_material()
+                                    .map_err(|message| err(EXIT_TARGET, message))?,
+                            )
+                            .map_err(|message| err(EXIT_TARGET, message))?;
+                    }
+                } else if KeyDomainRole::from_partition_role(part.geometry.role).is_some() {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {}密码域保留计划缺少来源 key record",
+                            part.geometry.role.label()
+                        ),
+                    ));
                 }
             }
             RegionDisposition::RewrapVerified => {
@@ -572,6 +655,7 @@ pub fn prepare_target_provision(
     Ok(PreparedNewProvision {
         disk,
         device_id,
+        source_kind,
         mode: selected_mode,
         force_change_password,
         pass_info_policy,

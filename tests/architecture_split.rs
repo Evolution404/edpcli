@@ -1763,17 +1763,14 @@ fn infrastructure_does_not_depend_on_application_layer() {
 #[test]
 fn chapter_15_identity_write_boundaries_remain_separate() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let source = |path: &str| {
-        fs::read_to_string(root.join(path)).unwrap_or_else(|error| panic!("read {path}: {error}"))
-    };
-    let restore = source("src/application/write.rs");
-    let selector = source("src/selectors.rs");
-    let observer = source("src/media_identity_observer.rs");
-    let matcher = source("src/media_identity.rs");
-    let edpb_writer = source("src/edpb/write.rs");
-    let edpb_legacy = source("src/edpb/legacy.rs");
-    let backup_writer = source("src/diskio/backup_create.rs");
-    let lineage = source("src/application/provision/identity_lineage.rs");
+    let restore = read_source("src/application/write.rs");
+    let selector = read_source("src/selectors.rs");
+    let observer = read_source("src/media_identity_observer.rs");
+    let matcher = read_source("src/media_identity.rs");
+    let edpb_writer = read_source("src/edpb/write.rs");
+    let edpb_legacy = read_source("src/edpb/legacy.rs");
+    let backup_writer = read_source("src/diskio/backup_create.rs");
+    let lineage = read_source("src/application/provision/identity_lineage.rs");
 
     let authorize = restore
         .split("fn authorize_restore(")
@@ -1810,7 +1807,7 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
         "src/tui/backups/render.rs",
         "src/tui/inspect/render.rs",
     ] {
-        let renderer = source(path);
+        let renderer = read_source(path);
         for forbidden in [
             "FileDev::open_",
             "verify_file(",
@@ -1830,7 +1827,7 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
         "src/provision/reprovision/plan.rs",
         "src/tui/provision/review.rs",
     ] {
-        let text = source(path);
+        let text = read_source(path);
         for forbidden in [
             "RegionDisposition::Migrate",
             "migration_sources",
@@ -1860,7 +1857,7 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
             "file-level migration artifact must stay removed: {path}"
         );
     }
-    let prepare = source("src/application/provision/prepare.rs");
+    let prepare = read_source("src/application/provision/prepare.rs");
     let plain_prepare = prepare
         .split("pub fn prepare_plain_provision(")
         .nth(1)
@@ -1878,8 +1875,28 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
             "EDP→Plain must not read/migrate files: found {forbidden}"
         );
     }
-    let restore_result = source("src/tui/restore_result_render.rs");
+    let restore_result = read_source("src/tui/restore_result_render.rs");
     assert!(restore_result.contains("文件数据未恢复"));
+}
+
+#[test]
+fn plain_scan_and_prepare_share_geometry_aware_filesystem_evidence() {
+    let scan = read_source("src/disk_scan.rs");
+    let prepare = read_source("src/application/provision/prepare.rs");
+    let helper = "detect_boot_sector_with_geometry(";
+
+    assert!(
+        scan.contains(helper),
+        "Plain device scan must use geometry-aware filesystem evidence"
+    );
+    assert!(
+        prepare.contains(helper),
+        "Provision prepare must use the same geometry-aware filesystem evidence"
+    );
+    assert!(
+        !scan.contains("partition.filesystem = crate::filesystem::detect_boot_sector("),
+        "Plain device scan must not fall back to type-only filesystem detection"
+    );
 }
 
 #[test]
@@ -1937,6 +1954,47 @@ fn provision_capacity_editor_follows_global_unit_system() {
             "Provision capacity UI must not hardcode binary unit text: {forbidden}"
         );
     }
+}
+
+#[test]
+fn default_key_domain_password_has_one_production_source_of_truth() {
+    let canonical_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provision/key_domain.rs");
+    let canonical = fs::read_to_string(&canonical_path).expect("read key-domain defaults");
+    assert!(canonical.contains("pub const DEFAULT_KEY_DOMAIN_PASSWORD_TEXT: &str = \"0000aaaa\";"));
+    assert!(canonical.contains(
+        "pub const DEFAULT_KEY_DOMAIN_PASSWORD: &[u8] = DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.as_bytes();"
+    ));
+
+    for path in rust_sources_under("src") {
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if path == canonical_path || file_name == "tests.rs" || file_name.ends_with("_tests.rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !source.contains("0000aaaa"),
+            "{} hardcodes the default key-domain password instead of using DEFAULT_KEY_DOMAIN_PASSWORD[_TEXT]",
+            path.display()
+        );
+        assert!(
+            !source.contains("const DEFAULT_PASSWORD"),
+            "{} declares a duplicate default password constant",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn provision_layout_never_uses_ambiguous_pending_fallback_text() {
+    let layout = read_source("src/tui/provision/layout_presentation.rs");
+    assert!(!layout.contains("? 待确认"));
+    assert!(!layout.contains("同步检查尚未生成当前区域结论"));
+    assert!(layout.contains("⚠ 计划异常"));
+    assert!(layout.contains("缺少同步预检结论"));
 }
 
 #[test]

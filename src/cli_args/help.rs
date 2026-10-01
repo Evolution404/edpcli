@@ -64,7 +64,8 @@ fn print_topic_help(topic: &str) {
                 crate::provision::DEFAULT_SAFE6_LABEL
             );
             println!(
-                "来源密码未指定表示 Unknown；存在的目标密码域默认 0000aaaa；卷标默认值: 启动区。"
+                "来源密码未指定表示 Unknown；存在的目标密码域默认 {}；卷标默认值: 启动区。",
+                crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT
             );
             println!("标签标识未指定时自动生成一个合法 onlyid 候选；可通过 --label-id 手动覆盖。");
             println!("密码策略: 未指定时继承注册盘可靠 PassInfo；普通盘默认 强制改密=否、取消复杂性验证=否、两区最大错误次数=255。");

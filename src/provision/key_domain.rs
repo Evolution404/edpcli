@@ -8,7 +8,8 @@ use std::fmt;
 
 use super::PartitionRole;
 
-pub const DEFAULT_KEY_DOMAIN_PASSWORD: &[u8] = b"0000aaaa";
+pub const DEFAULT_KEY_DOMAIN_PASSWORD_TEXT: &str = "0000aaaa";
+pub const DEFAULT_KEY_DOMAIN_PASSWORD: &[u8] = DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.as_bytes();
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct SecretBytes(Vec<u8>);

@@ -1,6 +1,7 @@
 use edpcli::common::SECTOR;
 use edpcli::filesystem::{
-    build_empty_exfat, build_empty_fat16, detect_boot_sector, FilesystemKind,
+    build_empty_exfat, build_empty_fat16, detect_boot_sector, detect_boot_sector_with_geometry,
+    FilesystemKind,
 };
 
 fn put16(bytes: &mut [u8], offset: usize, value: u16) {
@@ -104,6 +105,30 @@ fn filesystem_detection_matrix_is_frozen_before_domain_refactor() {
     );
 
     assert_eq!(detect_boot_sector(100_000, &[0u8; SECTOR]).unwrap(), None);
+}
+
+#[test]
+fn geometry_aware_detection_rejects_stale_fat16_hidden_sector() {
+    let sectors = 20_417u64;
+    let image = build_empty_fat16(63, sectors, 0x1234_5678, "BOOT").unwrap();
+    let valid = image.sector_or_zero(0).unwrap();
+    assert_eq!(
+        detect_boot_sector_with_geometry(63, sectors, &valid).unwrap(),
+        Some(FilesystemKind::Fat16)
+    );
+
+    let mut stale = valid;
+    stale[28..32].copy_from_slice(&64u32.to_le_bytes());
+    assert_eq!(
+        detect_boot_sector(sectors, &stale).unwrap(),
+        Some(FilesystemKind::Fat16),
+        "type-only detection intentionally still recognizes the FAT16 boot sector"
+    );
+    assert_eq!(
+        detect_boot_sector_with_geometry(63, sectors, &stale).unwrap(),
+        None,
+        "geometry-aware evidence must reject a stale hidden-sector offset"
+    );
 }
 
 #[test]

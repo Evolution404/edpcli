@@ -1,4 +1,5 @@
 use super::*;
+use crate::provision::DiskProvisionKind;
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -383,6 +384,7 @@ fn manufacturer_lba3_is_copied_verbatim_into_the_write_plan() {
     let mut prepared = PreparedNewProvision {
         disk: 4,
         device_id: "disk&ven_netac&prod_onlydisk".into(),
+        source_kind: DiskProvisionKind::Mode1,
         mode: OfficialPartitionMode::BootShareCombined,
         force_change_password: false,
         pass_info_policy: PassInfoPolicy::default(),
@@ -443,6 +445,87 @@ impl SectorDev for MemoryDev {
         self.sectors.insert(lba, data.to_vec());
         Ok(())
     }
+}
+
+#[test]
+fn plain_extent_reader_recovers_exact_fat16_boot_evidence_from_live_media() {
+    let total_sectors = 200_000u64;
+    let plan = PlainProvisionPlan::new(
+        total_sectors,
+        vec![PlainPartitionSpec::new(
+            63,
+            20_417,
+            FilesystemKind::Fat16,
+            "BOOT",
+        )],
+    )
+    .unwrap();
+    let write_plan = build_plain_provision_write_plan(&plan, None, &[0x1234_5678]).unwrap();
+    let mut dev = MemoryDev::default();
+    for (&lba, sector) in &write_plan.writes {
+        dev.sectors.insert(lba, sector.bytes.to_vec());
+    }
+
+    let extents = read_plain_source_extents(&mut dev, total_sectors).unwrap();
+    assert_eq!(
+        extents,
+        vec![crate::provision::PlainSourceExtent {
+            start_lba: 63,
+            sector_count: 20_417,
+            filesystem: Some(FilesystemKind::Fat16),
+        }]
+    );
+}
+
+#[test]
+fn plain_extent_reader_rejects_fat16_with_stale_hidden_sector_geometry() {
+    let total_sectors = 200_000u64;
+    let plan = PlainProvisionPlan::new(
+        total_sectors,
+        vec![PlainPartitionSpec::new(
+            63,
+            20_417,
+            FilesystemKind::Fat16,
+            "BOOT",
+        )],
+    )
+    .unwrap();
+    let write_plan = build_plain_provision_write_plan(&plan, None, &[0x1234_5678]).unwrap();
+    let mut dev = MemoryDev::default();
+    for (&lba, sector) in &write_plan.writes {
+        dev.sectors.insert(lba, sector.bytes.to_vec());
+    }
+
+    let boot = dev.sectors.get_mut(&63).expect("FAT16 boot sector");
+    boot[28..32].copy_from_slice(&64u32.to_le_bytes());
+    assert_eq!(
+        crate::filesystem::detect_boot_sector(20_417, boot).unwrap(),
+        Some(FilesystemKind::Fat16),
+        "type detection alone still sees FAT16"
+    );
+
+    let extents = read_plain_source_extents(&mut dev, total_sectors).unwrap();
+    assert_eq!(extents.len(), 1);
+    assert_eq!(extents[0].start_lba, 63);
+    assert_eq!(extents[0].sector_count, 20_417);
+    assert_eq!(
+        extents[0].filesystem, None,
+        "stale FAT16 hidden-sector geometry must not qualify for Plain boot preservation"
+    );
+    assert!(
+        !crate::provision::plain_extent_preserve_candidate(
+            &extents,
+            &crate::provision::TargetPartitionGeometry {
+                role: PartitionRole::Boot,
+                partition_type: crate::protocol::edpf::EdpPartitionType::Boot,
+                start_lba: 63,
+                sector_count: 20_417,
+                physically_encrypted: false,
+                filesystem: Some(FilesystemKind::Fat16),
+            },
+        ),
+        "a filesystem signature without matching on-disk geometry must rebuild"
+    );
 }
 
 #[test]
@@ -618,6 +701,7 @@ fn sparse_export_includes_selected_format_images() {
     let prepared = PreparedNewProvision {
         disk: 4,
         device_id: "disk&ven_aigo&prod_u335".into(),
+        source_kind: DiskProvisionKind::Mode0,
         mode: plan.mode,
         force_change_password: false,
         pass_info_policy: PassInfoPolicy::default(),
@@ -742,6 +826,7 @@ fn protocol_readback_gate_rejects_changed_onlyid_and_layout() {
     let prepared = PreparedNewProvision {
         disk: 4,
         device_id,
+        source_kind: DiskProvisionKind::Mode0,
         mode: plan.mode,
         force_change_password: false,
         pass_info_policy: PassInfoPolicy::default(),

@@ -18,7 +18,7 @@ fn activate_scheme(state: &mut AppState) -> ActionOutcome {
     };
     let kind = state.provision_begin_selected();
     state.provision_enter_form_workspace();
-    if kind == ProvisionKind::Plain {
+    if kind == ProvisionKind::Plain || state.provision_source_is_plain() {
         ActionOutcome::handled()
     } else {
         ActionOutcome::request(ActionRequest::ProvisionKeyProbe { disk })

@@ -87,6 +87,17 @@ impl TargetProvisionPlan {
         usable_end_lba: u64,
         key_domains: &super::super::KeyDomainSecrets,
     ) -> Result<Self, String> {
+        Self::build_with_plain_extents(source, &[], mode, targets, usable_end_lba, key_domains)
+    }
+
+    pub fn build_with_plain_extents(
+        source: Option<&ParsedExistingProvision>,
+        plain_source_extents: &[PlainSourceExtent],
+        mode: OfficialPartitionMode,
+        targets: &[TargetPartitionGeometry],
+        usable_end_lba: u64,
+        key_domains: &super::super::KeyDomainSecrets,
+    ) -> Result<Self, String> {
         if targets.len() != mode.partition_types().len() {
             return Err("target partition count does not match official mode".into());
         }
@@ -113,6 +124,10 @@ impl TargetProvisionPlan {
                     .map(|_| super::super::TargetPasswordPolicy::InitializeNew);
             let mut reason = "无全兼容来源分区；目标区域必须重建".to_string();
             let mut preserved_record = None;
+            if source.is_none() && plain_extent_preserve_candidate(plain_source_extents, target) {
+                disposition = RegionDisposition::PreserveVerified;
+                reason = "普通盘存在与目标 LBA 范围完全一致的物理分区；数据范围候选保留".into();
+            }
             if let Some(source) = source {
                 if let Some((source_index, old)) = source
                     .profile

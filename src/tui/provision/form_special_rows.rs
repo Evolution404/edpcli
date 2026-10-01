@@ -88,6 +88,7 @@ pub(super) fn password_domain_row(
         crate::provision::KeyDomainRole::Share => "交换区",
         crate::provision::KeyDomainRole::Encrypt => "保密区",
     };
+    let source_not_applicable = state.provision_source_password_not_applicable(domain);
     let verification = match domain {
         crate::provision::KeyDomainRole::Share => provision.share_source_verification,
         crate::provision::KeyDomainRole::Encrypt => provision.encrypt_source_verification,
@@ -96,18 +97,22 @@ pub(super) fn password_domain_row(
         crate::provision::KeyDomainRole::Share => provision.form.share_source_knowledge,
         crate::provision::KeyDomainRole::Encrypt => provision.form.encrypt_source_knowledge,
     };
-    let (status, status_style) = match verification {
-        ProvisionPasswordVerificationState::Verifying => (
-            crate::tui::animation::spinner_glyph(state.animation_frame()).to_string(),
-            secondary(),
-        ),
-        ProvisionPasswordVerificationState::Failed => ("✗".into(), danger()),
-        ProvisionPasswordVerificationState::Idle
-            if knowledge != crate::provision::SourcePasswordKnowledge::Unknown =>
-        {
-            ("✓".into(), success())
+    let (status, status_style) = if source_not_applicable {
+        (String::new(), muted())
+    } else {
+        match verification {
+            ProvisionPasswordVerificationState::Verifying => (
+                crate::tui::animation::spinner_glyph(state.animation_frame()).to_string(),
+                secondary(),
+            ),
+            ProvisionPasswordVerificationState::Failed => ("✗".into(), danger()),
+            ProvisionPasswordVerificationState::Idle
+                if knowledge != crate::provision::SourcePasswordKnowledge::Unknown =>
+            {
+                ("✓".into(), success())
+            }
+            ProvisionPasswordVerificationState::Idle => ("—".into(), muted()),
         }
-        ProvisionPasswordVerificationState::Idle => ("—".into(), muted()),
     };
 
     let separator = " │ ";
@@ -133,7 +138,12 @@ pub(super) fn password_domain_row(
         && state.input_mode() == InputMode::Insert
         && state.provision_selected_field_is_editable();
 
-    let (_, source_value, source_secret) = &fields[source_index];
+    let (_, field_source_value, field_source_secret) = &fields[source_index];
+    let (source_value, source_secret) = if source_not_applicable {
+        ("— 不涉及", false)
+    } else {
+        (*field_source_value, *field_source_secret)
+    };
     let (target_value, target_secret) = if state.provision_target_password_is_passthrough(domain) {
         ("透传", false)
     } else {
@@ -159,11 +169,11 @@ pub(super) fn password_domain_row(
             source_value,
             state.provision_field_cursor(),
             source_value_width.saturating_sub(2),
-            *source_secret,
+            source_secret,
         )
     } else {
         fit_display_width(
-            &masked_value(source_value, *source_secret),
+            &masked_value(source_value, source_secret),
             source_value_width,
         )
         .trim_end()
