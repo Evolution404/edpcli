@@ -82,9 +82,11 @@ impl AppState {
     ) {
         match result {
             Ok(workspace) => {
-                self.push_navigation_frame(NavigationLocation::from_workspace(
-                    self.shell.workspace,
-                ));
+                if self.shell.workspace != crate::tui::state::Workspace::Inspect {
+                    self.push_navigation_frame(NavigationLocation::from_workspace(
+                        self.shell.workspace,
+                    ));
+                }
                 self.shell.workspace = crate::tui::state::Workspace::Inspect;
                 let Some(state) = self.inspect.advanced.as_mut() else {
                     return;
@@ -123,6 +125,9 @@ impl AppState {
             AdvancedInspectStage::Running => {}
             AdvancedInspectStage::Failed => {
                 self.inspect.advanced = None;
+                if self.shell.workspace == crate::tui::state::Workspace::Inspect {
+                    self.restore_workspace_frame();
+                }
             }
             AdvancedInspectStage::Browser => {
                 self.inspect.advanced = None;

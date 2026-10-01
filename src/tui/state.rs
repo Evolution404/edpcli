@@ -1828,6 +1828,10 @@ impl AppState {
                 }
                 return StateEffect::None;
             }
+            if self.shell.workspace == Workspace::Inspect && self.inspect.advanced.is_none() {
+                self.restore_workspace_frame();
+                return StateEffect::None;
+            }
             if self.shell.workspace == Workspace::Provision {
                 match self.provision.stage {
                     ProvisionStage::Running => {

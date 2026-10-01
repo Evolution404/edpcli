@@ -194,6 +194,52 @@ fn plain_provision_state() -> AppState {
 }
 
 #[test]
+fn inspect_reentry_never_restores_to_an_empty_inspect_workspace() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(inspect_workspace()));
+    assert_eq!(state.workspace(), Workspace::Inspect);
+    assert_eq!(state.navigation().depth(), 1);
+
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(inspect_workspace()));
+    assert_eq!(state.navigation().depth(), 1);
+
+    state.navigate(NavCommand::Escape, 20);
+    assert_eq!(state.workspace(), Workspace::Devices);
+    assert!(state.advanced_inspect().is_none());
+}
+
+#[test]
+fn failed_inspect_from_inspect_restores_the_original_workspace() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(inspect_workspace()));
+
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Err("demo failure".into()));
+    state.navigate(NavCommand::Escape, 20);
+
+    assert_eq!(state.workspace(), Workspace::Devices);
+    assert!(state.advanced_inspect().is_none());
+}
+
+#[test]
+fn empty_inspect_workspace_escape_always_falls_back_to_devices() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device()]);
+    state.navigate(NavCommand::WorkspaceInspect, 20);
+    assert_eq!(state.workspace(), Workspace::Inspect);
+    assert!(state.advanced_inspect().is_none());
+
+    state.navigate(NavCommand::Escape, 20);
+    assert_eq!(state.workspace(), Workspace::Devices);
+}
+
+#[test]
 fn inspect_tab_cycle_is_tree_overview_detail_bytes() {
     let mut state = inspect_state();
     assert_eq!(

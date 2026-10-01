@@ -28,6 +28,9 @@ pub(super) fn handle_inspect_key(
                 return Some(KeyOutcome::NextIteration);
             }
             AdvancedInspectStage::Failed => {
+                if matches!(key.code, ct_event::KeyCode::Esc | ct_event::KeyCode::Enter) {
+                    state.close_advanced_inspect();
+                }
                 return Some(KeyOutcome::NextIteration);
             }
             AdvancedInspectStage::Browser => {
