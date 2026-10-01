@@ -39,7 +39,7 @@ fn classify_live_source_identity(
     )
 }
 
-fn read_plain_source_extents(
+pub(super) fn read_plain_source_extents(
     dev: &mut dyn SectorDev,
     total_sectors: u64,
 ) -> EdpCliResult<Vec<crate::provision::PlainSourceExtent>> {
