@@ -100,6 +100,7 @@ fn plain_row(partition: Option<(u64, u64, Option<&str>)>) -> crate::disk_scan::R
                     primary_slot: Some(1),
                 },
                 filesystem: filesystem.map(str::to_string),
+                volume_label: filesystem.map(|_| "MYBOOT".to_string()),
             })
             .into_iter()
             .collect(),
@@ -214,6 +215,11 @@ fn plain_boot_preflight_auto_formats_required_rebuilds_and_preserves_exact_exten
         }
 
         if exact {
+            let fields = state.provision_visible_fields();
+            assert!(fields.iter().any(|(label, value, _)| {
+                label == "启动区卷标（原样保留）" && *value == "MYBOOT"
+            }));
+
             state.provision_mut().form.format_boot = true;
             let preflight = state.provision_preflight().unwrap();
             assert_eq!(
@@ -240,4 +246,24 @@ fn plain_mode0_request_enables_required_formats_without_manual_checkboxes() {
     assert!(!form.format_boot);
     assert!(!form.format_share);
     assert!(!form.format_encrypt);
+}
+
+#[test]
+fn preserved_plain_partition_reports_unknown_volume_label_without_inventing_default() {
+    let mut row = plain_row(Some((63, 20_417, Some("FAT16"))));
+    row.partition_table.as_mut().unwrap().partitions[0].volume_label = None;
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    assert!(state.provision_select_scheme_index(0));
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    state.provision_enter_form_workspace();
+
+    let fields = state.provision_visible_fields();
+    assert!(fields.iter().any(|(label, value, _)| {
+        label == "启动区卷标（原样保留）" && *value == "未读取"
+    }));
+    assert!(!fields.iter().any(|(label, value, _)| {
+        label == "启动区卷标（原样保留）" && *value == "启动区"
+    }));
 }

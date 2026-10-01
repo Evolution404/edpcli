@@ -252,6 +252,7 @@ fn plain_partition_table_uses_metadata_partition_and_free_segments() {
                 primary_slot: Some(1),
             },
             filesystem: Some("exFAT".into()),
+            volume_label: Some("DATA".into()),
         }],
         table_extents: vec![PartitionTableExtent {
             label: "MBR".into(),

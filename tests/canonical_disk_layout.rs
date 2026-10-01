@@ -116,6 +116,7 @@ fn canonical_plain_layout_uses_partition_table_metadata_and_real_gaps_only() {
                 primary_slot: Some(1),
             },
             filesystem: Some("exFAT".into()),
+            volume_label: Some("DATA".into()),
         }],
         table_extents: vec![PartitionTableExtent {
             label: "MBR".into(),

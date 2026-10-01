@@ -103,6 +103,7 @@ pub(super) fn disk(disk: u32, kind: DiskProvisionKind) -> Row {
                 primary_slot: Some(1),
             },
             filesystem: Some("exFAT".into()),
+            volume_label: Some("演示普通盘".into()),
         }],
         table_extents: vec![PartitionTableExtent {
             label: "MBR".into(),

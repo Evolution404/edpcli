@@ -18,6 +18,77 @@ use crate::provision::{
 use crate::sectors::{parse_lba12, EdpfPartition};
 use crate::sysinfo::{self, CmdRunner};
 
+struct ScanPartitionReader<'a> {
+    disk: u32,
+    start_lba: u64,
+    sector_count: u64,
+    read_disk: &'a dyn Fn(u32, u32) -> io::Result<Vec<u8>>,
+}
+
+impl crate::filesystem::FilesystemReader for ScanPartitionReader<'_> {
+    fn sector_size(&self) -> u32 {
+        SECTOR as u32
+    }
+
+    fn sector_count(&self) -> u64 {
+        self.sector_count
+    }
+
+    fn read_sector(
+        &mut self,
+        relative_lba: u64,
+    ) -> Result<[u8; SECTOR], crate::filesystem::FilesystemError> {
+        if relative_lba >= self.sector_count {
+            return Err(crate::filesystem::FilesystemError::new(
+                crate::filesystem::FilesystemErrorKind::ReadFailure,
+                "文件系统读取超出分区范围",
+            ));
+        }
+        let absolute = self.start_lba.checked_add(relative_lba).ok_or_else(|| {
+            crate::filesystem::FilesystemError::new(
+                crate::filesystem::FilesystemErrorKind::ReadFailure,
+                "文件系统读取 LBA 溢出",
+            )
+        })?;
+        let lba = u32::try_from(absolute).map_err(|_| {
+            crate::filesystem::FilesystemError::new(
+                crate::filesystem::FilesystemErrorKind::ReadFailure,
+                format!("LBA{absolute} 超出当前扫描器 u32 范围"),
+            )
+        })?;
+        let bytes = (self.read_disk)(self.disk, lba).map_err(|error| {
+            crate::filesystem::FilesystemError::new(
+                crate::filesystem::FilesystemErrorKind::ReadFailure,
+                error.to_string(),
+            )
+        })?;
+        bytes.try_into().map_err(|bytes: Vec<u8>| {
+            crate::filesystem::FilesystemError::new(
+                crate::filesystem::FilesystemErrorKind::ReadFailure,
+                format!("LBA{absolute} 读取 {}B，预期 {SECTOR}B", bytes.len()),
+            )
+        })
+    }
+}
+
+fn scan_partition_volume_label(
+    disk: u32,
+    start_lba: u64,
+    sector_count: u64,
+    kind: crate::filesystem::FilesystemKind,
+    read_disk: &dyn Fn(u32, u32) -> io::Result<Vec<u8>>,
+) -> Option<String> {
+    let registry = crate::filesystem::default_registry();
+    let driver = registry.driver(kind)?;
+    let mut reader = ScanPartitionReader {
+        disk,
+        start_lba,
+        sector_count,
+        read_disk,
+    };
+    driver.read_metadata(&mut reader).ok()?.volume_label
+}
+
 pub struct Row {
     pub disk: u32,
     pub size: u64,
@@ -316,15 +387,24 @@ pub fn scan_disks(
                                 let Ok(boot) = read_exact(start) else {
                                     continue;
                                 };
+                                let detected = crate::filesystem::detect_boot_sector_with_geometry(
+                                    partition.start_lba,
+                                    partition.sector_count,
+                                    &boot,
+                                )
+                                .ok()
+                                .flatten();
                                 partition.filesystem =
-                                    crate::filesystem::detect_boot_sector_with_geometry(
+                                    detected.map(|filesystem| filesystem.label().to_string());
+                                partition.volume_label = detected.and_then(|filesystem| {
+                                    scan_partition_volume_label(
+                                        d.n,
                                         partition.start_lba,
                                         partition.sector_count,
-                                        &boot,
+                                        filesystem,
+                                        read_disk,
                                     )
-                                    .ok()
-                                    .flatten()
-                                    .map(|filesystem| filesystem.label().to_string());
+                                });
                             }
                             row.partition_table = Some(table);
                         }
@@ -352,4 +432,44 @@ pub fn scan_disks(
         rows.push(row);
     }
     rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_partition_volume_label_reads_real_fat16_metadata() {
+        let start_lba = 63u64;
+        let sector_count = 20_417u64;
+        let image = crate::filesystem::build_empty_filesystem(
+            crate::filesystem::FilesystemKind::Fat16,
+            start_lba,
+            sector_count,
+            0x1234_5678,
+            Some("MYBOOT"),
+        )
+        .unwrap();
+        let read_disk = |disk: u32, lba: u32| -> io::Result<Vec<u8>> {
+            assert_eq!(disk, 6);
+            let relative = u64::from(lba)
+                .checked_sub(start_lba)
+                .ok_or_else(|| io::Error::other("read before partition"))?;
+            image
+                .sector_or_zero(relative)
+                .map(|sector| sector.to_vec())
+                .ok_or_else(|| io::Error::other("read beyond partition"))
+        };
+
+        assert_eq!(
+            scan_partition_volume_label(
+                6,
+                start_lba,
+                sector_count,
+                crate::filesystem::FilesystemKind::Fat16,
+                &read_disk,
+            ),
+            Some("MYBOOT".into())
+        );
+    }
 }

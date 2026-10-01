@@ -48,6 +48,7 @@ pub struct PhysicalPartition {
     pub sector_count: u64,
     pub source: PartitionSource,
     pub filesystem: Option<String>,
+    pub volume_label: Option<String>,
 }
 
 impl PhysicalPartition {
@@ -190,6 +191,7 @@ fn push_primary(
             primary_slot: Some(slot + 1),
         },
         filesystem: None,
+        volume_label: None,
     });
     Ok(())
 }
@@ -241,6 +243,7 @@ where
                     primary_slot: None,
                 },
                 filesystem: None,
+                volume_label: None,
             });
         }
 
@@ -358,6 +361,7 @@ where
                 name: decode_utf16_name(entry),
             },
             filesystem: None,
+            volume_label: None,
         });
     }
 

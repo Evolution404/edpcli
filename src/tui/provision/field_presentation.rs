@@ -1,6 +1,28 @@
 use super::*;
 
 impl AppState {
+    fn provision_preserved_volume_label(
+        &self,
+        role: crate::provision::PartitionRole,
+    ) -> Option<&str> {
+        let (resolved, _) = self.provision_resolved_prefill().ok()?;
+        let target = resolved
+            .draft_partitions(crate::common::SECTOR as u64)
+            .ok()?
+            .into_iter()
+            .find(|partition| partition.role == role)?;
+        self.selected_device()?
+            .partition_table
+            .as_ref()?
+            .partitions
+            .iter()
+            .find(|partition| {
+                partition.start_lba == target.start_lba
+                    && partition.sector_count == target.sector_count
+            })
+            .and_then(|partition| partition.volume_label.as_deref())
+    }
+
     pub fn provision_visible_fields(&self) -> Vec<(String, &str, bool)> {
         let mut out = Vec::new();
         if self.provision.kind == ProvisionKind::Plain {
@@ -234,7 +256,12 @@ impl AppState {
             if disposition.selected() {
                 out.push((format!("{}格式化后卷标", role.label()), target_label, false));
             } else {
-                out.push((format!("{}卷标", role.label()), "原样保留 · 未读取", false));
+                out.push((
+                    format!("{}卷标（原样保留）", role.label()),
+                    self.provision_preserved_volume_label(role)
+                        .unwrap_or("未读取"),
+                    false,
+                ));
             }
         }
         out.push((

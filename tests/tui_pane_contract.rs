@@ -1063,6 +1063,7 @@ fn d0_plain_mbr_layout_uses_real_partition_table_without_unknown_disk_body() {
                 primary_slot: Some(1),
             },
             filesystem: Some("exFAT".into()),
+            volume_label: Some("DATA".into()),
         }],
         table_extents: vec![PartitionTableExtent {
             label: "MBR 分区表".into(),
