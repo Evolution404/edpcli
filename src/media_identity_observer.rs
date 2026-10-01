@@ -4,8 +4,6 @@
 //! prepare/unmount a disk, reopen a handle read-write, or write a sector. Destructive callers must
 //! separately apply their authorization policy and the existing write safety state machine.
 
-use sha2::{Digest, Sha256};
-
 use crate::common::{
     EdpCliError, EdpCliResult, EXIT_IO, METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR,
 };
@@ -91,7 +89,7 @@ fn merged_hardware_probe(runner: &dyn CmdRunner, disk: u32) -> Option<HardwarePr
 fn lba4_digest(lba4: &[u8]) -> Option<String> {
     lba4.iter()
         .any(|byte| *byte != 0)
-        .then(|| format!("{:x}", Sha256::digest(lba4)))
+        .then(|| crate::sha256::sha256_hex(lba4))
 }
 
 pub(crate) fn apply_runtime_plain_override(

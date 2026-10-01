@@ -4,11 +4,9 @@
 //! authorize writes.  It describes evidence collected elsewhere and derives an explainable
 //! relationship/confidence result.  Destructive operations must apply their own stricter policy.
 
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-
 use crate::platform::NativeTransport;
 use crate::provision::DiskProvisionKind;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SerialQuality {
@@ -212,7 +210,7 @@ impl MediaIdentityResumePin {
         }
         if self.device_id != observed.protocol.device_id
             || self.onlyid != observed.protocol.onlyid
-            || self.protocol_image_sha256 != format!("{:x}", Sha256::digest(protocol_image))
+            || self.protocol_image_sha256 != crate::sha256::sha256_hex(protocol_image)
         {
             return Err(MediaIdentityPinConflict::ProtocolImageChanged);
         }
@@ -224,7 +222,7 @@ impl MediaIdentityPin {
     pub fn new(snapshot: MediaIdentitySnapshot, protocol_image: &[u8]) -> Self {
         Self {
             snapshot,
-            protocol_image_sha256: format!("{:x}", Sha256::digest(protocol_image)),
+            protocol_image_sha256: crate::sha256::sha256_hex(protocol_image),
         }
     }
 
@@ -250,7 +248,7 @@ impl MediaIdentityPin {
         {
             return Err(MediaIdentityPinConflict::GeometryChangedOrLost);
         }
-        if self.protocol_image_sha256 != format!("{:x}", Sha256::digest(protocol_image)) {
+        if self.protocol_image_sha256 != crate::sha256::sha256_hex(protocol_image) {
             return Err(MediaIdentityPinConflict::ProtocolImageChanged);
         }
         Ok(())
@@ -558,7 +556,7 @@ pub fn serial_digest_evidence(raw: Option<&str>) -> SerialDigestEvidence {
     };
 
     SerialDigestEvidence {
-        sha256: Some(format!("{:x}", Sha256::digest(normalized.as_bytes()))),
+        sha256: Some(crate::sha256::sha256_hex(normalized.as_bytes())),
         quality,
     }
 }

@@ -27,7 +27,6 @@ mod macos {
         DEFAULT_SAFE6_LABEL,
     };
     use edpcli::sysinfo::{disk_total_sectors, CmdRunner, SysRunner};
-    use sha2::{Digest, Sha256};
 
     const ENABLE_ENV: &str = "EDPCLI_REAL_USB_PASSWORD_HIL";
     const EXPECTED_VID: u16 = 0x3535;
@@ -204,7 +203,7 @@ mod macos {
     }
 
     fn sha256_hex(data: &[u8]) -> String {
-        format!("{:x}", Sha256::digest(data))
+        edpcli::sha256::sha256_hex(data)
     }
 
     fn probe_target(

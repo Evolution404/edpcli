@@ -822,8 +822,6 @@ fn record_lineage_after_commit(
     backup: &super::write::BackupReport,
     backup_sha256: String,
 ) -> Result<PathBuf, ProvisionWarning> {
-    use sha2::{Digest, Sha256};
-
     let mut dev = open_readonly_usb_disk(runner, prepared.disk())
         .map_err(|error| ProvisionWarning::AfterIdentityObservationFailed(error.msg))?;
     let after = super::media_identity_observer::observe_media_identity_readonly(
@@ -859,7 +857,7 @@ fn record_lineage_after_commit(
         after_identity: after.snapshot,
         mandatory_backup_path: backup.path.clone(),
         mandatory_backup_sha256: backup_sha256,
-        provision_summary_digest: format!("{:x}", Sha256::digest(&after.protocol_image)),
+        provision_summary_digest: crate::sha256::sha256_hex(&after.protocol_image),
     };
     identity_lineage::persist(backup_dir, &record)
         .map_err(ProvisionWarning::HostLineagePersistenceFailed)

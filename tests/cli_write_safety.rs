@@ -22,7 +22,6 @@ use edpcli::diskio::FileDev;
 use edpcli::diskio::SectorDev;
 use edpcli::edpb::{self, CoreCapture};
 use edpcli::sysinfo::CmdRunner;
-use sha2::{Digest, Sha256};
 
 // ══════════════════════════════════════════════════════════════════
 // 子进程测试(真二进制)
@@ -158,8 +157,10 @@ fn write_test_edpb_with_notes(
 }
 
 fn hardware_serial_note(serial: &str) -> String {
-    let digest = Sha256::digest(serial.trim().as_bytes());
-    format!("hardware_serial_sha256={digest:x}")
+    format!(
+        "hardware_serial_sha256={}",
+        edpcli::sha256::sha256_hex(serial.trim().as_bytes())
+    )
 }
 
 struct SerialRunner {
