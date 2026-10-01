@@ -1,10 +1,6 @@
 use super::*;
 
-pub(super) fn draw_restore_write_confirmation(
-    frame: &mut Frame,
-    area: ratatui::layout::Rect,
-    state: &AppState,
-) {
+pub(super) fn draw_restore_write_confirmation(frame: &mut Frame, state: &AppState) {
     let Some(wizard) = state.wizard() else {
         return;
     };
@@ -208,14 +204,13 @@ pub(super) fn draw_restore_write_confirmation(
 
     crate::tui::ui::render_write_confirmation_modal(
         frame,
-        area,
         crate::tui::ui::WriteConfirmationSpec {
             kind: crate::tui::ui::MediaWriteConfirmationKind::Restore,
             title: "恢复写入确认",
             warning: format!("确认后将直接开始向 disk{} 写入", wizard.disk),
             details,
             confirmation: &wizard.confirmation,
-            message: wizard.message.as_deref(),
+            message: wizard.message.as_ref(),
         },
     );
 }

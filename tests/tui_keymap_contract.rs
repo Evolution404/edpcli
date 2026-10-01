@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use edpcli::tui::{
     keymap::{
-        KeyMapper, TuiAction, WidgetRole, DEVICES_HELP, GLOBAL_HELP, INSPECT_HELP, TABLE_HELP,
+        KeyMapper, TuiAction, WidgetRole, DEVICES_HELP, GLOBAL_HELP, INSPECT_HELP, PROVISION_HELP,
+        TABLE_HELP,
     },
     state::InputMode,
 };
@@ -202,33 +203,32 @@ fn normal_navigation_uses_vim_semantics_without_workspace_side_effects() {
 }
 
 #[test]
-fn g_prefix_keeps_vim_navigation_and_adds_standard_tab_switching() {
+fn g_prefix_only_keeps_supported_vim_navigation() {
     let mut mapper = KeyMapper::new();
-    for (second, expected) in [
-        ('g', TuiAction::Top),
-        ('l', TuiAction::InspectJump),
-        ('t', TuiAction::WorkspaceNext),
-        ('T', TuiAction::WorkspacePrevious),
-    ] {
-        assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
-        assert_eq!(
-            mapper.map(InputMode::Normal, key(KeyCode::Char(second))),
-            Some(expected),
-            "g{second}"
-        );
-    }
-    for second in ['d', 'b', 'p', 'i'] {
+    assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('g'))),
+        Some(TuiAction::Top)
+    );
+    for second in ['d', 'b', 'p', 'i', 'l', 't', 'T'] {
         assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
         assert_eq!(
             mapper.map(InputMode::Normal, key(KeyCode::Char(second))),
             None,
-            "g{second} must not become an unrelated function shortcut"
+            "g{second} must remain unbound"
         );
     }
 }
 
 #[test]
 fn single_g_invalid_or_timed_out_prefix_never_executes_jump() {
+    let mut direct = KeyMapper::new();
+    assert_eq!(
+        direct.map(InputMode::Normal, key(KeyCode::Char('J'))),
+        Some(TuiAction::InspectJump),
+        "J is the single-key Inspect jump command"
+    );
+
     let mut mapper = KeyMapper::new();
     let now = Instant::now();
     assert_eq!(
@@ -260,7 +260,7 @@ fn single_g_invalid_or_timed_out_prefix_never_executes_jump() {
 }
 
 #[test]
-fn tab_is_context_focus_and_gt_owns_top_level_switching() {
+fn tab_is_context_focus_and_ctrl_w_owns_panel_switching() {
     let mut mapper = KeyMapper::new();
     for (second, expected) in [
         (KeyCode::Char('h'), TuiAction::PanelLeft),
@@ -285,27 +285,32 @@ fn tab_is_context_focus_and_gt_owns_top_level_switching() {
         ),
         Some(TuiAction::FocusPrevious)
     );
-    assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
-    assert_eq!(
-        mapper.map(InputMode::Normal, key(KeyCode::Char('t'))),
-        Some(TuiAction::WorkspaceNext)
-    );
-    assert_eq!(mapper.map(InputMode::Normal, key(KeyCode::Char('g'))), None);
-    assert_eq!(
-        mapper.map(InputMode::Normal, key(KeyCode::Char('T'))),
-        Some(TuiAction::WorkspacePrevious)
-    );
 }
 
 #[test]
-fn tab_focus_actions_are_distinct_from_top_level_workspace_actions() {
-    assert_ne!(TuiAction::FocusNext, TuiAction::WorkspaceNext);
-    assert_ne!(TuiAction::FocusPrevious, TuiAction::WorkspacePrevious);
-
+fn tab_focus_actions_remain_available_in_nested_workspaces() {
     let inspect = include_str!("../src/tui/runtime_input/inspect.rs");
     let provision = include_str!("../src/tui/runtime_input/provision.rs");
     assert!(inspect.contains("TuiAction::FocusNext"));
     assert!(provision.contains("TuiAction::FocusNext"));
+}
+
+#[test]
+fn result_workbenches_keep_content_navigation_separate_from_panel_navigation() {
+    let provision = include_str!("../src/tui/runtime_input/provision.rs");
+    let restore = include_str!("../src/tui/runtime_input/post_restore_wizard.rs");
+
+    for source in [provision, restore] {
+        assert!(source.contains("PanelLeft"));
+        assert!(source.contains("PanelRight"));
+        assert!(source.contains("PanelUp"));
+        assert!(source.contains("PanelDown"));
+        assert!(
+            !source.contains("if !state.provision_result_shift_partition_column")
+                && !source.contains("if !state.post_restore_result_shift_partition_column"),
+            "h/l must never fall back to changing Result Workbench panes"
+        );
+    }
 }
 
 #[test]
@@ -473,8 +478,56 @@ fn search_and_command_modes_consume_text_before_normal_bindings() {
             Some(TuiAction::Submit)
         );
         assert_eq!(mapper.map(mode, key(KeyCode::Esc)), Some(TuiAction::Back));
-        assert_eq!(mapper.map(mode, key(KeyCode::Tab)), None);
+        assert_eq!(
+            mapper.map(mode, key(KeyCode::Tab)),
+            Some(TuiAction::FocusNext)
+        );
     }
+}
+
+#[test]
+fn input_modes_keep_q_as_text_ctrl_c_as_cancel_and_ctrl_w_as_panel_prefix() {
+    let mut mapper = KeyMapper::new();
+    for mode in [InputMode::Insert, InputMode::Search, InputMode::Command] {
+        assert_eq!(
+            mapper.map(mode, key(KeyCode::Char('q'))),
+            Some(TuiAction::Text('q')),
+            "q must remain text in {mode:?}"
+        );
+        assert_eq!(
+            mapper.map(mode, ctrl('c')),
+            Some(TuiAction::Back),
+            "Ctrl-C must cancel input instead of quitting in {mode:?}"
+        );
+        assert_eq!(mapper.map(mode, ctrl('w')), None);
+        assert_eq!(
+            mapper.map(mode, key(KeyCode::Char('h'))),
+            Some(TuiAction::PanelLeft)
+        );
+    }
+
+    assert_eq!(
+        mapper.map(InputMode::Confirm, key(KeyCode::Char('q'))),
+        Some(TuiAction::Text('q'))
+    );
+    assert_eq!(
+        mapper.map(InputMode::Confirm, ctrl('c')),
+        Some(TuiAction::Cancel)
+    );
+    assert_eq!(mapper.map(InputMode::Confirm, ctrl('w')), None);
+    assert_eq!(
+        mapper.map(InputMode::Confirm, key(KeyCode::Char('l'))),
+        Some(TuiAction::PanelRight)
+    );
+
+    assert_eq!(
+        mapper.map(InputMode::Normal, key(KeyCode::Char('q'))),
+        Some(TuiAction::Quit)
+    );
+    assert_eq!(
+        mapper.map(InputMode::Normal, ctrl('c')),
+        Some(TuiAction::Quit)
+    );
 }
 
 #[test]
@@ -529,6 +582,20 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
         ),
         "Provision Form Enter must not enter Insert mode or toggle checkbox state"
     );
+    assert!(
+        contains_tokens_in_order(
+            form,
+            &[
+                "TuiAction::MoveLeft",
+                "state.provision_shift_selected_option(true)",
+                "TuiAction::MoveRight",
+                "state.provision_shift_selected_option(false)",
+                "TuiAction::Toggle",
+                "state.provision_toggle_selected_option()",
+            ],
+        ),
+        "Provision Form h/l must be directional while Space remains cycle/toggle"
+    );
     let production = include_str!("../src/tui/dispatch.rs");
     assert!(
         contains_tokens_in_order(
@@ -549,6 +616,33 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
     assert!(
         keymap.contains("进入下一阶段"),
         "Provision help registry must advertise Enter as the forward action"
+    );
+}
+
+#[test]
+fn provision_review_enter_is_confirmation_only_and_open_owns_details() {
+    let controller = include_str!("../src/tui/controller/provision.rs");
+    let review = source_section(
+        controller,
+        "ProvisionStage::Review => match action {",
+        "_ => return None,",
+    );
+    assert!(
+        contains_tokens_in_order(
+            review,
+            &[
+                "TuiAction::Open =>",
+                "state.toggle_disk_layout_tail()",
+                "state.provision_review_toggle_details()",
+                "TuiAction::Activate =>",
+                "state.provision_begin_confirm()",
+            ],
+        ),
+        "Provision Review must reserve o/Open for details and Enter/Activate for write confirmation"
+    );
+    assert!(
+        !review.contains("show_provision_layout_detail"),
+        "Provision Review Enter must not change meaning on the disk-layout pane"
     );
 }
 
@@ -692,29 +786,86 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
             && binding.label == "切换当前层级焦点 / 顶层标签"
             && binding.action == TuiAction::FocusNext
     }));
-    assert!(GLOBAL_HELP.iter().any(|binding| {
-        binding.keys == "gt / gT"
-            && binding.label == "下一个 / 上一个顶层标签"
-            && binding.action == TuiAction::WorkspaceNext
-    }));
     assert!(TABLE_HELP
         .iter()
         .any(|binding| binding.keys == "y / Y" && binding.action == TuiAction::TableCopyCell));
+    for required in ["h / l", "H / L", "< / >", "0 / $", "s / S", "y / Y"] {
+        assert!(
+            TABLE_HELP.iter().any(|binding| binding.keys == required),
+            "shared table help missing {required}"
+        );
+    }
+    assert!(PROVISION_HELP.iter().any(|binding| {
+        binding.keys == "h / l"
+            && binding.label == "当前选项上一个 / 下一个"
+            && binding.action == TuiAction::MoveRight
+    }));
     assert!(INSPECT_HELP.iter().any(|binding| {
         binding.keys == "Tab/Shift-Tab"
             && binding.label == "切换当前页 Pane"
             && binding.action == TuiAction::FocusNext
     }));
-    assert!(!INSPECT_HELP.iter().any(|binding| binding.keys == "gt/gT"));
     assert!(INSPECT_HELP
         .iter()
-        .any(|binding| binding.keys == "gl" && binding.action == TuiAction::InspectJump));
+        .any(|binding| binding.keys == "J" && binding.action == TuiAction::InspectJump));
     assert!(INSPECT_HELP
         .iter()
         .any(|binding| binding.keys == "h/l" && binding.label == "Fold"));
     assert!(INSPECT_HELP
         .iter()
         .any(|binding| binding.keys == "o" && binding.action == TuiAction::Open));
+
+    let inspect_help_text = INSPECT_HELP
+        .iter()
+        .flat_map(|binding| [binding.keys, binding.label])
+        .collect::<Vec<_>>()
+        .join(" ");
+    for stale in ["1/2/3/4", "byte offset"] {
+        assert!(
+            !inspect_help_text.contains(stale),
+            "Inspect help must not advertise removed semantic {stale}"
+        );
+    }
+    for stale_key in ["gt", "gT", "gl"] {
+        assert!(
+            !INSPECT_HELP.iter().any(|binding| binding.keys == stale_key),
+            "Inspect help must not advertise removed shortcut {stale_key}"
+        );
+    }
+}
+
+#[test]
+fn help_critical_shortcuts_match_live_keymap_actions() {
+    let mut mapper = KeyMapper::new();
+    for (code, action) in [
+        (KeyCode::Char('1'), TuiAction::InspectBusiness),
+        (KeyCode::Char('2'), TuiAction::InspectRawFields),
+        (KeyCode::Char('3'), TuiAction::InspectHex),
+        (KeyCode::Char('J'), TuiAction::InspectJump),
+    ] {
+        assert_eq!(mapper.map(InputMode::Normal, key(code)), Some(action));
+    }
+
+    for (code, action) in [
+        (KeyCode::Char('h'), TuiAction::TableColumnLeft),
+        (KeyCode::Char('l'), TuiAction::TableColumnRight),
+        (KeyCode::Char('H'), TuiAction::TableScrollLeft),
+        (KeyCode::Char('L'), TuiAction::TableScrollRight),
+        (KeyCode::Char('<'), TuiAction::TableMoveColumnLeft),
+        (KeyCode::Char('>'), TuiAction::TableMoveColumnRight),
+        (KeyCode::Char('0'), TuiAction::TableColumnFirst),
+        (KeyCode::Char('$'), TuiAction::TableColumnLast),
+        (KeyCode::Char('s'), TuiAction::TableSortToggle),
+        (KeyCode::Char('S'), TuiAction::TableSortClear),
+        (KeyCode::Char('y'), TuiAction::TableCopyCell),
+        (KeyCode::Char('Y'), TuiAction::TableCopyRow),
+    ] {
+        assert_eq!(
+            mapper.map_for_role(InputMode::Normal, WidgetRole::Table, key(code)),
+            Some(action),
+            "Help-declared table shortcut {code:?} must resolve to {action:?}"
+        );
+    }
 }
 
 #[test]

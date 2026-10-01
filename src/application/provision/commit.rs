@@ -332,6 +332,85 @@ pub(super) fn validate_key_disposition_plan(
             .iter()
             .find(|choice| choice.target.role == part.geometry.role)
             .is_some_and(|choice| choice.selected && choice.prepared_image.is_some());
+        let key_domain = KeyDomainRole::from_partition_role(part.geometry.role);
+        match (key_domain, part.password_disposition) {
+            (None, None) => {}
+            (None, Some(_)) => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}不是密码域，却携带密码动作",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            (Some(_), None) => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!("错误: {}缺少统一密码动作", part.geometry.role.label()),
+                ));
+            }
+            (Some(_), Some(crate::provision::PasswordDisposition::Blocked)) => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}密码域仍为“需重建”，拒绝进入写盘阶段",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            (
+                Some(_),
+                Some(crate::provision::PasswordDisposition::Passthrough(
+                    crate::provision::PassthroughBasis::OpaqueCompatible,
+                )),
+            ) if part.disposition != RegionDisposition::PreserveOpaque => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}透传依据为 OpaqueCompatible，但区域动作不是 PreserveOpaque",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            (
+                Some(_),
+                Some(crate::provision::PasswordDisposition::Passthrough(
+                    crate::provision::PassthroughBasis::Verified,
+                )),
+            ) if part.disposition != RegionDisposition::PreserveVerified => {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}透传依据为 Verified，但区域动作不是 PreserveVerified",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            (Some(_), Some(crate::provision::PasswordDisposition::Rewrap))
+                if part.disposition != RegionDisposition::RewrapVerified =>
+            {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}密码动作为 Rewrap，但区域动作不是 RewrapVerified",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            (Some(_), Some(crate::provision::PasswordDisposition::Rebuild))
+                if part.disposition != RegionDisposition::Rebuild =>
+            {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}密码动作为 Rebuild，但区域动作不允许重建密钥域",
+                        part.geometry.role.label()
+                    ),
+                ));
+            }
+            _ => {}
+        }
         match part.disposition {
             RegionDisposition::PreserveOpaque => {
                 if part.source_password_knowledge != Some(SourcePasswordKnowledge::Unknown)
@@ -388,30 +467,31 @@ pub(super) fn validate_key_disposition_plan(
                 }
             }
             RegionDisposition::PreserveVerified => {
-                let record = part.preserved_record.ok_or_else(|| {
-                    err(
+                if let Some(record) = part.preserved_record {
+                    if record.lba12.need_encrypt != 0 {
+                        let expected_lba12 = record
+                            .lba12_key_material()
+                            .map_err(|message| err(EXIT_TARGET, message))?;
+                        if plan.partition_lba7_material[index] != Some(record.lba7_key_material())
+                            || plan.partition_lba12_material[index] != Some(expected_lba12)
+                        {
+                            return Err(err(
+                                EXIT_TARGET,
+                                format!(
+                                    "错误: {} PreserveVerified 改变了来源 key material",
+                                    part.geometry.role.label()
+                                ),
+                            ));
+                        }
+                    }
+                } else if KeyDomainRole::from_partition_role(part.geometry.role).is_some() {
+                    return Err(err(
                         EXIT_TARGET,
                         format!(
-                            "错误: {} PreserveVerified 缺少来源记录",
+                            "错误: {} PreserveVerified 密码域缺少来源记录",
                             part.geometry.role.label()
                         ),
-                    )
-                })?;
-                if record.lba12.need_encrypt != 0 {
-                    let expected_lba12 = record
-                        .lba12_key_material()
-                        .map_err(|message| err(EXIT_TARGET, message))?;
-                    if plan.partition_lba7_material[index] != Some(record.lba7_key_material())
-                        || plan.partition_lba12_material[index] != Some(expected_lba12)
-                    {
-                        return Err(err(
-                            EXIT_TARGET,
-                            format!(
-                                "错误: {} PreserveVerified 改变了来源 key material",
-                                part.geometry.role.label()
-                            ),
-                        ));
-                    }
+                    ));
                 }
                 if selected_format {
                     return Err(err(
@@ -510,37 +590,6 @@ pub(super) fn validate_key_disposition_plan(
                     ));
                 }
             }
-            RegionDisposition::Migrate => {
-                if part.migration_sources.is_empty() {
-                    return Err(err(
-                        EXIT_TARGET,
-                        format!(
-                            "错误: {} Migrate 缺少 typed migration source",
-                            part.geometry.role.label()
-                        ),
-                    ));
-                }
-                if selected_format {
-                    return Err(err(
-                        EXIT_TARGET,
-                        format!(
-                            "错误: {} Migrate 不能再执行独立格式化阶段",
-                            part.geometry.role.label()
-                        ),
-                    ));
-                }
-                if KeyDomainRole::from_partition_role(part.geometry.role).is_some()
-                    && plan.partition_lba12_material[index].is_none()
-                {
-                    return Err(err(
-                        EXIT_TARGET,
-                        format!(
-                            "错误: {} Migrate 缺少新的目标 FileKey material",
-                            part.geometry.role.label()
-                        ),
-                    ));
-                }
-            }
             RegionDisposition::Drop => {
                 return Err(err(
                     EXIT_TARGET,
@@ -585,38 +634,11 @@ pub(super) fn validate_target_write_set(
         }
     }
     if target_plan.partitions.iter().any(|part| {
-        part.action == PartitionAction::PreserveExact && part.preserved_record.is_none()
+        part.action == PartitionAction::PreserveExact
+            && KeyDomainRole::from_partition_role(part.geometry.role).is_some()
+            && part.preserved_record.is_none()
     }) {
-        return Err(err(EXIT_TARGET, "错误: 保留分区缺少原 key material"));
-    }
-    for part in target_plan
-        .partitions
-        .iter()
-        .filter(|part| part.disposition == RegionDisposition::Migrate)
-    {
-        let start = u32::try_from(part.geometry.start_lba)
-            .map_err(|_| err(EXIT_TARGET, "错误: K6 目标起点 LBA 溢出"))?;
-        if !patch.contains_key(&start) {
-            return Err(err(
-                EXIT_TARGET,
-                format!(
-                    "错误: {} Migrate 写集合缺少目标文件系统引导扇区",
-                    part.geometry.role.label()
-                ),
-            ));
-        }
-        if formats
-            .iter()
-            .any(|choice| choice.target.role == part.geometry.role && choice.selected)
-        {
-            return Err(err(
-                EXIT_TARGET,
-                format!(
-                    "错误: {} Migrate 与格式化写集合冲突",
-                    part.geometry.role.label()
-                ),
-            ));
-        }
+        return Err(err(EXIT_TARGET, "错误: 保留密码域缺少原 key material"));
     }
     Ok(())
 }

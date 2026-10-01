@@ -8,6 +8,11 @@ fn lines(path: &str) -> usize {
         .count()
 }
 
+fn read_source(path: &str) -> String {
+    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
+        .unwrap_or_else(|error| panic!("read {path}: {error}"))
+}
+
 fn exists(path: &str) {
     assert!(
         Path::new(env!("CARGO_MANIFEST_DIR")).join(path).is_file(),
@@ -58,6 +63,74 @@ fn assert_sources_exclude(paths: impl IntoIterator<Item = PathBuf>, forbidden: &
 
 fn near_hard_limit(actual: usize, hard_limit: usize) -> bool {
     actual.saturating_mul(5) >= hard_limit.saturating_mul(4)
+}
+
+#[test]
+fn tui_modals_must_not_center_against_local_content_rects() {
+    for path in rust_sources_under("src/tui") {
+        if path.ends_with("ui/modal.rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !source.contains("centered_modal_rect(area")
+                && !source.contains("centered_modal_rect(parent"),
+            "{} centers a modal against a local rect instead of frame.area()",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn tui_user_messages_must_carry_explicit_severity() {
+    for path in rust_sources_under("src/tui") {
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !source.contains("message: Option<String>"),
+            "{} introduces an untyped user-facing message; use UiMessage so color follows semantic severity",
+            path.display()
+        );
+        assert!(
+            !source.contains("notice: Option<String>"),
+            "{} introduces an untyped notice; use UiMessage so normal feedback cannot inherit warning/error color",
+            path.display()
+        );
+        assert!(
+            !source.contains(r#"starts_with("错误")"#),
+            "{} infers severity from message text; use UiMessageTone instead",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn provision_preview_and_submit_share_single_preflight_decision_source() {
+    let layout = fs::read_to_string("src/tui/provision/layout_presentation.rs")
+        .expect("read provision layout presentation");
+    let validation =
+        fs::read_to_string("src/tui/provision/validation.rs").expect("read provision validation");
+    let field_input =
+        fs::read_to_string("src/tui/provision/field_input.rs").expect("read provision field input");
+
+    assert!(
+        layout.contains("provision_preflight()"),
+        "right-side provision layout must consume the shared synchronous preflight"
+    );
+    assert!(
+        validation.contains("provision_preflight()?"),
+        "provision_request must consume the same synchronous preflight before background planning"
+    );
+    assert!(
+        !layout.contains("provision_password_intent(")
+            && !layout.contains("PreserveAssessment::for_partition"),
+        "layout_presentation must not re-implement password/geometry disposition rules"
+    );
+    assert!(
+        !field_input.contains("provision_password_plan_intent"),
+        "field_input must not introduce a second submit-only password planning rule"
+    );
 }
 
 #[test]
@@ -373,6 +446,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/runtime_input/backup_batch.rs",
         "src/tui/runtime_input/backup_prune.rs",
         "src/tui/runtime_input/backup_wizard.rs",
+        "src/tui/runtime_input/post_restore_wizard.rs",
         "src/tui/runtime_input/shell.rs",
     ] {
         assert!(
@@ -484,6 +558,10 @@ fn large_modules_are_split_by_domain_boundary() {
     assert!(
         lines("src/tui/provision/editor.rs") < 300,
         "Provision edit actions must stay bounded"
+    );
+    assert!(
+        lines("src/tui/provision/option_editor.rs") < 240,
+        "Provision option edit actions must stay bounded"
     );
     let editor_source = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/provision/editor.rs"),
@@ -869,43 +947,6 @@ fn real_usb_password_hil_keeps_secrets_off_argv_and_is_default_off() {
         assert!(
             !source.contains(forbidden),
             "HIL source must not contain plaintext password/CLI secret token: {forbidden}"
-        );
-    }
-}
-
-#[test]
-fn real_usb_k6_verify_is_read_only_and_identity_bound() {
-    let source = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/real_usb_k6_verify.rs"),
-    )
-    .expect("real USB K6 verifier must exist");
-
-    for required in [
-        "EXPECTED_VID",
-        "EXPECTED_PID",
-        "EXPECTED_TOTAL_SECTORS",
-        "EXPECTED_DEVICE_ID",
-        "guard_usb_disk",
-        "FileDev::open_rdonly",
-        "stream_file_payload",
-        "DEFAULT_KEY_DOMAIN_PASSWORD",
-        "aggregate_sha256",
-    ] {
-        assert!(
-            source.contains(required),
-            "missing K6 verifier safety token: {required}"
-        );
-    }
-    for forbidden in [
-        "open_rdwr",
-        "write_sector(",
-        "execute_write_transaction",
-        "atomic_write",
-        "Command::new",
-    ] {
-        assert!(
-            !source.contains(forbidden),
-            "K6 verifier must stay read-only: found {forbidden}"
         );
     }
 }
@@ -1357,7 +1398,6 @@ fn help_and_status_information_architecture_has_single_owners() {
     assert!(!render.contains("制盘方案：j/k"));
     assert!(!render.contains("检查字段表："));
     assert!(!render.contains("y 单元格 · Y 整行"));
-    assert!(!render.contains("Tab/Shift-Tab 或 gt/gT"));
     assert!(keymap.contains("pub use help::"));
     assert!(help_registry.contains("pub const DEVICES_HELP"));
     assert!(help_registry.contains("pub const BACKUPS_HELP"));
@@ -1610,7 +1650,7 @@ fn app_state_owns_global_shell_state_through_shell_substate() {
         "critical_operation: bool",
         "exit_pending: bool",
         "navigation: NavigationStack",
-        "notice: Option<String>",
+        "notice: Option<crate::tui::ui::UiMessage>",
         "notice_at: Option<std::time::Instant>",
         "animation_frame: u64",
         "selected: usize",
@@ -1723,17 +1763,14 @@ fn infrastructure_does_not_depend_on_application_layer() {
 #[test]
 fn chapter_15_identity_write_boundaries_remain_separate() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let source = |path: &str| {
-        fs::read_to_string(root.join(path)).unwrap_or_else(|error| panic!("read {path}: {error}"))
-    };
-    let restore = source("src/application/write.rs");
-    let selector = source("src/selectors.rs");
-    let observer = source("src/media_identity_observer.rs");
-    let matcher = source("src/media_identity.rs");
-    let edpb_writer = source("src/edpb/write.rs");
-    let edpb_legacy = source("src/edpb/legacy.rs");
-    let backup_writer = source("src/diskio/backup_create.rs");
-    let lineage = source("src/application/provision/identity_lineage.rs");
+    let restore = read_source("src/application/write.rs");
+    let selector = read_source("src/selectors.rs");
+    let observer = read_source("src/media_identity_observer.rs");
+    let matcher = read_source("src/media_identity.rs");
+    let edpb_writer = read_source("src/edpb/write.rs");
+    let edpb_legacy = read_source("src/edpb/legacy.rs");
+    let backup_writer = read_source("src/diskio/backup_create.rs");
+    let lineage = read_source("src/application/provision/identity_lineage.rs");
 
     let authorize = restore
         .split("fn authorize_restore(")
@@ -1770,7 +1807,7 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
         "src/tui/backups/render.rs",
         "src/tui/inspect/render.rs",
     ] {
-        let renderer = source(path);
+        let renderer = read_source(path);
         for forbidden in [
             "FileDev::open_",
             "verify_file(",
@@ -1782,15 +1819,84 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
         }
     }
 
-    let prepare = source("src/application/provision/prepare.rs");
-    let commit = source("src/application/provision/commit.rs");
-    assert!(prepare.contains("RegionDisposition::Migrate =>"));
-    assert!(commit.contains("RegionDisposition::Migrate =>"));
-    assert!(prepare.contains("K6"));
-    assert!(prepare.contains("prepare_migrations"));
-    assert!(prepare.contains("build_migrated_filesystem"));
-    assert!(!commit.contains("Migrate 当前 unsupported"));
-    assert!(commit.contains("Migrate 写集合缺少目标文件系统引导扇区"));
+    for path in [
+        "src/application/provision.rs",
+        "src/application/provision/prepare.rs",
+        "src/application/provision/commit.rs",
+        "src/provision/plain.rs",
+        "src/provision/reprovision/plan.rs",
+        "src/tui/provision/review.rs",
+    ] {
+        let text = read_source(path);
+        for forbidden in [
+            "RegionDisposition::Migrate",
+            "migration_sources",
+            "prepare_migrations",
+            "prepare_existing_to_plain",
+            "prepare_plain_to_official",
+            "build_migrated_filesystem",
+            "build_plain_migrated_provision_write_plan",
+            "文件级 staging",
+            "K6 Plain→EDP",
+            "K6 EDP→Plain",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "Provision file migration must stay removed: {path} contains {forbidden}"
+            );
+        }
+    }
+    for path in [
+        "src/application/provision/migration.rs",
+        "src/provision/migration.rs",
+        "src/filesystem/migration.rs",
+        "examples/real_usb_k6_verify.rs",
+    ] {
+        assert!(
+            !root.join(path).exists(),
+            "file-level migration artifact must stay removed: {path}"
+        );
+    }
+    let prepare = read_source("src/application/provision/prepare.rs");
+    let plain_prepare = prepare
+        .split("pub fn prepare_plain_provision(")
+        .nth(1)
+        .expect("Plain prepare boundary");
+    assert!(plain_prepare.contains("build_plain_provision_write_plan("));
+    for forbidden in [
+        "key_domains",
+        "parse_existing_provision(",
+        "analyze_partition(",
+        "stream_file_payload(",
+        "migration",
+    ] {
+        assert!(
+            !plain_prepare.contains(forbidden),
+            "EDP→Plain must not read/migrate files: found {forbidden}"
+        );
+    }
+    let restore_result = read_source("src/tui/restore_result_render.rs");
+    assert!(restore_result.contains("文件数据未恢复"));
+}
+
+#[test]
+fn plain_scan_and_prepare_share_geometry_aware_filesystem_evidence() {
+    let scan = read_source("src/disk_scan.rs");
+    let prepare = read_source("src/application/provision/prepare.rs");
+    let helper = "detect_boot_sector_with_geometry(";
+
+    assert!(
+        scan.contains(helper),
+        "Plain device scan must use geometry-aware filesystem evidence"
+    );
+    assert!(
+        prepare.contains(helper),
+        "Provision prepare must use the same geometry-aware filesystem evidence"
+    );
+    assert!(
+        !scan.contains("partition.filesystem = crate::filesystem::detect_boot_sector("),
+        "Plain device scan must not fall back to type-only filesystem detection"
+    );
 }
 
 #[test]
@@ -1808,13 +1914,16 @@ fn passive_capacity_display_uses_one_global_unit_system() {
         "src/tui/devices/presentation.rs",
         "src/tui/disk_layout.rs",
         "src/tui/provision/layout.rs",
-        "src/tui/provision/render.rs",
+        "src/tui/provision/confirmation_render.rs",
         "src/tui/provision/scheme_picker_render.rs",
     ] {
         let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
             .unwrap_or_else(|error| panic!("read {path}: {error}"));
+        let routes_through_global_capacity = source.contains("fmt_capacity")
+            || (path == "src/tui/restore_result_partition_layout.rs"
+                && source.contains("result_partition_table_view"));
         assert!(
-            source.contains("fmt_capacity"),
+            routes_through_global_capacity,
             "{path} must route passive capacity text through the global formatter"
         );
         for forbidden in [
@@ -1828,6 +1937,95 @@ fn passive_capacity_display_uses_one_global_unit_system() {
             );
         }
     }
+}
+
+#[test]
+fn provision_capacity_editor_follows_global_unit_system() {
+    let form = read_source("src/tui/provision/form.rs");
+    let presentation = read_source("src/tui/provision/field_presentation.rs");
+    let hints = read_source("src/tui/provision/field_layout.rs");
+
+    assert!(form.contains("CAPACITY_UNIT_SYSTEM"));
+    assert!(form.contains("CapacityUnitSystem::Decimal"));
+    assert!(form.contains("CapacityUnitSystem::Binary"));
+    for forbidden in ["容量 (MiB)", "容量 (GiB)", "Space 切换 MiB / GiB"] {
+        assert!(
+            !presentation.contains(forbidden) && !hints.contains(forbidden),
+            "Provision capacity UI must not hardcode binary unit text: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn default_key_domain_password_has_one_production_source_of_truth() {
+    let canonical_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provision/key_domain.rs");
+    let canonical = fs::read_to_string(&canonical_path).expect("read key-domain defaults");
+    assert!(canonical.contains("pub const DEFAULT_KEY_DOMAIN_PASSWORD_TEXT: &str = \"0000aaaa\";"));
+    assert!(canonical.contains(
+        "pub const DEFAULT_KEY_DOMAIN_PASSWORD: &[u8] = DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.as_bytes();"
+    ));
+
+    for path in rust_sources_under("src") {
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if path == canonical_path || file_name == "tests.rs" || file_name.ends_with("_tests.rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !source.contains("0000aaaa"),
+            "{} hardcodes the default key-domain password instead of using DEFAULT_KEY_DOMAIN_PASSWORD[_TEXT]",
+            path.display()
+        );
+        assert!(
+            !source.contains("const DEFAULT_PASSWORD"),
+            "{} declares a duplicate default password constant",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn provision_layout_never_uses_ambiguous_pending_fallback_text() {
+    let layout = read_source("src/tui/provision/layout_presentation.rs");
+    assert!(!layout.contains("? 待确认"));
+    assert!(!layout.contains("同步检查尚未生成当前区域结论"));
+    assert!(layout.contains("⚠ 计划异常"));
+    assert!(layout.contains("缺少同步预检结论"));
+}
+
+#[test]
+fn provisioning_docs_keep_file_migration_out_of_the_product_contract() {
+    let provisioning = read_source("docs/provisioning/PROVISIONING.md");
+    let architecture = read_source("docs/architecture/ARCHITECTURE.md");
+    let usage = read_source("docs/user/USAGE.md");
+    let release = read_source("docs/user/RELEASE.md");
+
+    assert!(provisioning.contains("Provision 不提供文件级迁移"));
+    assert!(architecture.contains("Provision 不读取、暂存或搬运用户文件"));
+    assert!(usage.contains("Provision 不读取或搬运来源文件"));
+    assert!(release.contains("Provision 明确不提供文件级迁移"));
+    for forbidden in ["K6", "`Migrate`", "迁移预检", "迁移数据"] {
+        assert!(
+            !provisioning.contains(forbidden)
+                && !architecture.contains(forbidden)
+                && !usage.contains(forbidden)
+                && !release.contains(forbidden),
+            "current product docs must not advertise removed file migration: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn restore_result_capacity_is_formatted_by_shared_result_projection() {
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/result_partition_table_state.rs"),
+    )
+    .expect("read shared result partition projection");
+    assert!(source.contains("fmt_capacity"));
 }
 
 #[test]

@@ -374,7 +374,9 @@ fn edp_crypto_state(
         };
     }
 
-    match record.verified_file_key(Some(password.unwrap_or(b"0000aaaa"))) {
+    match record.verified_file_key(Some(
+        password.unwrap_or(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD),
+    )) {
         Ok(file_key) if record.lba12.encrypt_mode == FileKeyWrapMode::Sm4.raw() => {
             match decrypt_mode2(boot, &file_key) {
                 Ok(plain_boot) => {

@@ -113,6 +113,34 @@ fn overall_and_work_gauges_share_high_contrast_progress_labels() {
 }
 
 #[test]
+fn running_progress_uses_four_layers_one_line_safety_and_no_duplicate_global_status() {
+    let progress = include_str!("../src/tui/operation_progress_render.rs");
+    let current = include_str!("../src/tui/operation_progress_status.rs");
+    let root = include_str!("../src/tui/render.rs");
+    let status = include_str!("../src/tui/status.rs");
+
+    for required in ["总体进度", "运行记录", "Constraint::Length(1)"] {
+        assert!(progress.contains(required), "missing {required}");
+    }
+    assert!(current.contains("当前任务"));
+    assert!(current.contains("工作进度"));
+    assert!(current.contains("动态描述"));
+    assert!(current.contains("最近活动"));
+    assert!(!progress.contains("运行日志 · 最近语义活动"));
+    assert!(!current.contains("当前状态"));
+    assert!(!progress.contains("扇区活动"));
+    assert!(!current.contains("扇区活动"));
+    assert!(
+        root.contains("let footer_height =")
+            && root.contains("!operation_progress_running || notice.is_some() || status.is_some()")
+    );
+    assert!(
+        status.contains("if operation_progress_running") && status.contains("return None;"),
+        "Running must not emit a duplicate dynamic safety status"
+    );
+}
+
+#[test]
 fn result_report_pages_keep_static_primitive_and_provision_uses_interactive_workbench() {
     let shared = include_str!("../src/tui/ui/operation_result.rs");
     let workbench = include_str!("../src/tui/result_workbench.rs");
@@ -184,7 +212,7 @@ fn provision_waiting_states_are_overlays_not_full_pages() {
         .next()
         .expect("planning render boundary");
     assert!(planning.contains("draw_provision_form(frame, main_area, state)"));
-    assert!(planning.contains("draw_provision_status_modal"));
+    assert!(planning.contains("draw_provision_planning_modal"));
     assert!(!planning.contains(".block(crate::tui::ui::card"));
 
     let exporting = stage_render
@@ -197,6 +225,25 @@ fn provision_waiting_states_are_overlays_not_full_pages() {
     assert!(exporting.contains("draw_provision_review(frame, main_area, state)"));
     assert!(exporting.contains("draw_provision_status_modal"));
     assert!(!exporting.contains(".block(crate::tui::ui::card"));
+    assert!(
+        provision.contains("centered_modal_rect(frame.area(), 76, height)"),
+        "Provision waiting overlays must be centered from the full terminal viewport"
+    );
+    assert!(
+        provision.contains("centered_modal_rect(frame.area(), 36, 7)"),
+        "Planning overlay must use the compact globally centered modal"
+    );
+
+    let backups = include_str!("../src/tui/backups/render.rs");
+    assert!(
+        backups.contains("centered_modal_rect(frame.area(), 78, height)"),
+        "Backup waiting overlays must be centered from the full terminal viewport"
+    );
+    assert!(!provision.contains(
+        "draw_provision_status_modal(\n                frame,\n                main_area,"
+    ));
+    assert!(!backups
+        .contains("draw_backup_status_modal(\n                frame,\n                area,"));
 }
 
 #[test]

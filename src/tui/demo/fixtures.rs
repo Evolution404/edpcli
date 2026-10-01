@@ -12,8 +12,12 @@ use crate::backup_metadata::{Lba7CompatibilityGeometry, PartitionGeometry};
 use crate::common::{METADATA_IMAGE_LEN, SECTOR};
 use crate::disk_scan::Row;
 use crate::edpb::ArtifactCompleteness;
-use crate::provision::DiskProvisionKind;
+use crate::filesystem::FilesystemKind;
+use crate::provision::{
+    DiskProvisionKind, OfficialPartitionMode, PartitionRole, ProvisionTarget, RegionDisposition,
+};
 use crate::sectors::EdpfPartition;
+use crate::tui::state::{ProvisionResultPartition, ProvisionResultSnapshot};
 
 const TOTAL_SECTORS: u64 = 125_000_000;
 
@@ -144,6 +148,86 @@ pub(super) fn disk(disk: u32, kind: DiskProvisionKind) -> Row {
     };
     row.identity_pin = Some(pin(&row));
     row
+}
+
+pub(super) fn provision_result_snapshot(row: &Row) -> ProvisionResultSnapshot {
+    let target = match row.provision_kind {
+        DiskProvisionKind::Mode0 => {
+            ProvisionTarget::Official(OfficialPartitionMode::DefaultThreePartition)
+        }
+        DiskProvisionKind::Mode1 => {
+            ProvisionTarget::Official(OfficialPartitionMode::BootShareCombined)
+        }
+        DiskProvisionKind::Mode2 => {
+            ProvisionTarget::Official(OfficialPartitionMode::WholeDiskEncrypted)
+        }
+        DiskProvisionKind::Mode3 => {
+            ProvisionTarget::Official(OfficialPartitionMode::IntranetExtranetDualPartition)
+        }
+        DiskProvisionKind::Plain => ProvisionTarget::Plain,
+    };
+
+    let partitions = if row.provision_kind == DiskProvisionKind::Plain {
+        row.partition_table
+            .as_ref()
+            .map(|table| {
+                table
+                    .partitions
+                    .iter()
+                    .map(|partition| ProvisionResultPartition {
+                        role: None,
+                        filesystem: Some(FilesystemKind::ExFat),
+                        start_lba: partition.start_lba,
+                        size_bytes: partition.sector_count.saturating_mul(SECTOR as u64),
+                        selected_for_format: true,
+                        disposition: None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        row.partitions
+            .as_ref()
+            .map(|parts| {
+                parts
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, partition)| {
+                        let role = match (row.provision_kind, index, partition.ptype) {
+                            (DiskProvisionKind::Mode1, 0, 2) => PartitionRole::BootShareCombined,
+                            (DiskProvisionKind::Mode2, 0, 1) => PartitionRole::CompatibilityReserve,
+                            (_, _, 1) => PartitionRole::Boot,
+                            (_, _, 2) => PartitionRole::Share,
+                            (_, _, 4) => PartitionRole::Encrypt,
+                            _ => return None,
+                        };
+                        let filesystem = match role {
+                            PartitionRole::CompatibilityReserve => None,
+                            PartitionRole::Boot => Some(FilesystemKind::Fat16),
+                            PartitionRole::Share
+                            | PartitionRole::Encrypt
+                            | PartitionRole::BootShareCombined => Some(FilesystemKind::ExFat),
+                        };
+                        Some(ProvisionResultPartition {
+                            role: Some(role),
+                            filesystem,
+                            start_lba: partition.start_lba,
+                            size_bytes: partition.size_bytes,
+                            selected_for_format: role != PartitionRole::CompatibilityReserve,
+                            disposition: Some(RegionDisposition::Rebuild),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    ProvisionResultSnapshot {
+        disk: row.disk,
+        target,
+        total_bytes: row.size,
+        partitions,
+    }
 }
 
 fn coverage() -> BackupCoverage {

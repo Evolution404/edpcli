@@ -16,8 +16,14 @@ pub(super) fn handle_inspect_key(
         use state::AdvancedInspectStage;
         match stage {
             AdvancedInspectStage::Running => {
-                if key.code == ct_event::KeyCode::Esc {
-                    state.set_notice("全盘检查正在后台读取结构，请等待完成。");
+                match key.code {
+                    ct_event::KeyCode::Esc => {
+                        state.set_progress_notice("全盘检查正在后台读取结构，请等待完成。");
+                    }
+                    ct_event::KeyCode::Char('J') => {
+                        state.set_warning_notice("全盘检查数据尚未准备好，完成后才能跳转 LBA。");
+                    }
+                    _ => {}
                 }
                 return Some(KeyOutcome::NextIteration);
             }
@@ -55,11 +61,16 @@ pub(super) fn handle_inspect_key(
                                         }
                                     }
                                     Ok(None) => {}
-                                    Err(message) => state.set_notice(message),
+                                    Err(message)
+                                        if !matches!(
+                                            state.advanced_inspect_prompt(),
+                                            Some(state::AdvancedInspectPrompt::Jump { .. })
+                                        ) =>
+                                    {
+                                        state.set_warning_notice(message);
+                                    }
+                                    Err(_) => {}
                                 }
-                            }
-                            keymap::TuiAction::Text(' ') if mode == state::InputMode::Command => {
-                                state.advanced_inspect_toggle_jump_unit();
                             }
                             keymap::TuiAction::Text(ch) => {
                                 state.advanced_inspect_prompt_push(ch);
@@ -71,8 +82,7 @@ pub(super) fn handle_inspect_key(
                 }
 
                 let sector_detail = state.advanced_inspect().is_some_and(|advanced| {
-                    advanced.panel == state::AdvancedInspectPanel::Detail
-                        && advanced.sector.is_some()
+                    advanced.view_mode == state::InspectViewMode::Hex && advanced.sector.is_some()
                 });
                 if sector_detail {
                     let Some(action) = keys.map(state::InputMode::Normal, key) else {
@@ -80,10 +90,7 @@ pub(super) fn handle_inspect_key(
                     };
                     use keymap::TuiAction;
                     match action {
-                        TuiAction::FocusNext
-                        | TuiAction::FocusPrevious
-                        | TuiAction::WorkspaceNext
-                        | TuiAction::WorkspacePrevious => {}
+                        TuiAction::FocusNext | TuiAction::FocusPrevious => {}
                         TuiAction::MoveLeft => {
                             state.advanced_inspect_sector_move_cursor(-1);
                         }
@@ -160,6 +167,15 @@ pub(super) fn handle_inspect_key(
                         TuiAction::InspectJump => {
                             state.advanced_inspect_begin_jump();
                         }
+                        TuiAction::InspectBusiness => {
+                            state.advanced_inspect_set_view_mode(state::InspectViewMode::Business);
+                        }
+                        TuiAction::InspectRawFields => {
+                            state.advanced_inspect_set_view_mode(state::InspectViewMode::RawFields);
+                        }
+                        TuiAction::InspectHex => {
+                            state.advanced_inspect_set_view_mode(state::InspectViewMode::Hex);
+                        }
                         TuiAction::Search => {
                             state.advanced_inspect_begin_search();
                         }
@@ -167,7 +183,7 @@ pub(super) fn handle_inspect_key(
                             if let Err(message) = state
                                 .advanced_inspect_search_next(action == TuiAction::PreviousMatch)
                             {
-                                state.set_notice(message);
+                                state.set_warning_notice(message);
                             }
                         }
                         _ => {}

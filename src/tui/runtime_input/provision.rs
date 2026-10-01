@@ -37,14 +37,13 @@ pub(super) fn handle_provision_key(
                 | TuiAction::TableCopyRow
                 | TuiAction::FocusNext
                 | TuiAction::FocusPrevious
-                | TuiAction::WorkspaceNext
-                | TuiAction::WorkspacePrevious
         ) {
             if matches!(action, TuiAction::FocusNext | TuiAction::FocusPrevious)
                 && state.provision().stage == ProvisionStage::Form
                 && state.input_mode() == state::InputMode::Insert
+                && state.provision_end_insert()
             {
-                state.provision_end_insert();
+                crate::tui::dispatch::start_provision_source_password_verify(state, tasks);
             }
             match dispatch_tui_action(
                 state,
@@ -71,7 +70,10 @@ pub(super) fn handle_provision_key(
                     TuiAction::CursorRight => state.provision_move_cursor(1),
                     TuiAction::CursorHome => state.provision_cursor_home(),
                     TuiAction::CursorEnd => state.provision_cursor_end(),
-                    TuiAction::Submit | TuiAction::Back => state.provision_end_insert(),
+                    TuiAction::Submit | TuiAction::Back if state.provision_end_insert() => {
+                        crate::tui::dispatch::start_provision_source_password_verify(state, tasks);
+                    }
+                    TuiAction::Submit | TuiAction::Back => {}
                     _ => {}
                 }
             }
@@ -91,7 +93,7 @@ pub(super) fn handle_provision_key(
             }
             ProvisionStage::Planning => {
                 if action == TuiAction::Back {
-                    state.set_notice("制盘计划正在后台生成，请等待完成。");
+                    state.set_progress_notice("制盘计划正在后台生成，请等待完成。");
                 }
             }
             ProvisionStage::Review => {
@@ -123,7 +125,7 @@ pub(super) fn handle_provision_key(
             },
             ProvisionStage::Exporting => {
                 if action == TuiAction::Back {
-                    state.set_notice("镜像正在后台导出，请等待完成。");
+                    state.set_progress_notice("镜像正在后台导出，请等待完成。");
                 }
             }
             ProvisionStage::Confirm => match action {
@@ -142,7 +144,7 @@ pub(super) fn handle_provision_key(
                     let _ = state.navigate(NavCommand::Escape, viewport_height);
                 }
                 TuiAction::Confirm => {
-                    state.set_notice("写入目标介质前必须精确输入大写 YES 后按 Enter。")
+                    state.set_warning_notice("写入目标介质前必须精确输入大写 YES 后按 Enter。")
                 }
                 _ => {}
             },
@@ -194,18 +196,12 @@ pub(super) fn handle_provision_key(
                         .provision_result_move(viewport_height.max(1) as isize, viewport_height),
                     TuiAction::Top => state.provision_result_top(viewport_height),
                     TuiAction::Bottom => state.provision_result_bottom(viewport_height),
-                    TuiAction::MoveLeft => {
-                        if !state.provision_result_shift_partition_column(true) {
-                            state.provision_result_shift_pane(true);
-                        }
-                    }
-                    TuiAction::MoveRight => {
-                        if !state.provision_result_shift_partition_column(false) {
-                            state.provision_result_shift_pane(false);
-                        }
-                    }
                     TuiAction::PanelPrevious => state.provision_result_shift_pane(true),
                     TuiAction::PanelNext => state.provision_result_shift_pane(false),
+                    TuiAction::PanelLeft => state.provision_result_spatial_focus(-1, 0),
+                    TuiAction::PanelRight => state.provision_result_spatial_focus(1, 0),
+                    TuiAction::PanelUp => state.provision_result_spatial_focus(0, -1),
+                    TuiAction::PanelDown => state.provision_result_spatial_focus(0, 1),
                     TuiAction::Activate | TuiAction::Submit | TuiAction::Back => {
                         let _ = state.navigate(NavCommand::Escape, viewport_height);
                     }

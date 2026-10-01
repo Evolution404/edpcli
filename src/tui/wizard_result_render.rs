@@ -7,8 +7,9 @@ pub(super) fn draw_wizard_result(
     area: ratatui::layout::Rect,
     wizard: &WizardState,
 ) {
-    let message = wizard.message.as_deref().unwrap_or("操作结束");
-    let ok = !message.starts_with("错误");
+    let message = wizard.message.as_ref();
+    let message_text = message.map(|message| message.text()).unwrap_or("操作结束");
+    let ok = !message.is_some_and(|message| message.is_error());
     let (title, status, operation) = match wizard.kind {
         WriteKind::BackupCreate => (
             "备份结果",
@@ -25,18 +26,16 @@ pub(super) fn draw_wizard_result(
             "元数据恢复",
         ),
     };
-    let tone = if ok {
-        crate::tui::ui::ResultTone::Success
-    } else {
-        crate::tui::ui::ResultTone::Danger
-    };
+    let tone = message
+        .map(|message| message.result_tone())
+        .unwrap_or(crate::tui::ui::ResultTone::Success);
 
     let mut cards = vec![crate::tui::ui::ResultCard {
         title: "结果说明".into(),
-        lines: vec![if ok {
-            crate::tui::ui::ResultValue::success(message).emphasized()
-        } else {
-            crate::tui::ui::ResultValue::danger(message).emphasized()
+        lines: vec![crate::tui::ui::ResultValue {
+            text: message_text.into(),
+            tone,
+            bold: true,
         }],
     }];
 

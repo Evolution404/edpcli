@@ -132,13 +132,575 @@ fn provision_state() -> AppState {
 }
 
 #[test]
-fn ch16_provision_has_shared_stepper_and_card_surfaces() {
+fn ch16_provision_form_is_two_pane_without_protection_or_shortcut_footer() {
     let state = provision_state();
     let text = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
     for value in ["制盘配置", "生成计划", "计划确认", "执行", "完成"] {
         assert!(text.contains(value), "missing {value}");
     }
-    assert!(text.contains("固定目标"));
+    assert!(text.contains("参数"), "{text}");
+    assert!(text.contains("目标与磁盘布局"), "{text}");
+    assert!(!text.contains("固定目标"), "{text}");
+    assert!(!text.contains("写盘保护"), "{text}");
+    assert!(
+        !text.contains("↑/↓字段"),
+        "form must not render a shortcut footer"
+    );
+}
+
+#[test]
+fn provision_lba8_advanced_identity_expands_edits_and_collapses_with_o_contract() {
+    let mut state = provision_state();
+    let base_count = state.provision_visible_fields().len();
+    assert!(!state.provision().advanced_identity_open);
+    let fields = state.provision_visible_fields();
+    assert!(fields
+        .iter()
+        .any(|(label, value, _)| label == "高级设置" && value.contains("o 展开")));
+    assert!(!fields.iter().any(|(label, _, _)| label == "GLab"));
+
+    assert!(
+        !state.provision_toggle_advanced_identity(),
+        "o must only toggle while the Advanced Settings row is focused"
+    );
+    let advanced_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "高级设置")
+        .expect("advanced settings row");
+    state.provision_mut().field_selected = advanced_index;
+    assert!(state.provision_toggle_advanced_identity());
+    assert!(state.provision().advanced_identity_open);
+    let fields = state.provision_visible_fields();
+    assert_eq!(fields.len(), base_count + 14);
+    assert_eq!(fields[state.provision().field_selected].0, "高级设置");
+    assert!(fields[state.provision().field_selected]
+        .1
+        .contains("o 收起"));
+    assert!(fields
+        .iter()
+        .any(|(label, value, _)| label == "Autonum" && *value == "YD000001"));
+
+    let screen = rendered_lines(&state, 160, 60).join("\n").replace(' ', "");
+    assert!(screen.contains("高级设置"), "{screen}");
+    assert!(screen.contains("o收起"), "{screen}");
+    assert!(!screen.contains("LBA8高级身份"), "{screen}");
+    assert!(screen.contains("GLab"), "{screen}");
+    let lines = rendered_lines(&state, 160, 60)
+        .iter()
+        .map(|line| line.replace(' ', ""))
+        .collect::<Vec<_>>();
+    let advanced_y = lines
+        .iter()
+        .position(|line| line.contains("高级设置"))
+        .expect("advanced settings row must render");
+    let glab_y = lines
+        .iter()
+        .position(|line| line.contains("GLab"))
+        .expect("first advanced identity row must render");
+    let indus_y = lines
+        .iter()
+        .position(|line| line.contains("Indus"))
+        .expect("second advanced identity row must render");
+    assert_eq!(
+        glab_y,
+        advanced_y + 1,
+        "expanded advanced identity must start immediately below 高级设置 without a blank line"
+    );
+    assert_eq!(
+        indus_y,
+        glab_y + 1,
+        "advanced identity rows must be contiguous without wrapped blank lines"
+    );
+
+    let glab_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "GLab")
+        .expect("GLab row");
+    state.provision_mut().field_selected = glab_index;
+    assert!(state.provision_selected_field_is_editable());
+    let before = state.provision().form.lba8_identity.glab.clone();
+    state.provision_cursor_end();
+    state.provision_push_char('|');
+    assert_eq!(state.provision().form.lba8_identity.glab, before);
+    assert!(state
+        .provision()
+        .message
+        .as_deref()
+        .is_some_and(|message| message.contains("LBA8")));
+    state.provision_push_char('X');
+    assert_eq!(
+        state.provision().form.lba8_identity.glab,
+        format!("{before}X")
+    );
+    assert!(state.provision().message.is_none());
+
+    let advanced_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "高级设置")
+        .expect("advanced settings row");
+    state.provision_mut().field_selected = advanced_index;
+    assert!(state.provision_toggle_advanced_identity());
+    assert!(!state.provision().advanced_identity_open);
+    assert_eq!(state.provision_visible_fields().len(), base_count);
+    assert_eq!(
+        state.provision_visible_fields()[state.provision().field_selected].0,
+        "高级设置"
+    );
+    assert!(
+        state.provision_visible_fields()[state.provision().field_selected]
+            .1
+            .contains("o 展开")
+    );
+}
+
+#[test]
+fn provision_verified_source_status_is_success_and_normal_values_have_no_input_fill() {
+    use edpcli::provision::SourcePasswordKnowledge;
+
+    let mut state = provision_state();
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+        share: Some(SourcePasswordKnowledge::DefaultVerified),
+        share_opaque_profile: true,
+        encrypt: Some(SourcePasswordKnowledge::DefaultVerified),
+        encrypt_opaque_profile: true,
+    }));
+    state.provision_mut().field_selected = 1;
+    state.provision_mut().form.label_id = "ZTESTONLY".into();
+
+    let (width, height) = (160, 45);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let lines = (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    let compact = lines
+        .iter()
+        .map(|line| line.replace(' ', ""))
+        .collect::<Vec<_>>();
+    assert!(
+        !compact.iter().any(|line| line.contains("来源状态")),
+        "source status must be merged into the password rows"
+    );
+    let success_fg = edpcli::tui::theme::current().success().fg.unwrap();
+    let exchange_row = compact
+        .iter()
+        .find(|line| line.contains("交换区") && line.contains("原密码") && line.contains("新密码"))
+        .expect("exchange password row");
+    let separator = exchange_row.find('│').expect("password column separator");
+    let verified = exchange_row.find('✓').expect("source verification status");
+    let target = exchange_row.find("新密码").expect("target password column");
+    assert!(
+        verified < separator && separator < target,
+        "password row must be 原密码 + 状态 │ 新密码: {exchange_row}"
+    );
+    let exchange_y = compact
+        .iter()
+        .position(|line| line == exchange_row)
+        .expect("exchange password row index") as u16;
+    let separator_x = (0..70)
+        .find(|x| buffer[(*x, exchange_y)].symbol() == "│")
+        .expect("password column separator x");
+    assert!(
+        separator_x < 34,
+        "password row must use compact content-driven column sizing instead of a 50/50 split: x={separator_x}, row={}",
+        lines[exchange_y as usize]
+    );
+    for domain in ["交换区", "保密区"] {
+        let y = compact
+            .iter()
+            .position(|line| {
+                line.contains(domain) && line.contains("原密码") && line.contains("新密码")
+            })
+            .unwrap_or_else(|| panic!("missing verified status for {domain}"))
+            as u16;
+        let x = (0..width)
+            .find(|x| buffer[(*x, y)].symbol() == "✓")
+            .unwrap_or_else(|| panic!("verified mark missing on row: {}", lines[y as usize]));
+        assert_eq!(buffer[(x, y)].fg, success_fg, "{domain}");
+    }
+
+    let value = state.provision().form.label_id.clone();
+    let needle = value.chars().next().expect("label id").to_string();
+    let y = compact
+        .iter()
+        .position(|line| line.contains("标签标识") && line.contains(&value))
+        .expect("normal identity row") as u16;
+    let x = (0..80)
+        .find(|x| buffer[(*x, y)].symbol() == needle)
+        .expect("normal field value");
+    let label_x = (0..x)
+        .find(|label_x| buffer[(*label_x, y)].symbol() == "标")
+        .expect("identity label");
+    assert_eq!(
+        buffer[(x, y)].bg,
+        buffer[(label_x, y)].bg,
+        "normal value must share the pane background instead of painting a separate input strip"
+    );
+    assert_eq!(
+        buffer[(x, y)].fg,
+        edpcli::tui::theme::current().secondary_text().fg.unwrap(),
+        "normal value should use lightweight body text styling"
+    );
+}
+
+#[test]
+fn provision_form_capacity_indicator_tracks_boot_share_encrypt_without_vertical_jitter() {
+    let mut state = provision_state();
+    let field_index = |state: &AppState, prefix: &str| {
+        state
+            .provision_visible_fields()
+            .iter()
+            .position(|(label, _, _)| label.starts_with(prefix))
+            .unwrap_or_else(|| panic!("missing field prefix {prefix}"))
+    };
+
+    let identity = field_index(&state, "标签标识");
+    state.provision_mut().field_selected = identity;
+    let identity_lines = rendered_lines(&state, 160, 45);
+    assert!(
+        !identity_lines.iter().any(|line| line.contains('▲')),
+        "identity fields must hide the capacity-map indicator"
+    );
+    let identity_header_y = identity_lines
+        .iter()
+        .position(|line| {
+            let compact = line.replace(' ', "");
+            compact.contains("区域") && compact.contains("LBA范围")
+        })
+        .expect("layout table header");
+
+    let mut arrow_x = Vec::new();
+    for (prefix, region) in [
+        ("启动区容量", "启动区"),
+        ("交换区容量", "交换区"),
+        ("保密区容量", "保密区"),
+    ] {
+        let index = field_index(&state, prefix);
+        state.provision_mut().field_selected = index;
+        let lines = rendered_lines(&state, 160, 45);
+        let (y, line) = lines
+            .iter()
+            .enumerate()
+            .find(|(_, line)| line.contains('▲'))
+            .unwrap_or_else(|| panic!("missing capacity indicator for {prefix}"));
+        let x = line
+            .chars()
+            .position(|symbol| symbol == '▲')
+            .expect("capacity indicator x");
+        arrow_x.push(x);
+        let header_y = lines
+            .iter()
+            .position(|line| {
+                let compact = line.replace(' ', "");
+                compact.contains("区域") && compact.contains("LBA范围")
+            })
+            .expect("layout table header");
+        assert_eq!(
+            header_y, identity_header_y,
+            "indicator row must keep the layout table at a stable y position"
+        );
+        assert!(
+            y < header_y,
+            "capacity indicator must stay directly below the map and above the region table"
+        );
+        let linked_row = lines
+            .iter()
+            .find(|line| {
+                let right = line.chars().skip(70).collect::<String>();
+                let compact = right.replace(' ', "");
+                compact.contains(region) && compact.contains("LBA")
+            })
+            .unwrap_or_else(|| panic!("missing linked region row for {region}"));
+        assert!(
+            linked_row.chars().skip(70).any(|symbol| symbol == '▌'),
+            "left field focus must visibly activate the matching right-side region row: {linked_row}"
+        );
+    }
+    assert!(
+        arrow_x[0] < arrow_x[1] && arrow_x[1] < arrow_x[2],
+        "indicator must move with the real map segments: {arrow_x:?}"
+    );
+}
+
+#[test]
+fn provision_default_source_password_is_visible_while_verifying_and_separator_never_moves() {
+    use edpcli::provision::SourcePasswordKnowledge;
+
+    let mut state = provision_state();
+    assert_eq!(state.provision().form.share_source_password, "0000aaaa");
+    assert_eq!(state.provision().form.encrypt_source_password, "0000aaaa");
+
+    let render_separator = |state: &AppState| {
+        let (width, height) = (160, 45);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| render::draw(frame, state)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let row_y = (0..height)
+            .find(|y| {
+                let line = (0..width)
+                    .map(|x| buffer[(x, *y)].symbol())
+                    .collect::<String>()
+                    .replace(' ', "");
+                line.contains("交换区") && line.contains("原密码") && line.contains("新密码")
+            })
+            .expect("exchange password row");
+        let row = (0..width)
+            .map(|x| buffer[(x, row_y)].symbol())
+            .collect::<String>();
+        let separator = (0..width)
+            .find(|x| buffer[(*x, row_y)].symbol() == "│")
+            .expect("password separator");
+        (separator, row)
+    };
+
+    let (before, initial_row) = render_separator(&state);
+    assert!(
+        ["◐", "◓", "◑", "◒"]
+            .iter()
+            .any(|glyph| initial_row.contains(glyph)),
+        "initial source-password candidate must show the shared verification spinner: {initial_row}"
+    );
+
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+        share: Some(SourcePasswordKnowledge::DefaultVerified),
+        share_opaque_profile: true,
+        encrypt: Some(SourcePasswordKnowledge::DefaultVerified),
+        encrypt_opaque_profile: true,
+    }));
+    let (after, verified_row) = render_separator(&state);
+    assert!(verified_row.contains('✓'), "{verified_row}");
+    assert_eq!(
+        before, after,
+        "spinner → verified transition must never move the password-column separator"
+    );
+}
+
+#[test]
+fn provision_source_password_edit_auto_verify_contract_is_revision_safe() {
+    use edpcli::provision::{KeyDomainRole, SourcePasswordKnowledge};
+
+    let mut state = provision_state();
+    let source_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "原密码")
+        .expect("share source password");
+    let target_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "新密码")
+        .expect("share target password");
+
+    state.provision_mut().field_selected = source_index;
+    assert!(state.provision_begin_insert());
+    state.provision_cursor_end();
+    state.provision_push_char('A');
+    assert!(
+        state.provision_end_insert(),
+        "dirty source password must request automatic verification on Insert exit"
+    );
+    let (domain, _, revision_a) = state
+        .provision_source_password_verify_request()
+        .expect("verification request")
+        .expect("source password request");
+    assert_eq!(domain, KeyDomainRole::Share);
+
+    let spinner_a = rendered_lines(&state, 160, 45)
+        .into_iter()
+        .find(|line| {
+            let compact = line.replace(' ', "");
+            compact.contains("交换区") && compact.contains("原密码")
+        })
+        .expect("share password row");
+    assert!(
+        ["◐", "◓", "◑", "◒"]
+            .iter()
+            .any(|glyph| spinner_a.contains(glyph)),
+        "verifying state must use the shared spinner: {spinner_a}"
+    );
+    state.advance_animation();
+    state.advance_animation();
+    let spinner_b = rendered_lines(&state, 160, 45)
+        .into_iter()
+        .find(|line| {
+            let compact = line.replace(' ', "");
+            compact.contains("交换区") && compact.contains("原密码")
+        })
+        .expect("share password row after animation");
+    assert_ne!(spinner_a, spinner_b, "spinner frame must visibly advance");
+
+    assert!(state.provision_begin_insert());
+    state.provision_cursor_end();
+    state.provision_push_char('B');
+    assert!(state.provision_end_insert());
+    let (_, _, revision_b) = state
+        .provision_source_password_verify_request()
+        .expect("second verification request")
+        .expect("second source password request");
+    assert!(revision_b > revision_a);
+
+    state.provision_finish_source_password_verify(
+        KeyDomainRole::Share,
+        revision_a,
+        Ok(SourcePasswordKnowledge::UserVerified),
+    );
+    assert_eq!(
+        state.provision().form.share_source_knowledge,
+        SourcePasswordKnowledge::Unknown,
+        "stale verification result must not overwrite the newer password"
+    );
+    state.provision_finish_source_password_verify(
+        KeyDomainRole::Share,
+        revision_b,
+        Ok(SourcePasswordKnowledge::UserVerified),
+    );
+    assert_eq!(
+        state.provision().form.share_source_knowledge,
+        SourcePasswordKnowledge::UserVerified
+    );
+
+    state.provision_mut().field_selected = target_index;
+    assert!(state.provision_begin_insert());
+    state.provision_cursor_end();
+    state.provision_push_char('C');
+    assert!(
+        !state.provision_end_insert(),
+        "editing the new password must not verify the source password"
+    );
+}
+
+#[test]
+fn provision_source_password_failure_uses_red_cross_and_keeps_opaque_passthrough() {
+    use edpcli::provision::KeyDomainRole;
+    use edpcli::sectors::EdpfPartition;
+
+    let mut row = device();
+    row.partitions = Some(vec![
+        EdpfPartition {
+            ptype: 1,
+            active: 1,
+            enc: 0,
+            start_lba: 63,
+            size_bytes: 20_417 * 512,
+        },
+        EdpfPartition {
+            ptype: 2,
+            active: 1,
+            enc: 1,
+            start_lba: 20_480,
+            size_bytes: 4_000_000 * 512,
+        },
+        EdpfPartition {
+            ptype: 4,
+            active: 1,
+            enc: 1,
+            start_lba: 4_020_480,
+            size_bytes: 2_097_153 * 512,
+        },
+    ]);
+    crate::common::confirm_row_identity(&mut row);
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    state.provision_begin_selected();
+    state.provision_enter_form_workspace();
+    state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        source_kind: edpcli::provision::DiskProvisionKind::Mode0,
+        share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
+        share_opaque_profile: true,
+        encrypt: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
+        encrypt_opaque_profile: true,
+    }));
+    let source_index = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "原密码")
+        .expect("share source password");
+    state.provision_mut().field_selected = source_index;
+    assert!(state.provision_begin_insert());
+    state.provision_cursor_end();
+    state.provision_push_char('X');
+    assert!(state.provision_end_insert());
+    let (_, _, revision) = state
+        .provision_source_password_verify_request()
+        .expect("verification request")
+        .expect("source password request");
+    state.provision_finish_source_password_verify(
+        KeyDomainRole::Share,
+        revision,
+        Err("来源密码验证失败".into()),
+    );
+    assert!(
+        !state.provision().form.format_share,
+        "failed source-password verification must never auto-enable destructive formatting"
+    );
+    let request = state.provision_request().expect(
+        "failed verification with unchanged target password should still allow opaque passthrough",
+    );
+    assert!(!request.format.share);
+    assert_eq!(
+        request
+            .key_domains
+            .target_password(edpcli::provision::PartitionRole::Share),
+        None,
+        "opaque passthrough must not reinterpret the default target candidate as a password-change request"
+    );
+
+    let (width, height) = (160, 45);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let row_y = (0..height)
+        .find(|y| {
+            let line = (0..width)
+                .map(|x| buffer[(x, *y)].symbol())
+                .collect::<String>();
+            line.replace(' ', "").contains("交换区") && line.contains('✗')
+        })
+        .expect("failed share password row");
+    let cross_x = (0..width)
+        .find(|x| buffer[(*x, row_y)].symbol() == "✗")
+        .expect("failed verification cross");
+    assert_eq!(
+        buffer[(cross_x, row_y)].fg,
+        edpcli::tui::theme::current().danger().fg.unwrap()
+    );
+    let failed_row = (0..width)
+        .map(|x| buffer[(x, row_y)].symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    let separator = failed_row.find('│').expect("password column separator");
+    let failed = failed_row.find('✗').expect("failed source status");
+    let target = failed_row.find("新密码").expect("target password column");
+    assert!(
+        failed < separator && separator < target,
+        "failure status must stay beside 原密码 and must not replace/disable 新密码: {failed_row}"
+    );
+    let right_passthrough = (0..height).any(|y| {
+        let right = (70..width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+            .replace(' ', "");
+        right.contains("交换区") && right.contains("透传")
+    });
+    assert!(
+        right_passthrough,
+        "failed source-password verification with unchanged target password must keep an exact-compatible domain on opaque passthrough"
+    );
+
+    let provision_controller = include_str!("../src/tui/controller/provision.rs");
+    assert!(!provision_controller.contains("ViewOrVerify"));
+    assert!(!provision_controller.contains("ProvisionSourcePasswordVerify"));
 }
 
 #[test]
@@ -177,6 +739,126 @@ fn provision_breadcrumb_tracks_page_surface_not_overlay_stage() {
 }
 
 #[test]
+fn provision_planning_modal_is_centered_on_the_full_terminal_viewport() {
+    use edpcli::tui::state::ProvisionStage;
+    use ratatui::layout::Rect;
+
+    for (width, height) in [(160, 45), (120, 36), (60, 18)] {
+        let mut state = provision_state();
+        state.provision_mut().stage = ProvisionStage::Planning;
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+
+        let expected = edpcli::tui::ui::centered_modal_rect(Rect::new(0, 0, width, height), 36, 7);
+        let buffer = terminal.backend().buffer();
+        assert_eq!(
+            buffer[(expected.x, expected.y)].symbol(),
+            "┌",
+            "{width}x{height}: planning modal must use the full viewport center"
+        );
+        assert_eq!(
+            buffer[(
+                expected.x + expected.width - 1,
+                expected.y + expected.height - 1,
+            )]
+                .symbol(),
+            "┘",
+            "{width}x{height}: planning modal bottom-right corner mismatch"
+        );
+        let text = (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replace(' ', "");
+        assert!(text.contains("正在生成制盘计划"), "{text}");
+        assert!(
+            !text.contains("正在只读检查目标并生成精确制盘计划"),
+            "{text}"
+        );
+        assert!(!text.contains("只读规划"), "{text}");
+        assert!(
+            ["◐", "◓", "◑", "◒"]
+                .iter()
+                .any(|glyph| text.contains(glyph)),
+            "planning modal must render the shared spinner: {text}"
+        );
+    }
+}
+
+#[test]
+fn provision_write_confirmation_is_centered_on_the_full_terminal_viewport() {
+    use edpcli::tui::state::ProvisionStage;
+    use ratatui::layout::Rect;
+
+    for (width, height) in [(160, 45), (120, 36), (60, 18)] {
+        let mut state = provision_state();
+        state.provision_mut().pane_focus = edpcli::tui::pane::PaneFocus::provision_review();
+        state.provision_mut().stage = ProvisionStage::Confirm;
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+
+        // This fixture intentionally has no prepared plan, so the fail-closed
+        // confirmation renders two detail lines: target identity + YES semantics.
+        let expected = edpcli::tui::ui::centered_modal_rect(Rect::new(0, 0, width, height), 82, 12);
+        let buffer = terminal.backend().buffer();
+        assert_eq!(
+            buffer[(expected.x, expected.y)].symbol(),
+            "┌",
+            "{width}x{height}: write confirmation must use the full viewport center"
+        );
+        assert_eq!(
+            buffer[(
+                expected.x + expected.width - 1,
+                expected.y + expected.height - 1,
+            )]
+                .symbol(),
+            "┘",
+            "{width}x{height}: write confirmation bottom-right corner mismatch"
+        );
+    }
+}
+
+#[test]
+fn shared_action_confirmation_is_centered_on_the_full_terminal_viewport() {
+    use edpcli::tui::ui::{
+        render_action_confirmation_modal, ActionConfirmationSpec, ConfirmationTone,
+    };
+    use ratatui::{layout::Rect, text::Line};
+
+    for (width, height) in [(160, 45), (120, 36), (60, 18)] {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| {
+                render_action_confirmation_modal(
+                    frame,
+                    ActionConfirmationSpec {
+                        title: "确认",
+                        headline: "执行操作？",
+                        details: vec![Line::from("详情")],
+                        tone: ConfirmationTone::Warning,
+                    },
+                )
+            })
+            .unwrap();
+        let expected = edpcli::tui::ui::centered_modal_rect(Rect::new(0, 0, width, height), 76, 9);
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(expected.x, expected.y)].symbol(), "┌");
+        assert_eq!(
+            buffer[(
+                expected.x + expected.width - 1,
+                expected.y + expected.height - 1
+            )]
+                .symbol(),
+            "┘"
+        );
+    }
+}
+
+#[test]
 fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
     use edpcli::application::progress::{
         OverallProgress, Phase, ProgressEvent, Step, TransactionActivityPhase, Unit, WorkProgress,
@@ -207,29 +889,33 @@ fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
     for value in [
         "总体进度",
         "70%",
-        "当前阶段",
+        "当前任务",
+        "阶段",
         "2/7",
         "事务写入",
         "当前步骤",
         "协议读回校验",
-        "运行日志",
+        "工作进度",
+        "75/100sector·75%",
+        "动态描述",
+        "正在写入文件系统结构",
+        "最近活动",
+        "运行记录",
         "安全提示",
     ] {
         assert!(text.contains(value), "missing {value}");
     }
-    let phase_row = lines
-        .iter()
-        .position(|line| line.replace(' ', "").contains("当前阶段2/7"))
-        .expect("current-stage content row");
-    assert!(
-        lines[phase_row + 2].contains("75 / 100 sector · 75%"),
-        "work gauge label must occupy exactly the final content row: {:?}",
-        &lines[phase_row.saturating_sub(1)..=phase_row + 3]
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.replace(' ', "").contains("安全提示"))
+            .count(),
+        1,
+        "Operation Running must expose exactly one safety footer"
     );
-    assert!(
-        !lines[phase_row + 3].contains("75 / 100 sector · 75%"),
-        "work gauge must never overwrite the current-status bottom border"
-    );
+    assert!(!text.contains("扇区活动"), "{text}");
+    assert!(!text.contains("安全写盘事务执行中"), "{text}");
+    assert!(!text.contains("就绪"), "{text}");
     for (width, height) in [(40, 10), (80, 24), (120, 36), (240, 60)] {
         let compact = rendered_lines(&state, width, height)
             .join("\n")
@@ -239,6 +925,212 @@ fn ch16_provision_running_separates_progress_phase_step_log_and_safety() {
             "running fallback missing at {width}x{height}"
         );
     }
+}
+
+#[test]
+fn operation_log_table_aligns_milestones_and_animates_current_snapshot() {
+    use edpcli::application::progress::{
+        LogPolicy, OperationKind, OperationRunState, Phase, ProgressEvent, Severity, Step,
+        TransactionActivityPhase, Unit, WorkProgress,
+    };
+    use edpcli::provision::PartitionRole;
+    use edpcli::tui::state::ProvisionStage;
+    use std::time::Duration;
+
+    let mut state = provision_state();
+    state.provision_mut().stage = ProvisionStage::Running;
+    state.provision_mut().pane_focus = edpcli::tui::pane::PaneFocus::provision_running();
+    let now = std::time::Instant::now();
+    let mut run = OperationRunState::new(OperationKind::Provision, "disk6");
+    run.started_at = now;
+
+    for (offset, phase, step, current, total, severity) in [
+        (
+            0,
+            Phase::Backup,
+            Step::MandatoryBackup,
+            1,
+            8,
+            Severity::Info,
+        ),
+        (
+            1,
+            Phase::Identity,
+            Step::BackupVerification,
+            2,
+            8,
+            Severity::Info,
+        ),
+        (
+            2,
+            Phase::Transaction,
+            Step::ProtocolWrite,
+            3,
+            8,
+            Severity::Warning,
+        ),
+        (
+            3,
+            Phase::Readback,
+            Step::ProtocolReadback,
+            4,
+            8,
+            Severity::Error,
+        ),
+    ] {
+        let mut event = ProgressEvent::new(phase, step, current, total);
+        event.severity = severity;
+        event.emitted_at = now + Duration::from_secs(offset);
+        event.log_policy = LogPolicy::Append;
+        run.push(event);
+    }
+
+    let mut current = ProgressEvent::new(
+        Phase::Format,
+        Step::PartitionFormat(PartitionRole::Boot),
+        5,
+        8,
+    )
+    .with_work(WorkProgress {
+        current: 128,
+        total: 512,
+        unit: Unit::Sectors,
+        activity: Some(TransactionActivityPhase::FormatWrite),
+    });
+    current.log_policy = LogPolicy::SnapshotOnly;
+    current.emitted_at = now + Duration::from_secs(4);
+    run.push(current);
+    assert_eq!(
+        run.log.len(),
+        4,
+        "current snapshot must not become a history row"
+    );
+    state.provision_mut().run = Some(run);
+
+    let (width, height) = (160, 45);
+    let render_frame = |state: &edpcli::tui::state::AppState| {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| render::draw(frame, state)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let lines = (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        (terminal, lines)
+    };
+
+    let (terminal, lines) = render_frame(&state);
+    let buffer = terminal.backend().buffer();
+    let compact_lines = lines
+        .iter()
+        .map(|line| line.replace(' ', ""))
+        .collect::<Vec<_>>();
+    let header_y = compact_lines
+        .iter()
+        .position(|line| line.contains("时间") && line.contains("状态") && line.contains("阶段"))
+        .expect("operation log header") as u16;
+    let row_for = |needle: &str| {
+        compact_lines
+            .iter()
+            .enumerate()
+            .skip(header_y as usize + 1)
+            .find_map(|(y, line)| line.contains(needle).then_some(y as u16))
+            .unwrap_or_else(|| panic!("missing log row {needle}"))
+    };
+    let rows = [
+        row_for("制盘前元数据备份"),
+        row_for("备份身份校验"),
+        row_for("协议事务写盘"),
+        row_for("协议读回校验"),
+        row_for("启动区格式化与读回"),
+    ];
+    let symbols = ["✓", "✓", "!", "✗", "◐"];
+    let mut status_x = None;
+    for (row, symbol) in rows.into_iter().zip(symbols) {
+        let x = (0..width)
+            .find(|x| buffer[(*x, row)].symbol() == symbol)
+            .unwrap_or_else(|| panic!("missing status {symbol} on row {row}"));
+        if let Some(expected) = status_x {
+            assert_eq!(x, expected, "status column must stay aligned");
+        } else {
+            status_x = Some(x);
+        }
+    }
+
+    let x = status_x.unwrap();
+    let theme = edpcli::tui::theme::current();
+    assert_eq!(buffer[(x, rows[0])].fg, theme.success().fg.unwrap());
+    assert_eq!(buffer[(x, rows[1])].fg, theme.success().fg.unwrap());
+    assert_eq!(buffer[(x, rows[2])].fg, theme.warning().fg.unwrap());
+    assert_eq!(buffer[(x, rows[3])].fg, theme.danger().fg.unwrap());
+    assert_eq!(buffer[(x, rows[4])].fg, theme.accent().fg.unwrap());
+
+    let header_status_x = (0..width)
+        .find(|x| buffer[(*x, header_y)].symbol() == "状")
+        .expect("status header");
+    assert_eq!(
+        x, header_status_x,
+        "header and status cells must share one column"
+    );
+
+    state.advance_animation();
+    state.advance_animation();
+    let (terminal, lines) = render_frame(&state);
+    let buffer = terminal.backend().buffer();
+    let spinner_row = lines
+        .iter()
+        .enumerate()
+        .find_map(|(y, line)| {
+            line.replace(' ', "")
+                .contains("启动区格式化与读回")
+                .then_some(y as u16)
+        })
+        .expect("animated current row");
+    assert_eq!(buffer[(x, spinner_row)].symbol(), "◓");
+}
+
+#[test]
+fn operation_log_started_event_spins_until_a_later_milestone_arrives() {
+    use edpcli::application::progress::{
+        OperationKind, OperationRunState, Phase, ProgressEvent, Step,
+    };
+    use edpcli::tui::state::ProvisionStage;
+
+    let mut state = provision_state();
+    state.provision_mut().stage = ProvisionStage::Running;
+    state.provision_mut().pane_focus = edpcli::tui::pane::PaneFocus::provision_running();
+    let mut run = OperationRunState::new(OperationKind::Provision, "disk6");
+    run.push(ProgressEvent::started(
+        OperationKind::Provision,
+        Phase::Backup,
+        Step::MandatoryBackup,
+        "正在创建制盘前元数据备份",
+    ));
+    state.provision_mut().run = Some(run);
+
+    let screen = rendered_lines(&state, 120, 36)
+        .join(
+            "
+",
+        )
+        .replace(' ', "");
+    assert!(screen.contains("◐"), "{screen}");
+    assert!(screen.contains("制盘前元数据备份"), "{screen}");
+
+    let mut next = ProgressEvent::new(Phase::Identity, Step::BackupVerification, 2, 8);
+    next.detail = Some("备份身份校验完成".into());
+    state.provision_push_progress(next);
+    let screen = rendered_lines(&state, 120, 36)
+        .join(
+            "
+",
+        )
+        .replace(' ', "");
+    assert!(screen.contains("✓"), "{screen}");
+    assert!(screen.contains("制盘前元数据备份"), "{screen}");
 }
 
 #[test]

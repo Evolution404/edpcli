@@ -245,11 +245,12 @@ fn provision_result_page_attaches_interactive_shared_full_disk_layout() {
     assert!(!layout.contains(".with_marker(false)"));
 
     assert!(
-        layout.contains("theme.apply_selection(theme.table_text(), selected_row, focused)"),
-        "result rows must use the shared table selection background"
+        layout.contains("Block::default().style(theme.selection_overlay(focused))")
+            && layout.contains(".column_spacing(0)"),
+        "result rows must paint one continuous selection background without physical column gaps"
     );
     assert!(
-        layout.contains("theme.table_cell(base, column == active_column, focused)"),
+        layout.contains("column.index == interaction.active_column()"),
         "only the active result column may receive bright/bold table-cell emphasis"
     );
     assert!(
@@ -265,8 +266,9 @@ fn provision_result_page_attaches_interactive_shared_full_disk_layout() {
         "full disk layout must remain one top-level pane without a nested focused card"
     );
     assert!(
-        input.contains("provision_result_shift_partition_column"),
-        "result h/l semantics must keep partition-column navigation"
+        input.contains("TuiAction::TableColumnLeft")
+            && layout.contains("TableKind::ResultPartitions"),
+        "result h/l semantics must use the shared table contract"
     );
 
     assert!(supplement.contains("render_disk_region_list"));
@@ -280,7 +282,7 @@ fn restore_post_result_uses_shared_workbench_and_typed_layout() {
     let partition_layout = include_str!("../src/tui/restore_result_partition_layout.rs");
     let verification = include_str!("../src/tui/restore_result_verification.rs");
     let state = include_str!("../src/tui/restore_result_state.rs");
-    let input = include_str!("../src/tui/runtime_input/backup_wizard.rs");
+    let input = include_str!("../src/tui/runtime_input/post_restore_wizard.rs");
     let root = include_str!("../src/tui/render.rs");
     let state_prod = state.split("#[cfg(test)]").next().unwrap_or(state);
     let render_sources = format!("{render}\n{partition_layout}\n{verification}");
@@ -298,13 +300,17 @@ fn restore_post_result_uses_shared_workbench_and_typed_layout() {
     }
     assert!(partition_layout.contains(".with_marker(true)"));
     assert!(
-        partition_layout
-            .contains("theme.apply_selection(theme.table_text(), selected_row, focused)"),
-        "restore result rows must use the shared selected-row background"
+        partition_layout.contains("Block::default().style(theme.selection_overlay(focused))")
+            && partition_layout.contains(".column_spacing(0)"),
+        "restore result rows must paint one continuous selection background without physical column gaps"
     );
     assert!(
-        partition_layout.contains("theme.table_cell(base, column == active_column, focused)"),
+        partition_layout.contains("column.index == interaction.active_column()"),
         "restore result active column must use the shared bright/bold cell style"
+    );
+    assert!(
+        input.contains("map_for_role") && partition_layout.contains("TableKind::ResultPartitions"),
+        "restore result must route table keys through the shared table role"
     );
     assert!(
         !render_sources.contains("row.style(theme.accent"),
@@ -323,7 +329,7 @@ fn restore_post_result_uses_shared_workbench_and_typed_layout() {
         "post-restore actions must only activate from the partition pane"
     );
     assert!(root.contains("let post_restore_overlay ="));
-    assert!(root.contains("super::ui::centered_modal_rect(area, 92, 24)"));
+    assert!(root.contains("super::ui::centered_modal_rect(frame.area(), 92, 24)"));
     assert!(
         root.matches("draw_post_restore_result(frame, area, state)")
             .count()

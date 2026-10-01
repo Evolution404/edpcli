@@ -1,4 +1,5 @@
 use super::*;
+use crate::provision::KeyDomainRole;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CapacityInputMode {
@@ -147,6 +148,33 @@ impl ExistingProvisionProfile {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PlainSourceExtent {
+    pub start_lba: u64,
+    pub sector_count: u64,
+    pub filesystem: Option<FilesystemKind>,
+}
+
+impl PlainSourceExtent {
+    pub fn matches_target(self, target: &TargetPartitionGeometry) -> bool {
+        target.role == PartitionRole::Boot
+            && self.start_lba == target.start_lba
+            && self.sector_count == target.sector_count
+            && self.filesystem.is_some()
+            && self.filesystem == target.filesystem
+    }
+}
+
+pub fn plain_extent_preserve_candidate(
+    extents: &[PlainSourceExtent],
+    target: &TargetPartitionGeometry,
+) -> bool {
+    extents
+        .iter()
+        .copied()
+        .any(|extent| extent.matches_target(target))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TargetPartitionGeometry {
     pub role: PartitionRole,
     pub partition_type: EdpPartitionType,
@@ -262,6 +290,16 @@ impl DiskProvisionKind {
 
     pub const fn official_mode(self) -> Option<OfficialPartitionMode> {
         self.target().official_mode()
+    }
+
+    pub const fn has_key_domain(self, domain: KeyDomainRole) -> bool {
+        match (self, domain) {
+            (Self::Plain, _) => false,
+            (Self::Mode0 | Self::Mode1, _) => true,
+            (Self::Mode2, KeyDomainRole::Encrypt) => true,
+            (Self::Mode3, KeyDomainRole::Share) => true,
+            _ => false,
+        }
     }
     pub const fn from_mode(mode: OfficialPartitionMode) -> Self {
         match mode {

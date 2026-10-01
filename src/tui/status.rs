@@ -4,6 +4,14 @@ use super::state::{
 };
 
 pub(super) fn dynamic_status(state: &AppState) -> Option<String> {
+    let operation_progress_running = state.provision().stage == ProvisionStage::Running
+        || state
+            .wizard()
+            .is_some_and(|wizard| wizard.stage == WizardStage::Running);
+    if operation_progress_running {
+        return None;
+    }
+
     if state.is_critical_operation() && state.backup_delete().is_some() {
         return Some("备份删除正在执行 · 退出请求将在安全检查点处理".into());
     }
@@ -40,7 +48,7 @@ pub(super) fn dynamic_status(state: &AppState) -> Option<String> {
 
     if let Some(wizard) = state.wizard() {
         return match wizard.stage {
-            WizardStage::Running => Some("备份/恢复事务执行中…".into()),
+            WizardStage::Running => None,
             WizardStage::Formatting => Some("正在格式化文件系统…".into()),
             WizardStage::Reinitializing => Some("正在重建加密密钥域…".into()),
             _ => None,
@@ -64,7 +72,7 @@ pub(super) fn dynamic_status(state: &AppState) -> Option<String> {
     match state.provision().stage {
         ProvisionStage::Planning => Some("正在生成只读制盘计划…".into()),
         ProvisionStage::Exporting => Some("正在后台导出制盘镜像…".into()),
-        ProvisionStage::Running => Some("安全写盘事务执行中…".into()),
+        ProvisionStage::Running => None,
         _ => None,
     }
 }

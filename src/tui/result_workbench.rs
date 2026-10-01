@@ -14,9 +14,6 @@ use super::disk_region_list::{DiskRegionListMode, DiskRegionListState};
 use super::pane::{PaneFocus, PaneId};
 use super::ui::{ResultTone, ViewportClass};
 
-/// Shared partition-result column contract for both Provision and Restore workbenches.
-pub const RESULT_PARTITION_COLUMN_COUNT: usize = 7;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResultHero {
     pub title: String,
@@ -45,7 +42,6 @@ impl ResultHero {
 pub struct ResultWorkbenchState {
     pane_focus: PaneFocus,
     pub selected_partition: Option<usize>,
-    partition_active_column: usize,
     region_list: DiskRegionListState,
 }
 
@@ -54,7 +50,6 @@ impl Default for ResultWorkbenchState {
         Self {
             pane_focus: PaneFocus::result_workbench(),
             selected_partition: None,
-            partition_active_column: 0,
             region_list: DiskRegionListState::default(),
         }
     }
@@ -75,24 +70,18 @@ impl ResultWorkbenchState {
         self.pane_focus.cycle(&PaneId::RESULT_ORDER, reverse);
     }
 
-    pub fn partition_active_column(&self, column_count: usize) -> usize {
-        self.partition_active_column
-            .min(column_count.saturating_sub(1))
-    }
-
-    pub fn move_partition_active_column(&mut self, reverse: bool, column_count: usize) -> bool {
-        if column_count == 0 {
-            self.partition_active_column = 0;
-            return false;
-        }
-        let current = self.partition_active_column(column_count);
-        let next = if reverse {
-            current.saturating_sub(1)
-        } else {
-            current.saturating_add(1).min(column_count - 1)
+    pub fn spatial_pane(&mut self, dx: i8, dy: i8) {
+        use PaneId::*;
+        let next = match (self.focused_pane(), dx.signum(), dy.signum()) {
+            (ResultPartitions, 1, _) => Some(ResultDiskLayout),
+            (ResultDiskLayout, -1, _) | (ResultVerification, -1, _) => Some(ResultPartitions),
+            (ResultDiskLayout, _, 1) => Some(ResultVerification),
+            (ResultVerification, _, -1) => Some(ResultDiskLayout),
+            _ => None,
         };
-        self.partition_active_column = next;
-        next != current
+        if let Some(next) = next {
+            self.focus(next);
+        }
     }
 
     pub fn viewport(&self, pane: PaneId) -> &super::pane::PaneViewport {
@@ -270,6 +259,25 @@ mod tests {
     }
 
     #[test]
+    fn workbench_spatial_navigation_matches_wide_layout() {
+        let mut state = ResultWorkbenchState::default();
+        state.spatial_pane(1, 0);
+        assert_eq!(state.focused_pane(), PaneId::ResultDiskLayout);
+        state.spatial_pane(0, 1);
+        assert_eq!(state.focused_pane(), PaneId::ResultVerification);
+        state.spatial_pane(0, -1);
+        assert_eq!(state.focused_pane(), PaneId::ResultDiskLayout);
+        state.spatial_pane(-1, 0);
+        assert_eq!(state.focused_pane(), PaneId::ResultPartitions);
+        state.spatial_pane(0, 1);
+        assert_eq!(
+            state.focused_pane(),
+            PaneId::ResultPartitions,
+            "down from a full-height left pane must not invent a new focus target"
+        );
+    }
+
+    #[test]
     fn workbench_layout_is_three_pane_wide_and_focus_only_narrow() {
         let mut state = ResultWorkbenchState::default();
         let wide = result_pane_slots(Rect::new(0, 0, 160, 30), &state);
@@ -281,20 +289,6 @@ mod tests {
         assert_eq!(narrow.len(), 1);
         assert_eq!(narrow[0].pane, PaneId::ResultVerification);
         assert!(narrow[0].focused);
-    }
-
-    #[test]
-    fn workbench_partition_column_navigation_is_bounded() {
-        let mut state = ResultWorkbenchState::default();
-        assert_eq!(state.partition_active_column(7), 0);
-        assert!(!state.move_partition_active_column(true, 7));
-        assert!(state.move_partition_active_column(false, 7));
-        assert_eq!(state.partition_active_column(7), 1);
-        for _ in 0..20 {
-            state.move_partition_active_column(false, 7);
-        }
-        assert_eq!(state.partition_active_column(7), 6);
-        assert!(!state.move_partition_active_column(false, 7));
     }
 
     #[test]

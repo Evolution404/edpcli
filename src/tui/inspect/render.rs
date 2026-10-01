@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::state::AdvancedInspectPrompt;
 
 #[path = "render_helpers.rs"]
 mod render_helpers;
@@ -19,6 +20,41 @@ use detail_render::draw_inspect_object_panes;
 mod sector_render;
 use sector_render::draw_sector_inspector;
 
+fn draw_inspect_jump_modal(frame: &mut Frame, state: &AppState) {
+    let Some(AdvancedInspectPrompt::Jump { input, error, .. }) = state.advanced_inspect_prompt()
+    else {
+        return;
+    };
+    let height = if error.is_some() { 10 } else { 9 };
+    let area = crate::tui::ui::centered_modal_rect(frame.area(), 52, height);
+    crate::tui::ui::render_modal(frame, area, "跳转到扇区", |frame, inner| {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Length(3),
+                Constraint::Min(1),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+        frame.render_widget(Paragraph::new("LBA 扇区号"), rows[0]);
+        frame.render_widget(
+            Paragraph::new(safe(input)).block(Block::default().borders(Borders::ALL)),
+            rows[1],
+        );
+        if let Some(message) = error.as_deref() {
+            frame.render_widget(
+                Paragraph::new(Span::styled(safe(message), danger())).wrap(Wrap { trim: false }),
+                rows[2],
+            );
+        }
+        frame.render_widget(
+            Paragraph::new("Enter 跳转        Esc 取消").alignment(Alignment::Center),
+            rows[3],
+        );
+    });
+}
+
 pub(super) fn draw_advanced_inspect(
     frame: &mut Frame,
     area: ratatui::layout::Rect,
@@ -27,7 +63,7 @@ pub(super) fn draw_advanced_inspect(
     let Some(advanced) = state.advanced_inspect() else {
         return;
     };
-    use super::super::state::{AdvancedInspectPanel, AdvancedInspectStage};
+    use super::super::state::{AdvancedInspectPanel, AdvancedInspectStage, InspectViewMode};
 
     match advanced.stage {
         AdvancedInspectStage::Running => {
@@ -86,10 +122,7 @@ pub(super) fn draw_advanced_inspect(
             let rows = state.advanced_inspect_tree_rows();
             let selected_index = advanced.tree_selected.min(rows.len().saturating_sub(1));
             let selected_row = rows.get(selected_index);
-            let panel_index = match advanced.panel {
-                AdvancedInspectPanel::Tree | AdvancedInspectPanel::Overview => 0,
-                AdvancedInspectPanel::Detail => 1,
-            };
+            let panel_index = advanced.view_mode.tab_index();
             let disk_layout = workspace.disk_layout.as_ref();
             let browser = Layout::default()
                 .direction(Direction::Vertical)
@@ -162,29 +195,29 @@ pub(super) fn draw_advanced_inspect(
                 );
             }
 
-            if advanced.sector.is_some() && advanced.panel == AdvancedInspectPanel::Detail {
+            if advanced.sector.is_some() && advanced.view_mode == InspectViewMode::Hex {
                 draw_sector_inspector(frame, content_area, state);
-                return;
-            }
-
-            if let Some(tree_area) = tree_area {
-                draw_inspect_tree_pane(
+            } else {
+                if let Some(tree_area) = tree_area {
+                    draw_inspect_tree_pane(
+                        frame,
+                        tree_area,
+                        &rows,
+                        selected_index,
+                        advanced.panel == AdvancedInspectPanel::Tree,
+                    );
+                }
+                draw_inspect_object_panes(
                     frame,
-                    tree_area,
-                    &rows,
-                    selected_index,
-                    advanced.panel == AdvancedInspectPanel::Tree,
+                    state,
+                    workspace,
+                    advanced,
+                    selected_row,
+                    overview_area,
+                    detail_area,
                 );
             }
-            draw_inspect_object_panes(
-                frame,
-                state,
-                workspace,
-                advanced,
-                selected_row,
-                overview_area,
-                detail_area,
-            );
+            draw_inspect_jump_modal(frame, state);
         }
     }
 }

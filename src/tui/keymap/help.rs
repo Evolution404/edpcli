@@ -9,8 +9,8 @@ pub struct HelpBinding {
 
 pub const INSPECT_HELP: &[HelpBinding] = &[
     HelpBinding {
-        keys: "1/2/3/4",
-        label: "业务字段/原始字段/Hex/全盘布局",
+        keys: "1/2/3",
+        label: "业务字段/原始字段/Hex",
         action: TuiAction::InspectBusiness,
     },
     HelpBinding {
@@ -54,8 +54,8 @@ pub const INSPECT_HELP: &[HelpBinding] = &[
         action: TuiAction::NextMatch,
     },
     HelpBinding {
-        keys: "gl",
-        label: "Goto",
+        keys: "J",
+        label: "跳转到 LBA",
         action: TuiAction::InspectJump,
     },
     HelpBinding {
@@ -158,13 +158,18 @@ pub const PROVISION_HELP: &[HelpBinding] = &[
         action: TuiAction::Insert,
     },
     HelpBinding {
+        keys: "h / l",
+        label: "当前选项上一个 / 下一个",
+        action: TuiAction::MoveRight,
+    },
+    HelpBinding {
         keys: "Space",
-        label: "切换当前选项 / 容量单位",
+        label: "切换当前选项 / 容量单位 / 新密码透传",
         action: TuiAction::Toggle,
     },
     HelpBinding {
         keys: "f",
-        label: "容量字段填满可用空间",
+        label: "起点/容量自动求解可用空间",
         action: TuiAction::Fill,
     },
     HelpBinding {
@@ -202,11 +207,6 @@ pub const GLOBAL_HELP: &[HelpBinding] = &[
         keys: "Tab / Shift-Tab",
         label: "切换当前层级焦点 / 顶层标签",
         action: TuiAction::FocusNext,
-    },
-    HelpBinding {
-        keys: "gt / gT",
-        label: "下一个 / 上一个顶层标签",
-        action: TuiAction::WorkspaceNext,
     },
     HelpBinding {
         keys: "Esc",

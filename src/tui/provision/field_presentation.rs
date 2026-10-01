@@ -14,10 +14,7 @@ impl AppState {
                     crate::provision::CapacityInputMode::Quick => (
                         format!(
                             "P{number} 容量 ({})",
-                            match part.quick_unit {
-                                crate::provision::QuickCapacityUnit::MiB => "MiB",
-                                crate::provision::QuickCapacityUnit::GiB => "GiB",
-                            }
+                            ProvisionForm::quick_unit_label(part.quick_unit)
                         ),
                         part.quick_capacity.as_str(),
                     ),
@@ -41,12 +38,6 @@ impl AppState {
             Some(value) => value,
             None => return out,
         };
-        let knowledge_suffix =
-            |knowledge: crate::provision::SourcePasswordKnowledge| match knowledge {
-                crate::provision::SourcePasswordKnowledge::DefaultVerified => "✓ 默认已验证",
-                crate::provision::SourcePasswordKnowledge::UserVerified => "✓ 用户已验证",
-                crate::provision::SourcePasswordKnowledge::Unknown => "⚠ Unknown",
-            };
         out.extend([
             (
                 "标签标识".into(),
@@ -61,66 +52,79 @@ impl AppState {
                 false,
             ),
         ]);
-        if matches!(mode, 0 | 1 | 3) {
-            let domain = if mode == 1 {
-                "二合一区"
+        out.push((
+            "高级设置".into(),
+            if self.provision.advanced_identity_open {
+                "▾  o 收起"
             } else {
-                "交换区"
-            };
+                "▸  o 展开"
+            },
+            false,
+        ));
+        if self.provision.advanced_identity_open {
+            for field in Lba8IdentityField::ALL {
+                out.push((
+                    field.label().into(),
+                    field.value(&self.provision.form.lba8_identity),
+                    false,
+                ));
+            }
+        }
+        if matches!(mode, 0 | 1 | 3) {
             out.push((
-                format!(
-                    "{domain}来源密码（可空） {}",
-                    knowledge_suffix(self.provision.form.share_source_knowledge)
-                ),
+                "原密码".into(),
                 self.provision.form.share_source_password.as_str(),
                 true,
             ));
-            let share_opaque =
-                self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share);
             out.push((
-                format!("{domain}目标密码"),
-                if share_opaque {
-                    "— PreserveOpaque 禁用"
+                "新密码".into(),
+                if self.provision_target_password_mode(crate::provision::KeyDomainRole::Share)
+                    == password_verification::TargetPasswordMode::Passthrough
+                {
+                    "透传"
                 } else {
                     self.provision.form.share_target_password.as_str()
                 },
-                !share_opaque,
+                self.provision_target_password_mode(crate::provision::KeyDomainRole::Share)
+                    == password_verification::TargetPasswordMode::Explicit,
             ));
         }
         if matches!(mode, 0..=2) {
             out.push((
-                format!(
-                    "保密区来源密码（可空） {}",
-                    knowledge_suffix(self.provision.form.encrypt_source_knowledge)
-                ),
+                "原密码".into(),
                 self.provision.form.encrypt_source_password.as_str(),
                 true,
             ));
-            let encrypt_opaque =
-                self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt);
             out.push((
-                "保密区目标密码".into(),
-                if encrypt_opaque {
-                    "— PreserveOpaque 禁用"
+                "新密码".into(),
+                if self.provision_target_password_mode(crate::provision::KeyDomainRole::Encrypt)
+                    == password_verification::TargetPasswordMode::Passthrough
+                {
+                    "透传"
                 } else {
                     self.provision.form.encrypt_target_password.as_str()
                 },
-                !encrypt_opaque,
+                self.provision_target_password_mode(crate::provision::KeyDomainRole::Encrypt)
+                    == password_verification::TargetPasswordMode::Explicit,
             ));
         }
         if matches!(mode, 0 | 3) {
             let exact =
                 self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact;
             out.push((
+                "启动区起点 LBA".into(),
+                self.provision.form.boot_start_lba.as_str(),
+                false,
+            ));
+            out.push((
                 (if exact {
-                    "启动区容量 (sector)"
+                    "启动区容量 (sector)".into()
                 } else {
-                    match self.provision.form.boot_quick_unit {
-                        crate::provision::QuickCapacityUnit::MiB => "启动区容量 (MiB)",
-                        crate::provision::QuickCapacityUnit::GiB => "启动区容量 (GiB)",
-                    }
-                })
-                .into(),
+                    format!(
+                        "启动区容量 ({})",
+                        ProvisionForm::quick_unit_label(self.provision.form.boot_quick_unit)
+                    )
+                }),
                 if exact {
                     self.provision.form.boot_sectors.as_str()
                 } else {
@@ -128,25 +132,24 @@ impl AppState {
                 },
                 false,
             ));
-            out.push((
-                "启动区起点 LBA".into(),
-                self.provision.form.boot_start_lba.as_str(),
-                false,
-            ));
         }
         if matches!(mode, 0 | 1 | 3) {
             let exact =
                 self.provision.form.share_input_mode == crate::provision::CapacityInputMode::Exact;
             out.push((
+                "交换区起点 LBA".into(),
+                self.provision.form.share_start_lba.as_str(),
+                false,
+            ));
+            out.push((
                 (if exact {
-                    "交换区容量 (sector)"
+                    "交换区容量 (sector)".into()
                 } else {
-                    match self.provision.form.share_quick_unit {
-                        crate::provision::QuickCapacityUnit::MiB => "交换区容量 (MiB)",
-                        crate::provision::QuickCapacityUnit::GiB => "交换区容量 (GiB)",
-                    }
-                })
-                .into(),
+                    format!(
+                        "交换区容量 ({})",
+                        ProvisionForm::quick_unit_label(self.provision.form.share_quick_unit)
+                    )
+                }),
                 if exact {
                     self.provision.form.share_sectors.as_str()
                 } else {
@@ -154,35 +157,29 @@ impl AppState {
                 },
                 false,
             ));
-            out.push((
-                "交换区起点 LBA".into(),
-                self.provision.form.share_start_lba.as_str(),
-                false,
-            ));
         }
         if matches!(mode, 0..=2) {
             let exact = self.provision.form.encrypt_input_mode
                 == crate::provision::CapacityInputMode::Exact;
             out.push((
+                "保密区起点 LBA".into(),
+                self.provision.form.encrypt_start_lba.as_str(),
+                false,
+            ));
+            out.push((
                 (if exact {
-                    "保密区容量 (sector)"
+                    "保密区容量 (sector)".into()
                 } else {
-                    match self.provision.form.encrypt_quick_unit {
-                        crate::provision::QuickCapacityUnit::MiB => "保密区容量 (MiB)",
-                        crate::provision::QuickCapacityUnit::GiB => "保密区容量 (GiB)",
-                    }
-                })
-                .into(),
+                    format!(
+                        "保密区容量 ({})",
+                        ProvisionForm::quick_unit_label(self.provision.form.encrypt_quick_unit)
+                    )
+                }),
                 if exact {
                     self.provision.form.encrypt_sectors.as_str()
                 } else {
                     self.provision.form.encrypt_mib.as_str()
                 },
-                false,
-            ));
-            out.push((
-                "保密区起点 LBA".into(),
-                self.provision.form.encrypt_start_lba.as_str(),
                 false,
             ));
         }

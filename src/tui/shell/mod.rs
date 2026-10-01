@@ -74,14 +74,22 @@ pub fn navigation(frame: &mut Frame, area: Rect, state: &AppState) {
     }
 }
 
-pub fn message_bar(frame: &mut Frame, area: Rect, notice: Option<&str>, status: Option<&str>) {
+pub fn message_bar(
+    frame: &mut Frame,
+    area: Rect,
+    notice: Option<&crate::tui::ui::UiMessage>,
+    status: Option<&str>,
+) {
     let theme = theme::current();
     let mut spans = Vec::new();
     if let Some(notice) = notice {
-        spans.push(Span::styled("● ", theme.warning()));
         spans.push(Span::styled(
-            crate::ui::sanitize_terminal_text(notice),
-            theme.warning(),
+            format!("{} ", notice.marker()),
+            notice.style(),
+        ));
+        spans.push(Span::styled(
+            crate::ui::sanitize_terminal_text(notice.text()),
+            notice.style(),
         ));
     }
     if let Some(status) = status {

@@ -1,5 +1,4 @@
 use ratatui::{
-    layout::Rect,
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
     Frame,
@@ -46,14 +45,14 @@ fn push_section(lines: &mut Vec<Line<'static>>, title: &str, bindings: &[HelpBin
     lines.extend(bindings.iter().map(binding_line));
 }
 
-pub(super) fn draw_help_overlay(frame: &mut Frame, area: Rect, state: &AppState) {
+pub(super) fn draw_help_overlay(frame: &mut Frame, state: &AppState) {
     let (context_title, context) = context_bindings(state);
     let include_table =
         state.active_table_kind().is_some() && !state.provision_scheme_picker_open();
     let line_count =
         context.len() + GLOBAL_HELP.len() + if include_table { TABLE_HELP.len() } else { 0 };
     let height = (line_count + if include_table { 8 } else { 6 }) as u16;
-    let popup = ui::centered_modal_rect(area, 92, height.min(30));
+    let popup = ui::centered_modal_rect(frame.area(), 92, height.min(30));
     ui::render_modal(
         frame,
         popup,

@@ -1,6 +1,12 @@
 use super::*;
-use crate::tui::state::ProvisionFieldSection;
+use crate::tui::state::{
+    ProvisionFieldId, ProvisionFieldSection, ProvisionPasswordVerificationState,
+};
 use std::collections::HashMap;
+
+#[path = "form_special_rows.rs"]
+mod form_special_rows;
+use form_special_rows::{advanced_settings_row, password_domain_row, two_column_widths};
 
 const INPUT_EDITING_SLACK: usize = 2;
 
@@ -18,7 +24,7 @@ pub(super) fn draw_provision_form(
     let focused_pane = state.provision_focused_pane();
     let parameters_focused = focused_pane == crate::tui::pane::PaneId::ProvisionParameters;
     let (form_area, layout_area) = if wide {
-        let areas = Layout::horizontal([Constraint::Percentage(56), Constraint::Percentage(44)])
+        let areas = Layout::horizontal([Constraint::Percentage(44), Constraint::Percentage(56)])
             .split(main_area);
         (Some(areas[0]), Some(areas[1]))
     } else if focused_pane == crate::tui::pane::PaneId::ProvisionDiskLayout {
@@ -71,9 +77,40 @@ pub(super) fn draw_provision_form(
     let mut selected_line = 0usize;
     for (section, indexes) in rows {
         if current_section != Some(section) {
-            form_lines.push(Line::from(""));
-            form_lines.push(Line::from(Span::styled(section.label(), secondary())));
+            if section != ProvisionFieldSection::AdvancedIdentity {
+                form_lines.push(Line::from(""));
+                form_lines.push(Line::from(Span::styled(section.label(), secondary())));
+            }
             current_section = Some(section);
+        }
+        if indexes.len() == 1
+            && state.provision_field_id(indexes[0]) == Some(ProvisionFieldId::AdvancedSection)
+        {
+            if indexes[0] == provision.field_selected {
+                selected_line = form_lines.len();
+            }
+            form_lines.push(advanced_settings_row(state, indexes[0], parameters_focused));
+            continue;
+        }
+        if section == ProvisionFieldSection::PasswordDomain && indexes.len() == 2 {
+            if indexes.contains(&provision.field_selected) {
+                selected_line = form_lines.len();
+            }
+            let metrics = section_metrics
+                .get(&section)
+                .copied()
+                .unwrap_or((0, 0, 8, 8));
+            if let Some(line) = password_domain_row(
+                state,
+                &indexes,
+                &fields,
+                content_width,
+                parameters_focused,
+                metrics,
+            ) {
+                form_lines.push(line);
+                continue;
+            }
         }
         let mut spans = Vec::new();
         let row_selected = indexes.contains(&provision.field_selected);
@@ -91,23 +128,21 @@ pub(super) fn draw_provision_form(
                 .get(&section)
                 .copied()
                 .unwrap_or((0, 0, 8, 8));
-            let min_right_width = 2 + metrics.1 + 1 + metrics.3.max(8);
-            let desired_left_width = 2 + metrics.0 + 1 + metrics.2.max(8);
-            let max_left_width = content_width
-                .saturating_sub(separator_width)
-                .saturating_sub(min_right_width)
-                .max(8);
-            let section_left_width = desired_left_width.min(max_left_width);
+            let (section_left_width, section_right_width) =
+                two_column_widths(content_width, separator_width, metrics);
             let cell_width = if two_columns {
                 if position == 0 {
                     section_left_width
                 } else {
-                    content_width
-                        .saturating_sub(section_left_width)
-                        .saturating_sub(separator_width)
+                    section_right_width
                 }
             } else {
                 content_width
+            };
+            let cell_width = if section == ProvisionFieldSection::AdvancedIdentity {
+                cell_width.saturating_sub(2)
+            } else {
+                cell_width
             };
             let label_width = if position == 0 { metrics.0 } else { metrics.1 };
             let label_width = label_width.min(cell_width.saturating_sub(4));
@@ -118,6 +153,9 @@ pub(super) fn draw_provision_form(
                 .max(1);
 
             let focused_active = active && parameters_focused;
+            if section == ProvisionFieldSection::AdvancedIdentity {
+                spans.push(Span::raw("  "));
+            }
             spans.push(Span::styled(
                 if focused_active { "▌ " } else { "  " },
                 if focused_active {
@@ -132,27 +170,42 @@ pub(super) fn draw_provision_form(
             let editable_active = active && state.provision_selected_field_is_editable();
             let editing_active = editable_active && state.input_mode() == InputMode::Insert;
             let shown = if editing_active {
-                input_value_window(value, state.provision_field_cursor(), value_width, *secret)
+                input_value_window(
+                    value,
+                    state.provision_field_cursor(),
+                    value_width.saturating_sub(2),
+                    *secret,
+                )
             } else if value.is_empty() {
-                fit_display_width("〈请输入〉", value_width)
+                "〈请输入〉".to_string()
             } else if *secret {
-                fit_display_width(&"•".repeat(value.chars().count()), value_width)
+                "•".repeat(value.chars().count())
             } else {
-                fit_display_width(value, value_width)
+                fit_display_width(value, value_width).trim_end().to_string()
             };
-            let shown_width = crate::ui::disp_width(&shown).min(value_width);
-            spans.push(Span::styled(
-                shown,
-                if editing_active {
-                    input_focused()
-                } else if active {
-                    crate::tui::theme::current().apply_selection(input(), true, parameters_focused)
-                } else {
-                    input()
-                },
-            ));
-            if editing_active && shown_width < value_width {
-                spans.push(Span::raw(" ".repeat(value_width - shown_width)));
+            if editing_active {
+                let occupied = crate::ui::disp_width(&shown)
+                    .saturating_add(2)
+                    .min(value_width);
+                spans.push(Span::styled("[", accent()));
+                spans.push(Span::styled(shown, input_focused()));
+                spans.push(Span::styled("]", accent()));
+                if occupied < value_width {
+                    spans.push(Span::raw(" ".repeat(value_width - occupied)));
+                }
+            } else {
+                let occupied = crate::ui::disp_width(&shown).min(value_width);
+                spans.push(Span::styled(
+                    shown,
+                    if focused_active {
+                        accent().add_modifier(Modifier::BOLD)
+                    } else {
+                        crate::tui::theme::current().secondary_text()
+                    },
+                ));
+                if occupied < value_width {
+                    spans.push(Span::raw(" ".repeat(value_width - occupied)));
+                }
             }
         }
         form_lines.push(Line::from(spans));
@@ -164,37 +217,11 @@ pub(super) fn draw_provision_form(
             Span::styled(safe(&hint), muted()),
         ]));
     }
-    form_lines.push(Line::from(""));
-    let mut shortcuts = Vec::new();
-    if state.input_mode() == InputMode::Insert {
-        shortcuts.extend([
-            Span::styled("INSERT", accent().add_modifier(Modifier::BOLD)),
-            Span::raw("   "),
-            Span::styled("←/→", accent()),
-            Span::raw(" 光标   "),
-            Span::styled("输入/Backspace", secondary()),
-            Span::raw(" 编辑   "),
-            Span::styled("Enter/Esc", success()),
-            Span::raw(" 完成编辑"),
-        ]);
-    } else {
-        shortcuts.extend([Span::styled("NORMAL", muted()), Span::raw("   ")]);
-        shortcuts.extend([Span::styled("↑/↓", accent()), Span::raw(" 字段   ")]);
-        if state.provision_selected_field_is_editable() {
-            shortcuts.extend([Span::styled("i", secondary()), Span::raw(" 编辑   ")]);
-        } else {
-            shortcuts.extend([Span::styled("Space", secondary()), Span::raw(" 切换   ")]);
-        }
-        shortcuts.extend([
-            Span::styled("Enter", success()),
-            Span::raw(" 生成计划   "),
-            Span::styled("Esc", warning()),
-            Span::raw(" 返回"),
-        ]);
-    }
-    form_lines.push(Line::from(shortcuts));
     if let Some(message) = &provision.message {
-        form_lines.push(Line::from(Span::styled(safe(message), danger())));
+        form_lines.push(Line::from(Span::styled(
+            format!("{} {}", message.marker(), safe(message.text())),
+            message.style(),
+        )));
     }
 
     let visible_height = form_geometry.height.saturating_sub(2) as usize;
@@ -214,17 +241,36 @@ pub(super) fn draw_provision_form(
 
     if let Some(layout_area) = layout_area {
         let layout_model = state.provision_layout_model();
+        let map_selection = parameters_focused
+            .then(|| state.provision_field_region_selection(&layout_model))
+            .flatten();
+        let show_linked_selection = parameters_focused && map_selection.is_some();
         let layout_details = state.provision_layout_editor_details();
-        let layout_summary = format!(
-            "{} · {}",
-            provision.kind.title(),
-            AppState::format_sector_size(layout_model.total_sectors)
+        let layout_summary = state.selected_device().map_or_else(
+            || {
+                format!(
+                    "{} · {}",
+                    provision.kind.title(),
+                    AppState::format_sector_size(layout_model.total_sectors)
+                )
+            },
+            |device| {
+                format!(
+                    "disk{} · {} · {} · {}:{} · {}",
+                    device.disk,
+                    crate::common::fmt_capacity(device.size),
+                    safe(&device.proto),
+                    safe(&device.vid),
+                    safe(&device.pid),
+                    provision.kind.title()
+                )
+            },
         );
         layout_model.render_pane(
             frame,
             layout_area,
             crate::tui::disk_layout::DiskLayoutPane {
-                title: "磁盘布局",
+                title: "目标与磁盘布局",
                 summary: &layout_summary,
                 details: &layout_details,
                 focused: focused_pane == crate::tui::pane::PaneId::ProvisionDiskLayout,
@@ -235,6 +281,9 @@ pub(super) fn draw_provision_form(
                 profile: crate::tui::disk_layout::DiskLayoutProfile::EditorExact,
                 tail: state.disk_layout_tail_expansion(),
                 selected_segment: state.disk_layout_selected(),
+                map_selection,
+                show_map_marker: true,
+                show_linked_selection,
             },
         );
     }

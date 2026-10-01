@@ -1,13 +1,6 @@
 use super::*;
 
 impl AppState {
-    pub(super) fn provision_sync_cursor_to_end(&mut self) {
-        self.provision.field_cursor = self
-            .provision_selected_field()
-            .map(|value| value.chars().count())
-            .unwrap_or(0);
-    }
-
     pub fn provision_selected_field_is_editable(&self) -> bool {
         self.provision_field_descriptor(self.provision.field_selected)
             .is_some_and(|descriptor| descriptor.capabilities.editable)
@@ -99,6 +92,7 @@ impl AppState {
                 }
             }
             ProvisionFieldId::LabelId => ProvisionInputPolicy::OnlyId,
+            ProvisionFieldId::Lba8Identity(_) => ProvisionInputPolicy::Lba8Text,
             ProvisionFieldId::StartLba(_) => ProvisionInputPolicy::UnsignedInteger,
             ProvisionFieldId::MaxPasswordErrors(_) => ProvisionInputPolicy::U8,
             _ => ProvisionInputPolicy::Text,
@@ -124,6 +118,13 @@ impl AppState {
         }
     }
 
+    pub(super) fn provision_mark_target_password_edited(&mut self, id: Option<ProvisionFieldId>) {
+        let Some(ProvisionFieldId::TargetPassword(domain)) = id else {
+            return;
+        };
+        self.provision_note_target_password_user_edit(domain);
+    }
+
     pub fn provision_push_char(&mut self, ch: char) {
         if ch.is_control() {
             return;
@@ -143,7 +144,9 @@ impl AppState {
         let candidate = chars.into_iter().collect::<String>();
         let policy = self.provision_input_policy(id);
         if !policy.accepts(&candidate) {
-            self.provision.message = Some(policy.rejection_message().into());
+            self.provision.message = Some(crate::tui::ui::UiMessage::warning(
+                policy.rejection_message(),
+            ));
             return;
         }
         if let Some(field) = self.provision_selected_field_mut() {
@@ -151,6 +154,7 @@ impl AppState {
             self.provision.field_cursor = cursor + 1;
             self.provision_mark_capacity_edit(Some(id));
             self.provision_mark_source_password_unverified(Some(id));
+            self.provision_mark_target_password_edited(Some(id));
             self.provision.message = None;
         }
     }
@@ -169,6 +173,7 @@ impl AppState {
                 self.provision.field_cursor = cursor - 1;
                 self.provision_mark_capacity_edit(id);
                 self.provision_mark_source_password_unverified(id);
+                self.provision_mark_target_password_edited(id);
                 self.provision.message = None;
             }
         }
@@ -184,6 +189,7 @@ impl AppState {
                 *field = chars.into_iter().collect();
                 self.provision_mark_capacity_edit(id);
                 self.provision_mark_source_password_unverified(id);
+                self.provision_mark_target_password_edited(id);
                 self.provision.message = None;
             }
         }

@@ -24,11 +24,8 @@ impl TaskHub {
         disk: u32,
         domain: crate::provision::KeyDomainRole,
         password: String,
+        revision: u64,
     ) -> Result<u64, &'static str> {
-        let generation = self
-            .provision_key_probe_slot
-            .try_begin()
-            .ok_or("已有来源密码域探测/验证正在执行")?;
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
@@ -43,12 +40,12 @@ impl TaskHub {
             }))
             .unwrap_or_else(|_| Err("来源密码验证 worker 异常终止".into()));
             let _ = tx.send(WorkerResult::ProvisionKeyVerify {
-                generation,
+                revision,
                 domain,
                 result,
             });
         });
-        Ok(generation)
+        Ok(revision)
     }
 
     pub fn request_provision_plan(

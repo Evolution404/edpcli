@@ -13,27 +13,20 @@ use std::time::Duration;
 use crate::backup_metadata::{parse_lba7_compatibility_geometry, PartitionGeometry};
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_OK, EXIT_TARGET, SECTOR};
 use crate::diskio::{self, SectorDev};
-use crate::filesystem::analysis::{
-    analyze_partition, stream_file_payload, AnalysisStatus, PartitionReader,
-};
-use crate::filesystem::{
-    build_empty_filesystem, build_migrated_filesystem, FilesystemKind, FilesystemMigrationEntry,
-    SparseFilesystemImage,
-};
-use crate::partition_transform::EdpSm4Transform;
+use crate::filesystem::analysis::{analyze_partition, AnalysisStatus, PartitionReader};
+use crate::filesystem::{build_empty_filesystem, FilesystemKind, SparseFilesystemImage};
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
     apply_target_geometry_overrides, build_official_partition_filesystem,
-    build_official_provision_protocol_image, build_plain_migrated_provision_write_plan,
-    build_plain_provision_write_plan, parse_existing_provision, prefill_for_target_mode,
-    unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
-    CapacitySource, FileKeyWrapMode, KeyDomainRole, KeyDomainSecrets, OfficialPartitionFilesystems,
-    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
-    OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision, PartitionAction,
-    PartitionFilesystemImage, PartitionFormatTarget, PartitionRole, PassInfoPolicy,
-    PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan, PlainProvisionWritePlan,
-    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-    ProvisionTarget, QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge,
+    build_official_provision_protocol_image, build_plain_provision_write_plan,
+    parse_existing_provision, prefill_for_target_mode, unwrap_legacy_lba7_file_key, wrap_file_key,
+    wrap_legacy_lba7_file_key, CapacityInput, CapacitySource, FileKeyWrapMode, KeyDomainRole,
+    KeyDomainSecrets, OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, OfficialProvisionWriteImage, OnlyId, ParsedExistingProvision,
+    PartitionAction, PartitionFilesystemImage, PartitionFormatTarget, PartitionRole,
+    PassInfoPolicy, PlainCleanupExtent, PlainPartitionSpec, PlainProvisionPlan,
+    PlainProvisionWritePlan, ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile,
+    ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge,
     TargetGeometryOverrides, TargetIdentity, TargetPasswordPolicy, TargetProvisionPlan,
     DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_MODE0_BOOT_SECTORS,
 };
@@ -67,6 +60,7 @@ pub struct OfficialProvisionRequest {
     pub user: String,
     pub dept: String,
     pub label: String,
+    pub lba8_identity: crate::provision::Lba8Identity,
     pub key_domains: KeyDomainSecrets,
     pub volume_label: String,
     pub format: FormatOptions,
@@ -112,9 +106,6 @@ pub struct PlainPartitionRequest {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PlainProvisionRequest {
     pub partitions: Vec<PlainPartitionRequest>,
-    /// Source-only credentials used when an existing EDP disk is migrated to Plain.
-    /// KeyDomainSecrets keeps Debug output redacted and zeroes secret buffers on drop.
-    pub key_domains: KeyDomainSecrets,
 }
 
 impl PlainProvisionRequest {
@@ -130,7 +121,6 @@ impl PlainProvisionRequest {
                     volume_label: partition.volume_label.clone(),
                 })
                 .collect(),
-            key_domains: KeyDomainSecrets::default(),
         }
     }
 
@@ -500,6 +490,7 @@ pub struct ProvisionKeyProbe {
 pub struct PreparedNewProvision {
     pub disk: u32,
     pub device_id: String,
+    pub source_kind: crate::provision::DiskProvisionKind,
     pub mode: OfficialPartitionMode,
     pub force_change_password: bool,
     pub pass_info_policy: PassInfoPolicy,
@@ -552,6 +543,7 @@ impl std::fmt::Debug for PreparedNewProvision {
             .debug_struct("PreparedNewProvision")
             .field("disk", &self.disk)
             .field("device_id", &self.device_id)
+            .field("source_kind", &self.source_kind)
             .field("mode", &self.mode)
             .field("force_change_password", &self.force_change_password)
             .field("pass_info_policy", &self.pass_info_policy)
@@ -707,8 +699,8 @@ fn sizes(
 mod commit;
 mod export;
 mod identity_lineage;
-mod migration;
 mod prepare;
+mod prepared_projection;
 mod progress_projection;
 
 pub use commit::{
@@ -717,12 +709,12 @@ pub use commit::{
 pub use export::{
     export_provision_image, export_sparse_plain_provision_image, export_sparse_provision_image,
 };
-#[cfg(test)]
-use prepare::target_encrypt_capacity_override;
 pub use prepare::{
     prepare_plain_provision, prepare_provision, prepare_target_provision,
     probe_provision_key_domains_on_disk, verify_provision_source_password_on_disk,
 };
+#[cfg(test)]
+use prepare::{read_plain_source_extents, target_encrypt_capacity_override};
 
 pub fn prepare_provision_on_disk(
     runner: &dyn CmdRunner,

@@ -3,6 +3,7 @@ use crate::application::inspect::AdvancedInspectWorkspace;
 use crate::application::inspect_tree::InspectNodeKind;
 use crate::tui::state::{
     AdvancedInspectPanel, AdvancedInspectPrompt, AdvancedInspectState, AdvancedInspectTreeRow,
+    InspectViewMode,
 };
 
 pub(super) fn draw_inspect_object_panes(
@@ -232,37 +233,25 @@ pub(super) fn draw_inspect_object_panes(
         overview_lines.push(Line::from("当前没有可选节点。"));
         detail_lines.push(Line::from("当前没有可选节点。"));
     }
-    if let Some(prompt) = advanced.prompt.as_ref() {
+    if let Some(AdvancedInspectPrompt::Search { input }) = advanced.prompt.as_ref() {
         detail_lines.push(Line::from(""));
-        match prompt {
-            AdvancedInspectPrompt::Jump { unit, input } => {
-                detail_lines.push(Line::from(Span::styled(
-                    "Jump to",
-                    accent().add_modifier(Modifier::BOLD),
-                )));
-                detail_lines.push(Line::from(format!("> {}", safe(input))));
-                detail_lines.push(Line::from(format!("Unit: {}", unit.label())));
-                detail_lines.push(Line::from(
-                    "Enter 跳转 · Space 切换 LBA / byte offset · Esc 取消",
-                ));
-            }
-            AdvancedInspectPrompt::Search { input } => {
-                detail_lines.push(Line::from(Span::styled(
-                    "结构化搜索",
-                    accent().add_modifier(Modifier::BOLD),
-                )));
-                detail_lines.push(Line::from(format!("/{}", safe(input))));
-                detail_lines.push(Line::from(
-                    "搜索 Region / Extent / Structure / Group / Field label 与 typed value",
-                ));
-                detail_lines.push(Line::from("Enter 定位 · Esc 取消"));
-            }
-        }
+        detail_lines.push(Line::from(Span::styled(
+            "结构化搜索",
+            accent().add_modifier(Modifier::BOLD),
+        )));
+        detail_lines.push(Line::from(format!("/{}", safe(input))));
+        detail_lines.push(Line::from(
+            "搜索 Region / Extent / Structure / Group / Field label 与 typed value",
+        ));
+        detail_lines.push(Line::from("Enter 定位 · Esc 取消"));
     }
 
-    if let Some(message) = advanced.message.as_deref() {
+    if let Some(message) = advanced.message.as_ref() {
         detail_lines.push(Line::from(""));
-        detail_lines.push(Line::from(Span::styled(safe(message), danger())));
+        detail_lines.push(Line::from(Span::styled(
+            format!("{} {}", message.marker(), safe(message.text())),
+            message.style(),
+        )));
     }
 
     if let Some(overview_area) = overview_area {
@@ -290,7 +279,10 @@ pub(super) fn draw_inspect_object_panes(
             .scroll_y
             .offset;
         let field_item = selected_row
-            .filter(|row| row.kind == InspectNodeKind::Sector)
+            .filter(|row| {
+                advanced.view_mode == InspectViewMode::RawFields
+                    && row.kind == InspectNodeKind::Sector
+            })
             .and_then(|row| {
                 workspace
                     .items

@@ -482,27 +482,37 @@ fn draw_backup_coverage(frame: &mut Frame, area: ratatui::layout::Rect, state: &
     );
 }
 
-fn draw_backup_status_modal(
-    frame: &mut Frame,
-    area: ratatui::layout::Rect,
-    title: &str,
-    lines: Vec<Line<'static>>,
-) {
+fn draw_backup_status_modal(frame: &mut Frame, title: &str, lines: Vec<Line<'static>>) {
     let height = (lines.len() as u16).saturating_add(2).clamp(5, 12);
-    let modal = crate::tui::ui::centered_modal_rect(area, 78, height);
+    let modal = crate::tui::ui::centered_modal_rect(frame.area(), 78, height);
     crate::tui::ui::render_modal(frame, modal, title, |frame, inner| {
         frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
     });
 }
 
-pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+fn backup_status_message(
+    message: Option<&crate::tui::ui::UiMessage>,
+    fallback: &'static str,
+) -> Line<'static> {
+    match message {
+        Some(message) => Line::from(Span::styled(
+            format!("{} {}", message.marker(), safe(message.text())),
+            message.style(),
+        )),
+        None => Line::from(Span::styled(
+            format!("◌ {fallback}"),
+            crate::tui::theme::current().secondary_accent(),
+        )),
+    }
+}
+
+pub(super) fn draw_backup_delete(frame: &mut Frame, state: &AppState) {
     let Some(delete) = state.backup_delete() else {
         return;
     };
     if delete.stage == WizardStage::Confirm {
         crate::tui::ui::render_action_confirmation_modal(
             frame,
-            area,
             crate::tui::ui::ActionConfirmationSpec {
                 title: "删除备份",
                 headline: "永久删除当前备份？",
@@ -525,20 +535,13 @@ pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect,
     if delete.stage == WizardStage::Running {
         draw_backup_status_modal(
             frame,
-            area,
             "删除备份 · 执行中",
             vec![
                 Line::from(format!(
                     "文件  {}",
                     safe(&delete.path.display().to_string())
                 )),
-                Line::from(
-                    delete
-                        .message
-                        .as_deref()
-                        .map(safe)
-                        .unwrap_or_else(|| "正在复核并删除备份…".into()),
-                ),
+                backup_status_message(delete.message.as_ref(), "正在复核并删除备份…"),
                 Line::from(Span::styled(
                     "q / Esc / Ctrl-C 将延迟到安全结束点。",
                     warning(),
@@ -548,11 +551,7 @@ pub(super) fn draw_backup_delete(frame: &mut Frame, area: ratatui::layout::Rect,
     }
 }
 
-pub(super) fn draw_backup_batch_delete(
-    frame: &mut Frame,
-    area: ratatui::layout::Rect,
-    state: &AppState,
-) {
+pub(super) fn draw_backup_batch_delete(frame: &mut Frame, state: &AppState) {
     let Some(batch) = state.backup_batch_delete() else {
         return;
     };
@@ -567,7 +566,6 @@ pub(super) fn draw_backup_batch_delete(
         BackupBatchDeleteStage::Planning => {
             draw_backup_status_modal(
                 frame,
-                area,
                 "批量删除 · 生成计划",
                 vec![
                     Line::from(format!("已勾选  {} 份备份", state.backup_selection_count())),
@@ -579,7 +577,6 @@ pub(super) fn draw_backup_batch_delete(
         BackupBatchDeleteStage::Confirm => {
             crate::tui::ui::render_action_confirmation_modal(
                 frame,
-                area,
                 crate::tui::ui::ActionConfirmationSpec {
                     title: "批量删除备份",
                     headline: "确认执行批量删除？",
@@ -598,17 +595,10 @@ pub(super) fn draw_backup_batch_delete(
         BackupBatchDeleteStage::Running => {
             draw_backup_status_modal(
                 frame,
-                area,
                 "批量删除 · 执行中",
                 vec![
                     Line::from(format!("固定目标  {planned} 份")),
-                    Line::from(
-                        batch
-                            .message
-                            .as_deref()
-                            .map(safe)
-                            .unwrap_or_else(|| "正在按固定计划逐条复核并删除…".into()),
-                    ),
+                    backup_status_message(batch.message.as_ref(), "正在按固定计划逐条复核并删除…"),
                     Line::from(Span::styled("退出请求会延迟到安全结束点。", warning())),
                 ],
             );
@@ -616,7 +606,7 @@ pub(super) fn draw_backup_batch_delete(
     }
 }
 
-pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
+pub(super) fn draw_backup_prune(frame: &mut Frame, state: &AppState) {
     let Some(prune) = state.backup_prune() else {
         return;
     };
@@ -626,7 +616,6 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
         BackupPruneStage::Input => {
             draw_backup_status_modal(
                 frame,
-                area,
                 "备份清理 · keep-N",
                 vec![
                     Line::from("按同盘组保留最近 N 份快照。"),
@@ -641,7 +630,6 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
         BackupPruneStage::Planning => {
             draw_backup_status_modal(
                 frame,
-                area,
                 "备份清理 · 生成计划",
                 vec![
                     Line::from(format!("keep-N  {}", safe(&prune.keep_input))),
@@ -658,7 +646,6 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
                 .unwrap_or(0);
             crate::tui::ui::render_action_confirmation_modal(
                 frame,
-                area,
                 crate::tui::ui::ActionConfirmationSpec {
                     title: "备份清理确认",
                     headline: "确认执行 keep-N 清理？",
@@ -691,16 +678,12 @@ pub(super) fn draw_backup_prune(frame: &mut Frame, area: ratatui::layout::Rect, 
                 .unwrap_or(0);
             draw_backup_status_modal(
                 frame,
-                area,
                 "备份清理 · 执行中",
                 vec![
                     Line::from(format!("固定目标  {count} 份")),
-                    Line::from(
-                        prune
-                            .message
-                            .as_deref()
-                            .map(safe)
-                            .unwrap_or_else(|| "正在逐条复核摘要并清理固定候选…".into()),
+                    backup_status_message(
+                        prune.message.as_ref(),
+                        "正在逐条复核摘要并清理固定候选…",
                     ),
                     Line::from(Span::styled("退出请求会延迟到安全结束点。", warning())),
                 ],

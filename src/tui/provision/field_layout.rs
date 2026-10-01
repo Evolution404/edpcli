@@ -26,8 +26,10 @@ impl AppState {
             };
             let section = descriptor.section;
             let width = match (section, descriptor.id) {
+                (ProvisionFieldSection::Identity, ProvisionFieldId::AdvancedSection) => 1,
                 (ProvisionFieldSection::Identity, _) => 2,
-                (ProvisionFieldSection::PartitionLayout, ProvisionFieldId::Capacity(_)) => 2,
+                (ProvisionFieldSection::AdvancedIdentity, _) => 1,
+                (ProvisionFieldSection::PartitionLayout, ProvisionFieldId::StartLba(_)) => 2,
                 (ProvisionFieldSection::PartitionLayout, _) => 1,
                 (
                     ProvisionFieldSection::PasswordPolicy | ProvisionFieldSection::PasswordDomain,
@@ -68,37 +70,39 @@ impl AppState {
         if let ProvisionFieldId::Plain { kind, .. } = id {
             return match kind {
                 PlainProvisionFieldKind::StartLba => Some("精确 LBA；不会自动移动其它分区".into()),
-                PlainProvisionFieldKind::Capacity => {
-                    Some("Space 切换 MiB / GiB / sector · f 填满".into())
-                }
+                PlainProvisionFieldKind::Capacity => Some(format!(
+                    "Space 切换 {} / {} / sector · f 填满",
+                    ProvisionForm::quick_unit_label(crate::provision::QuickCapacityUnit::MiB),
+                    ProvisionForm::quick_unit_label(crate::provision::QuickCapacityUnit::GiB)
+                )),
                 PlainProvisionFieldKind::Filesystem => Some("Space 切换 FAT16 / exFAT".into()),
                 PlainProvisionFieldKind::VolumeLabel => Some("普通卷标".into()),
             };
         }
         match id {
-            ProvisionFieldId::Capacity(_) => Some("Space 切换 MiB / GiB / sector · f 填满".into()),
+            ProvisionFieldId::AdvancedSection => None,
+            ProvisionFieldId::Lba8Identity(_) => Some("高级身份字段".into()),
+            ProvisionFieldId::Capacity(_) => Some(format!(
+                "Space 切换 {} / {} / sector · f 最大可用容量",
+                ProvisionForm::quick_unit_label(crate::provision::QuickCapacityUnit::MiB),
+                ProvisionForm::quick_unit_label(crate::provision::QuickCapacityUnit::GiB)
+            )),
             ProvisionFieldId::SourcePassword(_) => {
-                Some("来源密码可留空表示 Unknown · v 验证当前域旧密码".into())
+                Some("修改原密码后，Enter / Esc 结束输入会自动只读验证".into())
             }
-            ProvisionFieldId::TargetPassword(domain) => {
-                Some(if self.provision_domain_opaque_candidate(domain) {
-                    "PreserveOpaque：目标密码禁用；先验证旧密码才能改密".into()
-                } else {
-                    match domain {
-                        crate::provision::KeyDomainRole::Share => {
-                            "目标密码只作用于交换密钥域，不会同步到保密域".into()
-                        }
-                        crate::provision::KeyDomainRole::Encrypt => {
-                            "目标密码只作用于保密密钥域，不会同步到交换域".into()
-                        }
-                    }
-                })
-            }
+            ProvisionFieldId::TargetPassword(domain) => Some(match domain {
+                crate::provision::KeyDomainRole::Share => {
+                    "Space 切换透传/设置密码；透传时按 i 直接编辑。原密码已验证且新密码相同会自动归一化为透传；原密码未验证时改密需用户主动勾选交换区格式化".into()
+                }
+                crate::provision::KeyDomainRole::Encrypt => {
+                    "Space 切换透传/设置密码；透传时按 i 直接编辑。原密码已验证且新密码相同会自动归一化为透传；原密码未验证时改密需用户主动勾选保密区格式化".into()
+                }
+            }),
             ProvisionFieldId::ForceChangePassword
             | ProvisionFieldId::CancelPasswordComplexityCheck
             | ProvisionFieldId::FormatEnabled(_)
             | ProvisionFieldId::Filesystem(_) => Some("Space 切换".into()),
-            ProvisionFieldId::StartLba(_) => Some("通常无需修改；固定分区边界时再调整".into()),
+            ProvisionFieldId::StartLba(_) => Some("f 自动寻找最小可用起点".into()),
             ProvisionFieldId::MaxPasswordErrors(_) => Some("范围 0–255".into()),
             _ => None,
         }

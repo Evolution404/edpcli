@@ -81,13 +81,15 @@ impl DemoTimeline {
             ),
         ];
         let total = steps.len() as u64;
-        let mut log = VecDeque::new();
+        let mut run = OperationRunState::new(OperationKind::Provision, "DEMO disk");
+        run.started_at = base;
+        run.last_activity_at = base;
         for (index, (phase, step, activity, detail)) in steps
             .into_iter()
             .enumerate()
             .take(tick.min(Self::LAST_TICK) + 1)
         {
-            log.push_back(demo_progress(
+            run.push(demo_progress(
                 OperationKind::Provision,
                 phase,
                 step,
@@ -101,15 +103,7 @@ impl DemoTimeline {
                 base + Duration::from_secs(index as u64 * 2),
             ));
         }
-        let latest = log.back().cloned();
-        OperationRunState {
-            operation: OperationKind::Provision,
-            target: "DEMO disk".into(),
-            started_at: base,
-            last_activity_at: latest.as_ref().map_or(base, |event| event.emitted_at),
-            latest,
-            log,
-        }
+        run
     }
 
     pub fn long_at_tick(tick: usize, base: Instant) -> OperationRunState {
@@ -292,19 +286,13 @@ impl DemoTimeline {
         );
 
         debug_assert_eq!(events.len(), Self::LONG_LAST_TICK + 1);
-        let log: VecDeque<_> = events
-            .into_iter()
-            .take(tick.min(Self::LONG_LAST_TICK) + 1)
-            .collect();
-        let latest = log.back().cloned();
-        OperationRunState {
-            operation: OperationKind::Provision,
-            target: "DEMO slow disk".into(),
-            started_at: base,
-            last_activity_at: latest.as_ref().map_or(base, |event| event.emitted_at),
-            latest,
-            log,
+        let mut run = OperationRunState::new(OperationKind::Provision, "DEMO slow disk");
+        run.started_at = base;
+        run.last_activity_at = base;
+        for event in events.into_iter().take(tick.min(Self::LONG_LAST_TICK) + 1) {
+            run.push(event);
         }
+        run
     }
 
     pub fn backup_verify_at_tick(tick: usize, base: Instant) -> BackupVerifyRunState {

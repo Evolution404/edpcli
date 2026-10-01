@@ -58,24 +58,15 @@ impl ParsedExistingProvision {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct MigrationSource {
-    pub source_index: usize,
-    pub region: SourceRegion,
-    pub transform: MigrationTransform,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TargetPartitionPlan {
     pub geometry: TargetPartitionGeometry,
     pub action: PartitionAction,
     pub disposition: RegionDisposition,
+    pub password_disposition: Option<super::super::PasswordDisposition>,
     pub source_password_knowledge: Option<super::super::SourcePasswordKnowledge>,
     pub target_password_policy: Option<super::super::TargetPasswordPolicy>,
     pub reason: String,
-    /// Source regions that require file-level/data migration into this target.
-    /// Execution remains fail-closed unless application preflight/staging completes.
-    pub migration_sources: Vec<MigrationSource>,
     /// Only present when a verified source key record belongs to this exact
     /// target geometry. The writer re-encodes it for the target slot.
     pub preserved_record: Option<ExistingPartitionRecord>,
@@ -96,32 +87,26 @@ impl TargetProvisionPlan {
         usable_end_lba: u64,
         key_domains: &super::super::KeyDomainSecrets,
     ) -> Result<Self, String> {
+        Self::build_with_plain_extents(source, &[], mode, targets, usable_end_lba, key_domains)
+    }
+
+    pub fn build_with_plain_extents(
+        source: Option<&ParsedExistingProvision>,
+        plain_source_extents: &[PlainSourceExtent],
+        mode: OfficialPartitionMode,
+        targets: &[TargetPartitionGeometry],
+        usable_end_lba: u64,
+        key_domains: &super::super::KeyDomainSecrets,
+    ) -> Result<Self, String> {
         if targets.len() != mode.partition_types().len() {
             return Err("target partition count does not match official mode".into());
         }
         let gap = validate_target_geometry(targets, usable_end_lba)?;
-        let migration_plan = if let Some(source) = source {
+        if let Some(source) = source {
             if source.profile.partitions.len() != source.records.len() {
                 return Err("source partition/record count mismatch".into());
             }
-            let source_regions = source
-                .profile
-                .partitions
-                .iter()
-                .copied()
-                .zip(source.records.iter().copied())
-                .map(|(partition, record)| SourceRegion::from_existing(partition, record))
-                .collect::<Vec<_>>();
-            let target_regions = targets
-                .iter()
-                .copied()
-                .map(TargetRegion::from_target)
-                .collect::<Vec<_>>();
-            let plan = RegionMappingPlanner::map(&source_regions, &target_regions);
-            Some((source_regions, plan))
-        } else {
-            None
-        };
+        }
         let mut partitions = Vec::with_capacity(targets.len());
         for (index, target) in targets.iter().enumerate() {
             if target.partition_type != mode.partition_types()[index] {
@@ -130,35 +115,19 @@ impl TargetProvisionPlan {
                 ));
             }
             let mut disposition = RegionDisposition::Rebuild;
+            let mut password_disposition =
+                super::super::KeyDomainRole::from_partition_role(target.role)
+                    .map(|_| super::super::PasswordDisposition::Blocked);
             let mut source_password_knowledge = None;
             let mut target_password_policy =
                 super::super::KeyDomainRole::from_partition_role(target.role)
                     .map(|_| super::super::TargetPasswordPolicy::InitializeNew);
             let mut reason = "无全兼容来源分区；目标区域必须重建".to_string();
             let mut preserved_record = None;
-            let migration_sources = migration_plan
-                .as_ref()
-                .map(|(source_regions, plan)| {
-                    plan.mappings
-                        .iter()
-                        .filter(|mapping| {
-                            mapping.target_index == Some(index)
-                                && mapping.kind == RegionMappingKind::Migrate
-                        })
-                        .filter_map(|mapping| {
-                            let source_index = mapping.source_index?;
-                            let transform = mapping.migration_transform?;
-                            source_regions.get(source_index).copied().map(|region| {
-                                MigrationSource {
-                                    source_index,
-                                    region,
-                                    transform,
-                                }
-                            })
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+            if source.is_none() && plain_extent_preserve_candidate(plain_source_extents, target) {
+                disposition = RegionDisposition::PreserveVerified;
+                reason = "普通盘存在与目标 LBA 范围完全一致的物理分区；数据范围候选保留".into();
+            }
             if let Some(source) = source {
                 if let Some((source_index, old)) = source
                     .profile
@@ -194,8 +163,21 @@ impl TargetProvisionPlan {
                         disposition = if opaque_compatible && !strict_compatible {
                             target_password_policy =
                                 Some(super::super::TargetPasswordPolicy::PreserveOpaque);
+                            password_disposition =
+                                if key_domains.target_password(target.role).is_some() {
+                                    Some(super::super::PasswordDisposition::Blocked)
+                                } else {
+                                    Some(super::super::PasswordDisposition::Passthrough(
+                                        super::super::PassthroughBasis::OpaqueCompatible,
+                                    ))
+                                };
                             RegionDisposition::PreserveOpaque
                         } else if record.lba12.need_encrypt == 0 {
+                            password_disposition = domain.map(|_| {
+                                super::super::PasswordDisposition::Passthrough(
+                                    super::super::PassthroughBasis::Verified,
+                                )
+                            });
                             RegionDisposition::PreserveVerified
                         } else {
                             match source_password_knowledge
@@ -204,31 +186,54 @@ impl TargetProvisionPlan {
                                 super::super::SourcePasswordKnowledge::Unknown => {
                                     target_password_policy =
                                         Some(super::super::TargetPasswordPolicy::PreserveOpaque);
+                                    password_disposition =
+                                        if key_domains.target_password(target.role).is_some() {
+                                            Some(super::super::PasswordDisposition::Blocked)
+                                        } else {
+                                            Some(super::super::PasswordDisposition::Passthrough(
+                                                super::super::PassthroughBasis::OpaqueCompatible,
+                                            ))
+                                        };
                                     RegionDisposition::PreserveOpaque
                                 }
                                 super::super::SourcePasswordKnowledge::DefaultVerified => {
-                                    if key_domains.target_password(target.role)
-                                        == Some(super::super::DEFAULT_KEY_DOMAIN_PASSWORD)
+                                    if key_domains.target_password(target.role).is_none()
+                                        || key_domains.target_password(target.role)
+                                            == Some(super::super::DEFAULT_KEY_DOMAIN_PASSWORD)
                                     {
                                         target_password_policy =
                                             Some(super::super::TargetPasswordPolicy::ReuseVerified);
+                                        password_disposition =
+                                            Some(super::super::PasswordDisposition::Passthrough(
+                                                super::super::PassthroughBasis::Verified,
+                                            ));
                                         RegionDisposition::PreserveVerified
                                     } else {
                                         target_password_policy = Some(
                                             super::super::TargetPasswordPolicy::ReplaceVerified,
                                         );
+                                        password_disposition =
+                                            Some(super::super::PasswordDisposition::Rewrap);
                                         RegionDisposition::RewrapVerified
                                     }
                                 }
                                 super::super::SourcePasswordKnowledge::UserVerified => {
-                                    if key_domains.target_password(target.role) == user_password {
+                                    if key_domains.target_password(target.role).is_none()
+                                        || key_domains.target_password(target.role) == user_password
+                                    {
                                         target_password_policy =
                                             Some(super::super::TargetPasswordPolicy::ReuseVerified);
+                                        password_disposition =
+                                            Some(super::super::PasswordDisposition::Passthrough(
+                                                super::super::PassthroughBasis::Verified,
+                                            ));
                                         RegionDisposition::PreserveVerified
                                     } else {
                                         target_password_policy = Some(
                                             super::super::TargetPasswordPolicy::ReplaceVerified,
                                         );
+                                        password_disposition =
+                                            Some(super::super::PasswordDisposition::Rewrap);
                                         RegionDisposition::RewrapVerified
                                     }
                                 }
@@ -237,13 +242,19 @@ impl TargetProvisionPlan {
                         if disposition.preserves_extent() {
                             reason = match disposition {
                                 RegionDisposition::PreserveOpaque => {
-                                    "role/type/extent/physical crypto/key profile 精确兼容；来源密码未知，文件系统不解读，原 key material 与密文区域逐字节透传"
+                                    if password_disposition
+                                        == Some(super::super::PasswordDisposition::Blocked)
+                                    {
+                                        "来源密码未知且请求了新密码；无法执行无损改密，必须由用户明确授权重建"
+                                    } else {
+                                        "分区角色、类型、LBA 范围、物理加密和密钥配置完全兼容；来源密码未知，文件系统不解读，原密钥材料与密文区域逐字节透传"
+                                    }
                                 }
                                 RegionDisposition::PreserveVerified => {
-                                    "物理/语义/几何/filesystem 与来源密钥均已验证；原 FileKey 与 data extent 保持不变"
+                                    "物理结构、语义、分区几何、文件系统与来源密钥均已验证；原 FileKey 与数据范围保持不变"
                                 }
                                 RegionDisposition::RewrapVerified => {
-                                    "来源 FileKey 已验证；目标密码变化，只允许重包 wrapper，data extent 保持零写入"
+                                    "来源 FileKey 已验证；目标密码变化，仅更新密码封装，数据范围保持零写入"
                                 }
                                 _ => unreachable!(),
                             }
@@ -252,37 +263,20 @@ impl TargetProvisionPlan {
                         }
                     } else {
                         reason =
-                            "语义、位置、大小、物理加密、文件系统或 key profile 与来源不兼容；不能进入 Preserve family"
+                            "语义、位置、大小、物理加密、文件系统或密钥配置与来源不兼容；不能进入保留类处理"
                                 .into();
                     }
                 }
-            }
-            if !migration_sources.is_empty() {
-                let sources = migration_sources
-                    .iter()
-                    .map(|source| source.region.role.label())
-                    .collect::<Vec<_>>()
-                    .join(" + ");
-                disposition = RegionDisposition::Migrate;
-                source_password_knowledge = None;
-                target_password_policy =
-                    super::super::KeyDomainRole::from_partition_role(target.role)
-                        .map(|_| super::super::TargetPasswordPolicy::InitializeNew);
-                preserved_record = None;
-                reason = format!(
-                    "来源区域 {sources} 到目标 {} 使用 K6 文件级 staging/migration",
-                    target.role.label()
-                );
             }
             let action = disposition.legacy_action();
             partitions.push(TargetPartitionPlan {
                 geometry: *target,
                 action,
                 disposition,
+                password_disposition,
                 source_password_knowledge,
                 target_password_policy,
                 reason,
-                migration_sources,
                 preserved_record,
             });
         }
@@ -301,21 +295,25 @@ impl TargetProvisionPlan {
         else {
             return false;
         };
-        if !part.disposition.preserves_extent() && part.disposition != RegionDisposition::Migrate {
+        if part.disposition == RegionDisposition::Rebuild {
+            part.password_disposition = super::super::KeyDomainRole::from_partition_role(role)
+                .map(|_| super::super::PasswordDisposition::Rebuild);
+            part.target_password_policy = super::super::KeyDomainRole::from_partition_role(role)
+                .map(|_| super::super::TargetPasswordPolicy::InitializeNew);
+            part.reason = "用户明确选择重新格式化；目标区域执行重建".into();
+            return true;
+        }
+        if !part.disposition.preserves_extent() {
             return false;
         }
-        let previous = part.disposition;
         part.action = PartitionAction::Rebuild;
         part.disposition = RegionDisposition::Rebuild;
+        part.password_disposition = super::super::KeyDomainRole::from_partition_role(role)
+            .map(|_| super::super::PasswordDisposition::Rebuild);
         part.target_password_policy = super::super::KeyDomainRole::from_partition_role(role)
             .map(|_| super::super::TargetPasswordPolicy::InitializeNew);
         part.preserved_record = None;
-        part.migration_sources.clear();
-        part.reason = if previous == RegionDisposition::Migrate {
-            "用户选择重新格式化；Migrate 已显式转为 Rebuild".into()
-        } else {
-            "用户选择重新格式化；Preserve family 已显式转为 Rebuild".into()
-        };
+        part.reason = "用户选择重新格式化；保留类处理已明确转为重建".into();
         true
     }
 

@@ -20,7 +20,7 @@ pub(super) fn dispatch_table_action_with_clipboard(
             TuiAction::TableSortToggle | TuiAction::TableSortClear
         )
     {
-        state.set_notice("关联备份保持身份关系顺序，不支持排序。");
+        state.set_warning_notice("关联备份保持身份关系顺序，不支持排序。");
         return true;
     }
     match action {
@@ -57,16 +57,22 @@ pub(super) fn dispatch_table_action_with_clipboard(
             if !whole_row {
                 let logical = state.table_logical_column(kind, state.table_active_column(kind));
                 if !crate::tui::table_layout::table_column_copyable(kind, logical) {
-                    state.set_notice("当前列是界面控制列，不复制。");
+                    state.set_warning_notice("当前列是界面控制列，不复制。");
                     return true;
                 }
             }
             let Some(payload) = state.table_copy_payload(kind, whole_row) else {
-                state.set_notice("当前没有可复制的数据。");
+                state.set_warning_notice("当前没有可复制的数据。");
                 return true;
             };
             let outcome = clipboard.copy(&payload);
-            state.set_notice(clipboard::outcome_message(&outcome, whole_row));
+            let message = clipboard::outcome_message(&outcome, whole_row);
+            match outcome {
+                clipboard::ClipboardOutcome::Confirmed => state.set_success_notice(message),
+                clipboard::ClipboardOutcome::TerminalRequestSent
+                | clipboard::ClipboardOutcome::Unsupported => state.set_warning_notice(message),
+                clipboard::ClipboardOutcome::Failed(_) => state.set_error_notice(message),
+            }
         }
         _ => return false,
     }

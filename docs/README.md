@@ -25,7 +25,7 @@
 
 ## 制盘
 
-- [`provisioning/PROVISIONING.md`](provisioning/PROVISIONING.md)：当前五种目标、布局、数据迁移、密钥域、文件系统能力与写盘安全规范。
+- [`provisioning/PROVISIONING.md`](provisioning/PROVISIONING.md)：当前五种目标、布局、数据保留/重建、密钥域、文件系统能力与写盘安全规范。
 
 ## 证据目录
 

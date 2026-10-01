@@ -347,11 +347,23 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     };
     let identity_separator = internal_separator_x("标签标识");
     assert_eq!(identity_separator, internal_separator_x("部门"));
-    let key_domain_separator = internal_separator_x("交换区来源密码");
-    assert_eq!(key_domain_separator, internal_separator_x("交换区目标密码"));
-    let layout_separator = internal_separator_x("启动区容量");
-    assert_eq!(layout_separator, internal_separator_x("交换区容量"));
-    assert_eq!(layout_separator, internal_separator_x("保密区容量"));
+    assert!(
+        compact_rows
+            .iter()
+            .any(|row| row.contains("交换区原密码") && row.contains("新密码")),
+        "{text}"
+    );
+    assert!(
+        compact_rows
+            .iter()
+            .any(|row| row.contains("保密区原密码") && row.contains("新密码")),
+        "{text}"
+    );
+    assert!(!compact_text.contains("来源状态"), "{text}");
+    for row_name in ["启动区容量", "交换区容量", "保密区容量"] {
+        let separator = internal_separator_x(row_name);
+        assert!(separator > 8 && separator < 80, "{row_name}");
+    }
     let format_separator = internal_separator_x("启动区格式化");
     assert_eq!(format_separator, internal_separator_x("交换区格式化"));
     assert_eq!(format_separator, internal_separator_x("保密区格式化"));
@@ -362,8 +374,7 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     );
     let distinct = [
         identity_separator,
-        key_domain_separator,
-        layout_separator,
+        internal_separator_x("启动区容量"),
         format_separator,
         password_separator,
     ]
@@ -419,22 +430,22 @@ fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor(
                 .contains("标签标识")
         })
         .expect("label id row");
-    let selection = edpcli::tui::theme::current().palette().selection;
+    let theme = edpcli::tui::theme::current();
     let label_cell = row
         .iter()
         .find(|cell| cell.symbol() == "标")
         .expect("label cell");
-    assert_ne!(label_cell.style().bg, Some(selection));
-    let highlighted = row
+    assert_ne!(label_cell.style().fg, theme.accent().fg);
+    let value_cell = row
         .iter()
-        .filter(|cell| cell.style().bg == Some(selection))
-        .map(|cell| cell.symbol())
-        .collect::<String>();
-    assert!(
-        highlighted.chars().any(|ch| ch.is_ascii_digit()),
-        "selected value should contain highlighted input content: {highlighted}"
+        .find(|cell| cell.symbol().chars().any(|ch| ch.is_ascii_digit()))
+        .expect("selected value cell");
+    assert_eq!(
+        value_cell.style().fg,
+        theme.accent().fg,
+        "Normal focus should emphasize the value without a full-width selection fill"
     );
-    assert!(!highlighted.contains('标'));
+    assert_eq!(value_cell.style().bg, label_cell.style().bg);
 
     let dept_index = state
         .provision_visible_fields()
@@ -497,13 +508,17 @@ fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor(
 }
 
 #[test]
-fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
+fn plain_source_renders_no_source_password_and_default_target_password() {
     let mut state = AppState::new();
     state.replace_devices(vec![usb_device()]);
     assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     state.provision_begin_selected();
     state.provision_enter_form_workspace();
-    state.provision_mut().form.share_target_password.clear();
+
+    assert!(state.provision().form.share_source_password.is_empty());
+    assert!(state.provision().form.encrypt_source_password.is_empty());
+    assert_eq!(state.provision().form.share_target_password, "0000aaaa");
+    assert_eq!(state.provision().form.encrypt_target_password, "0000aaaa");
 
     let backend = TestBackend::new(100, 28);
     let mut terminal = Terminal::new(backend).expect("test terminal");
@@ -516,7 +531,9 @@ fn empty_secret_field_renders_input_placeholder_instead_of_black_value() {
         .map(|cell| cell.symbol())
         .collect::<String>();
     let compact = text.replace(' ', "");
-    assert!(compact.contains("密码〈请输入〉"), "{text}");
+    assert!(compact.contains("原密码—不涉及"), "{text}");
+    assert!(!compact.contains("新密码透传"), "{text}");
+    assert!(compact.contains("新密码••••••••"), "{text}");
 }
 
 #[test]
@@ -726,8 +743,12 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
         );
         if width >= 80 {
             assert!(
-                active_tab.replace(' ', "").contains("2原始字段"),
-                "Detail focus must be visible in the shared Inspect tabs: {active_tab}"
+                active_tab.replace(' ', "").contains("1业务字段"),
+                "Pane focus must not implicitly switch the explicit Inspect view tab: {active_tab}"
+            );
+            assert_eq!(
+                state.advanced_inspect_view_mode(),
+                Some(edpcli::tui::state::InspectViewMode::Business)
             );
         } else {
             assert!(

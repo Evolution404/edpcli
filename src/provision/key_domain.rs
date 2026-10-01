@@ -8,7 +8,8 @@ use std::fmt;
 
 use super::PartitionRole;
 
-pub const DEFAULT_KEY_DOMAIN_PASSWORD: &[u8] = b"0000aaaa";
+pub const DEFAULT_KEY_DOMAIN_PASSWORD_TEXT: &str = "0000aaaa";
+pub const DEFAULT_KEY_DOMAIN_PASSWORD: &[u8] = DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.as_bytes();
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct SecretBytes(Vec<u8>);
@@ -67,6 +68,20 @@ pub enum SourcePasswordKnowledge {
     UserVerified,
     #[default]
     Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PassthroughBasis {
+    Verified,
+    OpaqueCompatible,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PasswordDisposition {
+    Passthrough(PassthroughBasis),
+    Rewrap,
+    Rebuild,
+    Blocked,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

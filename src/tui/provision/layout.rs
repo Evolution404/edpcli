@@ -311,7 +311,7 @@ impl AppState {
         let Ok((resolved, _)) = self.provision_resolved_prefill() else {
             return DiskLayoutModel::new(0, Vec::new());
         };
-        let Ok(parts) = resolved.target_partitions(crate::common::SECTOR as u64) else {
+        let Ok(parts) = resolved.draft_partitions(crate::common::SECTOR as u64) else {
             return DiskLayoutModel::new(0, Vec::new());
         };
         let partitions = parts
@@ -324,8 +324,7 @@ impl AppState {
             })
             .collect();
 
-        DiskLayoutModel::canonical_edp(total_sectors, partitions, lce.start_lba, lce.sector_count)
-            .unwrap_or_else(|_| DiskLayoutModel::new(0, Vec::new()))
+        DiskLayoutModel::draft_edp(total_sectors, partitions, lce.start_lba, lce.sector_count)
     }
 
     pub fn provision_layout_bar(

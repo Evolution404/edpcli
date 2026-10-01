@@ -45,6 +45,7 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
         return Ok(state);
     }
     let edp = fixtures::disk(6, crate::provision::DiskProvisionKind::Mode0);
+    let provision_result = fixtures::provision_result_snapshot(&edp);
     let edp_mode1 = fixtures::disk(7, crate::provision::DiskProvisionKind::Mode1);
     let plain = fixtures::disk(8, crate::provision::DiskProvisionKind::Plain);
     let inspect_fixture = fixtures::inspect_workspace(&edp);
@@ -93,6 +94,10 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
                 _ => ProvisionStage::Result,
             };
             let stage = state.provision().stage;
+            if stage == ProvisionStage::Result {
+                state.provision_mut().result_plan = Some(provision_result.clone());
+                state.provision_initialize_result_workbench();
+            }
             state.provision_mut().pane_focus = match stage {
                 ProvisionStage::Review => crate::tui::pane::PaneFocus::provision_review(),
                 ProvisionStage::Running => crate::tui::pane::PaneFocus::provision_running(),
@@ -109,7 +114,8 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
                 state.provision_mut().result_status =
                     Some(crate::application::provision::ProvisionExecutionStatus::FatalFailure);
             }
-            state.provision_mut().message = Some("演示模式不会执行真实操作".into());
+            state.provision_mut().message =
+                Some(crate::tui::ui::UiMessage::info("演示模式不会执行真实操作"));
             if name == "provision-running-long" {
                 let tick = timeline::DemoTimeline::LONG_INITIAL_TICK;
                 state.provision_mut().run = Some(timeline::DemoTimeline::long_at_tick(
@@ -142,7 +148,7 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
                 state.set_notice("演示模式不会执行真实操作");
             }
         }
-        "error-state" => state.set_notice("DEMO 错误：模拟读取失败，不访问真实介质"),
+        "error-state" => state.set_error_notice("DEMO 错误：模拟读取失败，不访问真实介质"),
         _ => {}
     }
     Ok(state)
@@ -329,12 +335,12 @@ fn execute_demo_request(
             crate::tui::state::StateEffect::None
         }
         super::controller::ActionRequest::ProvisionKeyProbe { .. } => {
-            state.provision_mut().message =
-                Some("演示模式使用固定制盘夹具，不探测真实介质密钥。".into());
+            state.provision_mut().message = Some(crate::tui::ui::UiMessage::info(
+                "演示模式使用固定制盘夹具，不探测真实介质密钥。",
+            ));
             crate::tui::state::StateEffect::None
         }
-        super::controller::ActionRequest::ProvisionSourcePasswordVerify
-        | super::controller::ActionRequest::ProvisionPlan => {
+        super::controller::ActionRequest::ProvisionPlan => {
             state.set_notice("演示模式不会启动真实后台任务");
             crate::tui::state::StateEffect::None
         }

@@ -7,7 +7,7 @@ pub struct ShellState {
     pub(super) critical_operation: bool,
     pub(super) exit_pending: bool,
     pub(super) navigation: NavigationStack,
-    pub(super) notice: Option<String>,
+    pub(super) notice: Option<crate::tui::ui::UiMessage>,
     pub(super) notice_at: Option<std::time::Instant>,
     pub(super) animation_frame: u64,
     pub(super) selected: usize,

@@ -49,7 +49,7 @@ fn context(total: u64) -> InspectDiskContext {
 }
 
 #[test]
-fn topology_uses_canonical_protocol_free_partitions_and_tail() {
+fn topology_uses_canonical_protocol_reserved_partitions_and_tail() {
     let topology = build_inspect_topology(&context(5_000));
     assert_eq!(topology.root.range, InspectNodeRange::sectors(0, 5_000));
     assert_eq!(
@@ -62,7 +62,7 @@ fn topology_uses_canonical_protocol_free_partitions_and_tail() {
         topology
             .primary_region_for_lba(30)
             .and_then(|node| node.region_semantic),
-        Some(DiskRegionSemantic::Unallocated)
+        Some(DiskRegionSemantic::Reserved)
     );
     assert_eq!(
         topology
@@ -320,11 +320,8 @@ fn cached_sector_enrichment_preserves_canonical_topology_identity_and_semantic()
     let topology = build_inspect_topology(&context(10_000));
     let region = topology
         .primary_region_for_lba(30)
-        .expect("free region containing LBA30");
-    assert_eq!(
-        region.region_semantic,
-        Some(DiskRegionSemantic::Unallocated)
-    );
+        .expect("reserved region containing LBA30");
+    assert_eq!(region.region_semantic, Some(DiskRegionSemantic::Reserved));
     let offset = 30 - region.range.start_lba;
     let base = region
         .materialize_sector_page(offset, 1)
@@ -374,7 +371,7 @@ fn cached_sector_enrichment_preserves_canonical_topology_identity_and_semantic()
     );
     assert_eq!(
         enriched.region_semantic,
-        Some(DiskRegionSemantic::Unallocated),
+        Some(DiskRegionSemantic::Reserved),
         "decode hydration must not change the region color/semantic"
     );
     let InspectChildren::Materialized(children) = enriched.children else {

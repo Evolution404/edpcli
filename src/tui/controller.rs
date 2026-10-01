@@ -4,8 +4,8 @@ use super::clipboard::ClipboardBackend;
 use super::keymap::{TuiAction, WidgetRole};
 use super::pane::PaneId;
 use super::state::{
-    AdvancedInspectSource, AdvancedInspectStage, AppState, DeviceInfoNodeKey, NavCommand,
-    StateEffect, Workspace,
+    AdvancedInspectSource, AdvancedInspectStage, AppState, DeviceInfoNodeKey, InspectViewMode,
+    NavCommand, StateEffect, Workspace,
 };
 
 #[derive(Debug, Clone)]
@@ -21,7 +21,6 @@ pub(super) enum ActionRequest {
     ProvisionKeyProbe {
         disk: u32,
     },
-    ProvisionSourcePasswordVerify,
     ProvisionPlan,
 }
 
@@ -100,8 +99,6 @@ fn action_to_nav(action: TuiAction) -> Option<NavCommand> {
         TuiAction::PreviousMatch => NavCommand::PreviousMatch,
         TuiAction::Command => NavCommand::CommandPalette,
         TuiAction::Refresh => NavCommand::Refresh,
-        TuiAction::WorkspaceNext => NavCommand::NextWorkspace,
-        TuiAction::WorkspacePrevious => NavCommand::PreviousWorkspace,
         _ => return None,
     })
 }
@@ -159,7 +156,7 @@ fn dispatch_inspect(
             if let Err(message) =
                 state.advanced_inspect_search_next(action == TuiAction::PreviousMatch)
             {
-                state.set_notice(message);
+                state.set_warning_notice(message);
             }
             ActionOutcome::handled()
         }
@@ -202,16 +199,18 @@ fn dispatch_inspect(
             ActionOutcome::request(ActionRequest::InspectSelection { force_hex: false })
         }
         TuiAction::InspectBusiness => {
-            state.advanced_inspect_focus_pane(PaneId::InspectOverview);
-            state.pane_viewport_mut(PaneId::InspectDetail).scroll_x = 0;
+            state.advanced_inspect_set_view_mode(InspectViewMode::Business);
             ActionOutcome::handled()
         }
         TuiAction::InspectRawFields => {
-            state.advanced_inspect_focus_pane(PaneId::InspectDetail);
-            state.pane_viewport_mut(PaneId::InspectDetail).scroll_x = 2;
+            state.advanced_inspect_set_view_mode(InspectViewMode::RawFields);
             ActionOutcome::handled()
         }
         TuiAction::InspectHex => {
+            state.advanced_inspect_set_view_mode(InspectViewMode::Hex);
+            if state.advanced_inspect_sector().is_some() {
+                return Some(ActionOutcome::handled());
+            }
             ActionOutcome::request(ActionRequest::InspectSelection { force_hex: true })
         }
         TuiAction::PanelNext | TuiAction::PanelPrevious => {
@@ -335,21 +334,6 @@ pub(super) fn dispatch_action(
         };
     }
 
-    if matches!(
-        action,
-        TuiAction::WorkspaceNext | TuiAction::WorkspacePrevious
-    ) {
-        if !matches!(state.workspace(), Workspace::Devices | Workspace::Backups) {
-            return ActionOutcome::handled();
-        }
-        let command = if action == TuiAction::WorkspaceNext {
-            NavCommand::NextWorkspace
-        } else {
-            NavCommand::PreviousWorkspace
-        };
-        return ActionOutcome::effect(state.navigate(command, viewport_height));
-    }
-
     if action == TuiAction::Quit {
         return ActionOutcome::effect(state.navigate(NavCommand::Quit, viewport_height));
     }
@@ -389,7 +373,7 @@ pub(super) fn dispatch_action(
                     state.device_info_focus_detail();
                 } else if state.devices_focused_pane() == PaneId::DevicesList {
                     if let Err(message) = state.activate_device_for_viewport(viewport_width) {
-                        state.set_notice(message);
+                        state.set_warning_notice(message);
                     }
                 }
                 ActionOutcome::handled()
@@ -401,9 +385,9 @@ pub(super) fn dispatch_action(
         },
         TuiAction::Provision if state.workspace() == Workspace::Devices => {
             if state.devices_focused_pane() != PaneId::DevicesList {
-                state.set_notice("请先回到设备列表，再按 p 选择制盘方案。");
+                state.set_warning_notice("请先回到设备列表，再按 p 选择制盘方案。");
             } else if let Err(message) = state.begin_provision_for_selected_device() {
-                state.set_notice(message);
+                state.set_warning_notice(message);
             }
             ActionOutcome::handled()
         }

@@ -39,13 +39,13 @@ pub(super) fn handle_shell_key(
                                             NavCommand::WorkspaceDevices,
                                             viewport_height,
                                         );
-                                        state.set_notice(
+                                        state.set_warning_notice(
                                             "请在设备列表选定 USB 盘后按 p 选择制盘方案。",
                                         );
                                     } else if let Err(message) =
                                         state.begin_provision_for_selected_device()
                                     {
-                                        state.set_notice(message);
+                                        state.set_error_notice(message);
                                     }
                                 } else {
                                     let effect = dispatch_nav_command(
@@ -60,7 +60,7 @@ pub(super) fn handle_shell_key(
                                     }
                                 }
                             }
-                            Err(message) => state.set_notice(message),
+                            Err(message) => state.set_warning_notice(message),
                         }
                     }
                 }

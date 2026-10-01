@@ -9,6 +9,8 @@ mod backup_prune;
 mod backup_wizard;
 #[path = "runtime_input/inspect.rs"]
 mod inspect;
+#[path = "runtime_input/post_restore_wizard.rs"]
+mod post_restore_wizard;
 #[path = "runtime_input/provision.rs"]
 mod provision;
 #[path = "runtime_input/shell.rs"]

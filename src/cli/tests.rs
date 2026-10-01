@@ -33,9 +33,9 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
     use crate::filesystem::FilesystemKind;
     use crate::protocol::edpf::EdpPartitionType;
     use crate::provision::{
-        OfficialPartitionMode, PartitionAction, PartitionRole, RegionDisposition,
-        SourcePasswordKnowledge, TargetPartitionGeometry, TargetPartitionPlan,
-        TargetPasswordPolicy, TargetProvisionPlan,
+        OfficialPartitionMode, PartitionAction, PartitionRole, PassthroughBasis,
+        PasswordDisposition, RegionDisposition, SourcePasswordKnowledge, TargetPartitionGeometry,
+        TargetPartitionPlan, TargetPasswordPolicy, TargetProvisionPlan,
     };
 
     let plan = TargetProvisionPlan {
@@ -52,10 +52,10 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
                 },
                 action: PartitionAction::Rebuild,
                 disposition: RegionDisposition::Rebuild,
+                password_disposition: Some(PasswordDisposition::Rebuild),
                 source_password_knowledge: None,
                 target_password_policy: Some(TargetPasswordPolicy::InitializeNew),
                 reason: "geometry changed".into(),
-                migration_sources: vec![],
                 preserved_record: None,
             },
             TargetPartitionPlan {
@@ -69,10 +69,12 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
                 },
                 action: PartitionAction::PreserveExact,
                 disposition: RegionDisposition::PreserveOpaque,
+                password_disposition: Some(PasswordDisposition::Passthrough(
+                    PassthroughBasis::OpaqueCompatible,
+                )),
                 source_password_knowledge: Some(SourcePasswordKnowledge::Unknown),
                 target_password_policy: Some(TargetPasswordPolicy::PreserveOpaque),
                 reason: "exact source match".into(),
-                migration_sources: vec![],
                 preserved_record: None,
             },
         ],
@@ -85,16 +87,16 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
         .any(|line| line.contains("start=63 end=162 sectors=100")));
     assert!(lines
         .iter()
-        .any(|line| line.contains("Rebuild") && line.contains("原数据不可原样保留")));
+        .any(|line| line.contains("Rebuild") && line.contains("K_new")));
     assert!(lines
         .iter()
         .any(|line| line.contains("start=1000 end=1199 sectors=200")));
-    assert!(lines.iter().any(|line| line.contains("PreserveOpaque")
-        && line.contains("原 key material")
-        && line.contains("0 写入")));
+    assert!(lines.iter().any(|line| line.contains("Passthrough")
+        && line.contains("opaque-compatible")
+        && line.contains("original key material")));
     assert!(lines
         .iter()
-        .any(|line| line.contains("source=Unknown") && line.contains("target=disabled(opaque)")));
+        .any(|line| line.contains("source=Unknown") && line.contains("password=passthrough")));
     assert!(lines
         .iter()
         .any(|line| line.contains("unallocated=737 sectors")));
@@ -658,17 +660,26 @@ fn disk_table_rendering() {
     );
     // EDPF 明细行: 类型 + 大小 + LBA 范围
     let edpf = lines.iter().find(|l| l.contains("EDPF")).unwrap();
+    let share_capacity = crate::common::fmt_capacity((116_700_881 - 63 + 1) * 512);
+    let encrypt_capacity = crate::common::fmt_capacity((122_847_487 - 116_707_328 + 1) * 512);
+    let boot_capacity = crate::common::fmt_capacity((63 - 32 + 1) * 512);
     assert!(
-        edpf.contains("Share 59.75GB (LBA 63~116,700,881)"),
+        edpf.contains(&format!("Share {share_capacity} (LBA 63~116,700,881)")),
         "{}",
         edpf
     );
     assert!(
-        edpf.contains("Encrypt 3.14GB (LBA 116,707,328~122,847,487)"),
+        edpf.contains(&format!(
+            "Encrypt {encrypt_capacity} (LBA 116,707,328~122,847,487)"
+        )),
         "{}",
         edpf
     );
-    assert!(edpf.contains("Boot 16.38KB (LBA 32~63)"), "{}", edpf);
+    assert!(
+        edpf.contains(&format!("Boot {boot_capacity} (LBA 32~63)")),
+        "{}",
+        edpf
+    );
     let meta = lines.iter().find(|l| l.contains("onlyid")).unwrap();
     assert!(
         meta.contains("onlyid=1402259934")
@@ -717,7 +728,11 @@ fn menus_are_numbered() {
         "{}",
         m
     );
-    assert!(m.contains("disk4") && m.contains("64.00GB") && m.contains("0951:1666"));
+    assert!(
+        m.contains("disk4")
+            && m.contains(&crate::common::fmt_capacity(64_000_000_000))
+            && m.contains("0951:1666")
+    );
 
     let b = backup_menu_str(&["2026-09-16 23:36".into(), "2026-08-27 22:25".into()]);
     assert!(b.contains("编号") && b.contains("时间"), "{}", b);

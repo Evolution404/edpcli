@@ -44,16 +44,14 @@ impl AppState {
             .as_mut()
             .filter(|state| state.stage == AdvancedInspectStage::Browser)
         {
-            state.sector = None;
-            state.panel = AdvancedInspectPanel::Tree;
-            state
-                .pane_focus
-                .focus(crate::tui::pane::PaneId::InspectTree);
             state.prompt = Some(AdvancedInspectPrompt::Jump {
-                unit: AdvancedInspectJumpUnit::Lba,
                 input: String::new(),
+                error: None,
+                origin_view: state.view_mode,
+                origin_panel: state.panel,
+                origin_pane: state.pane_focus.focused(),
+                origin_sector_mode: state.sector.as_ref().map(|sector| sector.mode),
             });
-            state.message = None;
         }
     }
 
@@ -92,7 +90,11 @@ impl AppState {
             return;
         };
         match prompt {
-            AdvancedInspectPrompt::Jump { input, .. } | AdvancedInspectPrompt::Search { input } => {
+            AdvancedInspectPrompt::Jump { input, error, .. } => {
+                input.push(ch);
+                *error = None;
+            }
+            AdvancedInspectPrompt::Search { input } => {
                 input.push(ch);
             }
         }
@@ -108,25 +110,25 @@ impl AppState {
             return;
         };
         match prompt {
-            AdvancedInspectPrompt::Jump { input, .. } | AdvancedInspectPrompt::Search { input } => {
+            AdvancedInspectPrompt::Jump { input, error, .. } => {
+                input.pop();
+                *error = None;
+            }
+            AdvancedInspectPrompt::Search { input } => {
                 input.pop();
             }
         }
     }
 
-    pub fn advanced_inspect_toggle_jump_unit(&mut self) {
-        let Some(AdvancedInspectPrompt::Jump { unit, .. }) = self
+    fn advanced_inspect_set_jump_error(&mut self, message: String) {
+        if let Some(AdvancedInspectPrompt::Jump { error, .. }) = self
             .inspect
             .advanced
             .as_mut()
             .and_then(|state| state.prompt.as_mut())
-        else {
-            return;
-        };
-        *unit = match *unit {
-            AdvancedInspectJumpUnit::Lba => AdvancedInspectJumpUnit::ByteOffset,
-            AdvancedInspectJumpUnit::ByteOffset => AdvancedInspectJumpUnit::Lba,
-        };
+        {
+            *error = Some(message);
+        }
     }
 
     pub fn advanced_inspect_submit_prompt(
@@ -140,15 +142,35 @@ impl AppState {
             .ok_or_else(|| "Inspect 输入面板未打开".to_string())?;
 
         let request = match prompt {
-            AdvancedInspectPrompt::Jump { unit, input } => {
-                let value = parse_inspect_jump_number(&input)?;
-                match unit {
-                    AdvancedInspectJumpUnit::Lba => {
-                        self.advanced_inspect_jump_lba(value)?;
-                        None
+            AdvancedInspectPrompt::Jump {
+                input,
+                origin_view,
+                origin_panel,
+                origin_pane,
+                origin_sector_mode,
+                ..
+            } => {
+                let result = (|| {
+                    let value = parse_inspect_jump_number(&input)?;
+                    self.advanced_inspect_jump_lba(value)?;
+                    self.advanced_inspect_prepare_jump_sector(
+                        value,
+                        origin_view,
+                        origin_sector_mode.unwrap_or(SectorInspectMode::Mixed),
+                    )
+                })();
+                match result {
+                    Ok(request) => {
+                        if let Some(state) = self.inspect.advanced.as_mut() {
+                            state.view_mode = origin_view;
+                            state.panel = origin_panel;
+                            state.pane_focus.focus(origin_pane);
+                        }
+                        request
                     }
-                    AdvancedInspectJumpUnit::ByteOffset => {
-                        self.advanced_inspect_jump_byte_offset(value)?
+                    Err(message) => {
+                        self.advanced_inspect_set_jump_error(message.clone());
+                        return Err(message);
                     }
                 }
             }

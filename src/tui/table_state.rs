@@ -5,6 +5,13 @@ impl AppState {
         use crate::tui::pane::PaneId;
         use crate::tui::table_layout::TableKind;
 
+        if self.shell.wizard.as_ref().is_some_and(|wizard| {
+            wizard.stage == WizardStage::PostRestore
+                && wizard.post_restore_workbench.focused_pane() == PaneId::ResultPartitions
+        }) {
+            return Some(TableKind::ResultPartitions);
+        }
+
         match self.shell.workspace {
             Workspace::Devices if self.devices_focused_pane() == PaneId::DevicesList => {
                 Some(TableKind::Devices)
@@ -21,6 +28,13 @@ impl AppState {
             }
             Workspace::Backups if self.backups_focused_pane() == PaneId::BackupsList => {
                 Some(TableKind::Backups)
+            }
+            Workspace::Provision
+                if self.provision.stage == ProvisionStage::Result
+                    && self.provision.result_workbench.focused_pane()
+                        == PaneId::ResultPartitions =>
+            {
+                Some(TableKind::ResultPartitions)
             }
             Workspace::Provision => None,
             Workspace::Inspect
@@ -100,6 +114,11 @@ impl AppState {
             TableKind::InspectFields => {
                 let row = self.advanced_inspect_detail_selected_row()?;
                 Some(row.cells.iter().cloned().map(sanitize).collect::<Vec<_>>())
+            }
+            TableKind::ResultPartitions => {
+                let selected = self.result_partition_selected_source_index()?;
+                self.result_partition_table_view()
+                    .and_then(|view| view.rows.get(selected).cloned())
             }
         }
     }
@@ -186,6 +205,16 @@ impl AppState {
                 }
                 widths
             }
+            TableKind::ResultPartitions => self
+                .result_partition_table_view()
+                .map(|view| view.content_widths)
+                .unwrap_or_else(|| {
+                    crate::tui::table_layout::table_column_schema(TableKind::ResultPartitions)
+                        .expect("result partition schema")
+                        .iter()
+                        .map(|column| display_width(column.heading))
+                        .collect()
+                }),
         }
     }
 
@@ -203,6 +232,20 @@ impl AppState {
                 .saturating_div(10)
                 .saturating_sub(6),
             TableKind::InspectFields => terminal_width.saturating_sub(3),
+            TableKind::ResultPartitions => {
+                let class = crate::tui::ui::ViewportClass::for_width(terminal_width);
+                if matches!(
+                    class,
+                    crate::tui::ui::ViewportClass::Wide | crate::tui::ui::ViewportClass::UltraWide
+                ) {
+                    terminal_width
+                        .saturating_mul(46)
+                        .saturating_div(100)
+                        .saturating_sub(4)
+                } else {
+                    terminal_width.saturating_sub(4)
+                }
+            }
         }
         .max(1)
     }

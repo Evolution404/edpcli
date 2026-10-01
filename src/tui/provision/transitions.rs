@@ -20,12 +20,16 @@ impl ProvisionFormViewSnapshot {
 #[derive(Debug, Clone)]
 pub(super) struct ProvisionReviewViewSnapshot {
     pane_focus: crate::tui::pane::PaneFocus,
+    region_selected: usize,
+    details_expanded: bool,
 }
 
 impl ProvisionReviewViewSnapshot {
     fn capture(state: &ProvisionState) -> Self {
         Self {
             pane_focus: state.pane_focus.clone(),
+            region_selected: state.review_region_selected,
+            details_expanded: state.review_details_expanded,
         }
     }
 }
@@ -43,7 +47,7 @@ impl AppState {
         }
         self.provision.stage = ProvisionStage::Planning;
         self.shell.input_mode = InputMode::Normal;
-        self.provision.message = Some("正在只读检查目标并生成精确制盘计划…".into());
+        self.provision.message = None;
     }
 
     fn provision_restore_form_snapshot(&mut self) {
@@ -61,6 +65,8 @@ impl AppState {
         self.provision.stage = ProvisionStage::Review;
         self.shell.input_mode = InputMode::Normal;
         self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_review();
+        self.provision.review_region_selected = 0;
+        self.provision.review_details_expanded = false;
         self.provision.review_view_snapshot = None;
         self.provision.message = None;
     }
@@ -70,7 +76,8 @@ impl AppState {
         self.shell.input_mode = InputMode::Normal;
         self.provision_restore_form_snapshot();
         self.provision.review_view_snapshot = None;
-        self.provision.message = Some(message);
+        self.provision.message = None;
+        self.set_error_notice(message);
     }
 
     pub fn provision_return_review_to_form(&mut self) {
@@ -79,6 +86,8 @@ impl AppState {
         self.provision_restore_form_snapshot();
         self.provision.review_view_snapshot = None;
         self.provision.prepared = None;
+        self.provision.review_region_selected = 0;
+        self.provision.review_details_expanded = false;
         self.provision.confirmation.clear();
         self.provision.message = None;
     }
@@ -91,11 +100,13 @@ impl AppState {
     fn provision_restore_review_snapshot(&mut self) {
         if let Some(snapshot) = self.provision.review_view_snapshot.take() {
             self.provision.pane_focus = snapshot.pane_focus;
+            self.provision.review_region_selected = snapshot.region_selected;
+            self.provision.review_details_expanded = snapshot.details_expanded;
         } else if !matches!(
             self.provision.pane_focus.focused(),
-            crate::tui::pane::PaneId::ProvisionSummary
-                | crate::tui::pane::PaneId::ProvisionDiskLayout
-                | crate::tui::pane::PaneId::ProvisionChanges
+            crate::tui::pane::PaneId::ProvisionDiskLayout
+                | crate::tui::pane::PaneId::ProvisionPartitionPlan
+                | crate::tui::pane::PaneId::ProvisionExecutionSummary
         ) {
             self.provision.pane_focus = crate::tui::pane::PaneFocus::provision_review();
         }

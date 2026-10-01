@@ -338,7 +338,7 @@ pub(super) fn legacy_old_hash(data: &[u8]) -> u32 {
 }
 
 pub(super) fn legacy_key_field(base: usize, group: String, entry: &EdpfEntry64) -> SectorField {
-    let known = b"0000aaaa";
+    let known = crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD;
     let mut children = vec![
         FieldChild {
             label: "pwd_crc".into(),

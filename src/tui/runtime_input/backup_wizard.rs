@@ -39,6 +39,17 @@ pub(super) fn handle_backup_wizard_key(
         }
     }
 
+    if let Some(outcome) = super::post_restore_wizard::handle_post_restore_wizard_key(
+        state,
+        tasks,
+        keys,
+        key,
+        backup_dir,
+        terminal_size,
+    ) {
+        return Some(outcome);
+    }
+
     if let Some(stage) = state.wizard().map(|wizard| wizard.stage) {
         match stage {
             state::WizardStage::Confirm => {
@@ -80,9 +91,8 @@ pub(super) fn handle_backup_wizard_key(
                         keymap::TuiAction::Cancel | keymap::TuiAction::Back => {
                             let _ = state.navigate(NavCommand::Escape, 1);
                         }
-                        keymap::TuiAction::Confirm => {
-                            state.set_notice("写入目标介质前必须精确输入大写 YES 后按 Enter。")
-                        }
+                        keymap::TuiAction::Confirm => state
+                            .set_warning_notice("写入目标介质前必须精确输入大写 YES 后按 Enter。"),
                         _ => {}
                     }
                 }
@@ -98,165 +108,6 @@ pub(super) fn handle_backup_wizard_key(
                 }
                 return Some(KeyOutcome::NextIteration);
             }
-            state::WizardStage::PostRestore => {
-                if let Some(action) = keys.map(state::InputMode::Normal, key) {
-                    let visible_rows = usize::from(terminal_size.height.saturating_sub(12)).max(1);
-                    match action {
-                        keymap::TuiAction::MoveDown => {
-                            state.move_post_restore_result_selection(1, visible_rows)
-                        }
-                        keymap::TuiAction::MoveUp => {
-                            state.move_post_restore_result_selection(-1, visible_rows)
-                        }
-                        keymap::TuiAction::PageUp => state.move_post_restore_result_selection(
-                            -(visible_rows as isize),
-                            visible_rows,
-                        ),
-                        keymap::TuiAction::PageDown => state.move_post_restore_result_selection(
-                            visible_rows as isize,
-                            visible_rows,
-                        ),
-                        keymap::TuiAction::Top => state.post_restore_result_top(visible_rows),
-                        keymap::TuiAction::Bottom => state.post_restore_result_bottom(visible_rows),
-                        keymap::TuiAction::MoveLeft => {
-                            if !state.post_restore_result_shift_partition_column(true) {
-                                state.post_restore_result_shift_pane(true);
-                            }
-                        }
-                        keymap::TuiAction::MoveRight => {
-                            if !state.post_restore_result_shift_partition_column(false) {
-                                state.post_restore_result_shift_pane(false);
-                            }
-                        }
-                        keymap::TuiAction::PanelPrevious => {
-                            state.post_restore_result_shift_pane(true)
-                        }
-                        keymap::TuiAction::PanelNext => state.post_restore_result_shift_pane(false),
-                        keymap::TuiAction::Activate => {
-                            if state.post_restore_result_focused_pane()
-                                == crate::tui::pane::PaneId::ResultPartitions
-                            {
-                                state.begin_selected_post_restore_action();
-                            }
-                        }
-                        keymap::TuiAction::Open => state.toggle_wizard_detail(),
-                        keymap::TuiAction::Back => {
-                            let _ = state.navigate(NavCommand::Escape, 1);
-                        }
-                        _ => {}
-                    }
-                }
-                return Some(KeyOutcome::NextIteration);
-            }
-            state::WizardStage::VolumeLabelInput => {
-                if let Some(action) = keys.map(state::InputMode::Insert, key) {
-                    match action {
-                        keymap::TuiAction::Text(ch) => state.push_wizard_volume_label_char(ch),
-                        keymap::TuiAction::Backspace => state.backspace_wizard_volume_label(),
-                        keymap::TuiAction::Submit => state.submit_wizard_volume_label(),
-                        keymap::TuiAction::Back | keymap::TuiAction::Cancel => {
-                            state.cancel_post_restore_volume_label();
-                        }
-                        _ => {}
-                    }
-                }
-                return Some(KeyOutcome::NextIteration);
-            }
-            state::WizardStage::PasswordInput
-            | state::WizardStage::ReinitializePassword
-            | state::WizardStage::ReinitializePasswordConfirm => {
-                if let Some(action) = keys.map(state::InputMode::Insert, key) {
-                    match action {
-                        keymap::TuiAction::Text(ch) => state.push_wizard_secret_char(ch),
-                        keymap::TuiAction::Backspace => state.backspace_wizard_secret(),
-                        keymap::TuiAction::Submit => state.submit_wizard_secret(),
-                        keymap::TuiAction::Back | keymap::TuiAction::Cancel => {
-                            state.cancel_post_restore_secret_flow();
-                        }
-                        _ => {}
-                    }
-                }
-                return Some(KeyOutcome::NextIteration);
-            }
-            state::WizardStage::EncryptedFormatConfirm => {
-                if let Some(action) = keys.map(state::InputMode::Confirm, key) {
-                    match action {
-                        keymap::TuiAction::Text(ch) => state.push_wizard_confirmation(ch),
-                        keymap::TuiAction::Backspace => {
-                            state.backspace_wizard_confirmation();
-                        }
-                        keymap::TuiAction::Submit => {
-                            if let Some(intent) = state.submit_encrypted_format_confirmation() {
-                                if let Err(message) =
-                                    tasks.request_post_restore_encrypted_format(intent)
-                                {
-                                    state.abort_post_restore_encrypted_action(message.to_string());
-                                }
-                            }
-                        }
-                        keymap::TuiAction::Cancel | keymap::TuiAction::Back => {
-                            state.cancel_post_restore_secret_flow();
-                        }
-                        keymap::TuiAction::Confirm => {
-                            state.set_notice("加密格式化需要独立输入大写 YES 后按 Enter。")
-                        }
-                        _ => {}
-                    }
-                }
-                return Some(KeyOutcome::NextIteration);
-            }
-            state::WizardStage::ReinitializeConfirm => {
-                if let Some(action) = keys.map(state::InputMode::Confirm, key) {
-                    match action {
-                        keymap::TuiAction::Text(ch) => state.push_wizard_confirmation(ch),
-                        keymap::TuiAction::Backspace => {
-                            state.backspace_wizard_confirmation();
-                        }
-                        keymap::TuiAction::Submit => {
-                            if let Some(intent) = state.submit_reinitialize_confirmation() {
-                                if let Err(message) =
-                                    tasks.request_post_restore_reinitialize(intent)
-                                {
-                                    state.abort_post_restore_encrypted_action(message.to_string());
-                                }
-                            }
-                        }
-                        keymap::TuiAction::Cancel | keymap::TuiAction::Back => {
-                            state.cancel_post_restore_secret_flow();
-                        }
-                        keymap::TuiAction::Confirm => {
-                            state.set_notice("重建密钥域需要独立输入大写 YES 后按 Enter。")
-                        }
-                        _ => {}
-                    }
-                }
-                return Some(KeyOutcome::NextIteration);
-            }
-            state::WizardStage::FormatConfirm => {
-                if let Some(action) = keys.map(state::InputMode::Confirm, key) {
-                    match action {
-                        keymap::TuiAction::Text(ch) => state.push_wizard_confirmation(ch),
-                        keymap::TuiAction::Backspace => {
-                            state.backspace_wizard_confirmation();
-                        }
-                        keymap::TuiAction::Submit => {
-                            if let Some(intent) = state.submit_post_restore_format_confirmation() {
-                                if let Err(message) = tasks.request_post_restore_format(intent) {
-                                    state.abort_post_restore_format(message.to_string());
-                                }
-                            }
-                        }
-                        keymap::TuiAction::Cancel | keymap::TuiAction::Back => {
-                            state.cancel_post_restore_format();
-                        }
-                        keymap::TuiAction::Confirm => {
-                            state.set_notice("格式化需要第二次独立输入大写 YES 后按 Enter。")
-                        }
-                        _ => {}
-                    }
-                }
-                return Some(KeyOutcome::NextIteration);
-            }
             state::WizardStage::Result => {
                 if let Some(action) = keys.map(state::InputMode::Normal, key) {
                     if matches!(
@@ -268,6 +119,7 @@ pub(super) fn handle_backup_wizard_key(
                 }
                 return Some(KeyOutcome::NextIteration);
             }
+            _ => {}
         }
     }
 

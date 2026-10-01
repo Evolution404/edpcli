@@ -355,7 +355,8 @@ fn backup_confirm_is_overlay_and_escape_preserves_device_selection() {
     let width = 120;
     let height = 32;
     let content_area = ratatui::layout::Rect::new(0, 2, width, height - 3);
-    let popup = edpcli::tui::ui::centered_modal_rect(content_area, 76, 11);
+    let viewport = ratatui::layout::Rect::new(0, 0, width, height);
+    let popup = edpcli::tui::ui::centered_modal_rect(viewport, 76, 11);
 
     let mut before_terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     before_terminal
@@ -412,6 +413,7 @@ fn backup_management_input_is_overlay_on_backups_workspace() {
     let width = 120;
     let height = 32;
     let content_area = ratatui::layout::Rect::new(0, 2, width, height - 3);
+    let viewport = ratatui::layout::Rect::new(0, 0, width, height);
 
     let mut before_terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     before_terminal
@@ -420,7 +422,7 @@ fn backup_management_input_is_overlay_on_backups_workspace() {
     let before = before_terminal.backend().buffer().clone();
 
     assert!(state.begin_backup_prune());
-    let popup = edpcli::tui::ui::centered_modal_rect(content_area, 78, 5);
+    let popup = edpcli::tui::ui::centered_modal_rect(viewport, 78, 5);
     let mut modal_terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     modal_terminal
         .draw(|frame| render::draw(frame, &state))
@@ -504,22 +506,34 @@ fn provision_parameters_jk_changes_field_selection() {
 }
 
 #[test]
-fn provision_disk_layout_jk_scrolls_without_changing_field_selection() {
+fn provision_disk_layout_jk_moves_selection_before_viewport_scrolls() {
     let mut state = provision_state();
     state.provision_focus_pane(PaneId::ProvisionDiskLayout);
-    let selected = state.provision().field_selected;
-    let before = state
-        .pane_viewport(PaneId::ProvisionDiskLayout)
-        .scroll_y
-        .offset;
-    state.provision_move_focused_vertical(1, 8, 100);
-    assert_eq!(state.provision().field_selected, selected);
+    let field_selected = state.provision().field_selected;
+    let first_region = state.disk_layout_selected();
+
+    state.provision_move_focused_vertical(1, 20, 100);
+    assert_eq!(state.provision().field_selected, field_selected);
+    assert!(state.disk_layout_selected() > first_region);
     assert_eq!(
         state
             .pane_viewport(PaneId::ProvisionDiskLayout)
             .scroll_y
             .offset,
-        before + 1
+        0,
+        "selection that remains visible must not move the whole layout page"
+    );
+
+    for _ in 0..8 {
+        state.provision_move_focused_vertical(1, 7, 100);
+    }
+    assert!(
+        state
+            .pane_viewport(PaneId::ProvisionDiskLayout)
+            .scroll_y
+            .offset
+            > 0,
+        "viewport should follow only after the selected row reaches the visible edge"
     );
 }
 
@@ -537,29 +551,23 @@ fn provision_form_tab_changes_focus_without_changing_field_selection() {
 }
 
 #[test]
-fn provision_context_tab_walks_fields_then_layout_and_wraps() {
+fn provision_context_tab_cycles_panes_without_touching_field_selection() {
     let mut state = provision_state();
-    let count = state.provision_visible_fields().len();
-    assert!(count > 1);
+    state.provision_move_field(3);
+    let selected = state.provision().field_selected;
     assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
-    assert_eq!(state.provision().field_selected, 0);
 
-    for expected in 1..count {
-        state.provision_tab_focus(false);
-        assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
-        assert_eq!(state.provision().field_selected, expected);
-    }
     state.provision_tab_focus(false);
     assert_eq!(state.provision_focused_pane(), PaneId::ProvisionDiskLayout);
+    assert_eq!(state.provision().field_selected, selected);
+
     state.provision_tab_focus(false);
     assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
-    assert_eq!(state.provision().field_selected, 0);
+    assert_eq!(state.provision().field_selected, selected);
 
     state.provision_tab_focus(true);
     assert_eq!(state.provision_focused_pane(), PaneId::ProvisionDiskLayout);
-    state.provision_tab_focus(true);
-    assert_eq!(state.provision_focused_pane(), PaneId::ProvisionParameters);
-    assert_eq!(state.provision().field_selected, count - 1);
+    assert_eq!(state.provision().field_selected, selected);
 }
 
 fn assert_complete_layout(model: &DiskLayoutModel) {
@@ -653,7 +661,7 @@ fn provision_disk_layout_tail_starts_collapsed_and_expands_without_changing_geom
     assert!(state
         .disk_layout_detail(&canonical)
         .unwrap()
-        .contains("空闲区域"));
+        .contains("保留区域"));
     assert_eq!(state.provision_layout_model().segments, canonical.segments);
     state.toggle_disk_layout_tail();
     assert_eq!(
@@ -677,6 +685,7 @@ fn official_provision_disk_layout_covers_the_whole_physical_disk() {
         .map(|segment| segment.kind)
         .collect::<Vec<_>>();
     assert!(kinds.contains(&DiskRegionKind::Protocol));
+    assert!(kinds.contains(&DiskRegionKind::Reserved));
     assert!(kinds.contains(&DiskRegionKind::Free));
     assert!(kinds.contains(&DiskRegionKind::Lce));
     assert!(kinds.contains(&DiskRegionKind::BackupMirror));
@@ -747,37 +756,65 @@ fn plain_device_row_uses_native_hardware_model_when_protocol_device_id_is_absent
 }
 
 #[test]
-fn provision_review_tab_cycle_and_vertical_scroll_are_pane_local() {
+fn provision_review_focus_defaults_to_partition_plan_and_navigation_is_pane_local() {
     let mut state = provision_state();
     state.provision_mut().stage = ProvisionStage::Review;
     state.provision_mut().pane_focus = PaneFocus::provision_review();
-    let selected = state.provision().field_selected;
+    let field_selected = state.provision().field_selected;
 
-    assert_eq!(state.provision_focused_pane(), PaneId::ProvisionSummary);
+    assert_eq!(
+        state.provision_focused_pane(),
+        PaneId::ProvisionPartitionPlan
+    );
     for expected in [
+        PaneId::ProvisionExecutionSummary,
         PaneId::ProvisionDiskLayout,
-        PaneId::ProvisionChanges,
-        PaneId::ProvisionSummary,
+        PaneId::ProvisionPartitionPlan,
     ] {
         state.provision_shift_pane(false);
         assert_eq!(state.provision_focused_pane(), expected);
     }
 
+    state.provision_focus_pane(PaneId::ProvisionPartitionPlan);
+    state.provision_move_focused_vertical(1, 1, 100);
+    assert_eq!(state.provision().field_selected, field_selected);
+    assert_eq!(state.provision_review_selected_region(), 0);
+    assert_eq!(
+        state
+            .pane_viewport(PaneId::ProvisionPartitionPlan)
+            .scroll_y
+            .offset,
+        0
+    );
+
     for pane in [
-        PaneId::ProvisionSummary,
         PaneId::ProvisionDiskLayout,
-        PaneId::ProvisionChanges,
+        PaneId::ProvisionExecutionSummary,
     ] {
         state.provision_focus_pane(pane);
         let before = state.pane_viewport(pane).scroll_y.offset;
         state.provision_move_focused_vertical(1, 1, 100);
-        assert_eq!(state.provision().field_selected, selected, "{pane:?}");
+        assert_eq!(state.provision().field_selected, field_selected, "{pane:?}");
         assert_eq!(
             state.pane_viewport(pane).scroll_y.offset,
             before + 1,
             "{pane:?}"
         );
     }
+}
+
+#[test]
+fn provision_review_spatial_focus_matches_top_plus_lower_pair_geometry() {
+    let mut focus = PaneFocus::provision_review();
+    assert_eq!(focus.focused(), PaneId::ProvisionPartitionPlan);
+    focus.spatial_provision_review(0, -1);
+    assert_eq!(focus.focused(), PaneId::ProvisionDiskLayout);
+    focus.spatial_provision_review(0, 1);
+    assert_eq!(focus.focused(), PaneId::ProvisionPartitionPlan);
+    focus.spatial_provision_review(1, 0);
+    assert_eq!(focus.focused(), PaneId::ProvisionExecutionSummary);
+    focus.spatial_provision_review(-1, 0);
+    assert_eq!(focus.focused(), PaneId::ProvisionPartitionPlan);
 }
 
 #[test]
@@ -795,27 +832,17 @@ fn provision_form_narrow_renders_only_the_focused_pane() {
 }
 
 #[test]
-fn provision_review_wide_has_three_panes_and_narrow_uses_focus() {
+fn provision_review_without_prepared_snapshot_fails_closed() {
     let mut state = provision_state();
     state.provision_mut().stage = ProvisionStage::Review;
     state.provision_mut().pane_focus = PaneFocus::provision_review();
 
-    let wide = render_text(&state, 160, 36);
-    assert!(wide.contains("计划摘要"), "{wide}");
-    assert!(wide.contains("磁盘布局"), "{wide}");
-    assert!(wide.contains("变更明细"), "{wide}");
-
-    state.provision_focus_pane(PaneId::ProvisionSummary);
-    let summary = render_text(&state, 80, 24);
-    assert!(summary.contains("计划摘要"), "{summary}");
-    assert!(!summary.contains("磁盘布局"), "{summary}");
-    assert!(!summary.contains("变更明细"), "{summary}");
-
-    state.provision_focus_pane(PaneId::ProvisionChanges);
-    let changes = render_text(&state, 80, 24);
-    assert!(changes.contains("变更明细"), "{changes}");
-    assert!(!changes.contains("计划摘要"), "{changes}");
-    assert!(!changes.contains("磁盘布局"), "{changes}");
+    for (width, height) in [(160, 36), (80, 24)] {
+        let rendered = render_text(&state, width, height);
+        assert!(rendered.contains("计划确认不可用"), "{rendered}");
+        assert!(!rendered.contains("需要勾选格式化"), "{rendered}");
+        assert!(!rendered.contains("尚未获得格式化授权"), "{rendered}");
+    }
 }
 
 #[test]

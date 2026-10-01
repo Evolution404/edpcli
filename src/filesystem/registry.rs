@@ -31,6 +31,36 @@ pub fn detect_boot_sector(
         .map(|detected| detected.map(|value| value.kind()))
 }
 
+pub fn detect_boot_sector_with_geometry(
+    partition_offset: u64,
+    sector_count: u64,
+    boot: &[u8],
+) -> Result<Option<FilesystemKind>, FilesystemError> {
+    if boot.len() != 512 {
+        return Err(FilesystemError::new(
+            FilesystemErrorKind::ReadFailure,
+            "文件系统首扇区长度不是 512B",
+        ));
+    }
+    let registry = default_registry();
+    let mut detection_reader = BootSectorReader::new(boot, sector_count);
+    let Some(detected) = registry.detect(&mut detection_reader)? else {
+        return Ok(None);
+    };
+    let kind = detected.kind();
+    let geometry = super::FilesystemGeometry::new(partition_offset, sector_count, 512);
+    let mut geometry_reader = BootSectorReader::new(boot, sector_count);
+    match detected
+        .driver
+        .matches_geometry(&mut geometry_reader, geometry)
+    {
+        Ok(true) => Ok(Some(kind)),
+        Ok(false) => Ok(None),
+        Err(error) if error.kind == FilesystemErrorKind::Unsupported => Ok(Some(kind)),
+        Err(error) => Err(error),
+    }
+}
+
 pub struct DetectedFilesystem<'a> {
     pub driver: &'a dyn FilesystemDriver,
     pub result: DetectionResult,

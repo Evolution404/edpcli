@@ -16,6 +16,7 @@ pub enum InspectNodeKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiskRegionSemantic {
     Protocol,
+    Reserved,
     PartitionTable,
     PlainPartition,
     Unallocated,

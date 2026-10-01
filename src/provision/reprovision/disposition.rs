@@ -11,7 +11,6 @@ pub enum RegionDisposition {
     PreserveOpaque,
     PreserveVerified,
     RewrapVerified,
-    Migrate,
     Rebuild,
     Drop,
 }

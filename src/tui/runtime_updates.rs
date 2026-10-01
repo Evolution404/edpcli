@@ -15,11 +15,11 @@ pub(super) fn apply_task_updates(
     }
     if let Some(message) = updates.device_error {
         state.set_device_scan_pending(false);
-        state.set_notice(message);
+        state.set_error_notice(message);
     }
     if let Some(message) = updates.backup_error {
         state.set_backup_scan_pending(false);
-        state.set_notice(message);
+        state.set_error_notice(message);
     }
     for (_operation_id, event) in updates.write_progress {
         state.set_write_progress(event);
@@ -67,13 +67,13 @@ pub(super) fn apply_task_updates(
     if let Some((path, result)) = updates.backup_verify {
         state.set_backup_verify_run(None);
         match result {
-            Ok(()) => state.set_notice(format!(
+            Ok(()) => state.set_success_notice(format!(
                 "备份 {} 校验通过：大小与 SHA-256 正常。",
                 path.file_name()
                     .and_then(|name| name.to_str())
                     .unwrap_or("<无效文件名>")
             )),
-            Err(message) => state.set_notice(message),
+            Err(message) => state.set_error_notice(message),
         }
     }
     if let Some((_operation_id, result)) = updates.backup_delete {
@@ -109,8 +109,8 @@ pub(super) fn apply_task_updates(
     if let Some(result) = updates.provision_key_probe {
         state.provision_finish_key_probe(result);
     }
-    if let Some((domain, result)) = updates.provision_key_verify {
-        state.provision_finish_source_password_verify(domain, result);
+    for (domain, revision, result) in updates.provision_key_verify {
+        state.provision_finish_source_password_verify(domain, revision, result);
     }
     if let Some(result) = updates.provision_plan {
         state.provision_finish_plan(result);

@@ -250,7 +250,7 @@ pub(super) fn draw_sector_inspector(
 
     frame.render_widget(
         Paragraph::new(Line::from(
-            "h/l byte · j/k ±16B · 0/$ 行首尾 · gg/G 扇区首尾 · Ctrl-u/d 半页 · PgUp/PgDn 整页 · [/] 前后 sector · v mode · Space/o bit · / n/N 搜索 · gl 跳转 · Esc 返回树",
+            "h/l byte · j/k ±16B · 0/$ 行首尾 · gg/G 扇区首尾 · Ctrl-u/d 半页 · PgUp/PgDn 整页 · [/] 前后 sector · v mode · Space/o bit · / n/N 搜索 · J 跳转 · Esc 返回树",
         ))
         .block(Block::default().borders(Borders::TOP)),
         vertical[2],

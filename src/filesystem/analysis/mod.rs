@@ -46,8 +46,8 @@ pub struct FileEntry {
     /// Creation time (not POSIX inode change time).
     pub ctime: Option<String>,
     pub attributes: u32,
-    /// Read-only physical locator retained for explicit K6 payload streaming.
-    /// It is runtime-only migration metadata and is not serialized.
+    /// Read-only physical locator used by filesystem inspection/verification.
+    /// It is runtime-only analysis metadata and is not serialized.
     #[serde(skip)]
     pub payload_locator: Option<FilePayloadLocator>,
 }

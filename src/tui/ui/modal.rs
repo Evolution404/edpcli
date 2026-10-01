@@ -8,6 +8,7 @@ use ratatui::{
 };
 
 use crate::tui::theme;
+use unicode_width::UnicodeWidthStr;
 
 struct ModalBackground(Style);
 
@@ -35,11 +36,26 @@ pub fn render_modal(
     body: impl FnOnce(&mut Frame, Rect),
 ) {
     let theme = theme::current();
+    let viewport = frame.area();
+    if area.x > viewport.x {
+        let left_x = area.x - 1;
+        for y in area.y..area.bottom() {
+            let crosses_left_border = {
+                let buffer = frame.buffer_mut();
+                UnicodeWidthStr::width(buffer[(left_x, y)].symbol()) == 2
+            };
+            if crosses_left_border {
+                frame.buffer_mut()[(left_x, y)].set_symbol(" ");
+            }
+        }
+    }
     frame.render_widget(Clear, area);
-    let block = Block::default()
+    let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.modal_border())
-        .title(Span::styled(format!(" {title} "), theme.modal_title()));
+        .border_style(theme.modal_border());
+    if !title.trim().is_empty() {
+        block = block.title(Span::styled(format!(" {title} "), theme.modal_title()));
+    }
     let inner = block.inner(area);
     frame.render_widget(block, area);
     body(frame, inner);

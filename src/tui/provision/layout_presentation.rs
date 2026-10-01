@@ -1,6 +1,30 @@
 use super::*;
 
 impl AppState {
+    pub(crate) fn provision_field_region_selection(
+        &self,
+        model: &crate::tui::disk_layout::DiskLayoutModel,
+    ) -> Option<crate::tui::disk_layout::DiskCapacitySelection> {
+        use crate::tui::disk_layout::{DiskCapacitySelection, DiskRegionKind};
+
+        let focus = self
+            .provision_field_id(self.provision.field_selected)
+            .map(ProvisionFieldId::region_focus)
+            .unwrap_or(ProvisionRegionFocus::None);
+        let segment = model.segments.iter().find(|segment| match focus {
+            ProvisionRegionFocus::None => false,
+            ProvisionRegionFocus::Boot => segment.kind == DiskRegionKind::Boot,
+            ProvisionRegionFocus::Share => {
+                matches!(
+                    segment.kind,
+                    DiskRegionKind::Share | DiskRegionKind::Combined
+                )
+            }
+            ProvisionRegionFocus::Encrypt => segment.kind == DiskRegionKind::Encrypt,
+        })?;
+        DiskCapacitySelection::from_segment(segment)
+    }
+
     pub fn provision_layout_editor_details(
         &self,
     ) -> Vec<crate::tui::disk_layout::DiskLayoutDetail> {
@@ -23,11 +47,16 @@ impl AppState {
         let selected =
             if self.provision_focused_pane() == crate::tui::pane::PaneId::ProvisionDiskLayout {
                 layout_selected
-            } else if let Ok(Some((role, ..))) = self.provision_selected_capacity_limit() {
+            } else if let Some(selection) = self.provision_field_region_selection(&visible) {
                 visible
                     .segments
                     .iter()
-                    .position(|segment| segment.kind == DiskRegionKind::from_partition_role(role))
+                    .position(|segment| {
+                        segment.start_lba == selection.start_lba
+                            && segment
+                                .end_exclusive()
+                                .is_ok_and(|end| end == selection.end_exclusive)
+                    })
                     .unwrap_or(layout_selected)
             } else {
                 layout_selected
@@ -43,11 +72,7 @@ impl AppState {
                 String,
             ),
         >::new();
-        let mut usable_summary = format!(
-            "disk{} · 整盘 {}",
-            device.disk,
-            Self::format_sector_size(total)
-        );
+        let mut usable_summary = format!("整盘 {}", Self::format_sector_size(total));
 
         if self.provision.kind == ProvisionKind::Plain {
             let Ok(plan) = self.provision.plain_form.plan(total) else {
@@ -58,8 +83,7 @@ impl AppState {
             };
             let free = plan.gaps.iter().map(|gap| gap.sector_count).sum::<u64>();
             usable_summary = format!(
-                "disk{} · 整盘 {} · 空闲 {}",
-                device.disk,
+                "整盘 {} · 空闲 {}",
                 Self::format_sector_size(total),
                 Self::format_sector_size(free)
             );
@@ -75,77 +99,125 @@ impl AppState {
                 );
             }
         } else {
-            let Ok((resolved, source)) = self.provision_resolved_prefill() else {
+            let Ok((resolved, _)) = self.provision_resolved_prefill() else {
                 return vec![
                     Detail::muted(usable_summary),
                     Detail::danger("目标布局尚未通过校验"),
                 ];
             };
-            let Ok(mut parts) = resolved.target_partitions(crate::common::SECTOR as u64) else {
+            let Ok(mut parts) = resolved.draft_partitions(crate::common::SECTOR as u64) else {
                 return vec![
                     Detail::muted(usable_summary),
                     Detail::danger("目标分区几何无效"),
                 ];
             };
             parts.sort_by_key(|part| part.start_lba);
-            let unallocated =
-                crate::provision::validate_target_geometry(&parts, resolved.usable_end_lba)
-                    .unwrap_or_default();
+            let geometry_validation =
+                crate::provision::validate_target_geometry(&parts, resolved.usable_end_lba);
+            let unallocated = geometry_validation.as_ref().copied().unwrap_or_default();
             usable_summary = format!(
-                "disk{} · 可分区 LBA {}–{} · 剩余 {}",
-                device.disk,
+                "可分区 LBA {}–{} · {}",
                 crate::provision::OFFICIAL_PARTITION_START_SECTOR,
                 resolved.usable_end_lba.saturating_sub(1),
-                Self::format_sector_size(unallocated)
+                if geometry_validation.is_ok() {
+                    format!("剩余 {}", Self::format_sector_size(unallocated))
+                } else {
+                    "当前草稿有冲突".to_string()
+                }
             );
+            let preflight = self.provision_preflight();
+            let preflight_error = preflight.as_ref().err().cloned();
             for part in &parts {
-                let assessment = crate::application::provision::PreserveAssessment::for_partition(
-                    source
-                        .as_ref()
-                        .and_then(|profile| profile.partition(part.role)),
-                    part,
-                );
+                let decision = preflight
+                    .as_ref()
+                    .ok()
+                    .and_then(|preflight| preflight.partition(part.role));
+                let (status, tone, reason) = match decision {
+                    Some(decision) => {
+                        use preflight::ProvisionPreflightKind as Kind;
+                        let (status, tone) = match decision.kind {
+                            Kind::Waiting => (
+                                format!(
+                                    "{} 验证中",
+                                    crate::tui::animation::spinner_glyph(self.animation_frame())
+                                ),
+                                Tone::Accent,
+                            ),
+                            Kind::Passthrough => ("✓ 透传".into(), Tone::Success),
+                            Kind::Rewrap => ("✓ 改密".into(), Tone::Success),
+                            Kind::Preserve => ("✓ 候选保留".into(), Tone::Success),
+                            Kind::Rebuild => ("⚠ 重建".into(), Tone::Warning),
+                            Kind::BlockedNeedsFormat | Kind::BlockedNeedsTargetPassword => {
+                                ("⚠ 需重建".into(), Tone::Warning)
+                            }
+                        };
+                        (status, tone, decision.reason.clone())
+                    }
+                    None => (
+                        "⚠ 计划异常".into(),
+                        Tone::Danger,
+                        preflight_error.clone().unwrap_or_else(|| {
+                            format!("内部错误：{}缺少同步预检结论", part.role.label())
+                        }),
+                    ),
+                };
                 partition_status.insert(
                     (part.start_lba, part.sector_count),
-                    (
-                        if assessment.candidate {
-                            "✓ 候选保留".into()
-                        } else {
-                            "⚠ 需重建".into()
-                        },
-                        if assessment.candidate {
-                            Tone::Success
-                        } else {
-                            Tone::Warning
-                        },
-                        Some(part.role),
-                        assessment.reason().to_string(),
-                    ),
+                    (status, tone, Some(part.role), reason),
                 );
             }
         }
 
         rows.push(Detail::muted(usable_summary));
-        rows.push(Detail::accent(
-            "区域              容量          LBA 范围               处理",
-        ));
+        rows.push(Detail::region_header());
 
         for (index, segment) in visible.segments.iter().enumerate() {
+            let role_for_kind = match segment.kind {
+                DiskRegionKind::Boot => Some(crate::provision::PartitionRole::Boot),
+                DiskRegionKind::Share => Some(crate::provision::PartitionRole::Share),
+                DiskRegionKind::Combined => {
+                    Some(crate::provision::PartitionRole::BootShareCombined)
+                }
+                DiskRegionKind::Encrypt => Some(crate::provision::PartitionRole::Encrypt),
+                DiskRegionKind::Compatibility => {
+                    Some(crate::provision::PartitionRole::CompatibilityReserve)
+                }
+                _ => None,
+            };
+            let fallback_role_status = || {
+                role_for_kind.and_then(|role| {
+                    partition_status
+                        .values()
+                        .find(|(_, _, candidate, _)| *candidate == Some(role))
+                        .cloned()
+                })
+            };
             let (status, tone, _, _) = partition_status
                 .get(&(segment.start_lba, segment.sector_count))
                 .cloned()
+                .or_else(fallback_role_status)
                 .unwrap_or_else(|| match segment.kind {
-                    DiskRegionKind::Free => ("空闲".into(), Tone::Muted, None, String::new()),
-                    DiskRegionKind::Unknown => {
-                        ("待确认".into(), Tone::Warning, None, String::new())
-                    }
+                    DiskRegionKind::Conflict => (
+                        "✗ 冲突".into(),
+                        Tone::Danger,
+                        None,
+                        "当前草稿有多个区域覆盖同一 LBA 范围".into(),
+                    ),
+                    DiskRegionKind::Reserved => ("● 保留".into(), Tone::Muted, None, String::new()),
+                    DiskRegionKind::Free => ("○ 空闲".into(), Tone::Muted, None, String::new()),
+                    DiskRegionKind::Unknown => (
+                        "⚠ 计划异常".into(),
+                        Tone::Danger,
+                        None,
+                        "目标布局存在未分类区域".into(),
+                    ),
                     DiskRegionKind::Plain => (
                         "⚠ 需重建".into(),
                         Tone::Warning,
                         None,
                         "目标普通分区将重建".into(),
                     ),
-                    _ => ("固定".into(), Tone::Muted, None, String::new()),
+                    _ => ("● 固定".into(), Tone::Muted, None, String::new()),
                 });
             rows.push(Detail::region_columns(
                 segment.kind,
@@ -163,18 +235,22 @@ impl AppState {
         }
 
         if let Some(segment) = visible.segments.get(selected) {
-            let (status, tone, role, reason) = partition_status
+            let (status, tone, role, _) = partition_status
                 .get(&(segment.start_lba, segment.sector_count))
                 .cloned()
                 .unwrap_or_else(|| match segment.kind {
-                    DiskRegionKind::Free => ("空闲".into(), Tone::Muted, None, String::new()),
-                    DiskRegionKind::Unknown => {
-                        ("待确认".into(), Tone::Warning, None, String::new())
-                    }
-                    _ => ("固定".into(), Tone::Muted, None, String::new()),
+                    DiskRegionKind::Reserved => ("● 保留".into(), Tone::Muted, None, String::new()),
+                    DiskRegionKind::Free => ("○ 空闲".into(), Tone::Muted, None, String::new()),
+                    DiskRegionKind::Unknown => (
+                        "⚠ 计划异常".into(),
+                        Tone::Danger,
+                        None,
+                        "目标布局存在未分类区域".into(),
+                    ),
+                    _ => ("● 固定".into(), Tone::Muted, None, String::new()),
                 });
             rows.push(Detail::muted(""));
-            let title = format!("当前区域  {}    {}", segment.label, status);
+            let title = format!("当前区域  {} · {}", segment.label, status);
             rows.push(match tone {
                 Tone::Warning => Detail::warning(title),
                 Tone::Danger => Detail::danger(title),
@@ -183,45 +259,42 @@ impl AppState {
                 Tone::Muted => Detail::accent(title),
             });
             rows.push(Detail::muted(format!(
-                "范围      LBA {}–{} · {} sector",
+                "LBA {}–{} · {}",
                 segment.start_lba,
                 segment.end_exclusive().unwrap_or(segment.start_lba + 1) - 1,
-                segment.sector_count
+                Self::format_sector_size(segment.sector_count)
             )));
-            if !reason.is_empty() {
-                rows.push(Detail::muted(format!("原因      {reason}")));
-            }
 
-            if let (Some(role), Ok(Some((limit_role, current, max, limiter, end)))) =
+            if let (Some(role), Ok(Some((limit_role, current, max, ..)))) =
                 (role, self.provision_selected_capacity_limit())
             {
                 if role == limit_role {
                     rows.push(Detail::muted(format!(
-                        "大小      {} · {} sector",
+                        "当前容量 {} · 最大 {}",
                         Self::format_sector_size(current),
-                        current
+                        Self::format_sector_size(max)
                     )));
-                    rows.push(Detail::muted(format!(
-                        "最大可设  {} · {} sector",
-                        Self::format_sector_size(max),
-                        max
-                    )));
-                    rows.push(Detail::muted(format!(
-                        "还能增加  {}",
-                        Self::format_sector_size(max.saturating_sub(current))
-                    )));
-                    rows.push(Detail::muted(match limiter {
-                        Some((next_role, next_start)) => format!(
-                            "限制      后续{}固定起点 LBA {next_start}",
-                            next_role.label()
-                        ),
-                        None => format!("限制      可分区末端 LBA {}", end.saturating_sub(1)),
-                    }));
                 }
             }
         }
 
-        rows.push(Detail::success("✓ 当前布局无重叠、未越界"));
+        if self.provision.kind != ProvisionKind::Plain {
+            if let Ok((resolved, _)) = self.provision_resolved_prefill() {
+                if let Ok(parts) = resolved.draft_partitions(crate::common::SECTOR as u64) {
+                    match crate::provision::validate_target_geometry(
+                        &parts,
+                        resolved.usable_end_lba,
+                    ) {
+                        Ok(_) => rows.push(Detail::success("✓ 当前布局无重叠、未越界")),
+                        Err(message) => {
+                            rows.push(Detail::danger(format!("✗ 当前草稿布局无效: {message}")))
+                        }
+                    }
+                }
+            }
+        } else {
+            rows.push(Detail::success("✓ 当前布局无重叠、未越界"));
+        }
         rows
     }
 }

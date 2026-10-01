@@ -117,7 +117,11 @@ fn render_uses_semantic_colors_and_no_color_remains_plain() {
         colored.contains("\x1b[36m输电运检中心\x1b[0m"),
         "{colored:?}"
     );
-    assert!(colored.contains("\x1b[35m125.83GB\x1b[0m"), "{colored:?}");
+    let capacity = edpcli::common::fmt_capacity(245_760_000 * 512);
+    assert!(
+        colored.contains(&format!("\x1b[35m{capacity}\x1b[0m")),
+        "{colored:?}"
+    );
     assert!(
         colored.contains("\x1b[32m0x980E9B2F / 计算 0x980E9B2F ✓\x1b[0m"),
         "{colored:?}"

@@ -15,7 +15,7 @@ pub struct ProvisionPrefill {
 }
 
 impl ProvisionPrefill {
-    pub fn target_partitions(
+    pub fn draft_partitions(
         &self,
         sector_size: u64,
     ) -> Result<Vec<TargetPartitionGeometry>, String> {
@@ -116,6 +116,14 @@ impl ProvisionPrefill {
                 );
             }
         }
+        Ok(out)
+    }
+
+    pub fn target_partitions(
+        &self,
+        sector_size: u64,
+    ) -> Result<Vec<TargetPartitionGeometry>, String> {
+        let out = self.draft_partitions(sector_size)?;
         validate_target_geometry(&out, self.usable_end_lba)?;
         Ok(out)
     }

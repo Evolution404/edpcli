@@ -39,6 +39,59 @@ fn classify_live_source_identity(
     )
 }
 
+pub(super) fn read_plain_source_extents(
+    dev: &mut dyn SectorDev,
+    total_sectors: u64,
+) -> EdpCliResult<Vec<crate::provision::PlainSourceExtent>> {
+    let table = crate::partition_table::read_partition_table(total_sectors, |lba| {
+        let lba =
+            u32::try_from(lba).map_err(|_| format!("Plain partition LBA{lba} exceeds u32"))?;
+        dev.read_sector(lba)
+            .map_err(|error| format!("read Plain partition LBA{lba}: {error}"))
+    })
+    .map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 无法读取普通盘物理分区表: {message}"),
+        )
+    })?;
+
+    let mut extents = Vec::with_capacity(table.partitions.len());
+    for partition in table.partitions {
+        let start = u32::try_from(partition.start_lba).map_err(|_| {
+            err(
+                EXIT_TARGET,
+                format!(
+                    "错误: 普通盘分区起点 LBA{} 超出当前读取范围",
+                    partition.start_lba
+                ),
+            )
+        })?;
+        let boot = dev.read_sector(start).map_err(|error| {
+            err(
+                EXIT_TARGET,
+                format!(
+                    "错误: 无法读取普通盘分区 P{} 启动扇区: {error}",
+                    partition.index
+                ),
+            )
+        })?;
+        let filesystem = crate::filesystem::detect_boot_sector_with_geometry(
+            partition.start_lba,
+            partition.sector_count,
+            &boot,
+        )
+        .ok()
+        .flatten();
+        extents.push(crate::provision::PlainSourceExtent {
+            start_lba: partition.start_lba,
+            sector_count: partition.sector_count,
+            filesystem,
+        });
+    }
+    Ok(extents)
+}
+
 fn resolved_source_password<'a>(
     source: &ParsedExistingProvision,
     key_domains: &'a KeyDomainSecrets,
@@ -147,99 +200,6 @@ pub(super) fn target_encrypt_capacity_override(
     override_capacity(mib, sectors)
 }
 
-struct PlannedMigrationImageReader<'a> {
-    image: &'a SparseFilesystemImage,
-}
-
-impl PartitionReader for PlannedMigrationImageReader<'_> {
-    fn read_sector(&mut self, relative_lba: u64) -> std::io::Result<Vec<u8>> {
-        self.image
-            .sector_or_zero(relative_lba)
-            .map(|sector| sector.to_vec())
-            .ok_or_else(|| std::io::Error::other("migration image read outside partition"))
-    }
-}
-
-fn verify_migration_image(
-    image: &SparseFilesystemImage,
-    target: &crate::provision::TargetPartitionGeometry,
-    migration: &super::migration::PreparedMigrationTarget,
-) -> EdpCliResult<()> {
-    let geometry = PartitionGeometry {
-        index: migration.target_index,
-        partition_type: 0,
-        partition_count: 1,
-        need_disturb: 0,
-        need_encrypt: 0,
-        start_sector: target.start_lba,
-        sector_size: SECTOR as u64,
-        partition_size: target
-            .sector_count
-            .checked_mul(SECTOR as u64)
-            .ok_or_else(|| err(EXIT_TARGET, "错误: K6 目标分区字节数溢出"))?,
-        sector_count: target.sector_count,
-        user_key_crc: 0,
-        file_key_crc: 0,
-        encrypt_mode: 0,
-    };
-    let mut reader = PlannedMigrationImageReader { image };
-    let report = analyze_partition(&geometry, &mut reader);
-    if report.status != AnalysisStatus::Parsed
-        || report.file_count != Some(migration.file_count)
-        || report.directory_count != Some(migration.directory_count)
-    {
-        return Err(err(
-            EXIT_TARGET,
-            format!(
-                "错误: {} K6 目标文件系统生成后语义校验失败: {}",
-                migration.role.label(),
-                report.reason
-            ),
-        ));
-    }
-    let parsed = report.entries.ok_or_else(|| {
-        err(
-            EXIT_TARGET,
-            format!(
-                "错误: {} K6 目标文件系统缺少文件清单",
-                migration.role.label()
-            ),
-        )
-    })?;
-    for staged in migration.entries.iter().filter(|entry| !entry.is_directory) {
-        let parsed_entry = parsed
-            .iter()
-            .find(|entry| !entry.is_directory && entry.path == staged.path)
-            .ok_or_else(|| {
-                err(
-                    EXIT_TARGET,
-                    format!("错误: K6 目标镜像缺少文件 {:?}", staged.path),
-                )
-            })?;
-        let mut reader = PlannedMigrationImageReader { image };
-        let mut actual = Vec::new();
-        let summary = stream_file_payload(
-            &mut reader,
-            parsed_entry,
-            staged.data.len() as u64,
-            &mut actual,
-        )
-        .map_err(|message| {
-            err(
-                EXIT_TARGET,
-                format!("错误: K6 目标文件 {:?} 回读失败: {message}", staged.path),
-            )
-        })?;
-        if summary.logical_size != staged.data.len() as u64 || actual != staged.data {
-            return Err(err(
-                EXIT_TARGET,
-                format!("错误: K6 目标文件 {:?} 内容校验失败", staged.path),
-            ));
-        }
-    }
-    Ok(())
-}
-
 /// The physical path for both plain and registered USB media. Source mode is
 /// consulted only while deriving defaults and Preserve candidates.
 pub fn prepare_target_provision(
@@ -276,6 +236,11 @@ pub fn prepare_target_provision(
         )
     })?;
     let before_pin = MediaIdentityPin::new(source_identity, &source_metadata);
+    let plain_source_extents = if source_kind == crate::provision::DiskProvisionKind::Plain {
+        read_plain_source_extents(dev, total_sectors)?
+    } else {
+        Vec::new()
+    };
     let source = if source_kind == crate::provision::DiskProvisionKind::Plain {
         None
     } else {
@@ -383,8 +348,9 @@ pub fn prepare_target_provision(
             }
         }
     }
-    let mut target_plan = TargetProvisionPlan::build(
+    let mut target_plan = TargetProvisionPlan::build_with_plain_extents(
         source.as_ref(),
+        &plain_source_extents,
         selected_mode,
         &targets,
         compatibility.start_lba,
@@ -396,21 +362,6 @@ pub fn prepare_target_provision(
             format!("错误: 无法生成统一目标制盘计划: {message}"),
         )
     })?;
-    let mut prepared_plain_import = None;
-    if source.is_none() && source_kind == crate::provision::DiskProvisionKind::Plain {
-        let target_index = super::migration::plain_import_target_index(&target_plan)?;
-        let role = target_plan.partitions[target_index].geometry.role;
-        if !request.format.choice(role).0 {
-            let import =
-                super::migration::prepare_plain_to_official(dev, &target_plan, total_sectors)?;
-            let target = &mut target_plan.partitions[import.target_index];
-            target.disposition = RegionDisposition::Migrate;
-            target.action = RegionDisposition::Migrate.legacy_action();
-            target.migration_sources = import.sources;
-            target.reason = "K6 Plain→EDP 文件级无损导入".into();
-            prepared_plain_import = Some(import.prepared);
-        }
-    }
     let explicit_rebuild_roles = target_plan
         .partitions
         .iter()
@@ -421,52 +372,28 @@ pub fn prepare_target_provision(
         target_plan.force_rebuild_for_format(role);
     }
     for part in &target_plan.partitions {
-        match part.disposition {
-            RegionDisposition::Migrate => {
-                if part.migration_sources.is_empty() {
-                    return Err(err(
-                        EXIT_TARGET,
-                        format!(
-                            "错误: {}为 Migrate 但缺少 typed migration source",
-                            part.geometry.role.label()
-                        ),
-                    ));
-                }
-                if request.format.choice(part.geometry.role).0 {
-                    return Err(err(
-                        EXIT_TARGET,
-                        format!(
-                            "错误: {}不能同时请求 Migrate 与显式格式化",
-                            part.geometry.role.label()
-                        ),
-                    ));
-                }
-            }
-            RegionDisposition::Rebuild
-                if part.geometry.role != PartitionRole::CompatibilityReserve
-                    && !request.format.choice(part.geometry.role).0 =>
-            {
-                return Err(err(
-                    EXIT_TARGET,
-                    format!(
-                        "错误: {}为 Rebuild，必须显式启用完整文件系统初始化；拒绝 K_new + old ciphertext",
-                        part.geometry.role.label()
-                    ),
-                ));
-            }
-            _ => {}
+        if part.password_disposition == Some(crate::provision::PasswordDisposition::Blocked) {
+            return Err(err(
+                EXIT_TARGET,
+                format!(
+                    "错误: {}密码域当前为“需重建”，但尚未获得用户的格式化授权",
+                    part.geometry.role.label()
+                ),
+            ));
+        }
+        if part.disposition == RegionDisposition::Rebuild
+            && part.geometry.role != PartitionRole::CompatibilityReserve
+            && !request.format.choice(part.geometry.role).0
+        {
+            return Err(err(
+                EXIT_TARGET,
+                format!(
+                    "错误: {}为 Rebuild，必须显式启用完整文件系统初始化；拒绝 K_new + old ciphertext",
+                    part.geometry.role.label()
+                ),
+            ));
         }
     }
-    let prepared_migrations = if let Some(prepared) = prepared_plain_import {
-        vec![prepared]
-    } else {
-        super::migration::prepare_migrations(
-            dev,
-            source.as_ref(),
-            &target_plan,
-            &request.key_domains,
-        )?
-    };
     let source_onlyid = source.as_ref().and_then(|_| {
         source_metadata
             .get(4 * SECTOR..5 * SECTOR)
@@ -520,6 +447,7 @@ pub fn prepare_target_provision(
         dept,
         label,
     )
+    .and_then(|metadata| metadata.with_lba8_identity(request.lba8_identity.clone()))
     .map_err(|message| err(EXIT_TARGET, format!("错误: 制盘身份字段无效: {message}")))?;
     let profile = ProvisionProfile::canonical_v1().with_pass_info_policy(pass_info_policy);
     let spec = ProvisionSpec::new(target, metadata, profile)
@@ -555,7 +483,7 @@ pub fn prepare_target_provision(
     let mut file_keys = Vec::with_capacity(target_plan.partitions.len());
     for (index, part) in target_plan.partitions.iter().enumerate() {
         match part.disposition {
-            RegionDisposition::PreserveOpaque | RegionDisposition::PreserveVerified => {
+            RegionDisposition::PreserveOpaque => {
                 let record = part.preserved_record.ok_or_else(|| {
                     err(
                         EXIT_TARGET,
@@ -576,6 +504,30 @@ pub fn prepare_target_provision(
                                 .map_err(|message| err(EXIT_TARGET, message))?,
                         )
                         .map_err(|message| err(EXIT_TARGET, message))?;
+                }
+            }
+            RegionDisposition::PreserveVerified => {
+                file_keys.push([0; 16]);
+                if let Some(record) = part.preserved_record {
+                    if record.lba12.need_encrypt != 0 {
+                        plan = plan
+                            .with_partition_key_material(
+                                index,
+                                record.lba7_key_material(),
+                                record
+                                    .lba12_key_material()
+                                    .map_err(|message| err(EXIT_TARGET, message))?,
+                            )
+                            .map_err(|message| err(EXIT_TARGET, message))?;
+                    }
+                } else if KeyDomainRole::from_partition_role(part.geometry.role).is_some() {
+                    return Err(err(
+                        EXIT_TARGET,
+                        format!(
+                            "错误: {}密码域保留计划缺少来源 key record",
+                            part.geometry.role.label()
+                        ),
+                    ));
                 }
             }
             RegionDisposition::RewrapVerified => {
@@ -649,33 +601,6 @@ pub fn prepare_target_provision(
                     file_keys.push([0; 16]);
                 }
             }
-            RegionDisposition::Migrate => {
-                if KeyDomainRole::from_partition_role(part.geometry.role).is_some() {
-                    let password = request
-                        .key_domains
-                        .target_password(part.geometry.role)
-                        .ok_or_else(|| {
-                            err(
-                                EXIT_TARGET,
-                                format!(
-                                    "错误: {} K6 迁移目标密码不能为空",
-                                    part.geometry.role.label()
-                                ),
-                            )
-                        })?;
-                    let key = random_array::<16>()?;
-                    file_keys.push(key);
-                    plan = plan
-                        .with_partition_key_material(
-                            index,
-                            wrap_legacy_lba7_file_key(password, random_array::<8>()?),
-                            wrap_file_key(password, key, FileKeyWrapMode::Sm4),
-                        )
-                        .map_err(|message| err(EXIT_TARGET, message))?;
-                } else {
-                    file_keys.push([0; 16]);
-                }
-            }
             RegionDisposition::Drop => {
                 return Err(err(
                     EXIT_TARGET,
@@ -699,23 +624,22 @@ pub fn prepare_target_provision(
             format!("错误: 无法构造目标格式化计划: {message}"),
         )
     })?;
-    let expected_serial_digest =
-        if format_targets.iter().any(|choice| choice.selected) || !prepared_migrations.is_empty() {
-            let evidence = super::super::media_identity::serial_digest_evidence(
-                runner.hardware_serial(disk).as_deref(),
-            );
-            if evidence.quality != super::super::media_identity::SerialQuality::Usable {
-                return Err(err(
-                    EXIT_TARGET,
-                    "错误: 无法读取可用 USB 硬件序列号，拒绝安排格式化或 K6 数据迁移",
-                ));
-            }
-            evidence.sha256
-        } else {
-            None
-        };
+    let expected_serial_digest = if format_targets.iter().any(|choice| choice.selected) {
+        let evidence = super::super::media_identity::serial_digest_evidence(
+            runner.hardware_serial(disk).as_deref(),
+        );
+        if evidence.quality != super::super::media_identity::SerialQuality::Usable {
+            return Err(err(
+                EXIT_TARGET,
+                "错误: 无法读取可用 USB 硬件序列号，拒绝安排格式化",
+            ));
+        }
+        evidence.sha256
+    } else {
+        None
+    };
     let entropy = ProvisionEntropy::new(random_array::<252>()?);
-    let mut write_image =
+    let write_image =
         build_official_provision_protocol_image(&spec, &entropy, &plan).map_err(|message| {
             err(
                 EXIT_TARGET,
@@ -723,76 +647,6 @@ pub fn prepare_target_provision(
             )
         })?;
 
-    for migration in &prepared_migrations {
-        let part = target_plan
-            .partitions
-            .get(migration.target_index)
-            .ok_or_else(|| err(EXIT_TARGET, "错误: K6 目标分区索引越界"))?;
-        let choice = format_targets
-            .get(migration.target_index)
-            .ok_or_else(|| err(EXIT_TARGET, "错误: K6 目标格式信息缺失"))?;
-        if choice.target.role != migration.role || choice.selected {
-            return Err(err(
-                EXIT_TARGET,
-                format!(
-                    "错误: {} K6 迁移目标与格式化计划不一致",
-                    migration.role.label()
-                ),
-            ));
-        }
-        let filesystem = part.geometry.filesystem.ok_or_else(|| {
-            err(
-                EXIT_TARGET,
-                format!("错误: {} K6 迁移目标没有文件系统", migration.role.label()),
-            )
-        })?;
-        let filesystem_entries = migration
-            .entries
-            .iter()
-            .map(FilesystemMigrationEntry::from)
-            .collect::<Vec<_>>();
-        let plain = build_migrated_filesystem(
-            filesystem,
-            part.geometry.start_lba,
-            part.geometry.sector_count,
-            serials[migration.target_index],
-            &choice.volume_label,
-            &filesystem_entries,
-        )
-        .map_err(|message| {
-            err(
-                EXIT_TARGET,
-                format!(
-                    "错误: {} K6 目标文件系统构造失败: {message}",
-                    migration.role.label()
-                ),
-            )
-        })?;
-        verify_migration_image(&plain, &part.geometry, migration)?;
-        let physical = if choice.target.physically_encrypted {
-            plain.transformed(&EdpSm4Transform::new(file_keys[migration.target_index]))
-        } else {
-            plain
-        };
-        for (&relative_lba, sector) in physical.sectors() {
-            let absolute = part
-                .geometry
-                .start_lba
-                .checked_add(relative_lba)
-                .and_then(|lba| u32::try_from(lba).ok())
-                .ok_or_else(|| err(EXIT_TARGET, "错误: K6 目标写入 LBA 溢出"))?;
-            if write_image
-                .patch
-                .insert(absolute, sector.to_vec())
-                .is_some()
-            {
-                return Err(err(
-                    EXIT_TARGET,
-                    format!("错误: K6 目标 LBA{absolute} 与既有写集合重叠"),
-                ));
-            }
-        }
-    }
     for key in &mut file_keys {
         key.fill(0);
     }
@@ -801,6 +655,7 @@ pub fn prepare_target_provision(
     Ok(PreparedNewProvision {
         disk,
         device_id,
+        source_kind,
         mode: selected_mode,
         force_change_password,
         pass_info_policy,
@@ -959,7 +814,7 @@ pub fn prepare_provision(
                     format!("错误: 无法构造 Plain 分区计划: {message}"),
                 )
             })?;
-            prepare_plain_provision_with_key_domains(runner, disk, plan, &request.key_domains, dev)
+            prepare_plain_provision(runner, disk, plan, dev)
                 .map(|prepared| PreparedProvision::Plain(Box::new(prepared)))
         }
     }
@@ -969,16 +824,6 @@ pub fn prepare_plain_provision(
     runner: &dyn CmdRunner,
     disk: u32,
     plan: PlainProvisionPlan,
-    dev: &mut dyn SectorDev,
-) -> EdpCliResult<PreparedPlainProvision> {
-    prepare_plain_provision_with_key_domains(runner, disk, plan, &KeyDomainSecrets::default(), dev)
-}
-
-fn prepare_plain_provision_with_key_domains(
-    runner: &dyn CmdRunner,
-    disk: u32,
-    plan: PlainProvisionPlan,
-    key_domains: &KeyDomainSecrets,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<PreparedPlainProvision> {
     let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
@@ -1029,47 +874,18 @@ fn prepare_plain_provision_with_key_domains(
             ))
         };
 
-    let staged_to_plain = if source_kind == crate::provision::DiskProvisionKind::Plain {
-        Vec::new()
-    } else {
-        let image = ProvisionImage::from_bytes(source_metadata.clone()).map_err(|message| {
-            err(
-                EXIT_TARGET,
-                format!("错误: EDP→Plain 来源协议镜像无效: {message}"),
-            )
-        })?;
-        let existing = parse_existing_provision(&image, &device_id, total_sectors)
-            .map_err(|message| {
-                err(
-                    EXIT_TARGET,
-                    format!("错误: EDP→Plain 来源注册结构无法解析: {message}"),
-                )
-            })?
-            .ok_or_else(|| err(EXIT_TARGET, "错误: EDP→Plain 缺少来源注册结构"))?;
-        let target_capacity = plan.partitions[0]
-            .sector_count
-            .checked_mul(SECTOR as u64)
-            .ok_or_else(|| err(EXIT_TARGET, "错误: Plain P1 容量溢出"))?;
-        super::migration::prepare_existing_to_plain(dev, &existing, target_capacity, key_domains)?
-    };
-
     let mut volume_serials = Vec::with_capacity(plan.partitions.len());
     for _ in &plan.partitions {
         volume_serials.push(u32::from_le_bytes(random_array::<4>()?));
     }
-    let write_plan = if staged_to_plain.is_empty() {
-        build_plain_provision_write_plan(&plan, source_lce, &volume_serials)
-    } else {
-        let mut migrations = vec![Vec::new(); plan.partitions.len()];
-        migrations[0] = staged_to_plain;
-        build_plain_migrated_provision_write_plan(&plan, source_lce, &volume_serials, &migrations)
-    }
-    .map_err(|message| {
-        err(
-            EXIT_TARGET,
-            format!("错误: 无法构造 Plain 写盘计划: {message}"),
-        )
-    })?;
+    let write_plan = build_plain_provision_write_plan(&plan, source_lce, &volume_serials).map_err(
+        |message| {
+            err(
+                EXIT_TARGET,
+                format!("错误: 无法构造 Plain 写盘计划: {message}"),
+            )
+        },
+    )?;
 
     Ok(PreparedPlainProvision {
         disk,

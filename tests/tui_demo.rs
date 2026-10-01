@@ -1,5 +1,6 @@
 use edpcli::tui::{demo, render};
 use ratatui::{backend::TestBackend, Terminal};
+use unicode_width::UnicodeWidthStr;
 
 fn screen_text(scene: &str) -> String {
     let state = demo::build_scene(scene).unwrap();
@@ -97,6 +98,76 @@ fn demo_fixtures_expose_typed_inspect_layout_backups_and_running_progress() {
 }
 
 #[test]
+fn provision_result_demo_uses_real_result_workbench_state() {
+    let state = demo::build_scene("provision-result-success").unwrap();
+    assert!(state.provision().result_plan.is_some());
+    assert_eq!(
+        state.provision().result_workbench.selected_partition,
+        Some(0)
+    );
+    assert!(state
+        .provision()
+        .result_workbench
+        .region_selection()
+        .is_some());
+
+    let screen = screen_text("provision-result-success");
+    let compact = screen.replace(' ', "");
+    for expected in ["制盘结果", "分区结果", "全盘布局", "验收与执行", "▲"] {
+        assert!(
+            compact.contains(expected),
+            "missing {expected} in result demo"
+        );
+    }
+}
+
+#[test]
+fn provision_result_partition_row_is_contiguous_and_omits_lba_range() {
+    let state = demo::build_scene("provision-result-success").unwrap();
+    let (width, height) = (160, 45);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let buffer = terminal.backend().buffer();
+
+    let left_limit = 76u16;
+    let (p1_x, row_y) = (0..height)
+        .find_map(|y| {
+            (0..left_limit.saturating_sub(1)).find_map(|x| {
+                (buffer[(x, y)].symbol() == "P" && buffer[(x + 1, y)].symbol() == "1")
+                    .then_some((x, y))
+            })
+        })
+        .expect("selected P1 row in result partition table");
+    let selected_bg = buffer[(p1_x, row_y)].bg;
+    let selected_x = (0..left_limit)
+        .filter(|x| buffer[(*x, row_y)].bg == selected_bg)
+        .collect::<Vec<_>>();
+    assert!(
+        selected_x.len() > 20,
+        "selected result row background is too short"
+    );
+    let first = *selected_x.first().unwrap();
+    let last = *selected_x.last().unwrap();
+    for x in first..=last {
+        if buffer[(x, row_y)].bg == selected_bg {
+            continue;
+        }
+        let wide_continuation =
+            x > first && UnicodeWidthStr::width(buffer[(x - 1, row_y)].symbol()) == 2;
+        assert!(
+            wide_continuation,
+            "selected result row background has a real gap at x={x}, y={row_y}"
+        );
+    }
+
+    let screen = screen_text("provision-result-success");
+    assert!(
+        !screen.contains("LBA 范围"),
+        "result table must not expose LBA range"
+    );
+}
+
+#[test]
 fn demo_timeline_is_deterministic_at_a_frozen_tick() {
     let base = std::time::Instant::now();
     let first = demo::timeline::DemoTimeline::at_tick(3, base);
@@ -117,33 +188,36 @@ fn long_provision_demo_exercises_slow_protocol_and_partition_progress() {
         demo::timeline::DemoTimeline::LONG_LAST_TICK,
         base,
     );
-    assert!(run.log.len() >= 40);
-    assert!(run.log.iter().any(|event| {
-        event.step == Step::ProtocolWrite
-            && event.work.is_some_and(|work| {
-                work.activity == Some(TransactionActivityPhase::Write)
-                    && work.current > 0
-                    && work.current < work.total
-            })
-    }));
+    assert_eq!(
+        run.log.len(),
+        11,
+        "demo history should contain milestones only"
+    );
+    assert!(
+        run.log.iter().all(|event| event.work.is_none()),
+        "high-frequency work snapshots must stay out of history"
+    );
     for role in [
         PartitionRole::Boot,
         PartitionRole::Share,
         PartitionRole::Encrypt,
     ] {
-        assert!(run.log.iter().any(|event| {
-            event.step == Step::PartitionFormat(role)
-                && event.work.is_some_and(|work| {
-                    work.activity == Some(TransactionActivityPhase::FormatWrite)
-                })
-        }));
-        assert!(run.log.iter().any(|event| {
-            event.step == Step::PartitionFormat(role)
-                && event.work.is_some_and(|work| {
-                    work.activity == Some(TransactionActivityPhase::FormatReadback)
-                })
-        }));
+        assert!(run
+            .log
+            .iter()
+            .any(|event| event.step == Step::PartitionFormat(role)));
     }
+    let running = demo::timeline::DemoTimeline::long_at_tick(
+        demo::timeline::DemoTimeline::LONG_INITIAL_TICK,
+        base,
+    );
+    assert_eq!(running.log.len(), 6);
+    assert!(running.latest.is_some_and(|event| {
+        event.step == Step::PartitionFormat(PartitionRole::Boot)
+            && event
+                .work
+                .is_some_and(|work| work.activity == Some(TransactionActivityPhase::FormatWrite))
+    }));
     assert!(run
         .log
         .iter()
@@ -161,9 +235,10 @@ fn long_provision_scene_opens_running_page_with_nested_activity_visible() {
     let run = state.provision().run.as_ref().expect("long demo progress");
     assert!(run.log.len() > 5);
     let screen = screen_text("provision-running-long").replace(' ', "");
-    for expected in ["扇区活动", "DEMO慢盘", "%", "运行日志"] {
+    for expected in ["当前任务", "DEMO慢盘", "%", "运行记录"] {
         assert!(screen.contains(expected), "{expected}");
     }
+    assert!(!screen.contains("扇区活动"), "{screen}");
 }
 
 #[test]
@@ -176,7 +251,8 @@ fn demo_scenes_show_real_workspace_content_and_safety_header() {
         assert!(screen.contains("DEMO"), "{scene}");
     }
     let running = screen_text("provision-running").replace(' ', "");
-    for expected in ["阶段", "步骤", "日志", "演示模式不会执行真实操作"] {
+    for expected in ["阶段", "当前步骤", "运行记录", "演示模式不会执行真实操作"]
+    {
         assert!(running.contains(expected), "{expected}");
     }
     let backup_verify = screen_text("backup-verify-running").replace(' ', "");

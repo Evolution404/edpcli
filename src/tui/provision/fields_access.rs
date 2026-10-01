@@ -18,10 +18,6 @@ impl AppState {
                 PlainProvisionFieldKind::VolumeLabel => Some(&mut part.volume_label),
             };
         }
-        let share_opaque =
-            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share);
-        let encrypt_opaque =
-            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt);
         match id {
             ProvisionFieldId::Capacity(crate::provision::PartitionRole::Boot) => Some(
                 if self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact
@@ -56,6 +52,9 @@ impl AppState {
             ProvisionFieldId::User => Some(&mut self.provision.form.user),
             ProvisionFieldId::Department => Some(&mut self.provision.form.dept),
             ProvisionFieldId::Safe6Label => Some(&mut self.provision.form.label),
+            ProvisionFieldId::Lba8Identity(field) => {
+                Some(field.value_mut(&mut self.provision.form.lba8_identity))
+            }
             ProvisionFieldId::VolumeLabel(crate::provision::PartitionRole::Boot) => {
                 Some(&mut self.provision.form.volume_label)
             }
@@ -85,17 +84,13 @@ impl AppState {
             ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Share) => {
                 Some(&mut self.provision.form.share_source_password)
             }
-            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Share)
-                if !share_opaque =>
-            {
+            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Share) => {
                 Some(&mut self.provision.form.share_target_password)
             }
             ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Encrypt) => {
                 Some(&mut self.provision.form.encrypt_source_password)
             }
-            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Encrypt)
-                if !encrypt_opaque =>
-            {
+            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Encrypt) => {
                 Some(&mut self.provision.form.encrypt_target_password)
             }
             _ => None,
@@ -119,10 +114,6 @@ impl AppState {
                 PlainProvisionFieldKind::VolumeLabel => Some(part.volume_label.as_str()),
             };
         }
-        let share_opaque =
-            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Share);
-        let encrypt_opaque =
-            self.provision_domain_opaque_candidate(crate::provision::KeyDomainRole::Encrypt);
         match id {
             ProvisionFieldId::Capacity(crate::provision::PartitionRole::Boot) => Some(
                 if self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact
@@ -157,6 +148,9 @@ impl AppState {
             ProvisionFieldId::User => Some(self.provision.form.user.as_str()),
             ProvisionFieldId::Department => Some(self.provision.form.dept.as_str()),
             ProvisionFieldId::Safe6Label => Some(self.provision.form.label.as_str()),
+            ProvisionFieldId::Lba8Identity(field) => {
+                Some(field.value(&self.provision.form.lba8_identity))
+            }
             ProvisionFieldId::VolumeLabel(crate::provision::PartitionRole::Boot) => {
                 Some(self.provision.form.volume_label.as_str())
             }
@@ -186,17 +180,13 @@ impl AppState {
             ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Share) => {
                 Some(self.provision.form.share_source_password.as_str())
             }
-            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Share)
-                if !share_opaque =>
-            {
+            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Share) => {
                 Some(self.provision.form.share_target_password.as_str())
             }
             ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Encrypt) => {
                 Some(self.provision.form.encrypt_source_password.as_str())
             }
-            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Encrypt)
-                if !encrypt_opaque =>
-            {
+            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Encrypt) => {
                 Some(self.provision.form.encrypt_target_password.as_str())
             }
             _ => None,

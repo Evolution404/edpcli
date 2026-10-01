@@ -5,7 +5,7 @@ pub struct BackupDeleteState {
     pub stage: WizardStage,
     pub path: std::path::PathBuf,
     pub expected_sha256: String,
-    pub message: Option<String>,
+    pub message: Option<crate::tui::ui::UiMessage>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,7 +18,7 @@ pub enum BackupBatchDeleteStage {
 pub struct BackupBatchDeleteState {
     pub stage: BackupBatchDeleteStage,
     pub prepared: Option<crate::application::backup::DeletePlan>,
-    pub message: Option<String>,
+    pub message: Option<crate::tui::ui::UiMessage>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +40,7 @@ pub struct BackupPruneState {
     pub stage: BackupPruneStage,
     pub keep_input: String,
     pub prepared: Option<BackupPrunePrepared>,
-    pub message: Option<String>,
+    pub message: Option<crate::tui::ui::UiMessage>,
 }
 
 #[derive(Debug, Clone)]
@@ -97,14 +97,14 @@ impl AppState {
 
     pub fn toggle_selected_backup(&mut self) {
         let Some((path, expected_sha256)) = self.selected_backup_delete_target() else {
-            self.set_notice("当前备份缺少固定 SHA-256，不能加入批量删除选择。");
+            self.set_warning_notice("当前备份缺少固定 SHA-256，不能加入批量删除选择。");
             return;
         };
         debug_assert!(!expected_sha256.is_empty());
         if !self.backups.selection.remove(&path) {
             self.backups.selection.insert(path);
         }
-        self.set_notice(format!(
+        self.set_success_notice(format!(
             "批量删除已勾选 {} 份备份；空格继续选择，d 进入统一删除流程。",
             self.backups.selection.len()
         ));
@@ -125,19 +125,21 @@ impl AppState {
 
     pub fn begin_backup_batch_delete(&mut self) -> Option<Vec<(std::path::PathBuf, String)>> {
         if self.shell.critical_operation || self.backups.batch_delete.is_some() {
-            self.set_notice("已有关键操作或批量删除向导正在执行。");
+            self.set_warning_notice("已有关键操作或批量删除向导正在执行。");
             return None;
         }
         let targets = self.selected_backup_batch_targets();
         if targets.is_empty() {
-            self.set_notice("先在备份页按空格勾选至少一份备份。");
+            self.set_warning_notice("先在备份页按空格勾选至少一份备份。");
             return None;
         }
         self.shell.input_mode = InputMode::Normal;
         self.backups.batch_delete = Some(BackupBatchDeleteState {
             stage: BackupBatchDeleteStage::Planning,
             prepared: None,
-            message: Some("正在新鲜扫描并逐项复核 SHA-256，生成固定删除计划…".into()),
+            message: Some(crate::tui::ui::UiMessage::progress(
+                "正在新鲜扫描并逐项复核 SHA-256，生成固定删除计划…",
+            )),
         });
         Some(targets)
     }
@@ -161,7 +163,7 @@ impl AppState {
             }
             Err(message) => {
                 self.backups.batch_delete = None;
-                self.set_notice(message);
+                self.set_error_notice(message);
             }
         }
     }
@@ -175,7 +177,9 @@ impl AppState {
         }
         let plan = batch.prepared.take()?;
         batch.stage = BackupBatchDeleteStage::Running;
-        batch.message = Some("正在按固定计划逐条复核并删除…".into());
+        batch.message = Some(crate::tui::ui::UiMessage::progress(
+            "正在按固定计划逐条复核并删除…",
+        ));
         self.shell.input_mode = InputMode::Normal;
         self.shell.critical_operation = true;
         Some(plan)
@@ -191,8 +195,10 @@ impl AppState {
         self.backups.batch_delete = None;
         if success {
             self.backups.selection.clear();
+            self.set_success_notice(message);
+        } else {
+            self.set_error_notice(message);
         }
-        self.set_notice(message);
     }
 
     pub fn close_backup_batch_delete(&mut self) {
@@ -258,7 +264,9 @@ impl AppState {
             .filter(|value| *value > 0)
             .ok_or_else(|| "保留份数必须为大于 0 的整数".to_string())?;
         prune.stage = BackupPruneStage::Planning;
-        prune.message = Some("正在后台扫描备份并生成固定清理计划…".into());
+        prune.message = Some(crate::tui::ui::UiMessage::progress(
+            "正在后台扫描备份并生成固定清理计划…",
+        ));
         self.shell.input_mode = InputMode::Normal;
         Ok(keep)
     }
@@ -268,7 +276,7 @@ impl AppState {
             Ok(prepared) if prepared.plan.targets.is_empty() => {
                 self.backups.prune = None;
                 self.shell.input_mode = InputMode::Normal;
-                self.set_notice("无需清理：当前备份已经满足保留策略。");
+                self.set_success_notice("无需清理：当前备份已经满足保留策略。");
             }
             Ok(prepared) => {
                 if let Some(prune) = self.backups.prune.as_mut() {
@@ -281,7 +289,7 @@ impl AppState {
             Err(message) => {
                 if let Some(prune) = self.backups.prune.as_mut() {
                     prune.stage = BackupPruneStage::Input;
-                    prune.message = Some(message);
+                    prune.message = Some(crate::tui::ui::UiMessage::error(message));
                     self.shell.input_mode = InputMode::Insert;
                 }
             }
@@ -295,7 +303,9 @@ impl AppState {
         }
         let prepared = prune.prepared.take()?;
         prune.stage = BackupPruneStage::Running;
-        prune.message = Some("正在逐条复核摘要并清理固定候选…".into());
+        prune.message = Some(crate::tui::ui::UiMessage::progress(
+            "正在逐条复核摘要并清理固定候选…",
+        ));
         self.shell.input_mode = InputMode::Normal;
         self.shell.critical_operation = true;
         Some(prepared)
@@ -303,13 +313,18 @@ impl AppState {
 
     pub fn backup_prune_finish_execute(&mut self, result: Result<usize, String>) {
         self.shell.critical_operation = false;
+        let success = result.is_ok();
         let message = match result {
             Ok(count) => format!("清理完成：已安全删除 {count} 份旧备份。"),
             Err(message) => message,
         };
         self.backups.prune = None;
         self.shell.input_mode = InputMode::Normal;
-        self.set_notice(message);
+        if success {
+            self.set_success_notice(message);
+        } else {
+            self.set_error_notice(message);
+        }
     }
 
     pub fn close_backup_prune(&mut self) {
@@ -325,7 +340,7 @@ impl AppState {
         expected_sha256: String,
     ) -> bool {
         if self.shell.critical_operation {
-            self.set_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
+            self.set_warning_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
             return false;
         }
         self.shell.input_mode = InputMode::Normal;
@@ -344,7 +359,9 @@ impl AppState {
             return None;
         }
         delete.stage = WizardStage::Running;
-        delete.message = Some("正在复核文件内容并删除备份…".to_string());
+        delete.message = Some(crate::tui::ui::UiMessage::progress(
+            "正在复核文件内容并删除备份…",
+        ));
         self.shell.input_mode = InputMode::Normal;
         self.shell.critical_operation = true;
         Some((delete.path.clone(), delete.expected_sha256.clone()))
@@ -353,11 +370,16 @@ impl AppState {
     pub fn finish_backup_delete(&mut self, result: Result<(), String>) {
         self.shell.critical_operation = false;
         self.backups.delete = None;
+        let success = result.is_ok();
         let message = match result {
             Ok(()) => "备份已删除；列表已刷新".to_string(),
             Err(message) => message,
         };
-        self.set_notice(message);
+        if success {
+            self.set_success_notice(message);
+        } else {
+            self.set_error_notice(message);
+        }
     }
 
     pub const fn workspace(&self) -> Workspace {

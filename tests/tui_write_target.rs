@@ -146,7 +146,13 @@ fn canonical_identity_projection_distinguishes_confirmed_possible_and_conflict()
 
 #[test]
 fn ch14_identity_search_matches_both_workspaces() {
-    for query in ["1234:5678", "test_test", "64.00gb", "7001"] {
+    let capacity_query = edpcli::common::fmt_capacity(64_000_000_000).to_lowercase();
+    for query in [
+        "1234:5678".to_string(),
+        "test_test".to_string(),
+        capacity_query,
+        "7001".to_string(),
+    ] {
         let mut devices = AppState::new();
         let mut row = device(6);
         row.onlyid = Some("7001".into());

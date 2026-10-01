@@ -236,40 +236,27 @@ fn provision_plain_is_a_typed_target_and_never_mode4() {
 }
 
 #[test]
-fn provision_plain_accepts_source_credentials_but_rejects_target_credentials() {
-    let parsed = parse_args(&args(&[
-        "provision",
-        "plan",
-        "--disk",
-        "4",
-        "--target",
-        "plain",
+fn provision_plain_rejects_all_password_credentials() {
+    for invalid in [
         "--share-source-password",
-        "ShareSource1!",
+        "--share-target-password",
         "--encrypt-source-password",
-        "EncryptSource1!",
-    ]))
-    .expect("Plain K6 must accept EDP source credentials");
-    let Parsed::Provision(ProvisionAction::Plan(opts)) = parsed else {
-        panic!("expected provision plan");
-    };
-    assert_eq!(opts.share_source_password, "ShareSource1!");
-    assert_eq!(opts.encrypt_source_password, "EncryptSource1!");
-    assert!(opts.share_target_password.is_empty());
-    assert!(opts.encrypt_target_password.is_empty());
-
-    for invalid in ["--share-target-password", "--encrypt-target-password"] {
-        assert!(parse_args(&args(&[
-            "provision",
-            "plan",
-            "--disk",
-            "4",
-            "--target",
-            "plain",
-            invalid,
-            "TargetPass1!",
-        ]))
-        .is_err());
+        "--encrypt-target-password",
+    ] {
+        assert!(
+            parse_args(&args(&[
+                "provision",
+                "plan",
+                "--disk",
+                "4",
+                "--target",
+                "plain",
+                invalid,
+                "AnyPass1!",
+            ]))
+            .is_err(),
+            "Plain must reject password option {invalid}"
+        );
     }
 }
 

@@ -140,6 +140,22 @@ fn cjk_and_emoji_use_terminal_display_width() {
 }
 
 #[test]
+fn adaptive_layout_supports_explicit_minimum_column_spacing() {
+    let layout = AdaptiveTableLayout::new(vec![
+        spec(4, 4, 4, 50, false),
+        spec(4, 4, 4, 50, false),
+        spec(4, 4, 4, 50, false),
+    ])
+    .with_column_spacing(2);
+    let content = [4, 4, 4];
+    assert_eq!(layout.column_spacing(), 2);
+    assert_eq!(layout.total_width(&content, None), 16);
+    assert_eq!(layout.column_span(&content, None, 0), (0, 4));
+    assert_eq!(layout.column_span(&content, None, 1), (6, 10));
+    assert_eq!(layout.column_span(&content, None, 2), (12, 16));
+}
+
+#[test]
 fn narrow_table_scrolls_all_columns_and_last_column_is_reachable() {
     let specs = vec![
         spec(7, 9, 12, 100, true),

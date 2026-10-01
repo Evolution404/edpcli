@@ -9,7 +9,6 @@ mod key_domain;
 mod keys;
 mod layout;
 mod lce;
-mod migration;
 mod partition_format;
 mod plain;
 mod profile;
@@ -21,8 +20,9 @@ mod write_plan;
 
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
 pub use key_domain::{
-    KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, SecretBytes, SourcePasswordKnowledge,
-    TargetPasswordPolicy, DEFAULT_KEY_DOMAIN_PASSWORD,
+    KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, PassthroughBasis, PasswordDisposition,
+    SecretBytes, SourcePasswordKnowledge, TargetPasswordPolicy, DEFAULT_KEY_DOMAIN_PASSWORD,
+    DEFAULT_KEY_DOMAIN_PASSWORD_TEXT,
 };
 pub use keys::{
     default_file_key, default_file_key_checked, unwrap_file_key, unwrap_legacy_lba7_file_key,
@@ -38,35 +38,30 @@ pub use layout::{
     OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
-pub use migration::{
-    build_migration_manifest, finalize_staged_entry, MigrationBudgets, MigrationInventory,
-    MigrationManifest, MigrationManifestEntry, MigrationPreflightError, MigrationStagedEntry,
-    MAX_MIGRATION_ENTRIES,
-};
 pub use partition_format::{build_official_partition_filesystem, PartitionFilesystemImage};
 pub use plain::{
-    build_plain_migrated_provision_write_plan, build_plain_provision_write_plan,
-    max_plain_sector_count, plain_gaps, validate_plain_partitions, PlainCleanupExtent, PlainGap,
-    PlainPartitionSpec, PlainProvisionPlan, PlainProvisionWritePlan, PlainSectorOwner,
-    PlainSectorWrite, DEFAULT_PLAIN_START_LBA, MAX_PLAIN_PARTITIONS,
+    build_plain_provision_write_plan, max_plain_sector_count, plain_gaps,
+    validate_plain_partitions, PlainCleanupExtent, PlainGap, PlainPartitionSpec,
+    PlainProvisionPlan, PlainProvisionWritePlan, PlainSectorOwner, PlainSectorWrite,
+    DEFAULT_PLAIN_START_LBA, MAX_PLAIN_PARTITIONS,
 };
 pub use profile::{PassInfoPolicy, ProvisionProfile, DEFAULT_SAFE6_LABEL};
 pub use region_mapping::{
-    migration_candidate, migration_transform, opaque_preserve_compatibility,
-    preserve_compatibility, CompatibilityFailure, Extent, FilesystemProfile, MigrationTransform,
-    PhysicalCryptoProfile, RegionKeyProfile, RegionMapping, RegionMappingKind, RegionMappingPlan,
-    RegionMappingPlanner, SourceRegion, TargetRegion,
+    opaque_preserve_compatibility, preserve_compatibility, CompatibilityFailure, Extent,
+    FilesystemProfile, PhysicalCryptoProfile, RegionKeyProfile, RegionMapping, RegionMappingKind,
+    RegionMappingPlan, RegionMappingPlanner, SourceRegion, TargetRegion,
 };
 pub use reprovision::{
-    apply_target_geometry_overrides, decide_partition_action, parse_existing_provision,
-    pass_info_policy_from_sectors, prefill_for_target_mode, rekey_existing_partition_image,
+    apply_target_geometry_overrides, apply_target_geometry_overrides_draft,
+    decide_partition_action, parse_existing_provision, pass_info_policy_from_sectors,
+    plain_extent_preserve_candidate, prefill_for_target_mode, rekey_existing_partition_image,
     validate_target_geometry, CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind,
-    ExistingPartition, ExistingPartitionRecord, ExistingProvisionProfile, MigrationSource,
-    ParsedExistingProvision, PartitionAction, ProvisionPrefill, ProvisionTarget, QuickCapacityUnit,
+    ExistingPartition, ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision,
+    PartitionAction, PlainSourceExtent, ProvisionPrefill, ProvisionTarget, QuickCapacityUnit,
     RegionDisposition, TargetGeometryOverrides, TargetPartitionGeometry, TargetPartitionPlan,
     TargetProvisionPlan,
 };
-pub use spec::{OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
+pub use spec::{Lba8Identity, OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
 pub use validate::{
     OfficialProvisionValidation, OfficialProvisionValidator, ProvisionValidation,
     ProvisionValidator,

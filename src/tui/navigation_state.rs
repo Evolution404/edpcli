@@ -12,7 +12,7 @@ impl AppState {
         }
         if workspace == Workspace::Provision {
             let Some(disk) = self.provision.target_disk else {
-                self.set_notice("请先在设备列表选定 USB 盘后按 p 选择制盘方案。");
+                self.set_warning_notice("请先在设备列表选定 USB 盘后按 p 选择制盘方案。");
                 return;
             };
             self.shell.pinned_disk = Some(disk);

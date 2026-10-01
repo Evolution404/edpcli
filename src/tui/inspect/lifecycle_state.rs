@@ -4,7 +4,7 @@ use super::*;
 impl AppState {
     pub fn begin_advanced_inspect(&mut self, source: AdvancedInspectSource) -> bool {
         if self.shell.critical_operation {
-            self.set_notice("关键操作仍在执行，完成前不能启动全盘检查。");
+            self.set_warning_notice("关键操作仍在执行，完成前不能启动全盘检查。");
             return false;
         }
         self.push_navigation_frame(NavigationLocation::from_workspace(self.shell.workspace));
@@ -20,6 +20,7 @@ impl AppState {
             result: None,
             tree_selected: 0,
             panel: AdvancedInspectPanel::Tree,
+            view_mode: InspectViewMode::Business,
             pane_focus: crate::tui::pane::PaneFocus::inspect(),
             expanded,
             lazy_offsets: std::collections::BTreeMap::new(),
@@ -31,7 +32,9 @@ impl AppState {
             tree_view_model: std::cell::RefCell::new(None),
             yank_register: None,
             prompt: None,
-            message: Some("正在后台读取协议上下文并建立全盘结构树…".into()),
+            message: Some(crate::tui::ui::UiMessage::progress(
+                "正在后台读取协议上下文并建立全盘结构树…",
+            )),
             search_query: String::new(),
             search_matches: Vec::new(),
             search_cursor: 0,
@@ -101,7 +104,7 @@ impl AppState {
             }
             Err(message) => {
                 state.result = None;
-                state.message = Some(message);
+                state.message = Some(crate::tui::ui::UiMessage::error(message));
             }
         }
     }

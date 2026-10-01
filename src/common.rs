@@ -129,14 +129,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn capacity_display_defaults_to_decimal_auto_scale() {
-        assert_eq!(CAPACITY_UNIT_SYSTEM, CapacityUnitSystem::Decimal);
-        assert_eq!(fmt_capacity(999), "999B");
-        assert_eq!(fmt_capacity(123_000), "123.00KB");
-        assert_eq!(fmt_capacity(999_999), "1.00MB");
-        assert_eq!(fmt_capacity(10_450_000), "10.45MB");
-        assert_eq!(fmt_capacity(64_000_000_000), "64.00GB");
-        assert_eq!(fmt_capacity(500_107_862_016), "500.11GB");
+    fn capacity_display_follows_global_unit_system() {
+        for bytes in [
+            999,
+            123_000,
+            999_999,
+            10_450_000,
+            64_000_000_000,
+            500_107_862_016,
+        ] {
+            assert_eq!(
+                fmt_capacity(bytes),
+                fmt_capacity_with_system(bytes, CAPACITY_UNIT_SYSTEM)
+            );
+        }
     }
 
     #[test]

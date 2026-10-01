@@ -51,8 +51,6 @@ pub enum TuiAction {
     RowEnd,
     FocusNext,
     FocusPrevious,
-    WorkspaceNext,
-    WorkspacePrevious,
     InspectJump,
     InspectBusiness,
     InspectRawFields,
@@ -175,11 +173,6 @@ impl KeyMapper {
             return None;
         }
 
-        if event.code == KeyCode::Char('q') && event.modifiers.is_empty() {
-            self.pending = None;
-            return Some(TuiAction::Quit);
-        }
-
         if self
             .pending
             .is_some_and(|pending| now.duration_since(pending.since) > PREFIX_TIMEOUT)
@@ -187,20 +180,10 @@ impl KeyMapper {
             self.pending = None;
         }
 
-        match mode {
-            InputMode::Insert => return self.map_insert(event),
-            InputMode::Search | InputMode::Command => return self.map_text_entry(event),
-            InputMode::Confirm => return self.map_confirm(event),
-            InputMode::Normal => {}
-        }
-
         if let Some(pending) = self.pending.take() {
             return match pending.prefix {
                 PendingPrefix::G => match event.code {
                     KeyCode::Char('g') => Some(TuiAction::Top),
-                    KeyCode::Char('l') => Some(TuiAction::InspectJump),
-                    KeyCode::Char('t') => Some(TuiAction::WorkspaceNext),
-                    KeyCode::Char('T') => Some(TuiAction::WorkspacePrevious),
                     _ => None,
                 },
                 PendingPrefix::CtrlW => match event.code {
@@ -213,6 +196,29 @@ impl KeyMapper {
                     _ => None,
                 },
             };
+        }
+
+        if mode != InputMode::Normal
+            && event.modifiers.contains(KeyModifiers::CONTROL)
+            && event.code == KeyCode::Char('w')
+        {
+            self.pending = Some(Pending {
+                prefix: PendingPrefix::CtrlW,
+                since: now,
+            });
+            return None;
+        }
+
+        match mode {
+            InputMode::Insert => return self.map_insert(event),
+            InputMode::Search | InputMode::Command => return self.map_text_entry(event),
+            InputMode::Confirm => return self.map_confirm(event),
+            InputMode::Normal => {}
+        }
+
+        if event.code == KeyCode::Char('q') && event.modifiers.is_empty() {
+            self.pending = None;
+            return Some(TuiAction::Quit);
         }
 
         if event.modifiers.contains(KeyModifiers::CONTROL) {
@@ -271,6 +277,7 @@ impl KeyMapper {
             KeyCode::Char('1') => Some(TuiAction::InspectBusiness),
             KeyCode::Char('2') => Some(TuiAction::InspectRawFields),
             KeyCode::Char('3') => Some(TuiAction::InspectHex),
+            KeyCode::Char('J') => Some(TuiAction::InspectJump),
             KeyCode::Char(' ') => Some(TuiAction::Toggle),
             KeyCode::Char('y') => Some(TuiAction::Yank),
             KeyCode::Char('Y') => Some(TuiAction::YankRaw),
@@ -287,6 +294,9 @@ impl KeyMapper {
 
     fn map_insert(&mut self, event: KeyEvent) -> Option<TuiAction> {
         self.pending = None;
+        if event.modifiers.contains(KeyModifiers::CONTROL) && event.code == KeyCode::Char('c') {
+            return Some(TuiAction::Back);
+        }
         match event.code {
             KeyCode::Esc => Some(TuiAction::Back),
             KeyCode::Enter => Some(TuiAction::Submit),
@@ -307,9 +317,14 @@ impl KeyMapper {
 
     fn map_text_entry(&mut self, event: KeyEvent) -> Option<TuiAction> {
         self.pending = None;
+        if event.modifiers.contains(KeyModifiers::CONTROL) && event.code == KeyCode::Char('c') {
+            return Some(TuiAction::Back);
+        }
         match event.code {
             KeyCode::Esc => Some(TuiAction::Back),
             KeyCode::Enter => Some(TuiAction::Submit),
+            KeyCode::Tab => Some(TuiAction::FocusNext),
+            KeyCode::BackTab => Some(TuiAction::FocusPrevious),
             KeyCode::Backspace => Some(TuiAction::Backspace),
             KeyCode::Delete => Some(TuiAction::DeleteChar),
             KeyCode::Left => Some(TuiAction::CursorLeft),
@@ -325,10 +340,15 @@ impl KeyMapper {
 
     fn map_confirm(&mut self, event: KeyEvent) -> Option<TuiAction> {
         self.pending = None;
+        if event.modifiers.contains(KeyModifiers::CONTROL) && event.code == KeyCode::Char('c') {
+            return Some(TuiAction::Cancel);
+        }
         match event.code {
             KeyCode::Esc | KeyCode::Char('n') => Some(TuiAction::Cancel),
             KeyCode::Char('y') => Some(TuiAction::Confirm),
             KeyCode::Enter => Some(TuiAction::Submit),
+            KeyCode::Tab => Some(TuiAction::FocusNext),
+            KeyCode::BackTab => Some(TuiAction::FocusPrevious),
             KeyCode::Backspace => Some(TuiAction::Backspace),
             KeyCode::Char(ch) if !event.modifiers.contains(KeyModifiers::CONTROL) => {
                 Some(TuiAction::Text(ch))

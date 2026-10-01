@@ -228,10 +228,6 @@ fn active_tab() -> Style {
     super::theme::current().active_tab()
 }
 
-fn input() -> Style {
-    super::theme::current().input()
-}
-
 fn input_focused() -> Style {
     super::theme::current().input_focused()
 }
@@ -305,13 +301,12 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     };
 
     if wizard.kind == WriteKind::Restore && wizard.stage == WizardStage::Confirm {
-        draw_restore_write_confirmation(frame, area, state);
+        draw_restore_write_confirmation(frame, state);
         return;
     }
     if wizard.kind == WriteKind::BackupCreate && wizard.stage == WizardStage::Confirm {
         super::ui::render_action_confirmation_modal(
             frame,
-            area,
             super::ui::ActionConfirmationSpec {
                 title: "创建元数据备份",
                 headline: "开始只读元数据备份？",
@@ -327,7 +322,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     }
     if wizard.stage == WizardStage::Running {
         if let Some(run) = wizard.run.as_ref() {
-            draw_operation_progress(frame, area, run);
+            draw_operation_progress(frame, area, run, state.animation_frame());
         }
         return;
     }
@@ -353,7 +348,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
         );
     let content_area = if post_restore_overlay {
         draw_post_restore_result(frame, area, state);
-        super::ui::centered_modal_rect(area, 92, 24)
+        super::ui::centered_modal_rect(frame.area(), 92, 24)
     } else {
         area
     };
@@ -472,7 +467,10 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 muted(),
             )));
             if let Some(message) = &wizard.message {
-                lines.push(Line::from(Span::styled(safe(message), warning())));
+                lines.push(Line::from(Span::styled(
+                    format!("{} {}", message.marker(), safe(message.text())),
+                    message.style(),
+                )));
             }
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
@@ -497,7 +495,10 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 super::theme::current().input_focused(),
             )));
             if let Some(message) = &wizard.message {
-                lines.push(Line::from(Span::styled(safe(message), warning())));
+                lines.push(Line::from(Span::styled(
+                    format!("{} {}", message.marker(), safe(message.text())),
+                    message.style(),
+                )));
             }
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
@@ -579,7 +580,10 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 super::theme::current().input_focused(),
             )));
             if let Some(message) = &wizard.message {
-                lines.push(Line::from(Span::styled(safe(message), warning())));
+                lines.push(Line::from(Span::styled(
+                    format!("{} {}", message.marker(), safe(message.text())),
+                    message.style(),
+                )));
             }
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
@@ -635,10 +639,17 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 "生成新 FileKey → 更新密钥记录 → 创建空加密文件系统 → 读回 → 使用新密码重新评估。",
             ));
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("● ", danger()),
-                Span::raw(wizard.message.as_deref().unwrap_or("正在执行密钥域重建…")),
-            ]));
+            if let Some(message) = wizard.message.as_ref() {
+                lines.push(Line::from(Span::styled(
+                    format!("{} {}", message.marker(), safe(message.text())),
+                    message.style(),
+                )));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "◌ 正在执行密钥域重建…",
+                    super::theme::current().secondary_accent(),
+                )));
+            }
             lines.push(Line::from(Span::styled(
                 "q / Esc / Ctrl-C 将延迟到安全结束点。",
                 muted(),
@@ -761,7 +772,6 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 .unwrap_or_else(|| format!("disk{}", wizard.disk));
             super::ui::render_write_confirmation_modal(
                 frame,
-                area,
                 super::ui::WriteConfirmationSpec {
                     kind: super::ui::MediaWriteConfirmationKind::Format,
                     title: "格式化写入确认",
@@ -775,7 +785,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                         Line::from("该分区原有文件系统内容不会被恢复。"),
                     ],
                     confirmation: &wizard.confirmation,
-                    message: wizard.message.as_deref(),
+                    message: wizard.message.as_ref(),
                 },
             );
         }
@@ -789,7 +799,6 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 .unwrap_or_else(|| format!("disk{}", wizard.disk));
             super::ui::render_write_confirmation_modal(
                 frame,
-                area,
                 super::ui::WriteConfirmationSpec {
                     kind: super::ui::MediaWriteConfirmationKind::EncryptedFormat,
                     title: "加密格式化写入确认",
@@ -804,7 +813,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                         Line::from("原文件系统内容不会恢复。"),
                     ],
                     confirmation: &wizard.confirmation,
-                    message: wizard.message.as_deref(),
+                    message: wizard.message.as_ref(),
                 },
             );
         }
@@ -818,7 +827,6 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 .unwrap_or_else(|| format!("disk{}", wizard.disk));
             super::ui::render_write_confirmation_modal(
                 frame,
-                area,
                 super::ui::WriteConfirmationSpec {
                     kind: super::ui::MediaWriteConfirmationKind::Reinitialize,
                     title: "加密分区重建写入确认",
@@ -833,7 +841,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                         Line::from("该操作不能恢复旧密钥域中的文件内容。"),
                     ],
                     confirmation: &wizard.confirmation,
-                    message: wizard.message.as_deref(),
+                    message: wizard.message.as_ref(),
                 },
             );
         }
@@ -859,13 +867,19 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
         CoreMode::Stable
     };
 
-    let notice = state.notice();
+    let notice = state.notice_message();
     let status = super::status::dynamic_status(state);
+    let operation_progress_running = state.provision().stage == ProvisionStage::Running
+        || state
+            .wizard()
+            .is_some_and(|wizard| wizard.stage == WizardStage::Running);
+    let footer_height =
+        u16::from(!operation_progress_running || notice.is_some() || status.is_some());
     let constraints = vec![
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(1),
-        Constraint::Length(1),
+        Constraint::Length(footer_height),
     ];
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -900,23 +914,25 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     }
 
     if state.provision_scheme_picker_open() {
-        draw_scheme_picker(frame, content_area, state);
+        draw_scheme_picker(frame, state);
     }
     if state.backup_delete().is_some() {
-        draw_backup_delete(frame, content_area, state);
+        draw_backup_delete(frame, state);
     } else if state.backup_batch_delete().is_some() {
-        draw_backup_batch_delete(frame, content_area, state);
+        draw_backup_batch_delete(frame, state);
     } else if state.backup_prune().is_some() {
-        draw_backup_prune(frame, content_area, state);
+        draw_backup_prune(frame, state);
     }
     if state.help_open() {
-        super::help_overlay::draw_help_overlay(frame, content_area, state);
+        super::help_overlay::draw_help_overlay(frame, state);
     }
     if write_confirmation_open {
         draw_wizard(frame, content_area, state);
     }
 
-    super::shell::message_bar(frame, chunks[3], notice, status.as_deref());
+    if footer_height > 0 {
+        super::shell::message_bar(frame, chunks[3], notice, status.as_deref());
+    }
 }
 
 #[cfg(test)]

@@ -15,8 +15,8 @@ pub enum PaneId {
     InspectDetail,
     ProvisionParameters,
     ProvisionDiskLayout,
-    ProvisionSummary,
-    ProvisionChanges,
+    ProvisionPartitionPlan,
+    ProvisionExecutionSummary,
     ProvisionRunLog,
     ResultPartitions,
     ResultDiskLayout,
@@ -36,9 +36,9 @@ impl PaneId {
     pub const PROVISION_FORM_ORDER: [Self; 2] =
         [Self::ProvisionParameters, Self::ProvisionDiskLayout];
     pub const PROVISION_REVIEW_ORDER: [Self; 3] = [
-        Self::ProvisionSummary,
         Self::ProvisionDiskLayout,
-        Self::ProvisionChanges,
+        Self::ProvisionPartitionPlan,
+        Self::ProvisionExecutionSummary,
     ];
     pub const RESULT_ORDER: [Self; 3] = [
         Self::ResultPartitions,
@@ -58,8 +58,8 @@ impl PaneId {
             self,
             Self::ProvisionParameters
                 | Self::ProvisionDiskLayout
-                | Self::ProvisionSummary
-                | Self::ProvisionChanges
+                | Self::ProvisionPartitionPlan
+                | Self::ProvisionExecutionSummary
                 | Self::ProvisionRunLog
         )
     }
@@ -183,7 +183,10 @@ impl PaneFocus {
     }
 
     pub fn provision_review() -> Self {
-        Self::new(PaneId::ProvisionSummary, PaneId::PROVISION_REVIEW_ORDER)
+        Self::new(
+            PaneId::ProvisionPartitionPlan,
+            PaneId::PROVISION_REVIEW_ORDER,
+        )
     }
 
     pub fn provision_running() -> Self {
@@ -254,10 +257,10 @@ impl PaneFocus {
     pub fn spatial_provision_review(&mut self, dx: i8, dy: i8) {
         use PaneId::*;
         let next = match (self.focused, dx.signum(), dy.signum()) {
-            (ProvisionSummary, 1, _) | (ProvisionSummary, _, 1) => Some(ProvisionDiskLayout),
-            (ProvisionDiskLayout, -1, _) | (ProvisionDiskLayout, _, -1) => Some(ProvisionSummary),
-            (ProvisionDiskLayout, 1, _) | (ProvisionDiskLayout, _, 1) => Some(ProvisionChanges),
-            (ProvisionChanges, -1, _) | (ProvisionChanges, _, -1) => Some(ProvisionDiskLayout),
+            (ProvisionDiskLayout, _, 1) => Some(ProvisionPartitionPlan),
+            (ProvisionPartitionPlan, _, -1) => Some(ProvisionDiskLayout),
+            (ProvisionPartitionPlan, 1, _) => Some(ProvisionExecutionSummary),
+            (ProvisionExecutionSummary, -1, _) => Some(ProvisionPartitionPlan),
             _ => None,
         };
         if let Some(next) = next {

@@ -73,9 +73,9 @@ fn verified_original_file_key<'a>(
     if record.lba12.encrypt_mode != FileKeyWrapMode::Sm4.raw() {
         return Err(ExistingFileKeyError::UnsupportedEncryptMode);
     }
-    const DEFAULT: &[u8] = b"0000aaaa";
-    match record.verified_file_key(Some(DEFAULT)) {
-        Ok(key) => Ok((DEFAULT, key)),
+    let default = crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD;
+    match record.verified_file_key(Some(default)) {
+        Ok(key) => Ok((default, key)),
         Err(ExistingFileKeyError::PasswordMismatch) => {
             let password = password
                 .filter(|password| !password.is_empty())

@@ -75,6 +75,38 @@ fn selected_lbas(opts: &InspectOpts) -> Vec<u64> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InspectTopologyKind {
+    Edp,
+    Plain,
+    Unknown,
+}
+
+fn classify_inspect_region_semantics(
+    semantics: impl IntoIterator<Item = Option<crate::application::inspect_tree::DiskRegionSemantic>>,
+) -> InspectTopologyKind {
+    use crate::application::inspect_tree::DiskRegionSemantic;
+
+    let mut has_protocol = false;
+    let mut has_plain_structure = false;
+    for semantic in semantics {
+        match semantic {
+            Some(DiskRegionSemantic::Protocol) => has_protocol = true,
+            Some(DiskRegionSemantic::PartitionTable | DiskRegionSemantic::PlainPartition) => {
+                has_plain_structure = true;
+            }
+            _ => {}
+        }
+    }
+    if has_protocol {
+        InspectTopologyKind::Edp
+    } else if has_plain_structure {
+        InspectTopologyKind::Plain
+    } else {
+        InspectTopologyKind::Unknown
+    }
+}
+
 fn print_inspect_meta(
     meta: &InspectMeta,
     topology: &crate::application::inspect_tree::InspectTopology,
@@ -92,39 +124,39 @@ fn print_inspect_meta(
     if !parts.is_empty() {
         println!("{}  {}", crate::ui::bold("设备"), parts.join(" · "));
     }
-    let (is_plain, has_edp_protocol) = match &topology.root.children {
-        crate::application::inspect_tree::InspectChildren::Materialized(children) => (
-            children.iter().any(|node| {
-                matches!(
-                    node.region_semantic,
-                    Some(
-                        crate::application::inspect_tree::DiskRegionSemantic::PartitionTable
-                            | crate::application::inspect_tree::DiskRegionSemantic::PlainPartition
-                            | crate::application::inspect_tree::DiskRegionSemantic::Unallocated
-                    )
-                )
-            }),
-            children.iter().any(|node| {
-                node.region_semantic
-                    == Some(crate::application::inspect_tree::DiskRegionSemantic::Protocol)
-            }),
-        ),
-        _ => (false, false),
+    let topology_kind = match &topology.root.children {
+        crate::application::inspect_tree::InspectChildren::Materialized(children) => {
+            classify_inspect_region_semantics(children.iter().map(|node| node.region_semantic))
+        }
+        _ => InspectTopologyKind::Unknown,
     };
-    if is_plain {
-        println!("{}  普通盘（device_id 不适用）", crate::ui::bold("盘型"));
-    } else if let Some(did) = &meta.device_id {
-        println!("{}  {}", crate::ui::bold("device_id"), did);
-    } else if has_edp_protocol {
-        println!(
-            "{}",
-            crate::ui::yellow("EDP device_id 未识别：相关加密字段只能显示 RAW；可用 --id 手动指定")
-        );
-    } else {
-        println!(
-            "{}",
-            crate::ui::yellow("盘型未确认：不假定为普通盘或 EDP 盘")
-        );
+    match topology_kind {
+        InspectTopologyKind::Edp => {
+            println!("{}  EDP 盘", crate::ui::bold("盘型"));
+            if let Some(did) = &meta.device_id {
+                println!("{}  {}", crate::ui::bold("device_id"), did);
+            } else {
+                println!(
+                    "{}",
+                    crate::ui::yellow(
+                        "EDP device_id 未识别：相关加密字段只能显示 RAW；可用 --id 手动指定"
+                    )
+                );
+            }
+        }
+        InspectTopologyKind::Plain => {
+            println!("{}  普通盘（device_id 不适用）", crate::ui::bold("盘型"));
+        }
+        InspectTopologyKind::Unknown => {
+            if let Some(did) = &meta.device_id {
+                println!("{}  {}", crate::ui::bold("device_id"), did);
+            } else {
+                println!(
+                    "{}",
+                    crate::ui::yellow("盘型未确认：不假定为普通盘或 EDP 盘")
+                );
+            }
+        }
     }
 }
 
@@ -284,5 +316,39 @@ pub(crate) fn inspect_flow(runner: &dyn CmdRunner, opts: InspectOpts) -> i32 {
         inspect_backup_flow(opts)
     } else {
         inspect_disk_flow(runner, opts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_inspect_region_semantics, InspectTopologyKind};
+    use crate::application::inspect_tree::DiskRegionSemantic;
+
+    #[test]
+    fn protocol_semantic_has_priority_over_unallocated_regions() {
+        assert_eq!(
+            classify_inspect_region_semantics([
+                Some(DiskRegionSemantic::Protocol),
+                Some(DiskRegionSemantic::Unallocated),
+                Some(DiskRegionSemantic::Partition { partition_type: 2 }),
+            ]),
+            InspectTopologyKind::Edp
+        );
+    }
+
+    #[test]
+    fn plain_requires_plain_partition_structure_not_free_space_alone() {
+        assert_eq!(
+            classify_inspect_region_semantics([
+                Some(DiskRegionSemantic::PartitionTable),
+                Some(DiskRegionSemantic::PlainPartition),
+                Some(DiskRegionSemantic::Unallocated),
+            ]),
+            InspectTopologyKind::Plain
+        );
+        assert_eq!(
+            classify_inspect_region_semantics([Some(DiskRegionSemantic::Unallocated)]),
+            InspectTopologyKind::Unknown
+        );
     }
 }

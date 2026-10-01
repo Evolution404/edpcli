@@ -327,10 +327,6 @@ fn choose_shift(sectors: u64) -> Result<u8, FilesystemError> {
         format!("无法为 {sectors} 扇区生成受支持的 exFAT 布局（已尝试 shift {tried:?}）"),
     ))
 }
-pub(crate) fn exfat_geometry(sectors: u64, shift: u8) -> Result<(u64, u64, u32), String> {
-    layout(sectors, shift).ok_or_else(|| "exFAT geometry did not converge".to_string())
-}
-
 pub(crate) fn exfat_boot_checksum(sectors: &[[u8; 512]]) -> u32 {
     let mut sum = 0u32;
     for (si, sec) in sectors.iter().take(11).enumerate() {

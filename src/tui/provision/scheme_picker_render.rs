@@ -11,8 +11,8 @@ fn shortcut(kind: ProvisionKind) -> &'static str {
     }
 }
 
-pub(super) fn draw_scheme_picker(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
-    let popup = crate::tui::ui::centered_modal_rect(area, 78, 17);
+pub(super) fn draw_scheme_picker(frame: &mut Frame, state: &AppState) {
+    let popup = crate::tui::ui::centered_modal_rect(frame.area(), 78, 17);
     crate::tui::ui::render_modal(frame, popup, "选择制盘方案", |frame, inner| {
         let rows = Layout::vertical([
             Constraint::Length(2),

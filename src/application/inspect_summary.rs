@@ -67,6 +67,7 @@ fn title(source: &InspectSummarySource<'_>) -> String {
     if source.kind == InspectNodeKind::Sector {
         let meaning = match source.region_semantic {
             Some(DiskRegionSemantic::PartitionTable) => "分区表结构",
+            Some(DiskRegionSemantic::Reserved) => "EDP 保留区域",
             Some(DiskRegionSemantic::PlainPartition) => "普通分区数据",
             Some(DiskRegionSemantic::Unallocated) => "空闲区域",
             Some(DiskRegionSemantic::Lce) => "LCE 兼容区",
@@ -99,6 +100,7 @@ fn title(source: &InspectSummarySource<'_>) -> String {
     }
     match source.region_semantic {
         Some(DiskRegionSemantic::Protocol) => "EDP 主协议区".into(),
+        Some(DiskRegionSemantic::Reserved) => "EDP 保留区域".into(),
         Some(DiskRegionSemantic::PartitionTable) => "分区表结构".into(),
         Some(DiskRegionSemantic::PlainPartition) => format!("{} · 普通分区", source.label),
         Some(DiskRegionSemantic::Unallocated) => "空闲区域".into(),

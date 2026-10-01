@@ -5,13 +5,6 @@ use crate::tui::state::{
     AppState, InputMode, NavCommand, ProvisionKind, ProvisionStage, Workspace,
 };
 
-fn show_provision_layout_detail(state: &mut AppState) {
-    let model = state.provision_layout_model();
-    if let Some(detail) = state.disk_layout_detail(&model) {
-        state.set_notice(detail);
-    }
-}
-
 fn move_provision(state: &mut AppState, delta: isize, viewport_height: usize) -> ActionOutcome {
     let content_len = state.provision_focused_content_len();
     state.provision_move_focused_vertical(delta, viewport_height, content_len);
@@ -20,12 +13,12 @@ fn move_provision(state: &mut AppState, delta: isize, viewport_height: usize) ->
 
 fn activate_scheme(state: &mut AppState) -> ActionOutcome {
     let Some(disk) = state.selected_device_disk() else {
-        state.set_notice("物理制盘需要先在设备列表明确选择 USB 目标。");
+        state.set_warning_notice("物理制盘需要先在设备列表明确选择 USB 目标。");
         return ActionOutcome::handled();
     };
     let kind = state.provision_begin_selected();
     state.provision_enter_form_workspace();
-    if kind == ProvisionKind::Plain {
+    if kind == ProvisionKind::Plain || state.provision_source_is_plain() {
         ActionOutcome::handled()
     } else {
         ActionOutcome::request(ActionRequest::ProvisionKeyProbe { disk })
@@ -74,6 +67,10 @@ pub(super) fn dispatch_provision(
     let stage = state.provision().stage;
     Some(match stage {
         ProvisionStage::Form if state.input_mode() == InputMode::Normal => match action {
+            TuiAction::Open if state.provision_focused_pane() == PaneId::ProvisionParameters => {
+                state.provision_toggle_advanced_identity();
+                ActionOutcome::handled()
+            }
             TuiAction::Open if state.provision_focused_pane() == PaneId::ProvisionDiskLayout => {
                 state.toggle_disk_layout_tail();
                 ActionOutcome::handled()
@@ -124,9 +121,19 @@ pub(super) fn dispatch_provision(
             TuiAction::PageDown => {
                 move_provision(state, viewport_height.max(1) as isize, viewport_height)
             }
-            TuiAction::MoveLeft | TuiAction::MoveRight | TuiAction::Toggle
+            TuiAction::MoveLeft
                 if state.provision_focused_pane() == PaneId::ProvisionParameters =>
             {
+                state.provision_shift_selected_option(true);
+                ActionOutcome::handled()
+            }
+            TuiAction::MoveRight
+                if state.provision_focused_pane() == PaneId::ProvisionParameters =>
+            {
+                state.provision_shift_selected_option(false);
+                ActionOutcome::handled()
+            }
+            TuiAction::Toggle if state.provision_focused_pane() == PaneId::ProvisionParameters => {
                 state.provision_toggle_selected_option();
                 ActionOutcome::handled()
             }
@@ -146,21 +153,9 @@ pub(super) fn dispatch_provision(
                 state.provision_plain_delete_selected_partition();
                 ActionOutcome::handled()
             }
-            TuiAction::ViewOrVerify
-                if state.provision_focused_pane() == PaneId::ProvisionParameters =>
-            {
-                ActionOutcome::request(ActionRequest::ProvisionSourcePasswordVerify)
-            }
-            TuiAction::Activate => {
-                if state.provision_focused_pane() == PaneId::ProvisionDiskLayout {
-                    show_provision_layout_detail(state);
-                    ActionOutcome::handled()
-                } else {
-                    ActionOutcome::request(ActionRequest::ProvisionPlan)
-                }
-            }
+            TuiAction::Activate => ActionOutcome::request(ActionRequest::ProvisionPlan),
             TuiAction::Export => {
-                state.set_notice("请先按 Enter 生成只读计划，再从计划页导出镜像。");
+                state.set_warning_notice("请先按 Enter 生成只读计划，再从计划页导出镜像。");
                 ActionOutcome::handled()
             }
             TuiAction::Back => {
@@ -169,8 +164,12 @@ pub(super) fn dispatch_provision(
             _ => return None,
         },
         ProvisionStage::Review => match action {
-            TuiAction::Open if state.provision_focused_pane() == PaneId::ProvisionDiskLayout => {
-                state.toggle_disk_layout_tail();
+            TuiAction::Open => {
+                if state.provision_focused_pane() == PaneId::ProvisionDiskLayout {
+                    state.toggle_disk_layout_tail();
+                } else {
+                    state.provision_review_toggle_details();
+                }
                 ActionOutcome::handled()
             }
             TuiAction::PanelNext | TuiAction::PanelPrevious => {
@@ -220,11 +219,7 @@ pub(super) fn dispatch_provision(
                 move_provision(state, viewport_height.max(1) as isize, viewport_height)
             }
             TuiAction::Activate => {
-                if state.provision_focused_pane() == PaneId::ProvisionDiskLayout {
-                    show_provision_layout_detail(state);
-                } else {
-                    state.provision_begin_confirm();
-                }
+                state.provision_begin_confirm();
                 ActionOutcome::handled()
             }
             TuiAction::Export => {

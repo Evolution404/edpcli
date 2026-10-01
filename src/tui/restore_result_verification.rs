@@ -83,8 +83,11 @@ fn verification_lines(state: &AppState) -> Vec<(String, crate::tui::ui::ResultTo
     }
     if let Some(message) = &wizard.message {
         lines.push((
-            format!("当前提示    {}", crate::ui::sanitize_terminal_text(message)),
-            crate::tui::ui::ResultTone::Accent,
+            format!(
+                "当前提示    {}",
+                crate::ui::sanitize_terminal_text(message.text())
+            ),
+            message.result_tone(),
         ));
     }
     lines

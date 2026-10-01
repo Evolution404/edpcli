@@ -9,18 +9,8 @@ impl AppState {
         self.provision.result_workbench.cycle_pane(reverse);
     }
 
-    pub fn provision_result_shift_partition_column(&mut self, reverse: bool) -> bool {
-        if self.provision.result_workbench.focused_pane()
-            != crate::tui::pane::PaneId::ResultPartitions
-        {
-            return false;
-        }
-        self.provision
-            .result_workbench
-            .move_partition_active_column(
-                reverse,
-                crate::tui::result_workbench::RESULT_PARTITION_COLUMN_COUNT,
-            )
+    pub fn provision_result_spatial_focus(&mut self, dx: i8, dy: i8) {
+        self.provision.result_workbench.spatial_pane(dx, dy);
     }
 
     pub fn provision_initialize_result_workbench(&mut self) {
@@ -65,12 +55,9 @@ impl AppState {
                     .selected_partition
                     .unwrap_or(0)
                     .min(plan.partitions.len().saturating_sub(1));
-                let next = if delta < 0 {
-                    current.saturating_sub(delta.unsigned_abs())
-                } else {
-                    current.saturating_add(delta as usize)
-                }
-                .min(plan.partitions.len().saturating_sub(1));
+                let Some(next) = self.result_partition_moved_source(current, delta) else {
+                    return;
+                };
                 self.provision.result_workbench.selected_partition = Some(next);
                 if let Some(selection) = plan.partition_selection(next) {
                     let _ = self.provision.result_workbench.select_region_geometry(

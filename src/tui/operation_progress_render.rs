@@ -1,12 +1,12 @@
-use crate::application::progress::{OperationKind, OperationRunState, Severity};
-use crate::tui::operation_progress_status::{
-    activity_label, draw_current_status, phase_label, unit_label,
+use crate::application::progress::{
+    LogPolicy, OperationKind, OperationRunState, ProgressEvent, Severity, Step,
 };
+use crate::tui::operation_progress_status::{draw_current_status, phase_label, unit_label};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Modifier,
     text::{Line, Span},
-    widgets::{Gauge, Paragraph, Wrap},
+    widgets::{Cell, Gauge, Paragraph, Row, Table, Wrap},
     Frame,
 };
 
@@ -26,7 +26,33 @@ fn overall_label(basis_points: u16) -> String {
     }
 }
 
-pub(crate) fn draw_operation_progress(frame: &mut Frame, area: Rect, run: &OperationRunState) {
+fn milestone_status_symbol(event: &ProgressEvent) -> &'static str {
+    match event.severity {
+        Severity::Error => "✗",
+        Severity::Warning => "!",
+        Severity::Info => "✓",
+    }
+}
+
+fn log_event_label(event: &ProgressEvent) -> String {
+    match event.step {
+        Step::PartitionFormat(role) => format!("{}格式化与读回", role.label()),
+        _ => event.step.label().to_string(),
+    }
+}
+
+fn current_snapshot(run: &OperationRunState) -> Option<&ProgressEvent> {
+    run.latest.as_ref().filter(|event| {
+        event.severity == Severity::Info && event.log_policy == LogPolicy::SnapshotOnly
+    })
+}
+
+pub(crate) fn draw_operation_progress(
+    frame: &mut Frame,
+    area: Rect,
+    run: &OperationRunState,
+    animation_frame: u64,
+) {
     let theme = crate::tui::theme::current();
     let latest = run.latest.as_ref();
     if area.height < 18 {
@@ -76,36 +102,12 @@ pub(crate) fn draw_operation_progress(frame: &mut Frame, area: Rect, run: &Opera
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
             Constraint::Length(3),
-            Constraint::Length(5),
+            Constraint::Length(8),
             Constraint::Min(6),
-            Constraint::Length(2),
+            Constraint::Length(1),
         ])
         .split(area);
-
-    let elapsed = std::time::Instant::now()
-        .saturating_duration_since(run.started_at)
-        .as_secs();
-    let last_activity = std::time::Instant::now()
-        .saturating_duration_since(run.last_activity_at)
-        .as_secs();
-    let summary = vec![
-        Line::from(vec![
-            Span::styled(
-                operation_title(run.operation),
-                theme.accent().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(format!("  {}", run.target)),
-        ]),
-        Line::from(format!(
-            "运行时间  {elapsed}s    最近活动  {last_activity}s 前"
-        )),
-    ];
-    frame.render_widget(
-        Paragraph::new(summary).block(crate::tui::ui::card("操作 / 目标", true)),
-        chunks[0],
-    );
 
     let overall = latest.map_or(0.0, |event| event.overall.ratio());
     let overall_label = latest
@@ -117,51 +119,116 @@ pub(crate) fn draw_operation_progress(frame: &mut Frame, area: Rect, run: &Opera
             .gauge_style(theme.accent())
             .ratio(overall)
             .label(Span::styled(overall_label, theme.progress_label())),
-        chunks[1],
+        chunks[0],
     );
 
-    draw_current_status(frame, chunks[2], latest);
+    draw_current_status(frame, chunks[1], run);
 
-    let log_lines = if run.log.is_empty() {
-        vec![Line::from(Span::styled("暂无语义活动日志", theme.muted()))]
+    let visible_log_rows = chunks[2].height.saturating_sub(3) as usize;
+    let header = Row::new([
+        Cell::from("时间"),
+        Cell::from("状态"),
+        Cell::from("阶段"),
+        Cell::from("事件"),
+    ])
+    .style(theme.muted());
+    let current = current_snapshot(run);
+    let logged_current_index = if current.is_none()
+        && run.latest.as_ref().is_some_and(|latest| {
+            latest.severity == Severity::Info
+                && latest.step != Step::Completed
+                && run.log.back().is_some_and(|event| event == latest)
+        }) {
+        run.log.len().checked_sub(1)
     } else {
-        run.log
-            .iter()
-            .rev()
-            .take(chunks[3].height.saturating_sub(2) as usize)
-            .rev()
-            .map(|event| {
-                let style = match event.severity {
-                    Severity::Info => theme.secondary_text(),
-                    Severity::Warning => theme.warning(),
-                    Severity::Error => theme.danger(),
-                };
-                let activity = event
-                    .work
-                    .and_then(|work| work.activity)
-                    .map(|activity| format!("扇区活动 {} · ", activity_label(activity)))
-                    .unwrap_or_default();
-                Line::from(Span::styled(
-                    format!(
-                        "{activity}{} · {}{}",
-                        event.phase.label(),
-                        event.step.label(),
-                        event
-                            .detail
-                            .as_deref()
-                            .map(|detail| format!(" · {detail}"))
-                            .unwrap_or_default()
-                    ),
-                    style,
-                ))
-            })
-            .collect()
+        None
     };
+    let history_capacity = visible_log_rows.saturating_sub(usize::from(current.is_some()));
+    let mut rows = run
+        .log
+        .iter()
+        .enumerate()
+        .rev()
+        .take(history_capacity)
+        .rev()
+        .map(|(index, event)| {
+            let is_running = logged_current_index == Some(index);
+            let status = if is_running {
+                crate::tui::animation::spinner_glyph(animation_frame)
+            } else {
+                milestone_status_symbol(event)
+            };
+            let status_style = match event.severity {
+                Severity::Error => theme.danger(),
+                Severity::Warning => theme.warning(),
+                Severity::Info if is_running => theme.accent(),
+                Severity::Info => theme.success(),
+            };
+            let elapsed = event
+                .emitted_at
+                .saturating_duration_since(run.started_at)
+                .as_secs();
+            let stage = event
+                .stage
+                .map(|stage| format!("{}/{} {}", stage.current, stage.total, event.phase.label()))
+                .unwrap_or_else(|| event.phase.label().to_string());
+            let detail = event
+                .detail
+                .as_deref()
+                .map(|detail| format!(" · {detail}"))
+                .unwrap_or_default();
+            Row::new([
+                Cell::from(format!("+{elapsed}s")).style(theme.secondary_text()),
+                Cell::from(status).style(status_style),
+                Cell::from(stage).style(theme.secondary_text()),
+                Cell::from(format!("{}{detail}", log_event_label(event)))
+                    .style(theme.secondary_text()),
+            ])
+        })
+        .collect::<Vec<_>>();
+    if let Some(event) = current {
+        let elapsed = event
+            .emitted_at
+            .saturating_duration_since(run.started_at)
+            .as_secs();
+        let stage = event
+            .stage
+            .map(|stage| format!("{}/{} {}", stage.current, stage.total, event.phase.label()))
+            .unwrap_or_else(|| event.phase.label().to_string());
+        let detail = event
+            .detail
+            .as_deref()
+            .map(|detail| format!(" · {detail}"))
+            .unwrap_or_default();
+        rows.push(Row::new([
+            Cell::from(format!("+{elapsed}s")).style(theme.secondary_text()),
+            Cell::from(crate::tui::animation::spinner_glyph(animation_frame)).style(theme.accent()),
+            Cell::from(stage).style(theme.secondary_text()),
+            Cell::from(format!("{}{detail}", log_event_label(event))).style(theme.secondary_text()),
+        ]));
+    }
+    if rows.is_empty() {
+        rows.push(Row::new([
+            Cell::from("—").style(theme.muted()),
+            Cell::from("—").style(theme.muted()),
+            Cell::from("—").style(theme.muted()),
+            Cell::from("暂无运行记录").style(theme.muted()),
+        ]));
+    }
     frame.render_widget(
-        Paragraph::new(log_lines)
-            .block(crate::tui::ui::card("运行日志 · 最近语义活动", true))
-            .wrap(Wrap { trim: false }),
-        chunks[3],
+        Table::new(
+            rows,
+            [
+                Constraint::Length(8),
+                Constraint::Length(6),
+                Constraint::Length(16),
+                Constraint::Min(1),
+            ],
+        )
+        .header(header)
+        .column_spacing(1)
+        .block(crate::tui::ui::card("运行记录", true)),
+        chunks[2],
     );
 
     let safety = match run.operation {
@@ -172,6 +239,6 @@ pub(crate) fn draw_operation_progress(frame: &mut Frame, area: Rect, run: &Opera
     };
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(safety, theme.muted()))),
-        chunks[4],
+        chunks[3],
     );
 }
