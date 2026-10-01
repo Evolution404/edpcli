@@ -3151,6 +3151,11 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
             raw_sha256: format!("raw-{lba}"),
             raw_nonzero: edpcli::common::SECTOR,
             decoded_sha256: decoded.as_ref().map(|_| format!("decoded-{lba}")),
+            decode_ranges: if decoded.is_some() {
+                vec![edpcli::inspect::DecodeRange::new(0, edpcli::common::SECTOR)]
+            } else {
+                Vec::new()
+            },
             decoded,
             method: Some(if decode_error.is_some() {
                 "raw-only".into()

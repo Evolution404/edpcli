@@ -39,11 +39,30 @@ pub struct FieldChild {
     pub relative_range: Option<(usize, usize)>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecodeRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl DecodeRange {
+    pub const fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+
+    pub const fn contains(self, offset: usize) -> bool {
+        offset >= self.start && offset < self.end
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SectorView {
     pub lba: u32,
     pub raw: Vec<u8>,
     pub decoded: Vec<u8>,
+    /// Byte ranges that were actually transformed by the sector decoder.
+    /// Equality between raw and decoded bytes does not change this provenance.
+    pub decode_ranges: Vec<DecodeRange>,
     pub method: String,
     pub fields: Vec<SectorField>,
     pub notes: Vec<String>,

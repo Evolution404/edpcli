@@ -12,9 +12,9 @@ pub fn render_fields(view: &SectorView) -> String {
     )
 }
 pub use crate::inspect_adapter::{
-    analyze_sector, analyze_sector_with_context, FieldChild, FieldStyle, FieldTransform,
-    InspectDiagnostic, InspectDiagnosticCode, InspectFieldKey, InspectMeta, InspectParseState,
-    SectorField, SectorFieldStatus, SectorView,
+    analyze_sector, analyze_sector_with_context, DecodeRange, FieldChild, FieldStyle,
+    FieldTransform, InspectDiagnostic, InspectDiagnosticCode, InspectFieldKey, InspectMeta,
+    InspectParseState, SectorField, SectorFieldStatus, SectorView,
 };
 
 mod render;

@@ -571,6 +571,7 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
             raw_sha256: format!("raw-{lba}"),
             raw_nonzero: 512,
             decoded: None,
+            decode_ranges: Vec::new(),
             decoded_sha256: None,
             method: None,
             decode_error: None,

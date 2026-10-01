@@ -450,6 +450,19 @@ impl Theme {
             .add_modifier(Modifier::BOLD)
     }
 
+    pub fn inspect_decode_overlay(self, base: Style) -> Style {
+        base.bg(self.palette.surface_active)
+    }
+
+    pub fn inspect_decode_unavailable_overlay(self, base: Style) -> Style {
+        base.bg(self.palette.selection)
+            .add_modifier(Modifier::UNDERLINED)
+    }
+
+    pub fn inspect_cursor_overlay(self, base: Style) -> Style {
+        base.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    }
+
     pub fn tab(self) -> Style {
         self.muted()
     }

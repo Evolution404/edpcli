@@ -408,6 +408,7 @@ pub(super) fn inspect_workspace(
         raw_sha256: "DEMO-RAW-SHA256".into(),
         raw_nonzero: SECTOR,
         decoded: Some(vec![0x45; SECTOR]),
+        decode_ranges: vec![crate::inspect::DecodeRange::new(0, SECTOR)],
         decoded_sha256: Some("DEMO-DECODE-SHA256".into()),
         method: Some("DEMO typed fixture".into()),
         decode_error: None,

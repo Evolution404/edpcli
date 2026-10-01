@@ -12,6 +12,7 @@ pub(super) fn render_lba9_12(
     fields: &mut Vec<SectorField>,
     notes: &mut Vec<String>,
     decoded: &mut Vec<u8>,
+    decode_ranges: &mut Vec<DecodeRange>,
     diagnostics: &mut Vec<InspectDiagnostic>,
 ) -> String {
     let LbaLateContext {
@@ -37,6 +38,18 @@ pub(super) fn render_lba9_12(
                 match lba9::parse_lba9(raw_sector, crc, dept_profile, long_user) {
                     Ok(view) => {
                         *decoded = view.decoded().to_vec();
+                        if matches!(&view.eetu, lba9::EetuState::Present(_)) {
+                            decode_ranges.push(DecodeRange::new(0, 0x80));
+                        }
+                        match &view.upper {
+                            lba9::UpperPayload::Sapf(_) => {
+                                decode_ranges.push(DecodeRange::new(0x100, 0x120));
+                            }
+                            lba9::UpperPayload::Eppe(_) => {
+                                decode_ranges.push(DecodeRange::new(0x180, SECTOR));
+                            }
+                            _ => {}
+                        }
                         fields.push(field(
                             0x080,
                             0x100,
@@ -283,6 +296,7 @@ pub(super) fn render_lba9_12(
                         ..
                     }) => {
                         decoded[..0x80].copy_from_slice(&plain_prefix);
+                        decode_ranges.push(DecodeRange::new(0, 0x80));
                         fields.push(field(0x000, 0x004, "EESI magic", "EESI", FieldStyle::Magic));
                         fields.push(field(
                             0x004,
@@ -349,6 +363,7 @@ pub(super) fn render_lba9_12(
             Some((view, profiles)) => {
                 decoded[..0x100].copy_from_slice(&view.reconstruct()[..0x100]);
                 decoded[0x100..].copy_from_slice(view.decoded_pdkb());
+                decode_ranges.push(DecodeRange::new(0x100, SECTOR));
                 fields.push(field(0x000, 0x004, "DRKB magic", "DRKB", FieldStyle::Magic));
                 fields.push(field(
                     0x004,
@@ -385,6 +400,7 @@ pub(super) fn render_lba9_12(
                 match infer_lba12(raw_sector, crc) {
                     Some((view, modes)) => {
                         *decoded = view.decoded().to_vec();
+                        decode_ranges.push(DecodeRange::new(0, SECTOR));
                         for (index, entry) in view.entries.iter().enumerate() {
                             fields.extend(edpf96_fields(index * 0x60, index, entry));
                         }

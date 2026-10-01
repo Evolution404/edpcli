@@ -45,6 +45,7 @@ fn lba8_state() -> AppState {
         raw_sha256: "test-raw".into(),
         raw_nonzero: 0,
         decoded: None,
+        decode_ranges: Vec::new(),
         decoded_sha256: None,
         method: None,
         decode_error: None,

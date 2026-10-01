@@ -161,6 +161,8 @@ pub struct AdvancedInspectItem {
     pub raw_sha256: String,
     pub raw_nonzero: usize,
     pub decoded: Option<Vec<u8>>,
+    /// Proven byte ranges that actually passed through a decoder.
+    pub decode_ranges: Vec<crate::inspect_adapter::DecodeRange>,
     pub decoded_sha256: Option<String>,
     pub method: Option<String>,
     pub decode_error: Option<String>,

@@ -54,6 +54,11 @@ fn item(lba: u64, decoded: bool) -> AdvancedInspectItem {
         raw_sha256: format!("raw-{lba}"),
         raw_nonzero: 510,
         decoded: decoded.then_some(decoded_bytes),
+        decode_ranges: if decoded {
+            vec![edpcli::inspect::DecodeRange::new(0, edpcli::common::SECTOR)]
+        } else {
+            Vec::new()
+        },
         decoded_sha256: decoded.then(|| format!("decoded-{lba}")),
         method: decoded.then(|| "test-decoder".into()),
         decode_error: (!decoded).then(|| "decoder unavailable".into()),
@@ -503,7 +508,7 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
         .collect::<String>()
         .replace(' ', "");
     assert!(text.contains("Esc返回：Inspect"), "{text}");
-    assert!(text.contains("SectorInspector"), "{text}");
+    assert!(text.contains("扇区检查"), "{text}");
     assert_eq!(
         state.advanced_inspect_view_mode(),
         Some(edpcli::tui::state::InspectViewMode::Hex),
@@ -734,7 +739,7 @@ fn sector_inspector_renders_32x16_offsets_ascii_typed_and_unknown_views() {
         .map(|cell| cell.symbol())
         .collect::<String>();
     let compact = text.replace(' ', "");
-    assert!(compact.contains("SectorInspector"), "{text}");
+    assert!(compact.contains("扇区检查"), "{text}");
     assert!(
         compact.contains("磁盘概览·当前LBA0"),
         "sector detail must keep the permanent mini capacity map: {text}"
@@ -747,16 +752,11 @@ fn sector_inspector_renders_32x16_offsets_ascii_typed_and_unknown_views() {
     assert!(compact.contains("bit-child"), "{text}");
 
     state.advanced_inspect_sector_move_cursor(10);
+    assert!(
+        state.advanced_inspect_sector_active_field().is_none(),
+        "cursor outside all Field ranges must remain explicitly unclassified"
+    );
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
-    let text = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect::<String>();
-    let compact = text.replace(' ', "");
-    assert!(compact.contains("Unknownbyte"), "{text}");
 
     for (width, height) in [(40, 10), (80, 24), (120, 36)] {
         let backend = TestBackend::new(width, height);
@@ -915,7 +915,7 @@ fn field_statuses_remain_distinct_and_unknown_byte_stays_unclassified() {
         .iter()
         .map(|cell| cell.symbol())
         .collect::<String>();
-    assert!(text.replace(' ', "").contains("Unknownbyte"), "{text}");
+    assert!(text.replace(' ', "").contains("未归属字段"), "{text}");
 }
 
 #[test]

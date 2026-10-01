@@ -7,6 +7,7 @@ pub(super) fn render_lba5_8(
     fields: &mut Vec<SectorField>,
     notes: &mut Vec<String>,
     decoded: &mut Vec<u8>,
+    decode_ranges: &mut Vec<DecodeRange>,
     diagnostics: &mut Vec<InspectDiagnostic>,
 ) -> String {
     match lba {
@@ -31,6 +32,7 @@ pub(super) fn render_lba5_8(
         6 => match lba6::parse_lba6(raw_sector) {
             Ok(view) => {
                 *decoded = view.decoded().to_vec();
+                decode_ranges.push(DecodeRange::new(0, 0x1fc));
                 let dept = match &view.dept {
                     lba6::DeptInline::Short(slot) => format!("short: {}", slot_value(slot)),
                     lba6::DeptInline::Join59(bytes) => {
@@ -229,6 +231,7 @@ pub(super) fn render_lba5_8(
                 match infer_lba7(raw_sector, crc) {
                     Some((view, entry_profile, pass_profile)) => {
                         *decoded = view.stored_plain().to_vec();
+                        decode_ranges.push(DecodeRange::new(0, SECTOR));
                         for (index, entry) in view.entries_0_1.iter().enumerate() {
                             fields.extend(edpf64_fields(index * 0x40, index, entry));
                         }
@@ -290,6 +293,7 @@ pub(super) fn render_lba5_8(
                 match infer_lba8(raw_sector, crc, meta_onlyid(meta)) {
                     Some((view, usb_profiles, host_profiles)) => {
                         *decoded = view.mixed_plain().to_vec();
+                        decode_ranges.push(DecodeRange::new(0, view.encrypted_len()));
                         fields.push(field(0x000, 0x004, "LLGB magic", "LLGB", FieldStyle::Magic));
                         fields.push(field(
                             0x004,

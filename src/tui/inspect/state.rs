@@ -193,7 +193,7 @@ impl AppState {
             }
         }
         if advanced.sector.is_some() {
-            path.push("Sector Inspector".into());
+            path.push("扇区检查".into());
         }
         Some(BreadcrumbModel {
             path,

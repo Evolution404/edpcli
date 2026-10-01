@@ -15,6 +15,7 @@ pub fn analyze_sector_with_context(
             lba,
             raw: raw.to_vec(),
             decoded: raw.to_vec(),
+            decode_ranges: Vec::new(),
             method: format!("RAW（短读：{}B，应为 {}B）", raw.len(), SECTOR),
             fields: vec![],
             notes: vec!["扇区长度异常，停止结构化解析。".into()],
@@ -30,6 +31,7 @@ pub fn analyze_sector_with_context(
     let mut notes = Vec::new();
     let mut diagnostics = Vec::new();
     let mut decoded = raw.to_vec();
+    let mut decode_ranges = Vec::new();
 
     let method = match lba {
         0..=4 => super::lba_early::render_lba0_4(
@@ -39,6 +41,7 @@ pub fn analyze_sector_with_context(
             &mut fields,
             &mut notes,
             &mut decoded,
+            &mut decode_ranges,
             &mut diagnostics,
         ),
         5..=8 => super::lba_middle::render_lba5_8(
@@ -48,6 +51,7 @@ pub fn analyze_sector_with_context(
             &mut fields,
             &mut notes,
             &mut decoded,
+            &mut decode_ranges,
             &mut diagnostics,
         ),
         9..=12 => super::lba_late::render_lba9_12(
@@ -60,6 +64,7 @@ pub fn analyze_sector_with_context(
             &mut fields,
             &mut notes,
             &mut decoded,
+            &mut decode_ranges,
             &mut diagnostics,
         ),
         _ => {
@@ -83,6 +88,7 @@ pub fn analyze_sector_with_context(
         lba,
         raw: raw.to_vec(),
         decoded,
+        decode_ranges,
         method,
         fields,
         notes,
