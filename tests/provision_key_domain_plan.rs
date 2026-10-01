@@ -397,6 +397,41 @@ fn confirmation_ui_uses_one_handling_vocabulary_and_symbolic_statuses() {
 }
 
 #[test]
+fn provision_write_confirmation_is_consequence_first_and_non_redundant() {
+    let details = include_str!("../src/tui/provision/confirmation_render.rs");
+    let render = include_str!("../src/tui/provision/render.rs");
+    let shared = include_str!("../src/tui/ui/confirmation.rs");
+
+    for token in [
+        "目标设备",
+        "目标布局",
+        "写入影响",
+        "VID:PID",
+        "onlyid",
+        "数据",
+        "密码",
+        "文件系统",
+    ] {
+        assert!(
+            details.contains(token),
+            "missing confirmation token: {token}"
+        );
+    }
+    assert!(render.contains("写入开始后不能撤销"));
+    assert!(shared.contains("MediaWriteConfirmationKind::Provision => \"确认写入\""));
+    for banned in [
+        "view.target.device_id",
+        "确认后将直接开始向",
+        "输入精确 YES 后立即按已审核计划开始写盘",
+    ] {
+        assert!(
+            !details.contains(banned) && !render.contains(banned),
+            "provision confirmation must not expose redundant/long-form content: {banned}"
+        );
+    }
+}
+
+#[test]
 fn chapter_12_cli_must_not_restore_global_password_fallback() {
     let cli = include_str!("../src/cli_args/provision.rs");
     assert!(!cli.contains("\"--password\" =>"));

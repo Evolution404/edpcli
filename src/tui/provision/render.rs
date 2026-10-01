@@ -6,6 +6,10 @@ pub(super) fn draw_scheme_picker(frame: &mut Frame, state: &AppState) {
     scheme_picker_render::draw_scheme_picker(frame, state);
 }
 
+#[path = "confirmation_render.rs"]
+mod confirmation_render;
+use confirmation_render::provision_confirmation_details;
+
 #[path = "form_render.rs"]
 mod form_render;
 use form_render::draw_provision_form;
@@ -177,73 +181,27 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
         ProvisionStage::Confirm => {
             draw_provision_review(frame, main_area, state);
             let view = state.provision_confirmation_view_model().ok();
-            let target = view
+            let details = view
                 .as_ref()
-                .map(|view| {
-                    format!(
-                        "disk{} · {} · {}",
-                        view.target.disk,
-                        crate::common::fmt_capacity(
-                            view.target
-                                .total_sectors
-                                .saturating_mul(crate::common::SECTOR as u64)
-                        ),
-                        view.target.device_id
-                    )
-                })
-                .unwrap_or_else(|| "目标身份不可用".into());
-            let mut details = vec![
-                Line::from(vec![
-                    Span::styled("目标设备  ", muted()),
-                    Span::styled(safe(&target), secondary()),
-                ]),
-                Line::from("输入精确 YES 后立即按已审核计划开始写盘。"),
-            ];
-            if let Some(view) = view.as_ref() {
-                let cleared = view
-                    .regions
-                    .iter()
-                    .filter(|region| {
-                        region.data_effect
-                            == crate::tui::state::ProvisionConfirmationDataEffect::Clear
-                    })
-                    .map(|region| region.label.as_str())
-                    .collect::<Vec<_>>();
-                if cleared.is_empty() {
-                    details.push(Line::from(Span::styled("✓ 数据区域全部保留", success())));
-                } else {
-                    details.push(Line::from(Span::styled(
-                        format!("⚠ 数据将清空：{}", cleared.join("、")),
-                        warning(),
-                    )));
-                }
-                let changed_filesystems = view
-                    .regions
-                    .iter()
-                    .filter(|region| {
-                        matches!(
-                            region.filesystem_effect,
-                            crate::tui::state::ProvisionConfirmationFilesystemEffect::Format(_)
-                                | crate::tui::state::ProvisionConfirmationFilesystemEffect::Create(
-                                    _
-                                )
-                        )
-                    })
-                    .map(|region| format!("{} {}", region.label, region.filesystem_effect.label()))
-                    .collect::<Vec<_>>();
-                if !changed_filesystems.is_empty() {
-                    details.push(Line::from(Span::styled(
-                        format!("文件系统：{}", changed_filesystems.join("；")),
-                        warning(),
-                    )));
-                }
-            }
+                .map(provision_confirmation_details)
+                .unwrap_or_else(|| {
+                    vec![
+                        Line::from(vec![
+                            Span::styled("目标设备  ", muted()),
+                            Span::styled("目标身份不可用", danger()),
+                        ]),
+                        Line::from(vec![
+                            Span::styled("写入影响  ", muted()),
+                            Span::styled("无法计算", danger()),
+                        ]),
+                    ]
+                });
             crate::tui::ui::render_write_confirmation_modal(
                 frame,
                 crate::tui::ui::WriteConfirmationSpec {
                     kind: crate::tui::ui::MediaWriteConfirmationKind::Provision,
                     title: "制盘写入确认",
-                    warning: format!("确认后将直接开始向 {target} 写入"),
+                    warning: "写入开始后不能撤销".into(),
                     details,
                     confirmation: &provision.confirmation,
                     message: provision.message.as_ref(),

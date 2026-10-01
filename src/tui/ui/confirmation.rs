@@ -47,7 +47,7 @@ pub fn render_write_confirmation_modal(frame: &mut Frame, spec: WriteConfirmatio
     render_modal(frame, area, spec.title, |frame, inner| {
         let theme = theme::current();
         let action_label = match spec.kind {
-            MediaWriteConfirmationKind::Provision => "开始制盘",
+            MediaWriteConfirmationKind::Provision => "确认写入",
             MediaWriteConfirmationKind::Restore => "开始恢复",
             MediaWriteConfirmationKind::Format => "开始格式化",
             MediaWriteConfirmationKind::EncryptedFormat => "开始加密格式化",

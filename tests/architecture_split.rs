@@ -1880,7 +1880,7 @@ fn passive_capacity_display_uses_one_global_unit_system() {
         "src/tui/devices/presentation.rs",
         "src/tui/disk_layout.rs",
         "src/tui/provision/layout.rs",
-        "src/tui/provision/render.rs",
+        "src/tui/provision/confirmation_render.rs",
         "src/tui/provision/scheme_picker_render.rs",
     ] {
         let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
