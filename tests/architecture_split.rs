@@ -1883,6 +1883,26 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
 }
 
 #[test]
+fn plain_scan_and_prepare_share_geometry_aware_filesystem_evidence() {
+    let scan = source("src/disk_scan.rs");
+    let prepare = source("src/application/provision/prepare.rs");
+    let helper = "detect_boot_sector_with_geometry(";
+
+    assert!(
+        scan.contains(helper),
+        "Plain device scan must use geometry-aware filesystem evidence"
+    );
+    assert!(
+        prepare.contains(helper),
+        "Provision prepare must use the same geometry-aware filesystem evidence"
+    );
+    assert!(
+        !scan.contains("partition.filesystem = crate::filesystem::detect_boot_sector("),
+        "Plain device scan must not fall back to type-only filesystem detection"
+    );
+}
+
+#[test]
 fn passive_capacity_display_uses_one_global_unit_system() {
     for path in [
         "src/disk_scan_render.rs",
