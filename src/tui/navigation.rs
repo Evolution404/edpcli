@@ -19,7 +19,7 @@ impl NavigationLocation {
             Self::Backups => "备份列表",
             Self::Provision => "制盘",
             Self::Inspect => "Inspect",
-            Self::SectorInspector => "Sector Inspector",
+            Self::SectorInspector => "扇区检查",
         }
     }
 

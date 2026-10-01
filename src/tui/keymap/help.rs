@@ -9,11 +9,6 @@ pub struct HelpBinding {
 
 pub const INSPECT_HELP: &[HelpBinding] = &[
     HelpBinding {
-        keys: "1/2/3",
-        label: "业务字段/原始字段/Hex",
-        action: TuiAction::InspectBusiness,
-    },
-    HelpBinding {
         keys: "Tab/Shift-Tab",
         label: "切换当前页 Pane",
         action: TuiAction::FocusNext,

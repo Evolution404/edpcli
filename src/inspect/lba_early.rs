@@ -4,11 +4,15 @@ pub(super) fn render_lba0_4(
     lba: u32,
     raw_sector: &[u8; SECTOR],
     protocol_image: Option<&[u8]>,
-    fields: &mut Vec<SectorField>,
-    notes: &mut Vec<String>,
-    decoded: &mut Vec<u8>,
-    diagnostics: &mut Vec<InspectDiagnostic>,
+    buffers: LbaRenderBuffers<'_>,
 ) -> String {
+    let LbaRenderBuffers {
+        fields,
+        notes,
+        decoded,
+        decode_ranges,
+        diagnostics,
+    } = buffers;
     match lba {
         0 => match lba0::parse_lba0(raw_sector) {
             Ok(view) => {
@@ -347,6 +351,12 @@ pub(super) fn render_lba0_4(
         4 => match lba4::parse_lba4(raw_sector, lba4::Lba4Context::default()) {
             Ok(view) => {
                 *decoded = view.reader.bytes().to_vec();
+                if view.backing_is_raw_zero() {
+                    decode_ranges.push(DecodeRange::new(24, 71));
+                    decode_ranges.push(DecodeRange::new(508, SECTOR));
+                } else {
+                    decode_ranges.push(DecodeRange::new(24, SECTOR));
+                }
                 fields.push(field(
                     0x000,
                     0x018,

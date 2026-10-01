@@ -1,6 +1,68 @@
 use super::super::*;
 use super::inspect_field_status_style;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ByteDecodeStatus {
+    Plain,
+    Decoded,
+    Unavailable,
+}
+
+fn byte_decode_status(
+    item: &crate::application::inspect::AdvancedInspectItem,
+    offset: usize,
+) -> ByteDecodeStatus {
+    if item.decode_error.is_some() {
+        ByteDecodeStatus::Unavailable
+    } else if item
+        .decode_ranges
+        .iter()
+        .copied()
+        .any(|range| range.contains(offset))
+    {
+        ByteDecodeStatus::Decoded
+    } else {
+        ByteDecodeStatus::Plain
+    }
+}
+
+fn byte_field_status(
+    item: &crate::application::inspect::AdvancedInspectItem,
+    offset: usize,
+) -> Option<crate::application::inspect::InspectFieldStatus> {
+    let absolute = item
+        .lba
+        .saturating_mul(crate::common::SECTOR as u64)
+        .saturating_add(offset as u64);
+    item.fields
+        .iter()
+        .find(|field| absolute >= field.range.start && absolute < field.range.end_exclusive)
+        .map(|field| field.status)
+}
+
+pub(super) fn sector_byte_style(
+    item: &crate::application::inspect::AdvancedInspectItem,
+    mode: crate::tui::state::SectorInspectMode,
+    offset: usize,
+    cursor: bool,
+) -> Style {
+    let theme = crate::tui::theme::current();
+    let mut style = byte_field_status(item, offset)
+        .map(inspect_field_status_style)
+        .unwrap_or_default();
+    if mode == crate::tui::state::SectorInspectMode::Mixed {
+        style = match byte_decode_status(item, offset) {
+            ByteDecodeStatus::Plain => style,
+            ByteDecodeStatus::Decoded => theme.inspect_decode_overlay(style),
+            ByteDecodeStatus::Unavailable => theme.inspect_decode_unavailable_overlay(style),
+        };
+    }
+    if cursor {
+        style = theme.inspect_cursor_overlay(style);
+    }
+    style
+}
+
 pub(super) fn draw_sector_inspector(
     frame: &mut Frame,
     area: ratatui::layout::Rect,
@@ -60,11 +122,7 @@ pub(super) fn draw_sector_inspector(
         ])
         .split(area);
     frame.render_widget(
-        Paragraph::new(header).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Sector Inspector"),
-        ),
+        Paragraph::new(header).block(Block::default().borders(Borders::ALL).title("扇区检查")),
         vertical[0],
     );
 
@@ -105,41 +163,25 @@ pub(super) fn draw_sector_inspector(
             for column in 0..16usize {
                 let index = offset + column;
                 let byte = display[index];
-                let absolute = sector
-                    .lba
-                    .saturating_mul(crate::common::SECTOR as u64)
-                    .saturating_add(index as u64);
-                let active_status = active_field.as_ref().and_then(|field| {
-                    (absolute >= field.range.start && absolute < field.range.end_exclusive)
-                        .then_some(field.status)
-                });
-                let style = if index == sector.cursor {
-                    crate::tui::theme::current().cursor()
-                } else if let Some(status) = active_status {
-                    inspect_field_status_style(status)
-                } else if sector.mode == SectorInspectMode::Mixed
-                    && decoded.is_some_and(|decoded| decoded[index] != item.raw[index])
-                {
-                    secondary()
-                } else {
-                    Style::default()
-                };
+                let style = sector_byte_style(item, sector.mode, index, index == sector.cursor);
                 spans.push(Span::styled(format!("{byte:02X} "), style));
                 if column == 7 {
                     spans.push(Span::raw(" "));
                 }
             }
-            let ascii = display[offset..offset + 16]
-                .iter()
-                .map(|byte| {
-                    if (0x20..=0x7e).contains(byte) {
-                        *byte as char
-                    } else {
-                        '.'
-                    }
-                })
-                .collect::<String>();
-            spans.push(Span::styled(format!(" |{ascii}|"), muted()));
+
+            spans.push(Span::styled(" |", muted()));
+            for (relative, byte) in display[offset..offset + 16].iter().copied().enumerate() {
+                let index = offset + relative;
+                let ch = if (0x20..=0x7e).contains(&byte) {
+                    byte as char
+                } else {
+                    '.'
+                };
+                let style = sector_byte_style(item, sector.mode, index, index == sector.cursor);
+                spans.push(Span::styled(ch.to_string(), style));
+            }
+            spans.push(Span::styled("|", muted()));
             hex_lines.push(Line::from(spans));
         }
     } else {
@@ -175,9 +217,42 @@ pub(super) fn draw_sector_inspector(
             .as_ref()
             .and_then(|bytes| bytes.get(sector.cursor))
             .copied();
-        details.push(Line::from(format!("Raw byte: 0x{raw:02X} ({raw})")));
+        details.push(Line::from(format!("Offset       +0x{:03X}", sector.cursor)));
+        details.push(Line::from(format!("Raw          0x{raw:02X} ({raw})")));
         if let Some(decoded) = decoded {
-            details.push(Line::from(format!("Decoded:  0x{decoded:02X} ({decoded})")));
+            details.push(Line::from(format!(
+                "Decoded      0x{decoded:02X} ({decoded})"
+            )));
+        } else {
+            details.push(Line::from("Decoded      —"));
+        }
+        let decode_range = item
+            .decode_ranges
+            .iter()
+            .copied()
+            .find(|range| range.contains(sector.cursor));
+        let decode_label =
+            if sector.pending && item.decoded.is_none() && item.decode_error.is_none() {
+                "读取中"
+            } else if item.decode_error.is_some() {
+                "Unavailable"
+            } else if decode_range.is_some() {
+                "Decoded"
+            } else {
+                "Plain"
+            };
+        details.push(Line::from(format!("Decode       {decode_label}")));
+        if let Some(range) = decode_range {
+            details.push(Line::from(format!(
+                "Decode Range +0x{:03X}..+0x{:03X}",
+                range.start, range.end
+            )));
+        }
+        if let Some(error) = item.decode_error.as_deref() {
+            details.push(Line::from(Span::styled(
+                format!("Decode Error {}", safe(error)),
+                warning(),
+            )));
         }
         details.push(Line::from(""));
         if let Some(field) = active_field.as_ref() {
@@ -193,9 +268,11 @@ pub(super) fn draw_sector_inspector(
                     inspect_field_status_style(field.status).add_modifier(Modifier::BOLD),
                 ),
             ]));
+            let sector_base = sector.lba.saturating_mul(crate::common::SECTOR as u64);
             details.push(Line::from(format!(
-                "Range: 0x{:X}..0x{:X}",
-                field.range.start, field.range.end_exclusive
+                "Range: +0x{:03X}..+0x{:03X}",
+                field.range.start.saturating_sub(sector_base),
+                field.range.end_exclusive.saturating_sub(sector_base)
             )));
             if sector.field_expanded {
                 details.push(Line::from(""));
@@ -221,8 +298,8 @@ pub(super) fn draw_sector_inspector(
                 details.push(Line::from("o 展开 bit / child 详情"));
             }
         } else {
-            details.push(Line::from(Span::styled("Unknown byte", muted())));
-            details.push(Line::from("当前 byte 不属于已知 Field；不推测语义。"));
+            details.push(Line::from(Span::styled("未归属字段", muted())));
+            details.push(Line::from("当前 byte 不属于任何已知 Field；不推测语义。"));
             if sector.field_expanded {
                 details.push(Line::from(format!("bits: {:08b}", raw)));
             }
@@ -239,11 +316,7 @@ pub(super) fn draw_sector_inspector(
     }
     frame.render_widget(
         Paragraph::new(details)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Typed / Field"),
-            )
+            .block(Block::default().borders(Borders::ALL).title("字节 / 字段"))
             .wrap(Wrap { trim: false }),
         main.1,
     );

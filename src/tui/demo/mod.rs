@@ -326,7 +326,7 @@ fn execute_demo_request(
             state.set_notice("演示模式不会执行真实外部操作");
             crate::tui::state::StateEffect::None
         }
-        super::controller::ActionRequest::InspectSelection { .. } => {
+        super::controller::ActionRequest::InspectSelection => {
             open_cached_inspect_selection(state);
             crate::tui::state::StateEffect::None
         }

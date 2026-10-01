@@ -4,7 +4,6 @@ use crate::application::inspect::AdvancedInspectWorkspace;
 use crate::application::inspect_tree::InspectNodeKind;
 use crate::tui::state::{
     AdvancedInspectPanel, AdvancedInspectPrompt, AdvancedInspectState, AdvancedInspectTreeRow,
-    InspectViewMode,
 };
 
 pub(super) fn draw_inspect_object_panes(
@@ -143,7 +142,7 @@ pub(super) fn draw_inspect_object_panes(
                     for note in &item.notes {
                         detail_lines.push(Line::from(safe(note)));
                     }
-                    detail_lines.push(Line::from("Enter 打开 Sector Inspector/Hex"));
+                    detail_lines.push(Line::from("Enter 打开扇区检查"));
                 } else {
                     match state.advanced_inspect_preview_state(lba) {
                         crate::tui::state::PreviewLoadState::Failed { message, attempts } => {
@@ -151,9 +150,8 @@ pub(super) fn draw_inspect_object_panes(
                                 format!("读取失败（第 {attempts} 次）：{}", safe(&message)),
                                 warning(),
                             )));
-                            detail_lines.push(Line::from(
-                                "按 r 显式重试预览，或 Enter 打开 Sector Inspector 重试。",
-                            ));
+                            detail_lines
+                                .push(Line::from("按 r 显式重试预览，或 Enter 打开扇区检查重试。"));
                         }
                         crate::tui::state::PreviewLoadState::Pending { .. } => {
                             detail_lines.push(Line::from("正在后台读取当前扇区…"));
@@ -161,9 +159,7 @@ pub(super) fn draw_inspect_object_panes(
                         _ => {
                             detail_lines
                                 .push(Line::from(Span::styled("该扇区尚未按需读取。", warning())));
-                            detail_lines.push(Line::from(
-                                "Enter 打开 Sector Inspector 并后台读取当前 sector。",
-                            ));
+                            detail_lines.push(Line::from("Enter 打开扇区检查并后台读取当前扇区。"));
                         }
                     }
                 }
@@ -271,7 +267,7 @@ pub(super) fn draw_inspect_object_panes(
         frame.render_widget(
             Paragraph::new(overview_lines)
                 .block(crate::tui::ui::card(
-                    "对象快照",
+                    "对象摘要",
                     advanced.panel == AdvancedInspectPanel::Overview,
                 ))
                 .scroll((overview_scroll.min(u16::MAX as usize) as u16, 0))
@@ -287,10 +283,7 @@ pub(super) fn draw_inspect_object_panes(
             .scroll_y
             .offset;
         let field_item = selected_row
-            .filter(|row| {
-                advanced.view_mode == InspectViewMode::RawFields
-                    && row.kind == InspectNodeKind::Sector
-            })
+            .filter(|row| row.kind == InspectNodeKind::Sector)
             .and_then(|row| {
                 workspace
                     .items
@@ -311,7 +304,7 @@ pub(super) fn draw_inspect_object_panes(
             let detail_scroll = detail_offset.min(detail_lines.len().saturating_sub(1));
             frame.render_widget(
                 Paragraph::new(detail_lines)
-                    .block(crate::tui::ui::card("字段详情 / Evidence", detail_focus))
+                    .block(crate::tui::ui::card("字段 / 证据", detail_focus))
                     .wrap(Wrap { trim: false })
                     .scroll((detail_scroll.min(u16::MAX as usize) as u16, 0)),
                 detail_area,

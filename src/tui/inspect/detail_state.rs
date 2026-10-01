@@ -2,16 +2,16 @@ use super::AdvancedInspectStage;
 use crate::tui::state::AppState;
 
 pub const INSPECT_DETAIL_HEADINGS: [&str; 11] = [
+    "Status",
     "Offset",
     "Len",
-    "Group",
     "Field",
     "Value",
+    "Group",
     "Raw",
     "Decoded",
     "Logical",
     "Type",
-    "Status",
     "Transform",
 ];
 
@@ -69,15 +69,16 @@ impl AppState {
             let offset = field.range.start.saturating_sub(sector_start);
             projected.push(InspectDetailRow {
                 cells: [
+                    format!("{:?}", field.status),
                     format!("0x{offset:03X}"),
                     field.range.len().to_string(),
-                    field.group.clone().unwrap_or_default(),
                     if field.key == crate::inspect::InspectFieldKey::Lba8Elabel {
                         format!("{marker}E_LABEL [{}]", field.children.len())
                     } else {
                         format!("{marker}{}", field.label)
                     },
                     field.value.clone(),
+                    field.group.clone().unwrap_or_default(),
                     inspect_hex(&field.raw),
                     inspect_hex(&field.decoded),
                     field
@@ -86,7 +87,6 @@ impl AppState {
                         .map(inspect_hex)
                         .unwrap_or_default(),
                     format!("{:?}", field.field_type),
-                    format!("{:?}", field.status),
                     field
                         .transform
                         .map(|transform| format!("{transform:?}"))
@@ -119,16 +119,16 @@ impl AppState {
                     };
                     projected.push(InspectDetailRow {
                         cells: [
+                            format!("{:?}", field.status),
                             offset,
                             len,
-                            field.group.clone().unwrap_or_default(),
                             format!("  {}", child.label),
                             child.value.clone(),
+                            field.group.clone().unwrap_or_default(),
                             raw,
                             decoded,
                             String::new(),
                             String::new(),
-                            format!("{:?}", field.status),
                             String::new(),
                         ],
                         range,

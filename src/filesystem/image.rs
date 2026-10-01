@@ -125,6 +125,21 @@ pub fn build_empty_fat16(
     )
 }
 
+pub fn build_empty_fat32(
+    partition_offset: u64,
+    volume_sectors: u64,
+    volume_serial: u32,
+    volume_label: &str,
+) -> Result<SparseFilesystemImage, String> {
+    build_empty_filesystem(
+        FilesystemKind::Fat32,
+        partition_offset,
+        volume_sectors,
+        volume_serial,
+        Some(volume_label),
+    )
+}
+
 pub fn build_empty_exfat(
     partition_offset: u64,
     volume_sectors: u64,

@@ -42,11 +42,19 @@ pub use field_contract::{
 pub use lba_adapter::{analyze_sector, analyze_sector_with_context};
 pub use mbr_adapter::analyze_mbr_sector;
 pub use metadata::InspectMeta;
-pub use model::{FieldChild, FieldStyle, SectorField, SectorView};
+pub use model::{DecodeRange, FieldChild, FieldStyle, SectorField, SectorView};
 
 use edpf_fields::edpf96_fields;
 use metadata::*;
 use model::*;
+
+struct LbaRenderBuffers<'a> {
+    fields: &'a mut Vec<SectorField>,
+    notes: &'a mut Vec<String>,
+    decoded: &'a mut Vec<u8>,
+    decode_ranges: &'a mut Vec<DecodeRange>,
+    diagnostics: &'a mut Vec<InspectDiagnostic>,
+}
 
 #[cfg(test)]
 mod tests {

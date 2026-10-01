@@ -17,7 +17,7 @@ use edpcli::diskio::SectorDev;
 use edpcli::edpb::{
     self, CaptureLevel, CoreCapture, MetadataCapture, RestorePolicy, SemanticStatus,
 };
-use edpcli::filesystem::{build_empty_exfat, build_empty_fat16};
+use edpcli::filesystem::{build_empty_exfat, build_empty_fat16, build_empty_fat32};
 
 const NETAC_DEVICE_ID: &str = "disk&ven_netac&prod_onlydisk";
 const NETAC_TOTAL_SECTORS: u64 = 122_880_000;
@@ -325,6 +325,31 @@ fn plain_exfat_metadata_capture_preserves_only_volume_label_hint() {
             .all(|artifact| !artifact.id.contains("filesystem")
                 && !artifact.kind.contains("filesystem")),
         "filesystem sectors may be read transiently for hints but must never become backup artifacts"
+    );
+    assert_eq!(capture.artifacts.len(), 1);
+}
+
+#[test]
+fn plain_fat32_metadata_capture_preserves_volume_label_hint() {
+    let total = 1_100_000u64;
+    let start = 2_048u64;
+    let count = 1_000_000u64;
+    let image = build_empty_fat32(start, count, 0x1357_2468, "DATAVOL").unwrap();
+    let mut dev = ReadOnlySparseDev::new();
+    dev.insert(0, test_mbr(0x0c, start as u32, count as u32));
+    dev.insert(start, image.sectors().get(&0).unwrap().to_vec());
+
+    let capture = acquire_plain_metadata(&mut dev, total).unwrap();
+
+    assert_eq!(dev.writes, 0);
+    assert_eq!(capture.partitions.len(), 1);
+    assert_eq!(
+        capture.partitions[0].filesystem_hint.as_deref(),
+        Some("fat32")
+    );
+    assert_eq!(
+        capture.partitions[0].volume_label_hint.as_deref(),
+        Some("DATAVOL")
     );
     assert_eq!(capture.artifacts.len(), 1);
 }

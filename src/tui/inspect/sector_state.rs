@@ -325,6 +325,7 @@ impl AppState {
             return false;
         };
         if state.sector.take().is_some() {
+            state.view_mode = InspectViewMode::Browser;
             if let Some(frame) = self.shell.navigation.pop() {
                 state.panel = frame.panel.unwrap_or(AdvancedInspectPanel::Tree);
                 state.tree_selected = frame.tree_selection;

@@ -75,7 +75,9 @@ impl AppState {
                     ProvisionForm::quick_unit_label(crate::provision::QuickCapacityUnit::MiB),
                     ProvisionForm::quick_unit_label(crate::provision::QuickCapacityUnit::GiB)
                 )),
-                PlainProvisionFieldKind::Filesystem => Some("Space 切换 FAT16 / exFAT".into()),
+                PlainProvisionFieldKind::Filesystem => {
+                    Some("Space 切换 FAT16 / FAT32 / exFAT".into())
+                }
                 PlainProvisionFieldKind::VolumeLabel => Some("普通卷标".into()),
             };
         }
@@ -115,9 +117,11 @@ impl AppState {
                     .unwrap_or("格式化状态暂不可判定");
                 Some(hint.into())
             }
+            ProvisionFieldId::Filesystem(_) => {
+                Some("Space 切换 FAT16 / FAT32 / exFAT".into())
+            }
             ProvisionFieldId::ForceChangePassword
-            | ProvisionFieldId::CancelPasswordComplexityCheck
-            | ProvisionFieldId::Filesystem(_) => Some("Space 切换".into()),
+            | ProvisionFieldId::CancelPasswordComplexityCheck => Some("Space 切换".into()),
             ProvisionFieldId::StartLba(_) => Some("f 自动寻找最小可用起点".into()),
             ProvisionFieldId::MaxPasswordErrors(_) => Some("范围 0–255".into()),
             _ => None,

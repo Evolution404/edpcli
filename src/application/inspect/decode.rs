@@ -65,7 +65,7 @@ pub fn decode_sector(
     lba: u64,
     raw: &[u8],
     partition_boot_raw: Option<&[u8]>,
-) -> Result<(Vec<u8>, String), InspectError> {
+) -> Result<(Vec<u8>, String, Vec<crate::inspect_adapter::DecodeRange>), InspectError> {
     let decoder = DECODER_REGISTRY
         .iter()
         .copied()
@@ -85,11 +85,57 @@ pub fn decode_sector(
                 meta,
                 Some(&context.protocol_image),
             );
-            Ok((view.decoded, view.method))
+            if view.parse_state != InspectParseState::Parsed {
+                let reason = view
+                    .diagnostics
+                    .first()
+                    .map(|diagnostic| diagnostic.message.clone())
+                    .unwrap_or_else(|| "canonical protocol decoder unavailable".into());
+                return Err(InspectError::decode(reason));
+            }
+            Ok((view.decoded, view.method, view.decode_ranges))
         }
-        InspectDecoderKind::Lce | InspectDecoderKind::Partition => context
-            .decode_non_protocol_with_boot(lba, raw, partition_boot_raw)
-            .map_err(InspectError::decode),
+        InspectDecoderKind::Lce => {
+            let (decoded, method) = context
+                .decode_non_protocol_with_boot(lba, raw, partition_boot_raw)
+                .map_err(InspectError::decode)?;
+            Ok((
+                decoded,
+                method,
+                vec![crate::inspect_adapter::DecodeRange::new(0, SECTOR)],
+            ))
+        }
+        InspectDecoderKind::Partition => {
+            let (decoded, method) = context
+                .decode_non_protocol_with_boot(lba, raw, partition_boot_raw)
+                .map_err(InspectError::decode)?;
+            let transformed = if context.is_plain() {
+                false
+            } else if let Some(partition) = context.partition_for_lba(lba) {
+                let boot = if lba == partition.start_sector {
+                    raw
+                } else {
+                    partition_boot_raw.ok_or_else(|| {
+                        InspectError::decode(format!(
+                            "分区[{}] 缺少起始扇区证据，无法确认 Decode provenance",
+                            partition.index
+                        ))
+                    })?
+                };
+                matches!(
+                    context.partition_physical_state(partition, boot),
+                    crate::inspect_target::PhysicalDataState::EncryptedMode2 { .. }
+                )
+            } else {
+                false
+            };
+            let ranges = if transformed {
+                vec![crate::inspect_adapter::DecodeRange::new(0, SECTOR)]
+            } else {
+                Vec::new()
+            };
+            Ok((decoded, method, ranges))
+        }
     }
 }
 

@@ -300,6 +300,7 @@ fn plain_filesystem_image(
     partition: &PlainPartitionSpec,
     volume_serial: u32,
 ) -> Result<SparseFilesystemImage, String> {
+    super::validate_provision_filesystem(partition.filesystem)?;
     build_empty_filesystem(
         partition.filesystem,
         partition.start_lba,

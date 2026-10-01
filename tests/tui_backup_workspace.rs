@@ -128,7 +128,11 @@ fn nested_workflows_keep_their_parent_top_level_tab_highlighted() {
             std::path::PathBuf::from("demo.edpb")
         ))
     );
-    assert_eq!(backup_inspect.workspace(), Workspace::Inspect);
+    assert_eq!(
+        backup_inspect.workspace(),
+        Workspace::Backups,
+        "backup Inspect loading stays on the Backups workspace until the worker succeeds"
+    );
     let active = active_tab_text(&backup_inspect);
     assert!(active.contains('份'), "{active}");
     assert!(!active.contains('设'), "{active}");

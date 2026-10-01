@@ -1296,6 +1296,7 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     assert!(!form.format_boot && !form.format_share && !form.format_encrypt);
     assert_eq!(form.boot_fs, edpcli::filesystem::FilesystemKind::Fat16);
     assert_eq!(form.share_fs, edpcli::filesystem::FilesystemKind::ExFat);
+    assert_eq!(form.encrypt_fs, edpcli::filesystem::FilesystemKind::ExFat);
     form.label = "自定义标签!SAFE6".into();
     form.label_id = "123456789".into();
     assert_eq!(form.label, "自定义标签!SAFE6");
@@ -1857,6 +1858,16 @@ fn provision_format_controls_follow_current_mode_targets() {
     assert!(state.provision().form.format_share);
     state.provision_mut().field_selected = fs_index;
     assert!(state.provision_toggle_selected_option());
+    assert_eq!(
+        state.provision().form.share_fs,
+        edpcli::filesystem::FilesystemKind::Fat16
+    );
+    assert!(state.provision_toggle_selected_option());
+    assert_eq!(
+        state.provision().form.share_fs,
+        edpcli::filesystem::FilesystemKind::Fat32
+    );
+    assert!(state.provision_shift_selected_option(true));
     assert_eq!(
         state.provision().form.share_fs,
         edpcli::filesystem::FilesystemKind::Fat16
@@ -3152,6 +3163,11 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
             raw_sha256: format!("raw-{lba}"),
             raw_nonzero: edpcli::common::SECTOR,
             decoded_sha256: decoded.as_ref().map(|_| format!("decoded-{lba}")),
+            decode_ranges: if decoded.is_some() {
+                vec![edpcli::inspect::DecodeRange::new(0, edpcli::common::SECTOR)]
+            } else {
+                Vec::new()
+            },
             decoded,
             method: Some(if decode_error.is_some() {
                 "raw-only".into()

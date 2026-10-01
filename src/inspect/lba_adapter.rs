@@ -15,6 +15,7 @@ pub fn analyze_sector_with_context(
             lba,
             raw: raw.to_vec(),
             decoded: raw.to_vec(),
+            decode_ranges: Vec::new(),
             method: format!("RAW（短读：{}B，应为 {}B）", raw.len(), SECTOR),
             fields: vec![],
             notes: vec!["扇区长度异常，停止结构化解析。".into()],
@@ -30,26 +31,22 @@ pub fn analyze_sector_with_context(
     let mut notes = Vec::new();
     let mut diagnostics = Vec::new();
     let mut decoded = raw.to_vec();
+    let mut decode_ranges = Vec::new();
+    macro_rules! buffers {
+        () => {
+            LbaRenderBuffers {
+                fields: &mut fields,
+                notes: &mut notes,
+                decoded: &mut decoded,
+                decode_ranges: &mut decode_ranges,
+                diagnostics: &mut diagnostics,
+            }
+        };
+    }
 
     let method = match lba {
-        0..=4 => super::lba_early::render_lba0_4(
-            lba,
-            raw_sector,
-            protocol_image,
-            &mut fields,
-            &mut notes,
-            &mut decoded,
-            &mut diagnostics,
-        ),
-        5..=8 => super::lba_middle::render_lba5_8(
-            lba,
-            raw_sector,
-            meta,
-            &mut fields,
-            &mut notes,
-            &mut decoded,
-            &mut diagnostics,
-        ),
+        0..=4 => super::lba_early::render_lba0_4(lba, raw_sector, protocol_image, buffers!()),
+        5..=8 => super::lba_middle::render_lba5_8(lba, raw_sector, meta, buffers!()),
         9..=12 => super::lba_late::render_lba9_12(
             lba,
             raw_sector,
@@ -57,10 +54,7 @@ pub fn analyze_sector_with_context(
                 meta,
                 protocol_image,
             },
-            &mut fields,
-            &mut notes,
-            &mut decoded,
-            &mut diagnostics,
+            buffers!(),
         ),
         _ => {
             diagnostics.push(InspectDiagnostic::new(
@@ -83,6 +77,7 @@ pub fn analyze_sector_with_context(
         lba,
         raw: raw.to_vec(),
         decoded,
+        decode_ranges,
         method,
         fields,
         notes,

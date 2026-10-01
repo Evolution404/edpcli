@@ -1814,9 +1814,7 @@ impl AppState {
                     self.set_progress_notice("全盘检查正在后台读取结构，请等待完成。");
                 } else if advanced.prompt.is_some() {
                     self.advanced_inspect_cancel_prompt();
-                } else if advanced.view_mode == InspectViewMode::Hex
-                    && self.advanced_inspect_close_sector()
-                {
+                } else if advanced.sector.is_some() && self.advanced_inspect_close_sector() {
                 } else {
                     self.close_advanced_inspect();
                 }

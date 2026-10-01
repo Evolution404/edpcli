@@ -8,16 +8,14 @@ use super::clipboard::ClipboardBackend;
 use super::keymap::{TuiAction, WidgetRole};
 use super::pane::PaneId;
 use super::state::{
-    AdvancedInspectSource, AdvancedInspectStage, AppState, DeviceInfoNodeKey, InspectViewMode,
-    NavCommand, StateEffect, Workspace,
+    AdvancedInspectSource, AdvancedInspectStage, AppState, DeviceInfoNodeKey, NavCommand,
+    StateEffect, Workspace,
 };
 
 #[derive(Debug, Clone)]
 pub(super) enum ActionRequest {
     Navigate(NavCommand),
-    InspectSelection {
-        force_hex: bool,
-    },
+    InspectSelection,
     InspectPreview {
         source: AdvancedInspectSource,
         lba: u64,
@@ -199,24 +197,7 @@ fn dispatch_inspect(
                 ActionOutcome::handled()
             }
         }
-        TuiAction::Activate => {
-            ActionOutcome::request(ActionRequest::InspectSelection { force_hex: false })
-        }
-        TuiAction::InspectBusiness => {
-            state.advanced_inspect_set_view_mode(InspectViewMode::Business);
-            ActionOutcome::handled()
-        }
-        TuiAction::InspectRawFields => {
-            state.advanced_inspect_set_view_mode(InspectViewMode::RawFields);
-            ActionOutcome::handled()
-        }
-        TuiAction::InspectHex => {
-            state.advanced_inspect_set_view_mode(InspectViewMode::Hex);
-            if state.advanced_inspect_sector().is_some() {
-                return Some(ActionOutcome::handled());
-            }
-            ActionOutcome::request(ActionRequest::InspectSelection { force_hex: true })
-        }
+        TuiAction::Activate => ActionOutcome::request(ActionRequest::InspectSelection),
         TuiAction::PanelNext | TuiAction::PanelPrevious => {
             state.advanced_inspect_shift_panel(action == TuiAction::PanelPrevious);
             ActionOutcome::handled()
@@ -301,6 +282,22 @@ pub(super) fn dispatch_action(
     viewport_width: u16,
     clipboard: &mut dyn ClipboardBackend,
 ) -> ActionOutcome {
+    if let Some(stage) = state.advanced_inspect().map(|advanced| advanced.stage) {
+        match stage {
+            AdvancedInspectStage::Running => {
+                state.set_progress_notice("Inspect 正在后台进行只读分析，请等待完成。");
+                return ActionOutcome::handled();
+            }
+            AdvancedInspectStage::Failed => {
+                if matches!(action, TuiAction::Activate | TuiAction::Back) {
+                    state.close_advanced_inspect();
+                }
+                return ActionOutcome::handled();
+            }
+            AdvancedInspectStage::Browser => {}
+        }
+    }
+
     if state.help_open() {
         return match action {
             TuiAction::Back => ActionOutcome::effect(state.navigate(NavCommand::Escape, 1)),

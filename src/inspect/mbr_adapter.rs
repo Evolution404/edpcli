@@ -6,6 +6,7 @@ pub fn analyze_mbr_sector(raw: &[u8]) -> SectorView {
             lba: 0,
             raw: raw.to_vec(),
             decoded: raw.to_vec(),
+            decode_ranges: Vec::new(),
             method: format!("RAW（短读：{}B，应为 {}B）", raw.len(), SECTOR),
             fields: vec![],
             notes: vec!["MBR 扇区长度异常，停止结构化解析。".into()],
@@ -34,6 +35,7 @@ pub fn analyze_mbr_sector(raw: &[u8]) -> SectorView {
         raw: raw.to_vec(),
         decoded: raw.to_vec(),
         method: "标准 MBR 分区表（raw=decoded）".into(),
+        decode_ranges: Vec::new(),
         fields,
         notes,
         parse_state: if valid {

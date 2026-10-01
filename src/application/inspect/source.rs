@@ -93,6 +93,10 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
             raw_sha256,
             raw_nonzero,
             decoded: None,
+            decode_ranges: protocol_view
+                .as_ref()
+                .map(|view| view.decode_ranges.clone())
+                .unwrap_or_default(),
             decoded_sha256: None,
             method: None,
             decode_error: None,
@@ -119,14 +123,24 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
             }
             AdvancedInspectMode::Decode => {
                 let decoded = if let Some(view) = protocol_view {
-                    Ok((view.decoded, view.method))
+                    if view.parse_state == InspectParseState::Parsed {
+                        Ok((view.decoded, view.method, view.decode_ranges))
+                    } else {
+                        Err(InspectError::decode(
+                            view.diagnostics
+                                .first()
+                                .map(|diagnostic| diagnostic.message.clone())
+                                .unwrap_or_else(|| "canonical protocol decoder unavailable".into()),
+                        ))
+                    }
                 } else {
                     decode_sector(&context, &meta, lba, &raw, partition_boot.as_deref())
                 };
                 match decoded {
-                    Ok((decoded, method)) => {
+                    Ok((decoded, method, decode_ranges)) => {
                         item.decoded_sha256 = Some(crate::sha256::sha256_hex(&decoded));
                         item.method = Some(method);
+                        item.decode_ranges = decode_ranges;
                         if let Some(dir) = &request.export_dir {
                             export_advanced_bytes(dir, lba, "decoded", &decoded)?;
                         }

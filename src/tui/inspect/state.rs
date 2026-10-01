@@ -40,6 +40,7 @@ impl AdvancedInspectSource {
 pub enum AdvancedInspectStage {
     Running,
     Browser,
+    Failed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,19 +90,8 @@ impl SectorInspectMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InspectViewMode {
-    Business,
-    RawFields,
+    Browser,
     Hex,
-}
-
-impl InspectViewMode {
-    pub const fn tab_index(self) -> usize {
-        match self {
-            Self::Business => 0,
-            Self::RawFields => 1,
-            Self::Hex => 2,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,7 +193,7 @@ impl AppState {
             }
         }
         if advanced.sector.is_some() {
-            path.push("Sector Inspector".into());
+            path.push("扇区检查".into());
         }
         Some(BreadcrumbModel {
             path,

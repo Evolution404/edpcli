@@ -56,6 +56,11 @@ fn item(lba: u64, decoded: bool) -> AdvancedInspectItem {
         raw_sha256: format!("raw-{lba}"),
         raw_nonzero: 510,
         decoded: decoded.then_some(decoded_bytes),
+        decode_ranges: if decoded {
+            vec![edpcli::inspect::DecodeRange::new(0, edpcli::common::SECTOR)]
+        } else {
+            Vec::new()
+        },
         decoded_sha256: decoded.then(|| format!("decoded-{lba}")),
         method: decoded.then(|| "test-decoder".into()),
         decode_error: (!decoded).then(|| "decoder unavailable".into()),
@@ -274,7 +279,7 @@ fn selecting_lba12_shows_canonical_fields_before_enter() {
     let current = state.advanced_inspect().unwrap().tree_selected;
     state.advanced_inspect_move_tree(lba12 as isize - current as isize);
     assert!(state.advanced_inspect_sector().is_none());
-    state.advanced_inspect_set_view_mode(edpcli::tui::state::InspectViewMode::RawFields);
+    state.advanced_inspect_set_view_mode(edpcli::tui::state::InspectViewMode::Browser);
 
     let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
@@ -505,7 +510,7 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
         .collect::<String>()
         .replace(' ', "");
     assert!(text.contains("Esc返回：Inspect"), "{text}");
-    assert!(text.contains("SectorInspector"), "{text}");
+    assert!(text.contains("扇区检查"), "{text}");
     assert_eq!(
         state.advanced_inspect_view_mode(),
         Some(edpcli::tui::state::InspectViewMode::Hex),
@@ -552,7 +557,7 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
     state.advanced_inspect_finish(Ok(workspace(vec![entry])));
     select_protocol_lba0(&mut state);
-    state.advanced_inspect_set_view_mode(InspectViewMode::RawFields);
+    state.advanced_inspect_set_view_mode(InspectViewMode::Browser);
     state.advanced_inspect_focus_pane(PaneId::InspectDetail);
     state
         .pane_viewport_mut(PaneId::InspectDetail)
@@ -574,7 +579,7 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
     assert!(text.contains("/30"), "{text}");
     assert!(text.contains("列"), "{text}");
     assert!(text.contains("Field20"), "{text}");
-    let detail = text.split("字段详情").nth(1).expect("field detail pane");
+    let detail = text.split("字段/证据").nth(1).expect("field evidence pane");
     assert!(!detail.contains("Field00"), "{detail}");
 }
 
@@ -736,7 +741,7 @@ fn sector_inspector_renders_32x16_offsets_ascii_typed_and_unknown_views() {
         .map(|cell| cell.symbol())
         .collect::<String>();
     let compact = text.replace(' ', "");
-    assert!(compact.contains("SectorInspector"), "{text}");
+    assert!(compact.contains("扇区检查"), "{text}");
     assert!(
         compact.contains("磁盘概览·当前LBA0"),
         "sector detail must keep the permanent mini capacity map: {text}"
@@ -749,16 +754,11 @@ fn sector_inspector_renders_32x16_offsets_ascii_typed_and_unknown_views() {
     assert!(compact.contains("bit-child"), "{text}");
 
     state.advanced_inspect_sector_move_cursor(10);
+    assert!(
+        state.advanced_inspect_sector_active_field().is_none(),
+        "cursor outside all Field ranges must remain explicitly unclassified"
+    );
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
-    let text = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect::<String>();
-    let compact = text.replace(' ', "");
-    assert!(compact.contains("Unknownbyte"), "{text}");
 
     for (width, height) in [(40, 10), (80, 24), (120, 36)] {
         let backend = TestBackend::new(width, height);
@@ -917,7 +917,7 @@ fn field_statuses_remain_distinct_and_unknown_byte_stays_unclassified() {
         .iter()
         .map(|cell| cell.symbol())
         .collect::<String>();
-    assert!(text.replace(' ', "").contains("Unknownbyte"), "{text}");
+    assert!(text.replace(' ', "").contains("未归属字段"), "{text}");
 }
 
 #[test]
@@ -972,7 +972,7 @@ fn jump_prompt_accepts_decimal_and_hex_lba_and_preserves_view_context() {
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
     state.advanced_inspect_finish(Ok(workspace_with_partition(Vec::new())));
     state.advanced_inspect_focus_pane(PaneId::InspectOverview);
-    state.advanced_inspect_set_view_mode(InspectViewMode::RawFields);
+    state.advanced_inspect_set_view_mode(InspectViewMode::Browser);
     let initial_selection = state.advanced_inspect().unwrap().tree_selected;
 
     state.advanced_inspect_begin_jump();
@@ -982,7 +982,7 @@ fn jump_prompt_accepts_decimal_and_hex_lba_and_preserves_view_context() {
     );
     assert_eq!(
         state.advanced_inspect_view_mode(),
-        Some(InspectViewMode::RawFields)
+        Some(InspectViewMode::Browser)
     );
     assert_eq!(
         state.advanced_inspect().unwrap().tree_selected,
@@ -1013,7 +1013,7 @@ fn jump_prompt_accepts_decimal_and_hex_lba_and_preserves_view_context() {
     assert_eq!(rows[selected].range.start_lba, 2_177);
     assert_eq!(
         state.advanced_inspect_view_mode(),
-        Some(InspectViewMode::RawFields)
+        Some(InspectViewMode::Browser)
     );
     assert_eq!(
         state.advanced_inspect_focused_pane(),
@@ -1329,7 +1329,7 @@ fn narrow_sector_inspector_keeps_selected_byte_visible_without_mutating_cursor()
 
     assert!(
         text.contains("+0x1F0"),
-        "narrow Sector Inspector must keep the selected byte row visible: {text}"
+        "窄屏扇区检查必须保持当前字节所在行可见: {text}"
     );
     assert_eq!(
         state.advanced_inspect_sector().unwrap().cursor,

@@ -44,8 +44,14 @@ fn decoder_registry_fails_closed_outside_registered_regions() {
     );
     let meta = InspectMeta::default();
     assert_eq!(DECODER_REGISTRY[0], InspectDecoderKind::Protocol);
-    let (_, method) = decode_sector(&context, &meta, 0, &[0; SECTOR], None).unwrap();
+    let mut lba0 = [0u8; SECTOR];
+    lba0[510..512].copy_from_slice(&[0x55, 0xaa]);
+    let (_, method, ranges) = decode_sector(&context, &meta, 0, &lba0, None).unwrap();
     assert!(!method.is_empty());
+    assert!(
+        ranges.is_empty(),
+        "LBA0 is parsed but does not pass through a sector decoder"
+    );
 
     let error = decode_sector(&context, &meta, 100, &[0; SECTOR], None).unwrap_err();
     assert_eq!(error.kind(), InspectErrorKind::Decode);

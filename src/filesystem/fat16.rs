@@ -313,7 +313,10 @@ impl FilesystemDriver for Fat16Driver {
 
         let mut boot = [0u8; SECTOR_SIZE];
         boot[0..3].copy_from_slice(&[0xeb, 0x3c, 0x90]);
-        boot[3..11].copy_from_slice(b"EDPCLI  ");
+        // Match the observed first-party FAT compatibility media OEM field.
+        // Evidence: audit/protocol/lba7_compatibility/evidence/
+        // lba7_compat_fat16_zero8_closure_20260923.json.
+        boot[3..11].copy_from_slice(b"MSDOS5.0");
         put_u16(&mut boot, 11, 512);
         boot[13] = spc;
         put_u16(&mut boot, 14, RESERVED as u16);
