@@ -499,8 +499,7 @@ fn plain_extent_reader_rejects_fat16_with_stale_hidden_sector_geometry() {
     let boot = dev.sectors.get_mut(&63).expect("FAT16 boot sector");
     boot[28..32].copy_from_slice(&64u32.to_le_bytes());
     assert_eq!(
-        crate::filesystem::detect_boot_sector(20_417, boot)
-            .unwrap(),
+        crate::filesystem::detect_boot_sector(20_417, boot).unwrap(),
         Some(FilesystemKind::Fat16),
         "type detection alone still sees FAT16"
     );
