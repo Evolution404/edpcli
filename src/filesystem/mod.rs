@@ -31,4 +31,7 @@ pub use io::{BootSectorReader, FilesystemReader};
 pub use kind::FilesystemKind;
 pub use metadata::FilesystemMetadata;
 pub use ntfs::{NtfsDriver, NTFS_DRIVER};
-pub use registry::{default_registry, detect_boot_sector, DetectedFilesystem, DriverRegistry};
+pub use registry::{
+    default_registry, detect_boot_sector, detect_boot_sector_with_geometry, DetectedFilesystem,
+    DriverRegistry,
+};
