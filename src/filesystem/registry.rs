@@ -50,7 +50,10 @@ pub fn detect_boot_sector_with_geometry(
     let kind = detected.kind();
     let geometry = super::FilesystemGeometry::new(partition_offset, sector_count, 512);
     let mut geometry_reader = BootSectorReader::new(boot, sector_count);
-    match detected.driver.matches_geometry(&mut geometry_reader, geometry) {
+    match detected
+        .driver
+        .matches_geometry(&mut geometry_reader, geometry)
+    {
         Ok(true) => Ok(Some(kind)),
         Ok(false) => Ok(None),
         Err(error) if error.kind == FilesystemErrorKind::Unsupported => Ok(Some(kind)),
