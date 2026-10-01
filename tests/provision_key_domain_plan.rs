@@ -69,7 +69,7 @@ const GOLDEN: [GoldenCell; 25] = [
     GoldenCell {
         source: State::Mode0,
         target: State::Plain,
-        contract: "migrate-or-rebuild",
+        contract: "plain-rebuild",
     },
     GoldenCell {
         source: State::Mode0,
@@ -79,7 +79,7 @@ const GOLDEN: [GoldenCell; 25] = [
     GoldenCell {
         source: State::Mode0,
         target: State::Mode1,
-        contract: "encrypt-preserve-candidate-combined-migrate-rebuild",
+        contract: "encrypt-preserve-candidate-combined-rebuild",
     },
     GoldenCell {
         source: State::Mode0,
@@ -89,17 +89,17 @@ const GOLDEN: [GoldenCell; 25] = [
     GoldenCell {
         source: State::Mode0,
         target: State::Mode3,
-        contract: "boot-share-compatible-preserve-encrypt-drop-migrate",
+        contract: "boot-share-compatible-preserve-encrypt-drop",
     },
     GoldenCell {
         source: State::Mode1,
         target: State::Plain,
-        contract: "migrate-or-rebuild",
+        contract: "plain-rebuild",
     },
     GoldenCell {
         source: State::Mode1,
         target: State::Mode0,
-        contract: "encrypt-preserve-candidate-combined-migrate-rebuild",
+        contract: "encrypt-preserve-candidate-combined-rebuild",
     },
     GoldenCell {
         source: State::Mode1,
@@ -114,12 +114,12 @@ const GOLDEN: [GoldenCell; 25] = [
     GoldenCell {
         source: State::Mode1,
         target: State::Mode3,
-        contract: "combined-not-share-encrypt-drop-migrate",
+        contract: "combined-rebuild-encrypt-drop",
     },
     GoldenCell {
         source: State::Mode2,
         target: State::Plain,
-        contract: "decrypt-migrate-or-rebuild",
+        contract: "decrypt-plain-rebuild",
     },
     GoldenCell {
         source: State::Mode2,
@@ -139,12 +139,12 @@ const GOLDEN: [GoldenCell; 25] = [
     GoldenCell {
         source: State::Mode2,
         target: State::Mode3,
-        contract: "type4-to-type2-migrate-rebuild-boot-new",
+        contract: "type4-to-type2-rebuild-boot-new",
     },
     GoldenCell {
         source: State::Mode3,
         target: State::Plain,
-        contract: "migrate-or-rebuild",
+        contract: "plain-rebuild",
     },
     GoldenCell {
         source: State::Mode3,
@@ -154,12 +154,12 @@ const GOLDEN: [GoldenCell; 25] = [
     GoldenCell {
         source: State::Mode3,
         target: State::Mode1,
-        contract: "boot-share-to-combined-migrate-rebuild-encrypt-new",
+        contract: "boot-share-to-combined-rebuild-encrypt-new",
     },
     GoldenCell {
         source: State::Mode3,
         target: State::Mode2,
-        contract: "share-to-encrypt-migrate-rebuild-reserve-rebuild",
+        contract: "share-to-encrypt-rebuild-reserve-rebuild",
     },
     GoldenCell {
         source: State::Mode3,
@@ -235,13 +235,13 @@ fn chapter_12_five_by_five_conversion_golden_is_complete() {
         .find(|cell| cell.source == State::Mode0 && cell.target == State::Mode1)
         .unwrap();
     assert!(m0_m1.contract.contains("encrypt-preserve-candidate"));
-    assert!(m0_m1.contract.contains("combined-migrate-rebuild"));
+    assert!(m0_m1.contract.contains("combined-rebuild"));
 
     let m2_m3 = GOLDEN
         .iter()
         .find(|cell| cell.source == State::Mode2 && cell.target == State::Mode3)
         .unwrap();
-    assert!(m2_m3.contract.contains("type4-to-type2-migrate-rebuild"));
+    assert!(m2_m3.contract.contains("type4-to-type2-rebuild"));
 
     let m1_m3 = GOLDEN
         .iter()
