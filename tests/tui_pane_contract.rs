@@ -395,6 +395,34 @@ fn backup_device_tree_filters_without_renumbering_and_search_stays_scoped() {
 }
 
 #[test]
+fn backup_device_tree_disambiguates_distinct_identity_groups_with_same_visible_label() {
+    let mut first = device();
+    first.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
+    first.onlyid = Some("1111111111".into());
+    confirm_kind(&mut first, edpcli::provision::DiskProvisionKind::Mode0);
+
+    let mut second = device();
+    second.disk = 7;
+    second.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
+    second.onlyid = Some("2222222222".into());
+    confirm_kind(&mut second, edpcli::provision::DiskProvisionKind::Mode0);
+
+    let mut first_backup = related_backup(1, &first);
+    let mut second_backup = related_backup(2, &second);
+    first_backup.onlyid = Some("SAME-DISPLAY".into());
+    second_backup.onlyid = Some("SAME-DISPLAY".into());
+
+    let mut state = AppState::new();
+    state.replace_backups(vec![first_backup, second_backup]);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    let nodes = state.backup_device_tree_nodes();
+    assert_eq!(nodes.len(), 3);
+    assert_ne!(nodes[1].label, nodes[2].label);
+    assert!(nodes[1].label.starts_with('#'));
+    assert!(nodes[2].label.starts_with('#'));
+}
+
+#[test]
 fn devices_to_backups_follows_the_selected_physical_device_group() {
     let mut first = device();
     first.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;

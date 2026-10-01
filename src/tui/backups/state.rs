@@ -142,6 +142,19 @@ impl AppState {
             .unwrap_or(base)
     }
 
+    fn disambiguate_backup_group_labels(groups: &mut [(String, String, usize)]) {
+        let mut label_counts = std::collections::BTreeMap::<String, usize>::new();
+        for (_, label, _) in groups.iter() {
+            *label_counts.entry(label.clone()).or_default() += 1;
+        }
+        for (key, label, _) in groups.iter_mut() {
+            if label_counts.get(label).copied().unwrap_or_default() > 1 {
+                let digest = crate::sha256::sha256_hex(key.as_bytes());
+                *label = format!("#{} · {label}", &digest[..6]);
+            }
+        }
+    }
+
     pub fn backup_device_tree_nodes(&self) -> Vec<BackupDeviceTreeNode> {
         let mut nodes = vec![BackupDeviceTreeNode {
             filter: BackupDeviceFilter::All,
@@ -168,6 +181,7 @@ impl AppState {
                 groups.push((key, Self::backup_group_display_label(backup), 1));
             }
         }
+        Self::disambiguate_backup_group_labels(&mut groups);
         nodes.extend(
             groups
                 .into_iter()

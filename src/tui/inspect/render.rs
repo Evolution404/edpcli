@@ -107,7 +107,9 @@ pub(super) fn draw_advanced_inspect(
         } else {
             let vertical = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(64), Constraint::Percentage(36)])
+                .constraints(render_helpers::inspect_vertical_constraints(
+                    advanced.sector.is_some(),
+                ))
                 .split(content_area);
             let upper = Layout::default()
                 .direction(Direction::Horizontal)
