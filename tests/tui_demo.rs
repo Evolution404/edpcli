@@ -113,7 +113,18 @@ fn provision_result_demo_uses_real_result_workbench_state() {
 
     let screen = screen_text("provision-result-success");
     let compact = screen.replace(' ', "");
-    for expected in ["制盘结果", "分区结果", "全盘布局", "验收与执行", "▲"] {
+    assert!(
+        screen.contains("P3"),
+        "third partition row must stay visible above the scrollbar"
+    );
+    for expected in [
+        "制盘结果",
+        "分区结果",
+        "当前分区",
+        "全盘布局",
+        "验收与执行",
+        "▲",
+    ] {
         assert!(
             compact.contains(expected),
             "missing {expected} in result demo"

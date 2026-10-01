@@ -1442,17 +1442,21 @@ impl AppState {
         let selected_disk = (self.shell.workspace == Workspace::Devices)
             .then(|| self.selected_device_disk())
             .flatten();
-        if self
-            .shell
-            .pinned_disk
-            .is_some_and(|disk| !devices.iter().any(|row| row.disk == disk))
+        let preserve_provision_result = self.shell.workspace == Workspace::Provision
+            && self.provision.stage == ProvisionStage::Result;
+        if !preserve_provision_result
+            && self
+                .shell
+                .pinned_disk
+                .is_some_and(|disk| !devices.iter().any(|row| row.disk == disk))
         {
             self.shell.pinned_disk = None;
         }
-        if self
-            .provision
-            .target_disk
-            .is_some_and(|disk| !devices.iter().any(|row| row.disk == disk))
+        if !preserve_provision_result
+            && self
+                .provision
+                .target_disk
+                .is_some_and(|disk| !devices.iter().any(|row| row.disk == disk))
         {
             self.provision.target_disk = None;
         }
@@ -1463,6 +1467,7 @@ impl AppState {
         );
         self.devices.scan_pending = false;
         if self.shell.workspace == Workspace::Provision
+            && self.provision.stage != ProvisionStage::Result
             && (self.provision.target_disk.is_none() || self.selected_device().is_none())
         {
             self.provision.target_disk = None;

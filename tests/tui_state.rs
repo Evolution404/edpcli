@@ -92,6 +92,33 @@ fn provision_result_escape_returns_directly_to_originating_devices_workspace() {
     assert_eq!(state.navigation().depth(), 0);
 }
 
+#[test]
+fn provision_result_survives_transient_device_rescan_absence() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_mut().stage = ProvisionStage::Result;
+    state.provision_mut().result_plan = Some(plain_result_plan());
+    state.provision_initialize_result_workbench();
+
+    assert_eq!(state.provision_target_disk(), Some(6));
+    assert_eq!(state.selected_device_disk(), Some(6));
+
+    state.replace_devices(vec![]);
+    assert_eq!(state.workspace(), Workspace::Provision);
+    assert_eq!(state.provision().stage, ProvisionStage::Result);
+    assert!(state.provision().result_plan.is_some());
+    assert_eq!(state.provision_target_disk(), Some(6));
+    assert_eq!(state.selected_device_disk(), None);
+
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(state.workspace(), Workspace::Provision);
+    assert_eq!(state.provision().stage, ProvisionStage::Result);
+    assert!(state.provision().result_plan.is_some());
+    assert_eq!(state.provision_target_disk(), Some(6));
+    assert_eq!(state.selected_device_disk(), Some(6));
+}
+
 fn plain_result_plan() -> edpcli::tui::state::ProvisionResultSnapshot {
     use edpcli::filesystem::FilesystemKind;
     use edpcli::tui::state::{ProvisionResultPartition, ProvisionResultSnapshot};

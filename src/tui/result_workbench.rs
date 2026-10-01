@@ -225,6 +225,17 @@ pub fn result_pane_slots(area: Rect, state: &ResultWorkbenchState) -> Vec<Result
     }]
 }
 
+pub fn result_partition_sections(area: Rect, row_count: usize) -> (Rect, Option<Rect>) {
+    if area.height < 10 {
+        return (area, None);
+    }
+    let desired_table = (row_count.saturating_add(2) as u16).clamp(4, 9);
+    let table_height = desired_table.min(area.height.saturating_sub(5));
+    let parts =
+        Layout::vertical([Constraint::Length(table_height), Constraint::Min(5)]).split(area);
+    (parts[0], Some(parts[1]))
+}
+
 /// Draws only the shared workbench shell and returns the pane rectangles.
 /// Callers render business-owned pane contents into the returned slots.
 pub fn render_result_workbench_shell(
@@ -243,6 +254,14 @@ pub fn render_result_workbench_shell(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partition_sections_reserve_header_rows_and_scrollbar_before_detail() {
+        let area = Rect::new(0, 0, 60, 20);
+        let (table, detail) = result_partition_sections(area, 3);
+        assert_eq!(table.height, 5);
+        assert_eq!(detail.expect("detail area").height, 15);
+    }
 
     #[test]
     fn workbench_cycles_only_result_panes() {

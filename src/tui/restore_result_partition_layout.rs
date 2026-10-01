@@ -57,12 +57,16 @@ pub(super) fn render_partition_pane(
     let Some(view) = state.result_partition_table_view() else {
         return;
     };
+    let selected = wizard.post_restore_workbench.selected_partition;
+    let visible_sources = state.visible_result_partition_indices();
+    let (table_area, detail_area) =
+        crate::tui::result_workbench::result_partition_sections(inner, visible_sources.len());
     let order = state.table_column_order(kind);
     let layout = state.table_visual_layout(kind);
     let visual_widths = state.table_visual_widths(kind, &view.content_widths);
     let interaction = state.table_interaction(kind);
     let viewport = layout.layout_with_active(
-        inner.width.saturating_sub(1),
+        table_area.width.saturating_sub(1),
         &visual_widths,
         interaction.viewport_offset(),
         Some(interaction.active_column()),
@@ -73,8 +77,6 @@ pub(super) fn render_partition_pane(
         Cell::from(visible_cell(&label, column))
             .style(theme.table_header(column.index == interaction.active_column(), focused))
     }));
-    let selected = wizard.post_restore_workbench.selected_partition;
-    let visible_sources = state.visible_result_partition_indices();
     let rows = visible_sources.iter().filter_map(|index| {
         outcome.assessment.partitions.get(*index).map(|partition| {
             let (status, status_tone) = partition_status(partition);
@@ -109,31 +111,51 @@ pub(super) fn render_partition_pane(
         Table::new(rows, viewport.widths())
             .header(header)
             .column_spacing(0),
-        inner,
+        table_area,
     );
     if let Some(visual_row) = selected.and_then(|selected| {
         visible_sources
             .iter()
             .position(|source| *source == selected)
     }) {
-        let row_y = inner.y.saturating_add(1).saturating_add(visual_row as u16);
-        if row_y < inner.bottom() && inner.width > 1 {
+        let row_y = table_area
+            .y
+            .saturating_add(1)
+            .saturating_add(visual_row as u16);
+        if row_y < table_area.bottom() && table_area.width > 1 {
             frame.render_widget(
                 Block::default().style(theme.selection_overlay(focused)),
-                ratatui::layout::Rect::new(inner.x, row_y, inner.width.saturating_sub(1), 1),
+                ratatui::layout::Rect::new(
+                    table_area.x,
+                    row_y,
+                    table_area.width.saturating_sub(1),
+                    1,
+                ),
             );
         }
     }
     render_table_scrollbars(
         frame,
-        area,
+        table_area,
         &viewport,
         visible_sources.len(),
         0,
         visible_sources
             .len()
-            .min(inner.height.saturating_sub(1) as usize),
+            .min(table_area.height.saturating_sub(1) as usize),
     );
+
+    if let (Some(detail_area), Some(selected)) = (detail_area, selected) {
+        if let Some(partition) = outcome.assessment.partitions.get(selected) {
+            crate::tui::result_partition_detail::render_restore_partition_detail(
+                frame,
+                detail_area,
+                partition,
+                view.rows.get(selected).map(Vec::as_slice),
+                tone_style(partition_status(partition).1),
+            );
+        }
+    }
 }
 
 pub(super) fn render_layout_pane(frame: &mut Frame, area: Rect, state: &AppState, focused: bool) {

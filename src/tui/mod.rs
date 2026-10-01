@@ -20,6 +20,7 @@ mod overview;
 pub mod pane;
 mod progress_transport;
 pub mod render;
+mod result_partition_detail;
 pub mod result_workbench;
 mod resume;
 mod runtime_input;
