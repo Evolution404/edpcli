@@ -42,7 +42,7 @@ fix(provision): unify synchronous preflight decisions
 1 制盘配置 ─ 2 生成计划 ─ 3 计划确认 ─ 4 执行 ─ 5 完成
 设备 / disk4 / mode0 > 计划确认
 
-disk4 · 125.83GB · USB · 模式0 → 模式0 · 王伟
+disk4 · 125.83GB · USB · 1234:5678 · onlyid 1402259934 · 模式0 → 模式0 · 王伟
 
 ┌ 最终磁盘布局 ────────────────────────────────────────────────────────────┐
 │                                                                         │
@@ -62,7 +62,7 @@ disk4 · 125.83GB · USB · 模式0 → 模式0 · 王伟
 │                                                ││ 原因 / 结果              │
 └────────────────────────────────────────────────┘└─────────────────────────┘
 
-↑↓/jk 选择区域 · o 详情 · Enter 执行 · e 导出镜像 · Esc 返回修改
+↑↓/jk 选择区域 · o 详情 · Enter 写入确认 · e 导出镜像 · Esc 返回修改
 ```
 
 ### 2.2 比例
@@ -106,15 +106,17 @@ Wide / UltraWide 默认：
 
 ### 3.2 数据源
 
-继续复用现有 `DiskLayoutModel` / `provision_layout_model()` 体系。
+继续复用现有 `DiskLayoutModel` 体系，但确认页必须建立 **prepared-only** 的布局投影，例如 `provision_confirmation_layout_model(&PreparedProvision)`；不得直接复用仍会读取表单草稿的 `provision_layout_model()`。
 
-确认页展示的是 **prepared plan 的最终目标结果**，不得重新在 renderer 内推导几何动作。
+确认页展示的是 **prepared plan 的最终目标结果**，不得重新从 `ProvisionForm`、`PlainProvisionForm`、`selected_device()` 或 renderer 内推导几何动作。Official 应从 prepared 的最终目标分区 + LCE 几何生成 canonical EDP layout；Plain 应从 prepared 的 `PlainProvisionPlan` 生成 canonical plain layout。
+
+必须增加完整性不变量：Official 确认页的 LBA0–12 为协议区，LBA13 到官方首分区起点之间为保留区域，不能被填成“空闲区域”；特别覆盖 LBA12–62 的回归场景。最终布局必须 `validate_complete()` 通过后才允许进入 Review。
 
 ### 3.3 联动
 
 “分区执行计划”当前选中行必须同步激活容量地图对应区域。
 
-联动身份使用统一的 `PartitionRole / region kind`，不能通过字符串名称匹配。
+联动主键必须使用共享的精确几何选择键（优先复用 `DiskCapacitySelection`：`start_lba + end_exclusive + kind`），不能只用 `PartitionRole / region kind`，更不能通过字符串名称匹配。`PartitionRole` 只作为语义标签/校验辅助；Plain 可存在多个同为 `DiskRegionKind::Plain` 的分区，必须依靠 extent 才能稳定命中唯一地图区域。
 
 ---
 
@@ -199,11 +201,12 @@ Wide 默认字段：
 
 ### 4.4 表格交互
 
-- `j/k`、`↑/↓`：移动当前区域。
-- 当前行使用共享 table selection 底色。
+- `j/k`、`↑/↓`：移动当前区域，而不是滚动一段 paragraph 文本。
+- 当前行使用共享 table selection 底色，并自动保持在 table viewport 内。
 - 切换行时同步：
-  - 上方容量地图激活区域；
+  - 上方容量地图激活精确 extent；
   - 右侧“当前区域”详情。
+- 选中行必须有独立的 confirmation view state；进入 Confirm/ExportPath 后返回 Review 时保留当前行、pane focus、展开状态和 viewport；重新生成新 plan 或 Esc 返回表单后清空并重新初始化。
 - 不允许选择变化后重新计算底层计划，只切换展示对象。
 
 ---
@@ -284,10 +287,10 @@ FileKey 与 data extent 保持不变。
 把当前“固定目标”Pane压缩成顶部一行：
 
 ```text
-disk4 · 125.83GB · USB · 模式0 → 模式0 · 王伟
+disk4 · 125.83GB · USB · 1234:5678 · onlyid 1402259934 · 模式0 → 模式0 · 王伟
 ```
 
-可按实际数据补 VID:PID，但不得形成新的独立窗口。
+VID:PID 应在空间允许时默认显示；`onlyid`、原生序列号/设备身份中至少选择一个 prepared 阶段已经固定的稳定标识显示，避免只靠会变化的 `diskN` 识别目标。该行必须来自 prepared/bound target snapshot，不能重新读取当前列表选中行；不得形成新的独立窗口。
 
 ### 6.2 删除当前独立 Pane
 
@@ -302,6 +305,21 @@ disk4 · 125.83GB · USB · 模式0 → 模式0 · 王伟
 - 顶部单行；
 - 分区执行计划；
 - 执行摘要。
+
+---
+
+### 6.3 最终写入确认模态框
+
+确认页按 `Enter` 进入的 Confirm 不是一个新的业务推演阶段，只是 destructive-write guard。
+
+要求：
+
+- Confirm 使用与 Review **同一个 `ProvisionConfirmationViewModel` / prepared snapshot**；
+- 不再只显示“相关结构和数据可能被覆盖”这种泛化警告；
+- 至少显示目标设备稳定身份、将清空/删除的具体区域数量与名称、将重建的文件系统，以及“输入 YES 后立即开始写盘”；
+- 如果整体无数据清空，也应明确写“数据区域全部保留”，不要仍显示泛化的“可能覆盖”；
+- Confirm 返回 Review 时保持原选中区域与展开状态；
+- Confirm 本身不得重新访问表单、preflight 或实时设备列表来改变已经审核过的结论。
 
 ---
 
@@ -379,6 +397,10 @@ struct ProvisionConfirmationRegion {
 
 `ProvisionPreflight` 继续负责 **进入后台计划之前的同步阻塞**，确认页不得重新使用 preflight 推演最终 action。
 
+Confirmation ViewModel 构造必须 fail-closed：prepared 中若仍出现 `PasswordDisposition::Blocked`、Rebuild 与 `format_targets` 不一致、目标 extent 无法唯一映射到最终布局、布局不完整/冲突，均视为内部计划不一致，禁止进入可执行 Review，不允许 renderer 用兜底文案把异常伪装成“可确认”。
+
+确认页 renderer 还应禁止读取 `ProvisionForm / PlainProvisionForm / provision_preflight() / selected_device()`；这些都是表单/实时 UI 状态，不是 prepared confirmation 的权威数据源。
+
 ### 8.2 禁止 renderer 重算业务规则
 
 `review_render.rs` 只能：
@@ -424,13 +446,17 @@ ProvisionPartitionPlan
 ProvisionExecutionSummary
 ```
 
-Review focus 顺序建议：
+逻辑 Pane 顺序建议保持：
 
 ```text
 ProvisionDiskLayout
 → ProvisionPartitionPlan
 → ProvisionExecutionSummary
 ```
+
+但 **进入 Review 后的初始焦点必须是 `ProvisionPartitionPlan`**，因为它是确认页主窗口，用户应可直接 `j/k` 检查各区域动作；上方最终布局默认作为联动视觉中心，而不是抢占第一个键盘焦点。
+
+`Enter` 在 Review 的三个 Pane 中语义必须一致：始终进入“写入确认”模态框，不再像旧实现那样在磁盘布局 Pane 上变成“打开详情”。`o` 统一承担详情语义：布局 Pane 上展开/收起尾部细节，执行计划/摘要 Pane 上展开/收起当前区域技术依据。
 
 空间导航：
 
@@ -463,7 +489,10 @@ ProvisionDiskLayout
 
 - Tab / Shift-Tab 或现有 pane navigation 在 3 Pane 间切换；
 - 表格列裁剪使用共享 table viewport；
-- 当前区域详情不得挤到表格内部。
+- 当前区域详情不得挤到表格内部；
+- 列降级顺序必须固定：`区域 / 动作 / 数据` 永远保留，`文件系统` 次之，`容量 / 起点 LBA / 密码` 依宽度逐步隐藏或进入右侧详情；不能把破坏性动作列隐藏在横向滚动之外。
+
+除宽度外还必须处理 **短终端高度**：当主体高度不足以稳定显示“地图 + 下方两 Pane”时，直接进入单 Pane 模式或 Mini map，而不是继续按 22%～28% 百分比分配导致下半区只剩 1～2 行。底部快捷键也按当前 Pane/context 裁剪，不要求 Compact 强行塞满整句。
 
 禁止：
 
@@ -519,8 +548,11 @@ ProvisionDiskLayout
 - 计划确认页只有 3 个逻辑 Pane；
 - Wide 是“上 1 + 下 2”，不再是横向 3/4 栏；
 - 不存在“固定目标”独立 Pane；
+- 初始焦点是 `ProvisionPartitionPlan`；
+- Review 任意 Pane 按 Enter 都进入写入确认，不能触发其他详情动作；
 - 确认页禁止“需重建”“需要勾选格式化”等表单文案；
-- 行选择联动地图和右侧详情。
+- 行选择以精确 extent 联动地图和右侧详情；
+- Review 的布局与目标身份只能来自 prepared snapshot，禁止回读表单草稿/当前设备选择。
 
 ### P1 — Confirmation ViewModel
 
@@ -610,7 +642,12 @@ cargo build --release --locked
    - 禁止 `需要勾选格式化`
    - 禁止 `尚未获得格式化授权`
    - 禁止把 `Blocked` 作为可执行确认动作。
-12. renderer 架构门禁：`review_render.rs` 不直接匹配 `PasswordDisposition / RegionDisposition` 做业务决策。
+12. renderer 架构门禁：`review_render.rs` 不直接匹配 `PasswordDisposition / RegionDisposition` 做业务决策，也不得读取 `ProvisionForm / PlainProvisionForm / provision_preflight() / selected_device()`。
+13. prepared-only 布局：故意让表单草稿与 prepared fixture 不一致，确认页仍必须完全展示 prepared 几何。
+14. Official reserved 回归：LBA0–12=协议区，LBA13 到首分区起点=保留区域；LBA12–62 不得渲染为空闲区域。
+15. Plain 多分区：两个及以上 `DiskRegionKind::Plain` 行用精确 extent 联动到各自地图区域，不能因 kind 相同选错。
+16. Review 初始焦点为分区执行计划；三个 Pane 的 Enter 均只进入 Confirm。
+17. Review → Confirm/Export → Review 保持 selected row / pane / expansion；Review → Form → 新 plan 后重新初始化这些 view state。
 
 ---
 
@@ -630,6 +667,9 @@ cargo build --release --locked
 10. 页面状态、底层 prepared plan、执行动作三者语义一致。
 11. fast/full/clippy/release 全部通过。
 12. 不放宽现有架构硬门禁来迁就实现。
+13. Review 的目标身份、几何、动作、数据/密码/文件系统后果全部来自同一 prepared snapshot；实时设备列表变化不能改变确认页已经审核的事实。
+14. 任意 Pane 的 Enter 都只进入写入确认；只有输入精确 `YES` 才开始写盘，页面文案不得把第一次 Enter 描述成“立即执行”。
+15. Plain 多分区与 Official 保留区域都能稳定联动容量地图，不依赖非唯一的 region kind。
 
 ---
 
