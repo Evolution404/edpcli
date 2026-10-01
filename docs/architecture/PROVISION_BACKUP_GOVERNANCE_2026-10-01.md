@@ -1,8 +1,16 @@
 # Provision / LCE / 备份工作区治理方案（2026-10-01）
 
+> 状态：**已完成 / CLOSED**
+>
+> 关键实现提交：`6070f05`、`2aa0c5c`、`e3ab720`。
+>
+> 最终 Virtual Disk / FAT / 实体 USB / LCE HIL 证据见：`audit/protocol/notes/provision_lce_fat_hil_2026-10-01.md`。
+>
+> 下文“当前问题 / 建议实现”保留为计划形成时的历史设计依据，不再表示这些项目仍待实现。
+
 ## 1. 基线与目的
 
-本计划基于当前本机工作区只读审计结果：
+本计划最初基于当时本机工作区只读审计结果：
 
 ```text
 branch: main
@@ -1514,3 +1522,21 @@ git log -8 --oneline --decorate
 - 根据最新 main 调整实施位置，但不重复已经完成的工作。
 
 本文件经用户审核后再开始编码。
+
+---
+
+## 19. 最终实施状态（2026-10-01）
+
+本计划已经完成并收口：
+
+- P0：`verify_lce_readback()` 已接入正式写盘链，并在格式化前 fail-closed；
+- P1：`Rebuild` / `Preserve` / 卷标 / mode1 二合一 / mode2 兼容区语义已落地；
+- P2：备份设备树、筛选、滚动、Pane 导航与强身份几何门禁已落地；
+- P3：“备份信息”命名已完成；
+- P4：“恢复范围”容量地图、`RestoreContract` 投影及 `Manifest` 技术证据下沉 `Inspect` 已完成；
+- FAT16 / FAT32 / exFAT 文件系统写入能力已通过逻辑门禁、macOS 虚拟盘 HIL 和实体盘格式化读回；
+- 实体 disk5 已完成 mode0 真实制盘，协议、几何、LCE 6-sector gold plaintext、FAT16/FAT32/exFAT 全部读回通过；
+- 第二实体 disk4 的现有 mode0 LCE 也独立解码为同一 gold plaintext；
+- HIL 发现的重建文件系统覆盖错误与短版/带版本号 `device_id` 假换盘问题已修复并补回归测试。
+
+最终证据以 `audit/protocol/notes/provision_lce_fat_hil_2026-10-01.md` 为准。本计划不再保留未完成实施项。
