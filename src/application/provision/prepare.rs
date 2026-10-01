@@ -42,28 +42,48 @@ fn classify_live_source_identity(
 fn read_plain_source_extents(
     dev: &mut dyn SectorDev,
     total_sectors: u64,
-) -> Vec<crate::provision::PlainSourceExtent> {
-    crate::partition_table::read_partition_table(total_sectors, |lba| {
+) -> EdpCliResult<Vec<crate::provision::PlainSourceExtent>> {
+    let table = crate::partition_table::read_partition_table(total_sectors, |lba| {
         let lba =
             u32::try_from(lba).map_err(|_| format!("Plain partition LBA{lba} exceeds u32"))?;
         dev.read_sector(lba)
             .map_err(|error| format!("read Plain partition LBA{lba}: {error}"))
     })
-    .map(|table| {
-        table
-            .partitions
-            .into_iter()
-            .map(|partition| crate::provision::PlainSourceExtent {
-                start_lba: partition.start_lba,
-                sector_count: partition.sector_count,
-                filesystem: partition
-                    .filesystem
-                    .as_deref()
-                    .and_then(FilesystemKind::from_config_token),
-            })
-            .collect()
-    })
-    .unwrap_or_default()
+    .map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 无法读取普通盘物理分区表: {message}"),
+        )
+    })?;
+
+    let mut extents = Vec::with_capacity(table.partitions.len());
+    for partition in table.partitions {
+        let start = u32::try_from(partition.start_lba).map_err(|_| {
+            err(
+                EXIT_TARGET,
+                format!("错误: 普通盘分区起点 LBA{} 超出当前读取范围", partition.start_lba),
+            )
+        })?;
+        let boot = dev.read_sector(start).map_err(|error| {
+            err(
+                EXIT_TARGET,
+                format!("错误: 无法读取普通盘分区 P{} 启动扇区: {error}", partition.index),
+            )
+        })?;
+        let filesystem = crate::filesystem::detect_boot_sector(partition.sector_count, &boot)
+            .map_err(|error| {
+                err(
+                    EXIT_TARGET,
+                    format!("错误: 无法识别普通盘分区 P{} 文件系统: {error}", partition.index),
+                )
+            })?;
+        extents.push(crate::provision::PlainSourceExtent {
+            start_lba: partition.start_lba,
+            sector_count: partition.sector_count,
+            filesystem,
+        });
+    }
+    Ok(extents)
 }
 
 fn resolved_source_password<'a>(
@@ -211,7 +231,7 @@ pub fn prepare_target_provision(
     })?;
     let before_pin = MediaIdentityPin::new(source_identity, &source_metadata);
     let plain_source_extents = if source_kind == crate::provision::DiskProvisionKind::Plain {
-        read_plain_source_extents(dev, total_sectors)
+        read_plain_source_extents(dev, total_sectors)?
     } else {
         Vec::new()
     };
