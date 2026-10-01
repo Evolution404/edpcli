@@ -61,20 +61,29 @@ pub(super) fn read_plain_source_extents(
         let start = u32::try_from(partition.start_lba).map_err(|_| {
             err(
                 EXIT_TARGET,
-                format!("错误: 普通盘分区起点 LBA{} 超出当前读取范围", partition.start_lba),
+                format!(
+                    "错误: 普通盘分区起点 LBA{} 超出当前读取范围",
+                    partition.start_lba
+                ),
             )
         })?;
         let boot = dev.read_sector(start).map_err(|error| {
             err(
                 EXIT_TARGET,
-                format!("错误: 无法读取普通盘分区 P{} 启动扇区: {error}", partition.index),
+                format!(
+                    "错误: 无法读取普通盘分区 P{} 启动扇区: {error}",
+                    partition.index
+                ),
             )
         })?;
         let filesystem = crate::filesystem::detect_boot_sector(partition.sector_count, &boot)
             .map_err(|error| {
                 err(
                     EXIT_TARGET,
-                    format!("错误: 无法识别普通盘分区 P{} 文件系统: {error}", partition.index),
+                    format!(
+                        "错误: 无法识别普通盘分区 P{} 文件系统: {error}",
+                        partition.index
+                    ),
                 )
             })?;
         extents.push(crate::provision::PlainSourceExtent {
