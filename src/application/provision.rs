@@ -976,7 +976,7 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
 #[cfg(test)]
 use commit::{
     execute_partition_format, validate_preserve_source_snapshot, verify_format_hardware,
-    verify_protocol_readback,
+    verify_lce_readback, verify_protocol_readback,
 };
 use commit::{validate_key_disposition_plan, validate_target_write_set};
 

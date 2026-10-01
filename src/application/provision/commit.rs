@@ -263,6 +263,7 @@ pub(super) fn commit_new_provision_with_progress(
     )?;
     progress(Phase::Transaction, Step::ProtocolWrite, None);
     verify_protocol_readback(dev, prepared)?;
+    verify_lce_readback(dev, prepared)?;
     progress(Phase::Readback, Step::ProtocolReadback, None);
     let mut report = ProvisionCommitReport {
         provision_succeeded: true,
@@ -747,6 +748,119 @@ pub(super) fn verify_protocol_readback(
             "错误: 格式化前实际分区布局与制盘计划不一致",
         ));
     }
+    Ok(())
+}
+
+pub(super) fn verify_lce_readback(
+    dev: &mut dyn SectorDev,
+    prepared: &PreparedNewProvision,
+) -> EdpCliResult<()> {
+    let protocol = read_image(dev)?;
+    let geometry = parse_lba7_compatibility_geometry(
+        &protocol,
+        &prepared.device_id,
+        prepared.write_image.total_sectors,
+    )
+    .map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 格式化前无法从最终 LBA7 解析 LCE: {message}"),
+        )
+    })?;
+
+    let planned = prepared.plan.lba7_compatibility_extent;
+    if geometry.start_lba != prepared.lce_start_lba
+        || geometry.start_lba != planned.start_lba
+        || geometry.sector_count != planned.size_sectors
+    {
+        return Err(err(
+            EXIT_TARGET,
+            format!(
+                "错误: 格式化前 LCE 几何与制盘计划不一致(actual={}+{}, prepared={}, planned={}+{})",
+                geometry.start_lba,
+                geometry.sector_count,
+                prepared.lce_start_lba,
+                planned.start_lba,
+                planned.size_sectors
+            ),
+        ));
+    }
+
+    let expected_sectors = crate::protocol::lba7_compat::LBA7_COMPAT_EXTENT_TOTAL_SIZE / SECTOR;
+    if geometry.sector_count != expected_sectors as u64 {
+        return Err(err(
+            EXIT_TARGET,
+            format!(
+                "错误: 格式化前 LCE 长度为 {} sector，预期 {expected_sectors}",
+                geometry.sector_count
+            ),
+        ));
+    }
+
+    let logical_count = prepared
+        .plan
+        .logical_partitions(SECTOR as u64)
+        .map_err(|message| err(EXIT_TARGET, message))?
+        .len();
+    let expected_pointer_count = logical_count.saturating_sub(1);
+    if geometry.lba7_pointer_entries.len() != expected_pointer_count {
+        return Err(err(
+            EXIT_TARGET,
+            format!(
+                "错误: 格式化前 LBA7 的 3072B LCE 指针数量为 {}，预期 {}",
+                geometry.lba7_pointer_entries.len(),
+                expected_pointer_count
+            ),
+        ));
+    }
+
+    let end_lba = geometry
+        .start_lba
+        .checked_add(geometry.sector_count)
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化前 LCE LBA 范围溢出"))?;
+    if end_lba > prepared.write_image.total_sectors {
+        return Err(err(EXIT_TARGET, "错误: 格式化前 LCE 超出目标盘范围"));
+    }
+
+    let mut ciphertext =
+        Vec::with_capacity(crate::protocol::lba7_compat::LBA7_COMPAT_EXTENT_TOTAL_SIZE);
+    for offset in 0..geometry.sector_count {
+        let lba = geometry
+            .start_lba
+            .checked_add(offset)
+            .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化前 LCE LBA 溢出"))?;
+        let lba32 = u32::try_from(lba)
+            .map_err(|_| err(EXIT_TARGET, "错误: 格式化前 LCE LBA 超出当前读写器范围"))?;
+        let sector = dev.read_sector(lba32).map_err(|error| {
+            err(
+                EXIT_IO,
+                format!("错误: 格式化前读取 LCE LBA{lba} 失败: {error}"),
+            )
+        })?;
+        if sector.len() != SECTOR {
+            return Err(err(
+                EXIT_IO,
+                format!(
+                    "错误: 格式化前 LCE LBA{lba} 长度为 {}B，预期 {SECTOR}B",
+                    sector.len()
+                ),
+            ));
+        }
+        ciphertext.extend_from_slice(&sector);
+    }
+
+    let physical_offset = geometry
+        .start_lba
+        .checked_mul(SECTOR as u64)
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化前 LCE 物理字节偏移溢出"))?;
+    let plaintext = crate::crypto::a6b0_full_offset(&ciphertext, &[0u8; 8], physical_offset);
+    if plaintext.as_slice() != crate::provision::lce_plaintext() {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 格式化前 LCE 6 sector 解密后与官方 gold plaintext 不一致",
+        ));
+    }
+
     Ok(())
 }
 

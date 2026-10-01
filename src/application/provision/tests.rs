@@ -780,8 +780,7 @@ fn format_hardware_gate_rejects_changed_serial_probe_capacity_and_device_id() {
     assert!(check(&changed, total, Some("SERIAL-1"), &device_id).is_err());
 }
 
-#[test]
-fn protocol_readback_gate_rejects_changed_onlyid_and_layout() {
+fn protocol_readback_fixture() -> (PreparedNewProvision, MemoryDev) {
     let total = 16_777_216u64;
     let probe = crate::platform::HardwareProbe {
         vid: Some(0x0dd8),
@@ -819,7 +818,7 @@ fn protocol_readback_gate_rejects_changed_onlyid_and_layout() {
     let write_image =
         build_official_provision_protocol_image(&spec, &ProvisionEntropy::new([0x5a; 252]), &plan)
             .unwrap();
-    let mut dev = MemoryDev {
+    let dev = MemoryDev {
         sectors: write_image.patch.clone(),
         fail_at: None,
     };
@@ -842,6 +841,12 @@ fn protocol_readback_gate_rejects_changed_onlyid_and_layout() {
         expected_probe: probe,
         expected_lba3: Some([0; SECTOR]),
     };
+    (prepared, dev)
+}
+
+#[test]
+fn protocol_readback_gate_rejects_changed_onlyid_and_layout() {
+    let (prepared, mut dev) = protocol_readback_fixture();
     verify_protocol_readback(&mut dev, &prepared).unwrap();
     dev.sectors.get_mut(&4).unwrap()[4] ^= 1;
     assert!(verify_protocol_readback(&mut dev, &prepared).is_err());
@@ -849,4 +854,32 @@ fn protocol_readback_gate_rejects_changed_onlyid_and_layout() {
         .insert(4, prepared.write_image.patch[&4].clone());
     dev.sectors.get_mut(&12).unwrap()[0] ^= 1;
     assert!(verify_protocol_readback(&mut dev, &prepared).is_err());
+}
+
+#[test]
+fn lce_readback_gate_reparses_pointer_and_decrypts_all_six_sectors() {
+    let (prepared, mut dev) = protocol_readback_fixture();
+    verify_lce_readback(&mut dev, &prepared).unwrap();
+
+    let tampered_lba = u32::try_from(prepared.lce_start_lba + 3).unwrap();
+    dev.sectors.get_mut(&tampered_lba).unwrap()[17] ^= 1;
+    let error = verify_lce_readback(&mut dev, &prepared).unwrap_err();
+    assert!(error.msg.contains("gold plaintext"));
+
+    dev.sectors.insert(
+        tampered_lba,
+        prepared.write_image.patch[&tampered_lba].clone(),
+    );
+    let mut wrong_geometry = prepared.clone();
+    wrong_geometry.lce_start_lba += 1;
+    let error = verify_lce_readback(&mut dev, &wrong_geometry).unwrap_err();
+    assert!(error.msg.contains("LCE 几何"));
+}
+
+#[test]
+fn lce_readback_gate_rejects_corrupted_final_lba7_pointer_table() {
+    let (prepared, mut dev) = protocol_readback_fixture();
+    dev.sectors.get_mut(&7).unwrap()[0] ^= 1;
+    let error = verify_lce_readback(&mut dev, &prepared).unwrap_err();
+    assert!(error.msg.contains("最终 LBA7"));
 }
