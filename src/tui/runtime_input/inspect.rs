@@ -85,7 +85,9 @@ pub(super) fn handle_inspect_key(
                 }
 
                 let sector_detail = state.advanced_inspect().is_some_and(|advanced| {
-                    advanced.view_mode == state::InspectViewMode::Hex && advanced.sector.is_some()
+                    advanced.view_mode == state::InspectViewMode::Hex
+                        && advanced.sector.is_some()
+                        && advanced.panel == state::AdvancedInspectPanel::Bytes
                 });
                 if sector_detail {
                     let Some(action) = keys.map(state::InputMode::Normal, key) else {
@@ -164,6 +166,13 @@ pub(super) fn handle_inspect_key(
                                 }
                             }
                         }
+                        TuiAction::PanelNext | TuiAction::PanelPrevious => {
+                            state.advanced_inspect_shift_panel(action == TuiAction::PanelPrevious);
+                        }
+                        TuiAction::PanelLeft => state.advanced_inspect_spatial_focus(-1, 0),
+                        TuiAction::PanelRight => state.advanced_inspect_spatial_focus(1, 0),
+                        TuiAction::PanelUp => state.advanced_inspect_spatial_focus(0, -1),
+                        TuiAction::PanelDown => state.advanced_inspect_spatial_focus(0, 1),
                         TuiAction::Back => {
                             let _ = state.navigate(NavCommand::Escape, 1);
                         }

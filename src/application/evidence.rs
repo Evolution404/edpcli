@@ -118,6 +118,23 @@ struct BackupSectorReader {
 }
 
 impl BackupSectorReader {
+    fn has_sector(&self, lba: u64) -> bool {
+        if self.has_full_protocol && lba < METADATA_SECTOR_COUNT as u64 {
+            return true;
+        }
+        self.manifest.extents.iter().any(|extent| {
+            let Some(end) = extent.start_lba.checked_add(extent.sector_count) else {
+                return false;
+            };
+            lba >= extent.start_lba
+                && lba < end
+                && self.manifest.artifacts.iter().any(|artifact| {
+                    artifact.kind == "raw_sectors"
+                        && artifact.source_extent_ids.iter().any(|id| id == &extent.id)
+                })
+        })
+    }
+
     fn read_artifact(&mut self, artifact_id: &str) -> io::Result<Option<Vec<u8>>> {
         if !self
             .manifest
@@ -254,6 +271,17 @@ impl EvidenceSource {
         match &self.reader {
             EvidenceReader::Backup(reader) => Some(&reader.manifest),
             EvidenceReader::Disk(_) => None,
+        }
+    }
+
+    pub fn available_requested_lbas(&self, requested: &[u64]) -> Vec<u64> {
+        match &self.reader {
+            EvidenceReader::Disk(_) => requested.to_vec(),
+            EvidenceReader::Backup(reader) => requested
+                .iter()
+                .copied()
+                .filter(|lba| reader.has_sector(*lba))
+                .collect(),
         }
     }
 

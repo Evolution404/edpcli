@@ -71,20 +71,23 @@ fn draw_backup_device_tree(frame: &mut Frame, area: ratatui::layout::Rect, state
 
     let inner_width = usize::from(inner.width);
     let marker_width = 2usize;
-    let body_width = inner_width.saturating_sub(marker_width).max(1);
-    let selected_content_width = state
+    let count_width = state.backup_device_tree_count_width();
+    let gap_width = 1usize;
+    let info_width = inner_width
+        .saturating_sub(marker_width)
+        .saturating_sub(count_width)
+        .saturating_sub(gap_width)
+        .max(1);
+    let selected_info_width = state
         .backup_device_tree_row_parts(selected)
-        .map(|(prefix, label, count)| {
+        .map(|(prefix, label, _count)| {
             crate::tui::table_layout::display_width(prefix)
                 .saturating_add(crate::tui::table_layout::display_width(&safe(&label)))
-                .saturating_add(1)
-                .saturating_add(crate::tui::table_layout::display_width(&count.to_string()))
         })
-        .unwrap_or(body_width);
-    let canvas_width = body_width.max(selected_content_width);
+        .unwrap_or(info_width);
     let scroll_x = state
         .backup_device_tree_scroll_offset()
-        .min(canvas_width.saturating_sub(body_width));
+        .min(selected_info_width.saturating_sub(info_width));
     let theme = crate::tui::theme::current();
 
     for (index, node) in nodes.iter().enumerate() {
@@ -93,19 +96,15 @@ fn draw_backup_device_tree(frame: &mut Frame, area: ratatui::layout::Rect, state
         let Some((prefix, label, count)) = state.backup_device_tree_row_parts(index) else {
             continue;
         };
-        let label = safe(&label);
-        let count_text = count.to_string();
-        let used = crate::tui::table_layout::display_width(prefix)
-            .saturating_add(crate::tui::table_layout::display_width(&label))
-            .saturating_add(crate::tui::table_layout::display_width(&count_text));
-        let gap = canvas_width.saturating_sub(used).max(1);
-        let full_body = format!("{prefix}{label}{}{count_text}", " ".repeat(gap));
-        let mut body =
-            crate::tui::table_layout::slice_display_cells(&full_body, scroll_x, body_width);
-        let visible_width = crate::tui::table_layout::display_width(&body);
-        if visible_width < body_width {
-            body.push_str(&" ".repeat(body_width - visible_width));
+        let full_info = format!("{prefix}{}", safe(&label));
+        let row_scroll_x = if node.depth == 0 { 0 } else { scroll_x };
+        let mut info =
+            crate::tui::table_layout::slice_display_cells(&full_info, row_scroll_x, info_width);
+        let visible_width = crate::tui::table_layout::display_width(&info);
+        if visible_width < info_width {
+            info.push_str(&" ".repeat(info_width - visible_width));
         }
+        let count_text = format!("{count:>count_width$}");
 
         let base = if node.depth == 0 {
             secondary().add_modifier(Modifier::BOLD)
@@ -119,7 +118,9 @@ fn draw_backup_device_tree(frame: &mut Frame, area: ratatui::layout::Rect, state
         };
         lines.push(Line::from(vec![
             Span::styled(marker, row_style),
-            Span::styled(body, row_style),
+            Span::styled(info, row_style),
+            Span::styled(" ".repeat(gap_width), row_style),
+            Span::styled(count_text, row_style),
         ]));
     }
 

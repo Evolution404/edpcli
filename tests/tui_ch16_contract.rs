@@ -1375,18 +1375,16 @@ fn ch16_inspect_field_evidence_keeps_every_typed_layer() {
     state.advanced_inspect_move_tree(field_index as isize - current as isize);
     let text = rendered_lines(&state, 240, 60).join("\n").replace(' ', "");
     for value in [
-        "字段/证据",
-        "Value:",
-        "SourceLBA:",
-        "Group:",
-        "Offset:",
-        "Length:",
-        "Raw:",
-        "Decoded:",
-        "FieldLogical:",
-        "Transform:",
-        "Type:",
-        "Status:",
+        "技术证据",
+        "Value",
+        "SourceLBA",
+        "Group",
+        "Offset/Length",
+        "Raw",
+        "Decoded",
+        "FieldLogical",
+        "Transform",
+        "Type/Status",
     ] {
         assert!(text.contains(value), "missing {value} in field evidence");
     }
@@ -1407,7 +1405,7 @@ fn ch16_inspect_lba8_renders_at_all_required_sizes() {
             .join("\n")
             .replace(' ', "");
         assert!(
-            text.contains("结构树") || text.contains("LBA8"),
+            text.contains("扇区树") || text.contains("LBA8"),
             "missing workspace at {width}x{height}"
         );
     }

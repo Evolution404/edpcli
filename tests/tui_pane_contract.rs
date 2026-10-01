@@ -194,7 +194,7 @@ fn plain_provision_state() -> AppState {
 }
 
 #[test]
-fn inspect_tab_cycle_is_tree_overview_detail_only() {
+fn inspect_tab_cycle_is_tree_overview_detail_bytes() {
     let mut state = inspect_state();
     assert_eq!(
         state.advanced_inspect_focused_pane(),
@@ -203,6 +203,7 @@ fn inspect_tab_cycle_is_tree_overview_detail_only() {
     for expected in [
         PaneId::InspectOverview,
         PaneId::InspectDetail,
+        PaneId::InspectBytes,
         PaneId::InspectTree,
     ] {
         state.advanced_inspect_shift_panel(false);
@@ -211,7 +212,7 @@ fn inspect_tab_cycle_is_tree_overview_detail_only() {
     state.advanced_inspect_shift_panel(true);
     assert_eq!(
         state.advanced_inspect_focused_pane(),
-        Some(PaneId::InspectDetail)
+        Some(PaneId::InspectBytes)
     );
 }
 
@@ -453,6 +454,14 @@ fn backup_device_tree_hl_scroll_reveals_full_active_identity_without_ellipsis() 
         !initial_sidebar.iter().any(|line| line.contains('…')),
         "device-tree clipping must not replace hidden content with ellipsis: {initial_sidebar:#?}"
     );
+    let initial_active = initial_sidebar
+        .iter()
+        .find(|line| line.contains('▌'))
+        .expect("active device row");
+    assert!(
+        initial_active.trim_end().ends_with('1'),
+        "backup count must stay pinned at the right edge before horizontal scrolling: {initial_active}"
+    );
 
     while state.scroll_backup_device_tree(false, 160) {}
     assert!(state.backup_device_tree_scroll_offset() > 0);
@@ -470,6 +479,20 @@ fn backup_device_tree_hl_scroll_reveals_full_active_identity_without_ellipsis() 
     assert!(
         !scrolled_sidebar.iter().any(|line| line.contains('…')),
         "active device content must remain real text after horizontal scrolling: {scrolled_sidebar:#?}"
+    );
+    let scrolled_active = scrolled_sidebar
+        .iter()
+        .find(|line| line.contains('▌'))
+        .expect("active device row after H/L");
+    assert!(
+        scrolled_sidebar
+            .iter()
+            .any(|line| line.replace(' ', "").contains("全部备份")),
+        "root label must stay anchored while child device information scrolls: {scrolled_sidebar:#?}"
+    );
+    assert!(
+        scrolled_active.trim_end().ends_with('1'),
+        "backup count must remain visible and fixed while device information scrolls: {scrolled_active}"
     );
 
     while state.scroll_backup_device_tree(true, 160) {}

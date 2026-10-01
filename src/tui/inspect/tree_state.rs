@@ -34,7 +34,11 @@ pub(super) struct InspectTreeViewModel {
 
 pub(super) fn reset_inspect_selected_context(state: &mut AdvancedInspectState) {
     use crate::tui::pane::PaneId;
-    for pane in [PaneId::InspectOverview, PaneId::InspectDetail] {
+    for pane in [
+        PaneId::InspectOverview,
+        PaneId::InspectDetail,
+        PaneId::InspectBytes,
+    ] {
         let viewport = state.pane_focus.viewport_mut(pane);
         viewport.scroll_y.top();
         if pane == PaneId::InspectDetail {

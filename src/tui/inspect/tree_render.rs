@@ -116,7 +116,7 @@ pub(super) fn draw_inspect_tree_pane(
         Paragraph::new(tree_lines.collect::<Vec<_>>())
             .block(crate::tui::ui::card(
                 format!(
-                    "结构树  {}/{}",
+                    "扇区树  {}/{}",
                     selected_index.saturating_add(1),
                     rows.len()
                 ),

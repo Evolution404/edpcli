@@ -79,24 +79,21 @@ pub(super) fn draw_sector_inspector(
     let decode_issue = item.and_then(|item| item.decode_error.as_deref());
     let breadcrumb = state.advanced_inspect_breadcrumb();
     let header = vec![
-        Line::from(
-            breadcrumb
-                .as_ref()
-                .map(|model| safe(&model.display()))
-                .unwrap_or_default(),
-        ),
         Line::from(vec![
             Span::styled(
                 format!("LBA{}  ", sector.lba),
                 secondary().add_modifier(Modifier::BOLD),
             ),
-            Span::styled(sector.mode.label(), accent().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                sector.mode.label(),
+                secondary().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(format!(
-                "  · byte +0x{:03X} / absolute 0x{:X} / row {:02}/32{}",
+                "  · byte +0x{:03X} · absolute 0x{:X} · row {:02}/32{}",
                 sector.cursor,
                 absolute,
                 sector.cursor / 16 + 1,
-                if sector.pending { "  · 读取中" } else { "" }
+                if sector.pending { " · 读取中" } else { "" }
             )),
         ]),
         Line::from(format!(
@@ -116,13 +113,13 @@ pub(super) fn draw_sector_inspector(
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),
+            Constraint::Length(4),
             Constraint::Min(5),
-            Constraint::Length(2),
+            Constraint::Length(1),
         ])
         .split(area);
     frame.render_widget(
-        Paragraph::new(header).block(Block::default().borders(Borders::ALL).title("扇区检查")),
+        Paragraph::new(header).block(Block::default().borders(Borders::ALL).title("字节检查")),
         vertical[0],
     );
 
@@ -217,15 +214,13 @@ pub(super) fn draw_sector_inspector(
             .as_ref()
             .and_then(|bytes| bytes.get(sector.cursor))
             .copied();
-        details.push(Line::from(format!("Offset       +0x{:03X}", sector.cursor)));
-        details.push(Line::from(format!("Raw          0x{raw:02X} ({raw})")));
-        if let Some(decoded) = decoded {
-            details.push(Line::from(format!(
-                "Decoded      0x{decoded:02X} ({decoded})"
-            )));
-        } else {
-            details.push(Line::from("Decoded      —"));
-        }
+        details.push(Line::from(format!(
+            "+0x{:03X} · raw {raw:02X}/{raw} · dec {}",
+            sector.cursor,
+            decoded
+                .map(|value| format!("{value:02X}/{value}"))
+                .unwrap_or_else(|| "—".into())
+        )));
         let decode_range = item
             .decode_ranges
             .iter()
@@ -241,41 +236,38 @@ pub(super) fn draw_sector_inspector(
             } else {
                 "Plain"
             };
-        details.push(Line::from(format!("Decode       {decode_label}")));
-        if let Some(range) = decode_range {
-            details.push(Line::from(format!(
-                "Decode Range +0x{:03X}..+0x{:03X}",
+        details.push(Line::from(match decode_range {
+            Some(range) => format!(
+                "Decode {decode_label} · +0x{:03X}..+0x{:03X}",
                 range.start, range.end
-            )));
-        }
+            ),
+            None => format!("Decode {decode_label}"),
+        }));
         if let Some(error) = item.decode_error.as_deref() {
             details.push(Line::from(Span::styled(
                 format!("Decode Error {}", safe(error)),
                 warning(),
             )));
         }
-        details.push(Line::from(""));
         if let Some(field) = active_field.as_ref() {
-            details.push(Line::from(Span::styled(
-                safe(&field.label),
-                accent().add_modifier(Modifier::BOLD),
-            )));
-            details.push(Line::from(format!("Value: {}", safe(&field.value))));
             details.push(Line::from(vec![
-                Span::raw(format!("Type: {:?} / Status: ", field.field_type)),
+                Span::styled(safe(&field.label), secondary().add_modifier(Modifier::BOLD)),
+                Span::raw(format!(" · {}", safe(&field.value))),
+            ]));
+            let sector_base = sector.lba.saturating_mul(crate::common::SECTOR as u64);
+            details.push(Line::from(vec![
+                Span::raw(format!(
+                    "{:?} · Range +0x{:03X}..+0x{:03X} · ",
+                    field.field_type,
+                    field.range.start.saturating_sub(sector_base),
+                    field.range.end_exclusive.saturating_sub(sector_base)
+                )),
                 Span::styled(
                     format!("{:?}", field.status),
                     inspect_field_status_style(field.status).add_modifier(Modifier::BOLD),
                 ),
             ]));
-            let sector_base = sector.lba.saturating_mul(crate::common::SECTOR as u64);
-            details.push(Line::from(format!(
-                "Range: +0x{:03X}..+0x{:03X}",
-                field.range.start.saturating_sub(sector_base),
-                field.range.end_exclusive.saturating_sub(sector_base)
-            )));
             if sector.field_expanded {
-                details.push(Line::from(""));
                 details.push(Line::from(format!(
                     "bits: b7={} b6={} b5={} b4={} b3={} b2={} b1={} b0={}",
                     (raw >> 7) & 1,
@@ -316,16 +308,20 @@ pub(super) fn draw_sector_inspector(
     }
     frame.render_widget(
         Paragraph::new(details)
-            .block(Block::default().borders(Borders::ALL).title("字节 / 字段"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("当前字节 / 字段"),
+            )
             .wrap(Wrap { trim: false }),
         main.1,
     );
 
     frame.render_widget(
         Paragraph::new(Line::from(
-            "h/l byte · j/k ±16B · 0/$ 行首尾 · gg/G 扇区首尾 · Ctrl-u/d 半页 · PgUp/PgDn 整页 · [/] 前后 sector · v mode · Space/o bit · / n/N 搜索 · J 跳转 · Esc 返回树",
+            "h/l byte · j/k ±16B · 0/$ 行 · gg/G 扇区 · Ctrl-u/d · PgUp/PgDn · [/] sector · v mode · o 字段 · / n/N · J 跳转 · Ctrl-w 切窗 · Esc 关闭",
         ))
-        .block(Block::default().borders(Borders::TOP)),
+        .style(muted()),
         vertical[2],
     );
 }

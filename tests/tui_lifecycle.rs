@@ -718,9 +718,9 @@ fn advanced_inspect_tree_browser_renders_and_navigates_across_terminal_sizes() {
             .map(|cell| cell.symbol())
             .collect::<String>();
         let compact = text.replace(' ', "");
-        assert!(compact.contains("字段/证据"), "{text}");
+        assert!(compact.contains("技术证据"), "{text}");
         if width >= 80 {
-            assert!(compact.contains("结构树"), "{text}");
+            assert!(compact.contains("扇区树"), "{text}");
             assert!(compact.contains("对象摘要"), "{text}");
             assert!(compact.contains("磁盘概览"), "{text}");
         }

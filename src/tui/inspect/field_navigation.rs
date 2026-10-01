@@ -134,10 +134,10 @@ impl AppState {
             field_expanded: true,
             pinned_field: Some(field),
         });
-        state.panel = AdvancedInspectPanel::Detail;
+        state.panel = AdvancedInspectPanel::Bytes;
         state
             .pane_focus
-            .focus(crate::tui::pane::PaneId::InspectDetail);
+            .focus(crate::tui::pane::PaneId::InspectBytes);
         (!ready).then(|| (state.source.clone(), lba))
     }
 }

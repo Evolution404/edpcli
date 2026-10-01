@@ -12,12 +12,12 @@ use tree_render::draw_inspect_tree_pane;
 #[path = "field_table_render.rs"]
 mod field_table_render;
 
+#[path = "evidence_table_render.rs"]
+mod evidence_table_render;
+
 #[path = "detail_render.rs"]
 mod detail_render;
 use detail_render::draw_inspect_object_panes;
-
-#[path = "backup_manifest_render.rs"]
-mod backup_manifest_render;
 
 #[path = "sector_render.rs"]
 mod sector_render;
@@ -96,30 +96,34 @@ pub(super) fn draw_advanced_inspect(
     let compact_layout_area = content[0];
     let content_area = content[1];
     let class = crate::tui::ui::ViewportClass::for_width(content_area.width);
-    let (tree_area, overview_area, detail_area) = if class == crate::tui::ui::ViewportClass::Compact
-    {
-        match advanced.panel {
-            AdvancedInspectPanel::Tree => {
-                let parts = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-                    .split(content_area);
-                (Some(parts[1]), Some(parts[0]), None)
+    let (tree_area, overview_area, detail_area, bytes_area) =
+        if class == crate::tui::ui::ViewportClass::Compact {
+            match advanced.panel {
+                AdvancedInspectPanel::Tree => (Some(content_area), None, None, None),
+                AdvancedInspectPanel::Overview => (None, Some(content_area), None, None),
+                AdvancedInspectPanel::Detail => (None, None, Some(content_area), None),
+                AdvancedInspectPanel::Bytes => (None, None, None, Some(content_area)),
             }
-            AdvancedInspectPanel::Overview => (None, Some(content_area), None),
-            AdvancedInspectPanel::Detail => (None, None, Some(content_area)),
-        }
-    } else {
-        let vertical = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(60), Constraint::Min(4)])
-            .split(content_area);
-        let upper = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(29), Constraint::Percentage(71)])
-            .split(vertical[0]);
-        (Some(upper[0]), Some(upper[1]), Some(vertical[1]))
-    };
+        } else {
+            let vertical = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(64), Constraint::Percentage(36)])
+                .split(content_area);
+            let upper = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(29), Constraint::Percentage(71)])
+                .split(vertical[0]);
+            let right = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
+                .split(upper[1]);
+            (
+                Some(upper[0]),
+                Some(right[0]),
+                Some(right[1]),
+                Some(vertical[1]),
+            )
+        };
 
     if let Some(layout) = disk_layout {
         layout.render_mini(
@@ -141,27 +145,41 @@ pub(super) fn draw_advanced_inspect(
         );
     }
 
-    if advanced.sector.is_some() {
-        draw_sector_inspector(frame, content_area, state);
-    } else {
-        if let Some(tree_area) = tree_area {
-            draw_inspect_tree_pane(
-                frame,
-                tree_area,
-                &rows,
-                selected_index,
-                advanced.panel == AdvancedInspectPanel::Tree,
+    if let Some(tree_area) = tree_area {
+        draw_inspect_tree_pane(
+            frame,
+            tree_area,
+            &rows,
+            selected_index,
+            advanced.panel == AdvancedInspectPanel::Tree,
+        );
+    }
+    draw_inspect_object_panes(
+        frame,
+        state,
+        workspace,
+        advanced,
+        selected_row,
+        overview_area,
+        detail_area,
+    );
+    if let Some(bytes_area) = bytes_area {
+        if advanced.sector.is_some() {
+            draw_sector_inspector(frame, bytes_area, state);
+        } else {
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled("选择扇区后按 Enter 打开字节检查", muted())),
+                    Line::from("Raw / Decode / Mixed 在此区域展示；不会替代扇区树和语义摘要。"),
+                ])
+                .block(crate::tui::ui::card(
+                    "字节检查",
+                    advanced.panel == AdvancedInspectPanel::Bytes,
+                ))
+                .wrap(Wrap { trim: false }),
+                bytes_area,
             );
         }
-        draw_inspect_object_panes(
-            frame,
-            state,
-            workspace,
-            advanced,
-            selected_row,
-            overview_area,
-            detail_area,
-        );
     }
     draw_inspect_jump_modal(frame, state);
 }

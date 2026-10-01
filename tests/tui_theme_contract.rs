@@ -314,6 +314,33 @@ fn neutral_table_columns_brighten_without_becoming_accent_blue() {
 }
 
 #[test]
+fn inspect_field_table_uses_shared_continuous_row_selection_contract() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let field_table =
+        fs::read_to_string(root.join("src/tui/inspect/field_table_render.rs")).unwrap();
+    let status_style = fs::read_to_string(root.join("src/tui/inspect/render_helpers.rs")).unwrap();
+
+    assert!(
+        field_table.contains("crate::tui::ui::data_table(")
+            && field_table.contains("render_stateful_widget(table"),
+        "Inspect field rows must use the shared stateful data-table renderer so selection spans column spacing"
+    );
+    assert!(
+        !field_table.contains("apply_selection("),
+        "Inspect field rows must not paint selection cell-by-cell; that creates visible gaps"
+    );
+    assert!(
+        field_table.contains("if logical == 0"),
+        "field-status semantic color must be scoped to the Status column only"
+    );
+    assert!(
+        status_style.contains("InspectFieldStatus::Known")
+            && status_style.contains("current().table_text()"),
+        "Known must remain neutral table text instead of accent/blue"
+    );
+}
+
+#[test]
 fn new_selection_renderers_must_not_turn_active_rows_accent_blue() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
     let mut files = Vec::new();

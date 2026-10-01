@@ -4,7 +4,9 @@ pub(super) fn inspect_field_status_style(
     status: crate::application::inspect::InspectFieldStatus,
 ) -> Style {
     match status {
-        crate::application::inspect::InspectFieldStatus::Known => accent(),
+        crate::application::inspect::InspectFieldStatus::Known => {
+            crate::tui::theme::current().table_text()
+        }
         crate::application::inspect::InspectFieldStatus::Unknown => warning(),
         crate::application::inspect::InspectFieldStatus::Reserved => muted(),
         crate::application::inspect::InspectFieldStatus::Preserved => success(),

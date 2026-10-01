@@ -248,55 +248,60 @@ impl AppState {
                 let Some(row) = rows.get(state.tree_selected) else {
                     return 1;
                 };
-                let mut count = match row.kind {
-                    InspectNodeKind::Sector => state
-                        .result
-                        .as_ref()
-                        .and_then(|workspace| {
-                            workspace
-                                .items
-                                .iter()
-                                .find(|item| item.lba == row.range.start_lba)
-                        })
-                        .map(|item| {
-                            let body = if !item.fields.is_empty() {
-                                item.fields
-                                    .iter()
-                                    .map(|field| 1 + field.children.len())
-                                    .sum::<usize>()
-                            } else if let Some(meta_text) = &item.meta_text {
-                                meta_text.lines().count()
-                            } else {
-                                1
-                            };
-                            body + item.notes.len() + 1
-                        })
-                        .unwrap_or(2),
-                    InspectNodeKind::Field => {
-                        if self.advanced_inspect_selected_field().is_some() {
-                            4
-                        } else {
-                            1
-                        }
-                    }
-                    InspectNodeKind::Group => 2,
-                    _ => 2,
+                let Some(workspace) = state.result.as_ref() else {
+                    return 1;
                 };
-                if let Some(manifest) = state
-                    .result
-                    .as_ref()
-                    .and_then(|workspace| workspace.backup_manifest.as_ref())
-                {
-                    count += 4
+
+                // Keep scrolling aligned with the structured technical-evidence table.
+                let mut count = 5usize; // object + two location rows + status + source
+                count += usize::from(row.range.byte_range.is_some());
+                count += usize::from(row.decoder.is_some());
+                count += usize::from(row.region_semantic.is_some());
+
+                let item = matches!(row.kind, InspectNodeKind::Sector | InspectNodeKind::Field)
+                    .then(|| {
+                        workspace
+                            .items
+                            .iter()
+                            .find(|item| item.lba == row.range.start_lba)
+                    })
+                    .flatten();
+                if let Some(item) = item {
+                    if row.kind == InspectNodeKind::Field
+                        && row.range.byte_range.is_some_and(|range| {
+                            item.fields.iter().any(|field| field.range == range)
+                        })
+                    {
+                        count += 10;
+                    }
+                    count += usize::from(!item.regions.is_empty());
+                    count += 3; // RAW non-zero, RAW SHA-256, parse state
+                    count += usize::from(item.decoded_sha256.is_some());
+                    count += usize::from(item.method.is_some());
+                    count += usize::from(item.decode_error.is_some());
+                    count += item.diagnostics.len();
+                    count += item
+                        .meta_text
+                        .as_deref()
+                        .map(|text| {
+                            text.lines()
+                                .map(str::trim)
+                                .filter(|line| {
+                                    !line.is_empty()
+                                        && !line.starts_with("Enter ")
+                                        && !line.ends_with(':')
+                                        && !line.ends_with('：')
+                                })
+                                .count()
+                        })
+                        .unwrap_or(0);
+                    count += item.notes.len();
+                }
+                if let Some(manifest) = workspace.backup_manifest.as_ref() {
+                    count += 2
                         + manifest.regions.len()
                         + manifest.extents.len()
                         + manifest.artifacts.len().saturating_mul(3);
-                }
-                if state.prompt.is_some() {
-                    count += 5;
-                }
-                if state.message.is_some() {
-                    count += 2;
                 }
                 count.max(1)
             }

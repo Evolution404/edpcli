@@ -40,33 +40,29 @@ pub(super) fn draw_inspect_field_table(
         .pane_viewport(crate::tui::pane::PaneId::InspectDetail)
         .selected
         .unwrap_or(0);
-    let rows = values[row_start..row_end]
-        .iter()
-        .enumerate()
-        .map(|(index, row)| {
-            let row_selected = row_start + index == selected;
-            let base = inspect_field_status_style(item.fields[row.field_index].status);
-            TableRow::new(
-                viewport
-                    .columns
-                    .iter()
-                    .map(|column| {
-                        let logical = order[column.index];
-                        let style = crate::tui::theme::current().table_cell(
-                            base,
-                            column.index == interaction.active_column(),
-                            detail_focus,
-                        );
-                        let style = crate::tui::theme::current().apply_selection(
-                            style,
-                            row_selected,
-                            detail_focus,
-                        );
-                        Cell::from(visible_cell(&safe(&row.cells[logical]), column)).style(style)
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        });
+    let rows = values[row_start..row_end].iter().map(|row| {
+        let status = item.fields[row.field_index].status;
+        TableRow::new(
+            viewport
+                .columns
+                .iter()
+                .map(|column| {
+                    let logical = order[column.index];
+                    let base = if logical == 0 {
+                        inspect_field_status_style(status)
+                    } else {
+                        crate::tui::theme::current().table_text()
+                    };
+                    let style = crate::tui::theme::current().table_cell(
+                        base,
+                        column.index == interaction.active_column(),
+                        detail_focus,
+                    );
+                    Cell::from(visible_cell(&safe(&row.cells[logical]), column)).style(style)
+                })
+                .collect::<Vec<_>>(),
+        )
+    });
     let header = TableRow::new(
         viewport
             .columns
@@ -82,18 +78,18 @@ pub(super) fn draw_inspect_field_table(
             .collect::<Vec<_>>(),
     );
     let title = format!(
-        "字段 / 证据 · 行 {}–{} / {} · {}",
+        "技术证据 · 字段 · 行 {}–{} / {} · {}",
         if values.is_empty() { 0 } else { row_start + 1 },
         row_end,
         values.len(),
         table_position_label(&layout, interaction, &viewport)
     );
-    frame.render_widget(
-        Table::new(rows, viewport.widths())
-            .header(header)
-            .block(crate::tui::ui::card(title, detail_focus)),
-        detail_area,
-    );
+    let table = crate::tui::ui::data_table(&title, header, rows, viewport.widths(), detail_focus);
+    let mut table_state = ratatui::widgets::TableState::default();
+    if selected >= row_start && selected < row_end {
+        table_state.select(Some(selected - row_start));
+    }
+    frame.render_stateful_widget(table, detail_area, &mut table_state);
     render_table_scrollbars(
         frame,
         detail_area,

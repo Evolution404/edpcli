@@ -265,13 +265,20 @@ impl AppState {
 
     fn backup_device_tree_active_width(&self) -> usize {
         let selected = self.backup_device_tree_selected();
-        let Some((prefix, label, count)) = self.backup_device_tree_row_parts(selected) else {
+        let Some((prefix, label, _count)) = self.backup_device_tree_row_parts(selected) else {
             return 0;
         };
         crate::tui::table_layout::display_width(prefix)
             .saturating_add(crate::tui::table_layout::display_width(&label))
-            .saturating_add(1)
-            .saturating_add(crate::tui::table_layout::display_width(&count.to_string()))
+    }
+
+    pub fn backup_device_tree_count_width(&self) -> usize {
+        self.backup_device_tree_nodes()
+            .iter()
+            .map(|node| node.count.to_string().len())
+            .max()
+            .unwrap_or(1)
+            .max(3)
     }
 
     pub fn backup_device_tree_scroll_offset(&self) -> usize {
@@ -284,7 +291,13 @@ impl AppState {
                 .backup_device_tree_inner_width(terminal_width),
         );
         let marker_width = 2usize;
-        let viewport_width = inner_width.saturating_sub(marker_width).max(1);
+        let count_width = self.backup_device_tree_count_width();
+        let gap_width = 1usize;
+        let viewport_width = inner_width
+            .saturating_sub(marker_width)
+            .saturating_sub(count_width)
+            .saturating_sub(gap_width)
+            .max(1);
         let max_scroll = self
             .backup_device_tree_active_width()
             .saturating_sub(viewport_width);

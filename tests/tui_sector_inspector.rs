@@ -456,7 +456,7 @@ fn ch14_failed_passive_preview_requires_explicit_retry_then_recovers() {
         .collect::<String>()
         .replace(' ', "");
     assert!(text.contains("读取失败"), "{text}");
-    assert!(text.contains("按r显式重试"), "{text}");
+    assert!(text.contains("transientread"), "{text}");
     assert_eq!(
         state.advanced_inspect_retry_selected_preview().unwrap().1,
         2_048
@@ -489,6 +489,10 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
         state.advanced_inspect_breadcrumb().unwrap().escape_hint(),
         "Esc 返回：Inspect"
     );
+    assert_eq!(
+        state.advanced_inspect().unwrap().panel,
+        AdvancedInspectPanel::Bytes
+    );
     for expected in [AdvancedInspectPanel::Tree, AdvancedInspectPanel::Overview] {
         state.advanced_inspect_shift_panel(false);
         assert_eq!(state.advanced_inspect().unwrap().panel, expected);
@@ -509,8 +513,20 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
         .map(|cell| cell.symbol())
         .collect::<String>()
         .replace(' ', "");
-    assert!(text.contains("Esc返回：Inspect"), "{text}");
-    assert!(text.contains("扇区检查"), "{text}");
+    assert!(text.contains("扇区树"), "{text}");
+    assert!(!text.contains("字节检查"), "{text}");
+    state.advanced_inspect_focus_pane(edpcli::tui::pane::PaneId::InspectBytes);
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let bytes = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(bytes.contains("Esc返回：Inspect"), "{bytes}");
+    assert!(bytes.contains("字节检查"), "{bytes}");
     assert_eq!(
         state.advanced_inspect_view_mode(),
         Some(edpcli::tui::state::InspectViewMode::Hex),
@@ -579,7 +595,10 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
     assert!(text.contains("/30"), "{text}");
     assert!(text.contains("列"), "{text}");
     assert!(text.contains("Field20"), "{text}");
-    let detail = text.split("字段/证据").nth(1).expect("field evidence pane");
+    let detail = text
+        .split("技术证据·字段")
+        .nth(1)
+        .expect("field evidence pane");
     assert!(!detail.contains("Field00"), "{detail}");
 }
 
@@ -741,13 +760,24 @@ fn sector_inspector_renders_32x16_offsets_ascii_typed_and_unknown_views() {
         .map(|cell| cell.symbol())
         .collect::<String>();
     let compact = text.replace(' ', "");
-    assert!(compact.contains("扇区检查"), "{text}");
+    assert!(compact.contains("字节检查"), "{text}");
     assert!(
         compact.contains("磁盘概览·当前LBA0"),
         "sector detail must keep the permanent mini capacity map: {text}"
     );
     assert!(compact.contains("+0x000"), "{text}");
-    assert!(compact.contains("+0x1F0"), "{text}");
+    state.advanced_inspect_sector_bottom();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let bottom = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(bottom.contains("+0x1F0"), "{bottom}");
+    state.advanced_inspect_sector_top();
     assert!(compact.contains("KnownField"), "{text}");
     assert!(compact.contains("typed-value"), "{text}");
     assert!(compact.contains("b7="), "{text}");
