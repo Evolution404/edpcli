@@ -76,16 +76,10 @@ pub(super) fn read_plain_source_extents(
                 ),
             )
         })?;
-        let filesystem = crate::filesystem::detect_boot_sector(partition.sector_count, &boot)
-            .map_err(|error| {
-                err(
-                    EXIT_TARGET,
-                    format!(
-                        "错误: 无法识别普通盘分区 P{} 文件系统: {error}",
-                        partition.index
-                    ),
-                )
-            })?;
+        let filesystem =
+            crate::filesystem::detect_boot_sector(partition.sector_count, &boot)
+                .ok()
+                .flatten();
         extents.push(crate::provision::PlainSourceExtent {
             start_lba: partition.start_lba,
             sector_count: partition.sector_count,
