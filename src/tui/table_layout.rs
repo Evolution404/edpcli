@@ -273,6 +273,31 @@ impl TableInteractionState {
         true
     }
 
+    pub fn move_active_bounded(
+        &mut self,
+        layout: &AdaptiveTableLayout,
+        content_widths: &[usize],
+        viewport_width: u16,
+        reverse: bool,
+    ) -> bool {
+        self.normalize_columns(layout);
+        let count = layout.specs().len();
+        if count == 0 {
+            return false;
+        }
+        let next = if reverse {
+            self.active_column.saturating_sub(1)
+        } else {
+            self.active_column.saturating_add(1).min(count - 1)
+        };
+        if next == self.active_column {
+            return false;
+        }
+        self.active_column = next;
+        self.ensure_active_visible_bounded(layout, content_widths, viewport_width);
+        true
+    }
+
     pub fn move_active_edge(
         &mut self,
         layout: &AdaptiveTableLayout,
@@ -289,6 +314,25 @@ impl TableInteractionState {
         let changed = next != self.active_column;
         self.active_column = next;
         self.ensure_active_visible(layout, content_widths, viewport_width, !last);
+        changed
+    }
+
+    pub fn move_active_edge_bounded(
+        &mut self,
+        layout: &AdaptiveTableLayout,
+        content_widths: &[usize],
+        viewport_width: u16,
+        last: bool,
+    ) -> bool {
+        self.normalize_columns(layout);
+        let count = layout.specs().len();
+        if count == 0 {
+            return false;
+        }
+        let next = if last { count - 1 } else { 0 };
+        let changed = next != self.active_column;
+        self.active_column = next;
+        self.ensure_active_visible_bounded(layout, content_widths, viewport_width);
         changed
     }
 
@@ -319,6 +363,25 @@ impl TableInteractionState {
         ));
     }
 
+    fn ensure_active_visible_bounded(
+        &mut self,
+        layout: &AdaptiveTableLayout,
+        content_widths: &[usize],
+        viewport_width: u16,
+    ) {
+        let viewport_width = usize::from(viewport_width.max(1));
+        let (start, end) = layout.column_span(content_widths, None, self.active_column);
+        let current_end = self.scroll_x.saturating_add(viewport_width);
+        if start < self.scroll_x {
+            self.scroll_x = start;
+        } else if end > current_end {
+            self.scroll_x = end.saturating_sub(viewport_width);
+        }
+        self.scroll_x =
+            self.scroll_x
+                .min(layout.max_scroll(content_widths, None, viewport_width as u16));
+    }
+
     pub fn scroll_viewport(
         &mut self,
         layout: &AdaptiveTableLayout,
@@ -329,6 +392,25 @@ impl TableInteractionState {
         self.normalize_columns(layout);
         let max_scroll =
             layout.max_scroll(content_widths, Some(self.active_column), viewport_width);
+        let next = if reverse {
+            self.scroll_x.saturating_sub(2)
+        } else {
+            self.scroll_x.saturating_add(2).min(max_scroll)
+        };
+        let changed = next != self.scroll_x;
+        self.scroll_x = next;
+        changed
+    }
+
+    pub fn scroll_viewport_bounded(
+        &mut self,
+        layout: &AdaptiveTableLayout,
+        content_widths: &[usize],
+        viewport_width: u16,
+        reverse: bool,
+    ) -> bool {
+        self.normalize_columns(layout);
+        let max_scroll = layout.max_scroll(content_widths, None, viewport_width);
         let next = if reverse {
             self.scroll_x.saturating_sub(2)
         } else {

@@ -122,7 +122,7 @@ fn summary_lines(
             }
             _ => {
                 lines.push(Line::from(Span::styled(
-                    "当前扇区尚未按需读取；Enter 打开字节检查。",
+                    "当前扇区尚未按需读取；Enter 打开全屏 Hex。",
                     muted(),
                 )));
             }

@@ -240,7 +240,7 @@ fn empty_inspect_workspace_escape_always_falls_back_to_devices() {
 }
 
 #[test]
-fn inspect_tab_cycle_is_tree_overview_detail_bytes() {
+fn inspect_tab_cycle_is_tree_overview_detail() {
     let mut state = inspect_state();
     assert_eq!(
         state.advanced_inspect_focused_pane(),
@@ -249,7 +249,6 @@ fn inspect_tab_cycle_is_tree_overview_detail_bytes() {
     for expected in [
         PaneId::InspectOverview,
         PaneId::InspectDetail,
-        PaneId::InspectBytes,
         PaneId::InspectTree,
     ] {
         state.advanced_inspect_shift_panel(false);
@@ -258,7 +257,7 @@ fn inspect_tab_cycle_is_tree_overview_detail_bytes() {
     state.advanced_inspect_shift_panel(true);
     assert_eq!(
         state.advanced_inspect_focused_pane(),
-        Some(PaneId::InspectBytes)
+        Some(PaneId::InspectDetail)
     );
 }
 

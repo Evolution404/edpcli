@@ -1,13 +1,5 @@
 use super::*;
 
-pub(super) fn inspect_vertical_constraints(sector_open: bool) -> [Constraint; 2] {
-    if sector_open {
-        [Constraint::Percentage(64), Constraint::Percentage(36)]
-    } else {
-        [Constraint::Min(1), Constraint::Length(5)]
-    }
-}
-
 pub(super) fn inspect_tree_max_width(rows: &[crate::tui::state::AdvancedInspectTreeRow]) -> usize {
     rows.iter()
         .map(|row| {
@@ -64,21 +56,4 @@ pub(super) fn draw_inspect_breadcrumb(
         Paragraph::new(model.escape_hint()).style(accent()),
         parts[1],
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unopened_byte_inspector_stays_compact_until_a_sector_is_opened() {
-        assert_eq!(
-            inspect_vertical_constraints(false),
-            [Constraint::Min(1), Constraint::Length(5)]
-        );
-        assert_eq!(
-            inspect_vertical_constraints(true),
-            [Constraint::Percentage(64), Constraint::Percentage(36)]
-        );
-    }
 }

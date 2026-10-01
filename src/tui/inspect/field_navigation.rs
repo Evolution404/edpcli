@@ -134,10 +134,7 @@ impl AppState {
             field_expanded: true,
             pinned_field: Some(field),
         });
-        state.panel = AdvancedInspectPanel::Bytes;
-        state
-            .pane_focus
-            .focus(crate::tui::pane::PaneId::InspectBytes);
+        state.view_mode = InspectViewMode::Hex;
         (!ready).then(|| (state.source.clone(), lba))
     }
 }

@@ -473,7 +473,7 @@ fn ch14_failed_passive_preview_requires_explicit_retry_then_recovers() {
 }
 
 #[test]
-fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
+fn inspect_hex_is_fullscreen_and_escape_restores_origin() {
     use edpcli::tui::state::AdvancedInspectPanel;
 
     let mut state = AppState::new();
@@ -491,18 +491,9 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
     );
     assert_eq!(
         state.advanced_inspect().unwrap().panel,
-        AdvancedInspectPanel::Bytes
-    );
-    for expected in [AdvancedInspectPanel::Tree, AdvancedInspectPanel::Overview] {
-        state.advanced_inspect_shift_panel(false);
-        assert_eq!(state.advanced_inspect().unwrap().panel, expected);
-        assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 37);
-    }
-    state.advanced_inspect_shift_panel(true);
-    assert_eq!(
-        state.advanced_inspect().unwrap().panel,
         AdvancedInspectPanel::Tree
     );
+    assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 37);
     let mut terminal = Terminal::new(TestBackend::new(60, 18)).unwrap();
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
     let text = terminal
@@ -513,24 +504,13 @@ fn inspect_subworkspace_cycle_preserves_sector_cursor_and_return_target() {
         .map(|cell| cell.symbol())
         .collect::<String>()
         .replace(' ', "");
-    assert!(text.contains("扇区树"), "{text}");
-    assert!(!text.contains("字节检查"), "{text}");
-    state.advanced_inspect_focus_pane(edpcli::tui::pane::PaneId::InspectBytes);
-    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
-    let bytes = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect::<String>()
-        .replace(' ', "");
-    assert!(bytes.contains("Esc返回：Inspect"), "{bytes}");
-    assert!(bytes.contains("字节检查"), "{bytes}");
+    assert!(text.contains("Esc返回：Inspect"), "{text}");
+    assert!(text.contains("HexDetail"), "{text}");
+    assert!(!text.contains("扇区树"), "{text}");
+    assert!(!text.contains("技术证据"), "{text}");
     assert_eq!(
         state.advanced_inspect_view_mode(),
-        Some(edpcli::tui::state::InspectViewMode::Hex),
-        "Pane navigation must not implicitly change the explicit Inspect view mode"
+        Some(edpcli::tui::state::InspectViewMode::Hex)
     );
     assert!(state.advanced_inspect_close_sector());
     assert_eq!(
@@ -600,6 +580,84 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
         .nth(1)
         .expect("field evidence pane");
     assert!(!detail.contains("Field00"), "{detail}");
+}
+
+#[test]
+fn inspect_field_table_scrolls_to_true_right_edge_and_keeps_active_header_visible() {
+    use edpcli::tui::pane::PaneId;
+    use edpcli::tui::table_layout::{display_width, TableKind};
+
+    let mut entry = item(0, true);
+    entry.fields = vec![InspectField {
+        key: edpcli::inspect::InspectFieldKey::Synthetic,
+        range: AbsoluteByteRange {
+            start: 0,
+            end_exclusive: 1,
+        },
+        field_type: InspectFieldType::Identity,
+        raw: vec![0],
+        decoded: vec![0],
+        field_logical: None,
+        transform: None,
+        status: InspectFieldStatus::Known,
+        label: "VeryLongField".repeat(20),
+        value: "very-long-value-".repeat(40),
+        style: FieldStyle::Identity,
+        group: Some("group-".repeat(30)),
+        children: Vec::new(),
+    }];
+
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![entry])));
+    select_protocol_lba0(&mut state);
+    state.advanced_inspect_set_view_mode(InspectViewMode::Browser);
+    state.advanced_inspect_focus_pane(PaneId::InspectDetail);
+
+    let kind = TableKind::InspectFields;
+    let terminal_width = 160;
+    let terminal_height = 50;
+    while state.scroll_table_for_viewport(kind, false, terminal_width, terminal_height) {}
+
+    let headings = edpcli::tui::state::INSPECT_DETAIL_HEADINGS;
+    let rows = state.advanced_inspect_detail_rows();
+    let mut logical_widths = headings
+        .iter()
+        .map(|value| display_width(value))
+        .collect::<Vec<_>>();
+    for row in &rows {
+        for (index, value) in row.cells.iter().enumerate() {
+            logical_widths[index] = logical_widths[index].max(display_width(value));
+        }
+    }
+    let layout = state.table_visual_layout(kind);
+    let visual_widths = state.table_visual_widths(kind, &logical_widths);
+    let viewport_width = terminal_width
+        .saturating_mul(71)
+        .saturating_div(100)
+        .saturating_sub(3);
+    let expected_right_edge = layout.max_scroll(&visual_widths, None, viewport_width);
+    assert_eq!(state.table_scroll_offset(kind), expected_right_edge);
+
+    state.move_table_column_edge_for_viewport(kind, false, terminal_width, terminal_height);
+    for _ in 0..4 {
+        assert!(state.move_table_column_for_viewport(kind, false, terminal_width, terminal_height));
+    }
+    assert_eq!(state.table_active_column(kind), 4);
+    let offset = state.table_scroll_offset(kind);
+    let (start, end) = layout.column_span(&visual_widths, None, 4);
+    assert!(
+        start >= offset,
+        "active heading start must remain visible: start={start}, offset={offset}"
+    );
+    assert!(
+        start < offset + usize::from(viewport_width) && end > offset,
+        "active column must intersect the rendered viewport"
+    );
+    assert!(
+        end - start <= usize::from(layout.specs()[4].max_width),
+        "Inspect evidence columns must stay bounded instead of expanding to the full long cell"
+    );
 }
 
 #[test]
@@ -760,10 +818,10 @@ fn sector_inspector_renders_32x16_offsets_ascii_typed_and_unknown_views() {
         .map(|cell| cell.symbol())
         .collect::<String>();
     let compact = text.replace(' ', "");
-    assert!(compact.contains("字节检查"), "{text}");
+    assert!(compact.contains("HexDetail"), "{text}");
     assert!(
-        compact.contains("磁盘概览·当前LBA0"),
-        "sector detail must keep the permanent mini capacity map: {text}"
+        !compact.contains("磁盘概览"),
+        "full-screen Hex must not keep the Inspect browser panes: {text}"
     );
     assert!(compact.contains("+0x000"), "{text}");
     state.advanced_inspect_sector_bottom();

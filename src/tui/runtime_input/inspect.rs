@@ -88,9 +88,7 @@ pub(super) fn handle_inspect_key(
                 }
 
                 let sector_detail = state.advanced_inspect().is_some_and(|advanced| {
-                    advanced.view_mode == state::InspectViewMode::Hex
-                        && advanced.sector.is_some()
-                        && advanced.panel == state::AdvancedInspectPanel::Bytes
+                    advanced.view_mode == state::InspectViewMode::Hex && advanced.sector.is_some()
                 });
                 if sector_detail {
                     let Some(action) = keys.map(state::InputMode::Normal, key) else {

@@ -119,7 +119,7 @@ pub(super) fn draw_sector_inspector(
         ])
         .split(area);
     frame.render_widget(
-        Paragraph::new(header).block(Block::default().borders(Borders::ALL).title("字节检查")),
+        Paragraph::new(header).block(Block::default().borders(Borders::ALL).title("Hex Detail")),
         vertical[0],
     );
 
@@ -319,7 +319,7 @@ pub(super) fn draw_sector_inspector(
 
     frame.render_widget(
         Paragraph::new(Line::from(
-            "h/l byte · j/k ±16B · 0/$ 行 · gg/G 扇区 · Ctrl-u/d · PgUp/PgDn · [/] sector · v mode · o 字段 · / n/N · J 跳转 · Ctrl-w 切窗 · Esc 关闭",
+            "h/l byte · j/k ±16B · 0/$ 行 · gg/G 扇区 · Ctrl-u/d · PgUp/PgDn · [/] sector · v mode · o 字段 · / n/N · J 跳转 · Esc 返回 Inspect",
         ))
         .style(muted()),
         vertical[2],

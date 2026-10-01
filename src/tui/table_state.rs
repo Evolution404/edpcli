@@ -237,7 +237,17 @@ impl AppState {
                 .saturating_mul(7)
                 .saturating_div(10)
                 .saturating_sub(6),
-            TableKind::InspectFields => terminal_width.saturating_sub(3),
+            TableKind::InspectFields => {
+                let class = crate::tui::ui::ViewportClass::for_width(terminal_width);
+                if class == crate::tui::ui::ViewportClass::Compact {
+                    terminal_width.saturating_sub(3)
+                } else {
+                    terminal_width
+                        .saturating_mul(71)
+                        .saturating_div(100)
+                        .saturating_sub(3)
+                }
+            }
             TableKind::ResultPartitions => {
                 let class = crate::tui::ui::ViewportClass::for_width(terminal_width);
                 if matches!(
@@ -310,11 +320,12 @@ impl AppState {
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
-        self.shell
-            .horizontal_scroll
-            .entry(kind)
-            .or_default()
-            .move_active(&layout, &widths, viewport_width, reverse)
+        let interaction = self.shell.horizontal_scroll.entry(kind).or_default();
+        if kind == crate::tui::table_layout::TableKind::InspectFields {
+            interaction.move_active_bounded(&layout, &widths, viewport_width, reverse)
+        } else {
+            interaction.move_active(&layout, &widths, viewport_width, reverse)
+        }
     }
 
     pub fn move_table_column_edge_for_viewport(
@@ -326,11 +337,12 @@ impl AppState {
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
-        self.shell
-            .horizontal_scroll
-            .entry(kind)
-            .or_default()
-            .move_active_edge(&layout, &widths, viewport_width, last)
+        let interaction = self.shell.horizontal_scroll.entry(kind).or_default();
+        if kind == crate::tui::table_layout::TableKind::InspectFields {
+            interaction.move_active_edge_bounded(&layout, &widths, viewport_width, last)
+        } else {
+            interaction.move_active_edge(&layout, &widths, viewport_width, last)
+        }
     }
 
     pub fn table_sort(
@@ -473,11 +485,12 @@ impl AppState {
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
-        self.shell
-            .horizontal_scroll
-            .entry(kind)
-            .or_default()
-            .scroll_viewport(&layout, &widths, viewport_width, reverse)
+        let interaction = self.shell.horizontal_scroll.entry(kind).or_default();
+        if kind == crate::tui::table_layout::TableKind::InspectFields {
+            interaction.scroll_viewport_bounded(&layout, &widths, viewport_width, reverse)
+        } else {
+            interaction.scroll_viewport(&layout, &widths, viewport_width, reverse)
+        }
     }
 }
 

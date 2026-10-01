@@ -48,7 +48,6 @@ pub enum AdvancedInspectPanel {
     Tree,
     Overview,
     Detail,
-    Bytes,
 }
 
 impl AdvancedInspectPanel {
@@ -58,7 +57,6 @@ impl AdvancedInspectPanel {
             Self::Tree => PaneId::InspectTree,
             Self::Overview => PaneId::InspectOverview,
             Self::Detail => PaneId::InspectDetail,
-            Self::Bytes => PaneId::InspectBytes,
         }
     }
 
@@ -68,7 +66,6 @@ impl AdvancedInspectPanel {
             PaneId::InspectTree => Some(Self::Tree),
             PaneId::InspectOverview => Some(Self::Overview),
             PaneId::InspectDetail => Some(Self::Detail),
-            PaneId::InspectBytes => Some(Self::Bytes),
             _ => None,
         }
     }

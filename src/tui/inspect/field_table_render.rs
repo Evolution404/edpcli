@@ -31,7 +31,7 @@ pub(super) fn draw_inspect_field_table(
         detail_area.width.saturating_sub(3),
         &visual_widths,
         interaction.viewport_offset(),
-        Some(interaction.active_column()),
+        None,
     );
     let visible_rows = detail_area.height.saturating_sub(3).max(1) as usize;
     let row_start = detail_offset.min(values.len().saturating_sub(1));
