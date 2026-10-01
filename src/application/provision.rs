@@ -710,7 +710,7 @@ pub use export::{
     export_provision_image, export_sparse_plain_provision_image, export_sparse_provision_image,
 };
 #[cfg(test)]
-use prepare::target_encrypt_capacity_override;
+use prepare::{read_plain_source_extents, target_encrypt_capacity_override};
 pub use prepare::{
     prepare_plain_provision, prepare_provision, prepare_target_provision,
     probe_provision_key_domains_on_disk, verify_provision_source_password_on_disk,
