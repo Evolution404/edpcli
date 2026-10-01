@@ -570,7 +570,9 @@ fn ch14_partition_layout_has_typed_status_and_concise_selection_summary() {
 
 #[test]
 fn plain_source_to_every_official_mode_has_no_password_probe_or_pending_region() {
-    use edpcli::provision::{KeyDomainRole, DEFAULT_KEY_DOMAIN_PASSWORD};
+    use edpcli::provision::{
+        KeyDomainRole, DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_KEY_DOMAIN_PASSWORD_TEXT,
+    };
 
     let cases = [
         (0usize, ProvisionKind::Mode0, 3usize, true, true),
@@ -618,7 +620,7 @@ fn plain_source_to_every_official_mode_has_no_password_probe_or_pending_region()
             .filter(|(label, _, _)| label == "新密码")
         {
             assert_eq!(
-                *value, "0000aaaa",
+                *value, DEFAULT_KEY_DOMAIN_PASSWORD_TEXT,
                 "Plain -> {kind:?} default target password"
             );
             assert!(*secret, "target password must remain a secret field");
@@ -629,8 +631,10 @@ fn plain_source_to_every_official_mode_has_no_password_probe_or_pending_region()
             !before
                 .iter()
                 .filter_map(|row| row.columns.as_ref())
-                .any(|columns| columns[3] == "… 待计划"),
-            "Plain -> {kind:?} must be synchronously classifiable"
+                .any(|columns| {
+                    matches!(columns[3].as_str(), "… 待计划" | "? 待确认" | "⚠ 计划异常")
+                }),
+            "Plain -> {kind:?} must have a complete synchronous preflight decision"
         );
         let destructive = before
             .iter()
@@ -857,8 +861,10 @@ fn verified_edp_source_target_matrix_has_no_pending_backend_status() {
             .map(|columns| columns[3].as_str())
             .collect::<Vec<_>>();
         assert!(
-            !statuses.contains(&"… 待计划"),
-            "{:?} -> {:?} unexpectedly deferred a synchronous decision: {statuses:?}",
+            statuses.iter().all(|status| {
+                !matches!(*status, "… 待计划" | "? 待确认" | "⚠ 计划异常")
+            }),
+            "{:?} -> {:?} must have a complete synchronous preflight decision: {statuses:?}",
             case.source,
             case.target_kind
         );
@@ -926,8 +932,10 @@ fn unknown_nonopaque_key_profile_is_rebuild_not_pending_backend() {
         "{statuses:?}"
     );
     assert!(
-        statuses.iter().all(|(_, status)| status != "… 待计划"),
-        "unsupported key profiles are synchronously rebuildable: {statuses:?}"
+        statuses.iter().all(|(_, status)| {
+            !matches!(status.as_str(), "… 待计划" | "? 待确认" | "⚠ 计划异常")
+        }),
+        "unsupported key profiles must still receive a complete synchronous decision: {statuses:?}"
     );
 }
 

@@ -22,6 +22,7 @@ pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
 pub use key_domain::{
     KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, PassthroughBasis, PasswordDisposition,
     SecretBytes, SourcePasswordKnowledge, TargetPasswordPolicy, DEFAULT_KEY_DOMAIN_PASSWORD,
+    DEFAULT_KEY_DOMAIN_PASSWORD_TEXT,
 };
 pub use keys::{
     default_file_key, default_file_key_checked, unwrap_file_key, unwrap_legacy_lba7_file_key,

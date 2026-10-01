@@ -1957,6 +1957,47 @@ fn provision_capacity_editor_follows_global_unit_system() {
 }
 
 #[test]
+fn default_key_domain_password_has_one_production_source_of_truth() {
+    let canonical_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provision/key_domain.rs");
+    let canonical = fs::read_to_string(&canonical_path).expect("read key-domain defaults");
+    assert!(canonical.contains("pub const DEFAULT_KEY_DOMAIN_PASSWORD_TEXT: &str = \"0000aaaa\";"));
+    assert!(canonical.contains(
+        "pub const DEFAULT_KEY_DOMAIN_PASSWORD: &[u8] = DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.as_bytes();"
+    ));
+
+    for path in rust_sources_under("src") {
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if path == canonical_path || file_name == "tests.rs" || file_name.ends_with("_tests.rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !source.contains("0000aaaa"),
+            "{} hardcodes the default key-domain password instead of using DEFAULT_KEY_DOMAIN_PASSWORD[_TEXT]",
+            path.display()
+        );
+        assert!(
+            !source.contains("const DEFAULT_PASSWORD"),
+            "{} declares a duplicate default password constant",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn provision_layout_never_uses_ambiguous_pending_fallback_text() {
+    let layout = read_source("src/tui/provision/layout_presentation.rs");
+    assert!(!layout.contains("? 待确认"));
+    assert!(!layout.contains("同步检查尚未生成当前区域结论"));
+    assert!(layout.contains("⚠ 计划异常"));
+    assert!(layout.contains("缺少同步预检结论"));
+}
+
+#[test]
 fn provisioning_docs_keep_file_migration_out_of_the_product_contract() {
     let provisioning = read_source("docs/provisioning/PROVISIONING.md");
     let architecture = read_source("docs/architecture/ARCHITECTURE.md");

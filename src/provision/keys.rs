@@ -1,11 +1,12 @@
 //! Current LBA12 file-key wrapping used by the first-party writer.
 
+use super::key_domain::DEFAULT_KEY_DOMAIN_PASSWORD;
+
 use crate::crypto::{
     a6b0_decrypt, a7f0_encrypt, aes128_ecb_decrypt_block, aes128_ecb_encrypt_block, crc32_bare,
     sm4_decrypt_block, sm4_encrypt_block,
 };
 
-const DEFAULT_PASSWORD: &[u8] = b"0000aaaa";
 const DEFAULT_EFFECTIVE_PASSWORD: &[u8] = b"LtSWi[2f)j";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -187,7 +188,7 @@ pub fn unwrap_file_key(
 }
 
 fn effective_password(password: &[u8]) -> &[u8] {
-    if password == DEFAULT_PASSWORD {
+    if password == DEFAULT_KEY_DOMAIN_PASSWORD {
         DEFAULT_EFFECTIVE_PASSWORD
     } else {
         password
@@ -274,9 +275,12 @@ mod tests {
 
     #[test]
     fn legacy_default_password_fold_matches_first_party_vector() {
-        assert_eq!(legacy_password_fold32(b"0000aaaa"), 0x9191_9191);
+        assert_eq!(
+            legacy_password_fold32(DEFAULT_KEY_DOMAIN_PASSWORD),
+            0x9191_9191
+        );
         let material = wrap_legacy_lba7_file_key(
-            b"0000aaaa",
+            DEFAULT_KEY_DOMAIN_PASSWORD,
             [0x7d, 0x9e, 0xe4, 0xe8, 0x75, 0x4a, 0xd4, 0x38],
         );
         assert_eq!(material.user_key_crc, 0x0429_735d);
@@ -330,9 +334,10 @@ mod tests {
                 Err(ExistingFileKeyError::FileKeyCrcMismatch)
             );
         }
-        let default_material = wrap_file_key(b"0000aaaa", file_key, FileKeyWrapMode::Sm4);
+        let default_material =
+            wrap_file_key(DEFAULT_KEY_DOMAIN_PASSWORD, file_key, FileKeyWrapMode::Sm4);
         assert_eq!(
-            unwrap_file_key(Some(b"0000aaaa"), default_material),
+            unwrap_file_key(Some(DEFAULT_KEY_DOMAIN_PASSWORD), default_material),
             Ok(file_key)
         );
         assert_eq!(
@@ -427,7 +432,7 @@ pub fn default_file_key_checked(
     {
         return Err(DefaultFileKeyError::NotEncryptedMode2);
     }
-    if entry.user_key_crc != crc32_bare(b"0000aaaa") {
+    if entry.user_key_crc != crc32_bare(DEFAULT_KEY_DOMAIN_PASSWORD) {
         return Err(DefaultFileKeyError::NotDefaultPassword);
     }
     // v0x0206 substitutes LtSWi[2f)j before MD5. This digest is pinned by

@@ -15,7 +15,7 @@ fn password_intent_matrix_never_waits_for_a_source_password_when_rebuild_is_expl
             Source::NotApplicable,
             Target::Explicit,
             "",
-            "0000aaaa",
+            crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT,
             false
         ),
         Intent::InitializeNew
@@ -25,7 +25,7 @@ fn password_intent_matrix_never_waits_for_a_source_password_when_rebuild_is_expl
             Source::NotApplicable,
             Target::Explicit,
             "",
-            "0000aaaa",
+            crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT,
             true
         ),
         Intent::InitializeNew
