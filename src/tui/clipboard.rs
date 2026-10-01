@@ -60,15 +60,28 @@ impl ClipboardPlatform {
 }
 
 trait ClipboardCommandRunner {
-    fn run(&mut self, program: &str, args: &[&str], content: &str) -> io::Result<bool>;
+    fn run(
+        &mut self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+        content: &str,
+    ) -> io::Result<bool>;
 }
 
 struct ProcessCommandRunner;
 
 impl ClipboardCommandRunner for ProcessCommandRunner {
-    fn run(&mut self, program: &str, args: &[&str], content: &str) -> io::Result<bool> {
-        let mut child = Command::new(program)
-            .args(args)
+    fn run(
+        &mut self,
+        program: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+        content: &str,
+    ) -> io::Result<bool> {
+        let mut command = Command::new(program);
+        command.args(args).envs(env.iter().copied());
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -84,39 +97,65 @@ impl ClipboardCommandRunner for ProcessCommandRunner {
     }
 }
 
+struct ClipboardCommand<'a> {
+    program: &'a str,
+    args: &'a [&'a str],
+    env: &'a [(&'a str, &'a str)],
+}
+
 fn copy_native_with(
     platform: ClipboardPlatform,
     runner: &mut dyn ClipboardCommandRunner,
     content: &str,
 ) -> Option<ClipboardOutcome> {
     const POWERSHELL_STDIN: &str = "[Console]::InputEncoding = [Text.UTF8Encoding]::new($false); Set-Clipboard -Value ([Console]::In.ReadToEnd())";
-    let candidates: Vec<(&str, &[&str])> = match platform {
-        ClipboardPlatform::MacOs => vec![("pbcopy", &[])],
+    const NO_ENV: &[(&str, &str)] = &[];
+    const MACOS_UTF8_ENV: &[(&str, &str)] = &[("LC_CTYPE", "UTF-8")];
+    let candidates: Vec<ClipboardCommand<'_>> = match platform {
+        ClipboardPlatform::MacOs => vec![ClipboardCommand {
+            program: "pbcopy",
+            args: &[],
+            env: MACOS_UTF8_ENV,
+        }],
         ClipboardPlatform::Linux => linux_candidates(
             std::env::var_os("WAYLAND_DISPLAY").is_some(),
             std::env::var_os("DISPLAY").is_some(),
-        ),
-        ClipboardPlatform::Windows => vec![(
-            "powershell.exe",
-            &[
+        )
+        .into_iter()
+        .map(|(program, args)| ClipboardCommand {
+            program,
+            args,
+            env: NO_ENV,
+        })
+        .collect(),
+        ClipboardPlatform::Windows => vec![ClipboardCommand {
+            program: "powershell.exe",
+            args: &[
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
                 POWERSHELL_STDIN,
             ],
-        )],
+            env: NO_ENV,
+        }],
         ClipboardPlatform::Other => Vec::new(),
     };
-    for (program, args) in candidates {
-        match runner.run(program, args, content) {
+    for candidate in candidates {
+        match runner.run(candidate.program, candidate.args, candidate.env, content) {
             Ok(true) => return Some(ClipboardOutcome::Confirmed),
             Ok(false) => {
                 return Some(ClipboardOutcome::Failed(format!(
-                    "{program} exited unsuccessfully"
+                    "{} exited unsuccessfully",
+                    candidate.program
                 )))
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Some(ClipboardOutcome::Failed(format!("{program}: {error}"))),
+            Err(error) => {
+                return Some(ClipboardOutcome::Failed(format!(
+                    "{}: {error}",
+                    candidate.program
+                )))
+            }
         }
     }
     None
@@ -165,16 +204,27 @@ impl ClipboardBackend for ClipboardService {
 mod tests {
     use super::*;
 
+    type RecordedClipboardCall = (String, Vec<String>, Vec<(String, String)>, String);
+
     #[derive(Default)]
     struct FakeCommandRunner {
-        calls: Vec<(String, Vec<String>, String)>,
+        calls: Vec<RecordedClipboardCall>,
     }
 
     impl ClipboardCommandRunner for FakeCommandRunner {
-        fn run(&mut self, program: &str, args: &[&str], content: &str) -> io::Result<bool> {
+        fn run(
+            &mut self,
+            program: &str,
+            args: &[&str],
+            env: &[(&str, &str)],
+            content: &str,
+        ) -> io::Result<bool> {
             self.calls.push((
                 program.into(),
                 args.iter().map(|arg| (*arg).into()).collect(),
+                env.iter()
+                    .map(|(key, value)| ((*key).into(), (*value).into()))
+                    .collect(),
                 content.into(),
             ));
             Ok(true)
@@ -221,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn macos_native_uses_pbcopy_and_stdin_only() {
+    fn macos_native_uses_pbcopy_utf8_locale_and_stdin_only() {
         let mut runner = FakeCommandRunner::default();
         let result = copy_native_with(
             ClipboardPlatform::MacOs,
@@ -231,7 +281,12 @@ mod tests {
         assert_eq!(result, Some(ClipboardOutcome::Confirmed));
         assert_eq!(
             runner.calls,
-            [("pbcopy".into(), Vec::new(), "中文\n$(echo unsafe)".into())]
+            [(
+                "pbcopy".into(),
+                Vec::new(),
+                vec![("LC_CTYPE".into(), "UTF-8".into())],
+                "中文\n$(echo unsafe)".into()
+            )]
         );
     }
 
@@ -239,7 +294,13 @@ mod tests {
     fn native_failure_and_missing_program_have_distinct_outcomes() {
         struct Runner(bool);
         impl ClipboardCommandRunner for Runner {
-            fn run(&mut self, _: &str, _: &[&str], _: &str) -> io::Result<bool> {
+            fn run(
+                &mut self,
+                _: &str,
+                _: &[&str],
+                _: &[(&str, &str)],
+                _: &str,
+            ) -> io::Result<bool> {
                 if self.0 {
                     Ok(false)
                 } else {
@@ -284,7 +345,7 @@ mod tests {
         );
         assert_eq!(runner.calls.len(), 1);
         assert_eq!(runner.calls[0].0, "powershell.exe");
-        assert_eq!(runner.calls[0].2, "中文🙂");
+        assert_eq!(runner.calls[0].3, "中文🙂");
         assert!(runner.calls[0].1.last().unwrap().contains("ReadToEnd"));
         assert!(!runner.calls[0].1.iter().any(|arg| arg.contains("中文🙂")));
     }

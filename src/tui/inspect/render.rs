@@ -152,6 +152,9 @@ pub(super) fn draw_advanced_inspect(
             &rows,
             selected_index,
             advanced.panel == AdvancedInspectPanel::Tree,
+            state
+                .pane_viewport(crate::tui::pane::PaneId::InspectTree)
+                .scroll_x,
         );
     }
     draw_inspect_object_panes(

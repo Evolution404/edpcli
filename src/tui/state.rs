@@ -711,9 +711,12 @@ impl AppState {
                 self.shell.input_mode = InputMode::Insert;
             }
             PostRestorePartitionState::Usable => {
-                wizard.message = Some(crate::tui::ui::UiMessage::info(
-                    "该分区已经可用，不需要执行破坏性操作。",
-                ));
+                let message = if partition.role.as_deref() == Some("compatibility_reserve") {
+                    "模式2兼容保留区不承载文件系统，无需格式化。"
+                } else {
+                    "该分区已经可用，不需要执行破坏性操作。"
+                };
+                wizard.message = Some(crate::tui::ui::UiMessage::info(message));
             }
             PostRestorePartitionState::Unsupported => {
                 wizard.message = Some(crate::tui::ui::UiMessage::warning(

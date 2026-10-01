@@ -402,6 +402,15 @@ impl AppState {
         }
     }
 
+    pub fn advanced_inspect_scroll_tree_horizontal(&mut self, reverse: bool) {
+        let viewport = self.pane_viewport_mut(crate::tui::pane::PaneId::InspectTree);
+        viewport.scroll_x = if reverse {
+            viewport.scroll_x.saturating_sub(2)
+        } else {
+            viewport.scroll_x.saturating_add(2)
+        };
+    }
+
     pub fn advanced_inspect_toggle_selected(&mut self) {
         let rows = self.advanced_inspect_tree_rows();
         let selected = self

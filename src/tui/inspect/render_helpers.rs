@@ -1,5 +1,28 @@
 use super::*;
 
+pub(super) fn inspect_tree_max_width(rows: &[crate::tui::state::AdvancedInspectTreeRow]) -> usize {
+    rows.iter()
+        .map(|row| {
+            let range = if row.kind == crate::application::inspect_tree::InspectNodeKind::Sector {
+                String::new()
+            } else {
+                crate::application::inspect_tree::format_lba_closed_range(
+                    row.range.start_lba,
+                    row.range.end_lba_exclusive(),
+                )
+                .unwrap_or_else(|| "[空区间]".into())
+            };
+            row.depth.saturating_mul(2)
+                + 6
+                + crate::tui::table_layout::display_width(&safe(&row.label))
+                + usize::from(!range.is_empty())
+                + crate::tui::table_layout::display_width(&range)
+                + 1
+        })
+        .max()
+        .unwrap_or(0)
+}
+
 pub(super) fn inspect_field_status_style(
     status: crate::application::inspect::InspectFieldStatus,
 ) -> Style {

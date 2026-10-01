@@ -172,6 +172,14 @@ fn dispatch_inspect(
             state.advanced_inspect_expand_or_child();
             ActionOutcome::handled()
         }
+        TuiAction::TableScrollLeft if role == WidgetRole::Tree => {
+            state.advanced_inspect_scroll_tree_horizontal(true);
+            ActionOutcome::handled()
+        }
+        TuiAction::TableScrollRight if role == WidgetRole::Tree => {
+            state.advanced_inspect_scroll_tree_horizontal(false);
+            ActionOutcome::handled()
+        }
         TuiAction::Top => {
             state.advanced_inspect_focused_top();
             ActionOutcome::handled()

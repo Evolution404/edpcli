@@ -17,7 +17,12 @@ impl AppState {
                 .partitions
                 .iter()
                 .map(|partition| {
-                    let status = match partition.state {
+                    let compatibility_reserve =
+                        partition.role.as_deref() == Some("compatibility_reserve");
+                    let status = if compatibility_reserve {
+                        "兼容保留"
+                    } else {
+                        match partition.state {
                         crate::application::post_restore::PostRestorePartitionState::Usable => {
                             "可用"
                         }
@@ -33,13 +38,20 @@ impl AppState {
                         crate::application::post_restore::PostRestorePartitionState::Unsupported => {
                             "暂不支持"
                         }
+                    }
                     };
-                    let filesystem = partition
-                        .detected_filesystem
-                        .map(|value| value.label().to_string())
-                        .or_else(|| partition.filesystem_hint.clone())
-                        .unwrap_or_else(|| "—".into());
-                    let key_state = if partition.requires_original_key {
+                    let filesystem = if compatibility_reserve {
+                        "—".into()
+                    } else {
+                        partition
+                            .detected_filesystem
+                            .map(|value| value.label().to_string())
+                            .or_else(|| partition.filesystem_hint.clone())
+                            .unwrap_or_else(|| "—".into())
+                    };
+                    let key_state = if compatibility_reserve {
+                        "无需处理"
+                    } else if partition.requires_original_key {
                         "需要原密钥域"
                     } else {
                         "无需原密钥"

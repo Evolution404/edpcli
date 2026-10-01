@@ -344,6 +344,20 @@ fn plain_partition(
     }
 }
 
+fn compatibility_reserve_partition(partition: &ManifestPartition) -> Option<PostRestorePartition> {
+    (partition.role.as_deref() == Some("compatibility_reserve")).then(|| PostRestorePartition {
+        index: partition.index,
+        role: partition.role.clone(),
+        start_lba: partition.start_lba,
+        sector_count: partition.sector_count,
+        filesystem_hint: None,
+        detected_filesystem: None,
+        requires_original_key: false,
+        state: PostRestorePartitionState::Usable,
+        detail: "模式2兼容保留区不承载文件系统；无需格式化。".into(),
+    })
+}
+
 fn edp_crypto_state(
     record: crate::provision::ExistingPartitionRecord,
     boot: &[u8],
@@ -560,6 +574,10 @@ fn assess_partitions_impl(
         let manifest = partitions
             .iter()
             .find(|candidate| candidate.start_lba == partition.start_lba);
+        if let Some(reserved) = manifest.and_then(compatibility_reserve_partition) {
+            assessment.partitions.push(reserved);
+            continue;
+        }
         let boot = match read_sector(dev, partition.start_lba) {
             Ok(boot) => boot,
             Err(error) => {
@@ -596,4 +614,31 @@ fn assess_partitions_impl(
         });
     }
     Ok(assessment)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mode2_compatibility_reserve_never_enters_filesystem_format_flow() {
+        let partition = ManifestPartition {
+            index: 1,
+            role: Some("compatibility_reserve".into()),
+            partition_type: Some("edp:1".into()),
+            start_lba: 63,
+            sector_count: 63,
+            filesystem_hint: Some("exfat".into()),
+            volume_label_hint: Some("stale-label".into()),
+        };
+
+        let assessed = compatibility_reserve_partition(&partition).expect("compatibility reserve");
+        assert_eq!(assessed.state, PostRestorePartitionState::Usable);
+        assert_eq!(assessed.start_lba, 63);
+        assert_eq!(assessed.sector_count, 63);
+        assert_eq!(assessed.filesystem_hint, None);
+        assert_eq!(assessed.detected_filesystem, None);
+        assert!(!assessed.requires_original_key);
+        assert!(assessed.detail.contains("无需格式化"));
+    }
 }

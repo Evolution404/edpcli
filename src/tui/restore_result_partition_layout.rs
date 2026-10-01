@@ -9,6 +9,9 @@ use ratatui::{
 fn partition_status(
     partition: &PostRestorePartition,
 ) -> (&'static str, crate::tui::ui::ResultTone) {
+    if partition.role.as_deref() == Some("compatibility_reserve") {
+        return ("兼容保留", crate::tui::ui::ResultTone::Success);
+    }
     match partition.state {
         PostRestorePartitionState::Usable => ("可用", crate::tui::ui::ResultTone::Success),
         PostRestorePartitionState::NeedsFormat => {

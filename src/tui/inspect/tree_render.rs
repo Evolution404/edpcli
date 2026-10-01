@@ -33,6 +33,7 @@ pub(super) fn draw_inspect_tree_pane(
     rows: &[AdvancedInspectTreeRow],
     selected_index: usize,
     tree_focus: bool,
+    scroll_x: usize,
 ) {
     let visible = visible_window(selected_index, rows.len(), tree_area.height);
     let tree_lines = visible.map(|index| {
@@ -79,16 +80,6 @@ pub(super) fn draw_inspect_tree_pane(
             .unwrap_or_else(|| "[空区间]".into());
             format!("{marker}{icon}{} {range}", safe(&row.label))
         };
-        let available = usize::from(tree_area.width)
-            .saturating_sub(2)
-            .saturating_sub(row.depth.saturating_mul(2))
-            .saturating_sub(2)
-            .saturating_sub(1);
-        let content = crate::tui::table_layout::truncate_cell(
-            &content,
-            available,
-            crate::tui::table_layout::TruncatePolicy::Ellipsis,
-        );
         let base_style = if region_style.is_some() {
             kind_style
         } else if focused {
@@ -112,6 +103,9 @@ pub(super) fn draw_inspect_tree_pane(
             Span::raw(" "),
         ])
     });
+    let content_width = usize::from(tree_area.width.saturating_sub(2).max(1));
+    let max_width = super::render_helpers::inspect_tree_max_width(rows);
+    let effective_scroll = scroll_x.min(max_width.saturating_sub(content_width));
     frame.render_widget(
         Paragraph::new(tree_lines.collect::<Vec<_>>())
             .block(crate::tui::ui::card(
@@ -122,7 +116,7 @@ pub(super) fn draw_inspect_tree_pane(
                 ),
                 tree_focus,
             ))
-            .wrap(Wrap { trim: false }),
+            .scroll((0, effective_scroll.min(u16::MAX as usize) as u16)),
         tree_area,
     );
 }
