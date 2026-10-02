@@ -81,9 +81,9 @@ impl ProvisionConfirmationFilesystemEffect {
         match self {
             Self::Keep => "✓ 保持".into(),
             Self::Format(filesystem) => {
-                format!("⚠ 格式化 {}", filesystem.windows_format_name())
+                format!("⚠ 格式化 {}", filesystem.display_name())
             }
-            Self::Create(filesystem) => format!("+ 新建 {}", filesystem.windows_format_name()),
+            Self::Create(filesystem) => format!("+ 新建 {}", filesystem.display_name()),
             Self::None => "— 不涉及".into(),
         }
     }

@@ -102,6 +102,17 @@ fn backup_restore_provision_share_operation_progress_renderer() {
 }
 
 #[test]
+fn provision_running_log_navigation_reaches_the_shared_renderer() {
+    let shared = include_str!("../src/tui/operation_progress_render.rs");
+    let provision = include_str!("../src/tui/provision/render.rs");
+    let run_state = include_str!("../src/tui/provision/run.rs");
+    assert!(run_state.contains("fn provision_run_log_start"));
+    assert!(provision.contains("state.provision_run_log_start()"));
+    assert!(shared.contains("log_start: Option<usize>"));
+    assert!(shared.contains(".skip(history_start)"));
+}
+
+#[test]
 fn overall_and_work_gauges_share_high_contrast_progress_labels() {
     let theme = include_str!("../src/tui/theme.rs");
     let overall = include_str!("../src/tui/operation_progress_render.rs");

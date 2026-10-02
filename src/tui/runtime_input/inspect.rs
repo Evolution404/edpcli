@@ -167,13 +167,12 @@ pub(super) fn handle_inspect_key(
                                 }
                             }
                         }
-                        TuiAction::PanelNext | TuiAction::PanelPrevious => {
-                            state.advanced_inspect_shift_panel(action == TuiAction::PanelPrevious);
-                        }
-                        TuiAction::PanelLeft => state.advanced_inspect_spatial_focus(-1, 0),
-                        TuiAction::PanelRight => state.advanced_inspect_spatial_focus(1, 0),
-                        TuiAction::PanelUp => state.advanced_inspect_spatial_focus(0, -1),
-                        TuiAction::PanelDown => state.advanced_inspect_spatial_focus(0, 1),
+                        TuiAction::PanelNext
+                        | TuiAction::PanelPrevious
+                        | TuiAction::PanelLeft
+                        | TuiAction::PanelRight
+                        | TuiAction::PanelUp
+                        | TuiAction::PanelDown => {}
                         TuiAction::Back => {
                             let _ = state.navigate(NavCommand::Escape, 1);
                         }

@@ -34,8 +34,13 @@ fn wide_devices_keep_only_compact_core_indicator_during_normal_navigation() {
     let text = render_text(&state, 160, 30);
     assert!(text.contains("CORE ◇ STABLE"), "{text}");
     assert!(!text.contains("EDP CORE · LIVE"), "{text}");
-    assert!(text.replace(' ', "").contains("设备信息"), "{text}");
-    assert!(!text.replace(' ', "").contains("当前设备·"), "{text}");
+    let compact = text.replace(' ', "");
+    assert!(compact.contains("未发现可用设备"), "{text}");
+    assert!(
+        !compact.contains("设备信息"),
+        "zero-device wide view must collapse unused panes: {text}"
+    );
+    assert!(!compact.contains("当前设备·"), "{text}");
 }
 
 #[test]

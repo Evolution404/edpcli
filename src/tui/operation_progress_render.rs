@@ -52,6 +52,7 @@ pub(crate) fn draw_operation_progress(
     area: Rect,
     run: &OperationRunState,
     animation_frame: u64,
+    log_start: Option<usize>,
 ) {
     let theme = crate::tui::theme::current();
     let latest = run.latest.as_ref();
@@ -132,7 +133,11 @@ pub(crate) fn draw_operation_progress(
         Cell::from("事件"),
     ])
     .style(theme.muted());
-    let current = current_snapshot(run);
+    let current = if log_start.is_some() {
+        None
+    } else {
+        current_snapshot(run)
+    };
     let logged_current_index = if current.is_none()
         && run.latest.as_ref().is_some_and(|latest| {
             latest.severity == Severity::Info
@@ -144,13 +149,15 @@ pub(crate) fn draw_operation_progress(
         None
     };
     let history_capacity = visible_log_rows.saturating_sub(usize::from(current.is_some()));
+    let history_start = log_start
+        .unwrap_or_else(|| run.log.len().saturating_sub(history_capacity))
+        .min(run.log.len());
     let mut rows = run
         .log
         .iter()
         .enumerate()
-        .rev()
+        .skip(history_start)
         .take(history_capacity)
-        .rev()
         .map(|(index, event)| {
             let is_running = logged_current_index == Some(index);
             let status = if is_running {
@@ -234,7 +241,7 @@ pub(crate) fn draw_operation_progress(
     let safety = match run.operation {
         OperationKind::Backup => "安全提示  只读操作执行中；等待安全结束点。",
         OperationKind::Restore | OperationKind::Provision => {
-            "安全提示  关键写入安全事务执行中；q / Esc / Ctrl-C 不会绕过同步、读回或回滚安全点。"
+            "安全提示  关键写入安全事务执行中；q / Ctrl-C 退出请求在安全结束点处理；Esc 当前不可返回。"
         }
     };
     frame.render_widget(

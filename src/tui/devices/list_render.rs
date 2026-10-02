@@ -51,7 +51,7 @@ pub(super) fn draw_device_list(frame: &mut Frame, area: ratatui::layout::Rect, s
             (
                 "未发现可用设备",
                 "当前没有检测到外接存储设备。",
-                "插入 U 盘后刷新设备列表。",
+                "插入 U 盘后按 r 刷新设备列表。",
             )
         };
         frame.render_widget(

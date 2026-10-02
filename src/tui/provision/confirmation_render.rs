@@ -67,11 +67,11 @@ pub(super) fn provision_confirmation_details(
         .filter_map(|region| match region.filesystem_effect {
             ProvisionConfirmationFilesystemEffect::Format(filesystem) => Some((
                 "格式化",
-                format!("{} {}", region.label, filesystem.windows_format_name()),
+                format!("{} {}", region.label, filesystem.display_name()),
             )),
             ProvisionConfirmationFilesystemEffect::Create(filesystem) => Some((
                 "新建",
-                format!("{} {}", region.label, filesystem.windows_format_name()),
+                format!("{} {}", region.label, filesystem.display_name()),
             )),
             _ => None,
         })

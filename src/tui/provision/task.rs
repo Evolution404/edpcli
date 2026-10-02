@@ -13,7 +13,7 @@ impl TaskHub {
                 crate::application::provision::probe_provision_key_domains_on_disk(&runner, disk)
                     .map_err(|error| error.msg)
             }))
-            .unwrap_or_else(|_| Err("来源密码域探测 worker 异常终止".into()));
+            .unwrap_or_else(|_| Err("来源密码域探测后台任务异常终止".into()));
             let _ = tx.send(WorkerResult::ProvisionKeyProbe { generation, result });
         });
         Ok(generation)
@@ -38,7 +38,7 @@ impl TaskHub {
                 )
                 .map_err(|error| error.msg)
             }))
-            .unwrap_or_else(|_| Err("来源密码验证 worker 异常终止".into()));
+            .unwrap_or_else(|_| Err("来源密码验证后台任务异常终止".into()));
             let _ = tx.send(WorkerResult::ProvisionKeyVerify {
                 revision,
                 domain,
@@ -66,7 +66,7 @@ impl TaskHub {
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
-                    "制盘计划 worker 异常终止: {}",
+                    "制盘计划后台任务异常终止: {}",
                     panic_message(payload)
                 ))
             });
@@ -93,7 +93,7 @@ impl TaskHub {
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
-                    "制盘镜像导出 worker 异常终止: {}",
+                    "制盘镜像导出后台任务异常终止: {}",
                     panic_message(payload)
                 ))
             });
@@ -134,7 +134,7 @@ impl TaskHub {
                 )
                 .map_err(|error| error.msg)
             }))
-            .unwrap_or_else(|_| Err("制盘 worker 异常终止".into()));
+            .unwrap_or_else(|_| Err("制盘后台任务异常终止".into()));
                 let _ = tx.send(WorkerResult::ProvisionWrite {
                     operation_id,
                     result,

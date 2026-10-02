@@ -102,8 +102,17 @@ pub(super) fn handle_backup_wizard_key(
             | state::WizardStage::Formatting
             | state::WizardStage::Reinitializing => {
                 if let Some(action) = keys.map(state::InputMode::Normal, key) {
-                    if matches!(action, keymap::TuiAction::Open) {
-                        state.toggle_wizard_detail();
+                    match action {
+                        keymap::TuiAction::Help => {
+                            let _ = state.navigate(NavCommand::Help, 1);
+                        }
+                        keymap::TuiAction::Quit => {
+                            let _ = state.navigate(NavCommand::Quit, 1);
+                        }
+                        keymap::TuiAction::Back => {
+                            let _ = state.navigate(NavCommand::Escape, 1);
+                        }
+                        _ => {}
                     }
                 }
                 return Some(KeyOutcome::NextIteration);

@@ -57,7 +57,7 @@ impl AppState {
             .map(|mode| format!("mode{mode}"))
             .unwrap_or_else(|| "Plain".into());
         format!(
-            "设备 / {disk} > 制盘 / {kind} > {}",
+            "设备 > {disk} > 制盘 > {kind} > {}",
             self.provision_surface().label()
         )
     }
@@ -67,7 +67,7 @@ impl AppState {
             ProvisionSurface::Form => "Esc 返回：设备列表",
             ProvisionSurface::Review => "Esc 返回：制盘配置",
             ProvisionSurface::Running => "写盘执行中 · Esc 暂不可返回",
-            ProvisionSurface::Result => "Esc / Enter 返回：设备列表",
+            ProvisionSurface::Result => "Enter / Esc 返回：设备列表",
         }
     }
 }

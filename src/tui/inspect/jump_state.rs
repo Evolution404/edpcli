@@ -15,7 +15,7 @@ impl AppState {
             let workspace = state
                 .result
                 .as_ref()
-                .ok_or_else(|| "Inspect workspace 不可用".to_string())?;
+                .ok_or_else(|| "检查工作区不可用".to_string())?;
             if !workspace.topology.root.range.contains_lba(lba) {
                 return Err(format!("LBA{lba} 超出磁盘范围"));
             }

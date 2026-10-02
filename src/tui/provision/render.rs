@@ -215,6 +215,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     main_area,
                     run,
                     state.animation_frame(),
+                    state.provision_run_log_start(),
                 );
             }
         }

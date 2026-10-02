@@ -49,7 +49,7 @@ impl AppState {
                 out.push((capacity_label, capacity_value, false));
                 out.push((
                     format!("P{number} 文件系统"),
-                    part.filesystem.windows_format_name(),
+                    part.filesystem.display_name(),
                     false,
                 ));
                 out.push((format!("P{number} 卷标"), part.volume_label.as_str(), false));
@@ -250,7 +250,7 @@ impl AppState {
             out.push((format!("{}格式化", role.label()), format_status, false));
             out.push((
                 format!("{}文件系统", role.label()),
-                target.filesystem.unwrap().windows_format_name(),
+                target.filesystem.unwrap().display_name(),
                 false,
             ));
             if disposition.selected() {

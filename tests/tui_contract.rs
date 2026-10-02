@@ -85,6 +85,38 @@ fn advanced_inspect_uses_global_semantic_theme_without_private_colors() {
 }
 
 #[test]
+fn tui_never_exposes_internal_filesystem_tokens_as_display_names() {
+    fn visit(path: &std::path::Path, failures: &mut Vec<String>) {
+        for entry in std::fs::read_dir(path).expect("read TUI source directory") {
+            let entry = entry.expect("TUI source entry");
+            let path = entry.path();
+            if path.is_dir() {
+                visit(&path, failures);
+                continue;
+            }
+            if path.extension().and_then(|value| value.to_str()) != Some("rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("read TUI Rust source");
+            for forbidden in [".windows_format_name()", ".config_token()"] {
+                if source.contains(forbidden) {
+                    failures.push(format!("{} contains {forbidden}", path.display()));
+                }
+            }
+        }
+    }
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
+    let mut failures = Vec::new();
+    visit(&root, &mut failures);
+    assert!(
+        failures.is_empty(),
+        "TUI must use FilesystemKind::display_name() for user-facing names:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
 fn tui_remains_within_the_cli_v2_compatible_release_line() {
     let major = env!("CARGO_PKG_VERSION")
         .split('.')

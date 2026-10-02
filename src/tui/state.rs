@@ -108,7 +108,6 @@ pub struct WizardState {
     pub expected_identity: Option<ExpectedIdentity>,
     pub confirmation: String,
     pub message: Option<crate::tui::ui::UiMessage>,
-    pub detail_expanded: bool,
     pub restore_outcome: Option<crate::application::post_restore::MetadataRestoreOutcome>,
     pub post_restore_workbench: crate::tui::result_workbench::ResultWorkbenchState,
     pub pending_format: Option<crate::application::post_restore::PartitionFormatRequest>,
@@ -508,7 +507,6 @@ impl AppState {
             expected_identity,
             confirmation: String::new(),
             message: None,
-            detail_expanded: false,
             restore_outcome: None,
             post_restore_workbench: crate::tui::result_workbench::ResultWorkbenchState::default(),
             pending_format: None,
@@ -550,12 +548,6 @@ impl AppState {
         self.shell.input_mode = InputMode::Normal;
         self.shell.critical_operation = true;
         Some(intent)
-    }
-
-    pub fn toggle_wizard_detail(&mut self) {
-        if let Some(wizard) = self.shell.wizard.as_mut() {
-            wizard.detail_expanded = !wizard.detail_expanded;
-        }
     }
 
     fn selected_post_restore_format(
@@ -1731,6 +1723,9 @@ impl AppState {
     /// command palette and direct dispatch) must pass through this guard.
     pub fn guard_critical_command(&mut self, command: NavCommand) -> Option<StateEffect> {
         if !self.shell.critical_operation {
+            return None;
+        }
+        if command == NavCommand::Help {
             return None;
         }
         if matches!(

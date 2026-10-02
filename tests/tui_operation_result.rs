@@ -1,5 +1,6 @@
 use edpcli::tui::{
     disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind},
+    keymap::{PROVISION_RESULT_HELP, RESTORE_RESULT_HELP},
     ui::{
         render_operation_result, OperationResultSpec, ResultCard, ResultField, ResultSupplement,
         ResultTable, ResultTone, ResultValue,
@@ -328,6 +329,43 @@ fn restore_post_result_uses_shared_workbench_and_typed_layout() {
             && input.contains("PaneId::ResultPartitions"),
         "post-restore actions must only activate from the partition pane"
     );
+    assert!(
+        input.contains("TuiAction::FocusNext") && input.contains("TuiAction::FocusPrevious"),
+        "post-restore Result Workbench must make Tab/Shift-Tab cycle panes like provision results"
+    );
+    assert!(
+        input.contains("action == keymap::TuiAction::Help")
+            && input.contains("state.navigate(NavCommand::Help"),
+        "post-restore Result Workbench must not swallow the global help action"
+    );
+    assert!(
+        !input.contains("TuiAction::Open => state.toggle_wizard_detail()"),
+        "post-restore must not keep the invisible legacy detail toggle"
+    );
+    let help_overlay = include_str!("../src/tui/help_overlay.rs");
+    assert!(!RESTORE_RESULT_HELP.is_empty());
+    assert!(!PROVISION_RESULT_HELP.is_empty());
+    assert!(help_overlay.contains("\"恢复结果\", RESTORE_RESULT_HELP"));
+    assert!(help_overlay.contains("\"制盘结果\", PROVISION_RESULT_HELP"));
+    assert!(
+        verification.contains("result_verification_navigation_hint"),
+        "restore verification pane must use the shared truthful navigation hint"
+    );
+    let provision_result = include_str!("../src/tui/provision/result_render.rs");
+    assert!(
+        provision_result.contains("result_verification_navigation_hint"),
+        "provision and restore verification panes must share one navigation hint contract"
+    );
+    for stale in [
+        "Enter\", crate::tui::theme::current().accent()",
+        "激活列",
+        "Tab/Ctrl-w",
+    ] {
+        assert!(
+            !verification.contains(stale),
+            "restore verification hint must not advertise inactive controls: {stale}"
+        );
+    }
     assert!(root.contains("let post_restore_overlay ="));
     assert!(root.contains("super::ui::centered_modal_rect(frame.area(), 92, 24)"));
     assert!(

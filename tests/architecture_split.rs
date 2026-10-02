@@ -142,6 +142,7 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
         ("src/tui/render.rs", 1_200),
         ("src/tui/keymap.rs", 420),
         ("src/tui/keymap/help.rs", 320),
+        ("src/tui/keymap/help_workflows.rs", 240),
         ("src/tui/help_overlay.rs", 150),
         ("src/tui/status.rs", 140),
         ("src/tui/overview.rs", 180),
@@ -1387,6 +1388,8 @@ fn help_and_status_information_architecture_has_single_owners() {
     let keymap = fs::read_to_string(root.join("src/tui/keymap.rs")).expect("read keymap");
     let help_registry =
         fs::read_to_string(root.join("src/tui/keymap/help.rs")).expect("read help registry");
+    let workflow_help_registry = fs::read_to_string(root.join("src/tui/keymap/help_workflows.rs"))
+        .expect("read workflow help registry");
     let help = fs::read_to_string(root.join("src/tui/help_overlay.rs")).expect("read help overlay");
     let status = fs::read_to_string(root.join("src/tui/status.rs")).expect("read status model");
     let shell = fs::read_to_string(root.join("src/tui/shell/mod.rs")).expect("read shell");
@@ -1399,11 +1402,17 @@ fn help_and_status_information_architecture_has_single_owners() {
     assert!(!render.contains("检查字段表："));
     assert!(!render.contains("y 单元格 · Y 整行"));
     assert!(keymap.contains("pub use help::"));
+    assert!(keymap.contains("pub use help_workflows::"));
     assert!(help_registry.contains("pub const DEVICES_HELP"));
     assert!(help_registry.contains("pub const BACKUPS_HELP"));
-    assert!(help_registry.contains("pub const PROVISION_HELP"));
+    assert!(workflow_help_registry.contains("pub const PROVISION_HELP"));
+    assert!(workflow_help_registry.contains("pub const PROVISION_REVIEW_HELP"));
+    assert!(workflow_help_registry.contains("pub const PROVISION_RUNNING_HELP"));
+    assert!(workflow_help_registry.contains("pub const PROVISION_RESULT_HELP"));
+    assert!(workflow_help_registry.contains("pub const RESTORE_RESULT_HELP"));
     assert!(help_registry.contains("pub const GLOBAL_HELP"));
     assert!(!help_registry.contains("pub const NORMAL_HELP"));
+    assert!(!workflow_help_registry.contains("pub const NORMAL_HELP"));
     assert!(help.contains("PICKER_HELP"));
     assert!(help.contains("TABLE_HELP"));
     assert!(status.contains("pub(super) fn dynamic_status"));

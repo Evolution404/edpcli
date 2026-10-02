@@ -175,7 +175,7 @@ pub(super) fn draw_advanced_inspect_overlay(frame: &mut Frame, state: &AppState)
         AdvancedInspectStage::Browser => {}
         AdvancedInspectStage::Running => {
             let area = crate::tui::ui::centered_modal_rect(frame.area(), 52, 9);
-            crate::tui::ui::render_modal(frame, area, "Inspect", |frame, inner| {
+            crate::tui::ui::render_modal(frame, area, "检查", |frame, inner| {
                 let rows = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
@@ -222,7 +222,7 @@ pub(super) fn draw_advanced_inspect_overlay(frame: &mut Frame, state: &AppState)
         }
         AdvancedInspectStage::Failed => {
             let area = crate::tui::ui::centered_modal_rect(frame.area(), 58, 9);
-            crate::tui::ui::render_modal(frame, area, "Inspect 失败", |frame, inner| {
+            crate::tui::ui::render_modal(frame, area, "检查失败", |frame, inner| {
                 let rows = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
@@ -241,7 +241,7 @@ pub(super) fn draw_advanced_inspect_overlay(frame: &mut Frame, state: &AppState)
                         advanced
                             .message
                             .as_deref()
-                            .unwrap_or("Inspect worker 未返回可用结果"),
+                            .unwrap_or("检查任务未返回可用结果"),
                     ))
                     .wrap(Wrap { trim: false })
                     .alignment(Alignment::Center),

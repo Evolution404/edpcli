@@ -4,13 +4,43 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use edpcli::tui::{
     keymap::{
         KeyMapper, TuiAction, WidgetRole, DEVICES_HELP, GLOBAL_HELP, INSPECT_HELP, PROVISION_HELP,
-        TABLE_HELP,
+        SECTOR_INSPECT_HELP, TABLE_HELP,
     },
     state::InputMode,
 };
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+#[test]
+fn inspect_help_uses_the_same_chinese_action_vocabulary_as_the_rest_of_the_tui() {
+    for binding in INSPECT_HELP {
+        for stale in [
+            "Move", "Fold", "Open", "Toggle", "Search", "Match", "Sector", "Help", "Pane",
+        ] {
+            assert!(
+                !binding.label.contains(stale),
+                "Inspect help must not regress to mixed-language action labels: {} -> {}",
+                binding.keys,
+                binding.label
+            );
+        }
+    }
+}
+
+#[test]
+fn inspect_browser_help_advertises_only_browser_controls() {
+    assert!(INSPECT_HELP
+        .iter()
+        .any(|binding| binding.action == TuiAction::PanelNext));
+    assert!(
+        !INSPECT_HELP.iter().any(|binding| matches!(
+            binding.action,
+            TuiAction::SectorPrevious | TuiAction::SectorNext | TuiAction::Help
+        )),
+        "sector stepping belongs to full-screen Hex and help already comes from the global section"
+    );
 }
 
 #[test]
@@ -651,13 +681,16 @@ fn provision_form_enter_generates_plan_instead_of_editing_or_toggling() {
         "Provision Form plan request must execute through the production task adapter"
     );
 
-    let keymap = include_str!("../src/tui/keymap/help.rs");
     assert!(
-        !keymap.contains("i/Enter 进入 Insert"),
+        !PROVISION_HELP
+            .iter()
+            .any(|binding| binding.label.contains("i/Enter 进入 Insert")),
         "help/footer must not advertise the regressed Enter-to-edit behavior"
     );
     assert!(
-        keymap.contains("进入下一阶段"),
+        PROVISION_HELP.iter().any(|binding| {
+            binding.action == TuiAction::Activate && binding.label == "进入下一阶段"
+        }),
         "Provision help registry must advertise Enter as the forward action"
     );
 }
@@ -810,9 +843,18 @@ fn sector_inspector_dispatches_the_documented_vim_actions() {
     let render = include_str!("../src/tui/inspect/sector_render.rs");
     assert!(render.contains("0/$"));
     assert!(render.contains("gg/G"));
-    assert!(render.contains("Ctrl-u/d"));
     assert!(render.contains("[/]"));
-    assert!(render.contains("/ n/N"));
+    assert!(render.contains("/ 搜索"));
+    assert!(render.contains("? 帮助"));
+    assert!(SECTOR_INSPECT_HELP
+        .iter()
+        .any(|binding| binding.keys == "Ctrl-u / Ctrl-d"));
+    assert!(SECTOR_INSPECT_HELP
+        .iter()
+        .any(|binding| binding.keys == "PgUp / PgDn"));
+    assert!(SECTOR_INSPECT_HELP
+        .iter()
+        .any(|binding| binding.keys == "/ · n/N"));
 }
 
 #[test]
@@ -850,8 +892,8 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
             && binding.action == TuiAction::MoveRight
     }));
     assert!(INSPECT_HELP.iter().any(|binding| {
-        binding.keys == "Tab/Shift-Tab"
-            && binding.label == "切换当前页 Pane"
+        binding.keys == "Tab / Shift-Tab"
+            && binding.label == "切换当前页窗口"
             && binding.action == TuiAction::FocusNext
     }));
     assert!(INSPECT_HELP
@@ -859,7 +901,7 @@ fn help_registry_is_the_same_metadata_source_for_core_and_inspect_hints() {
         .any(|binding| binding.keys == "J" && binding.action == TuiAction::InspectJump));
     assert!(INSPECT_HELP
         .iter()
-        .any(|binding| binding.keys == "h/l" && binding.label == "Fold"));
+        .any(|binding| binding.keys == "h/l" && binding.label == "结构树：折叠 / 展开"));
     assert!(INSPECT_HELP
         .iter()
         .any(|binding| binding.keys == "o" && binding.action == TuiAction::Open));

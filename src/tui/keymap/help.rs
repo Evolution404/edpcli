@@ -9,18 +9,23 @@ pub struct HelpBinding {
 
 pub const INSPECT_HELP: &[HelpBinding] = &[
     HelpBinding {
-        keys: "Tab/Shift-Tab",
-        label: "切换当前页 Pane",
+        keys: "Tab / Shift-Tab",
+        label: "切换当前页窗口",
         action: TuiAction::FocusNext,
     },
     HelpBinding {
+        keys: "Ctrl-w h/j/k/l · w/W",
+        label: "按方向 / 顺序切换窗口",
+        action: TuiAction::PanelNext,
+    },
+    HelpBinding {
         keys: "j/k",
-        label: "Move",
+        label: "移动 / 选择",
         action: TuiAction::MoveDown,
     },
     HelpBinding {
         keys: "h/l",
-        label: "Fold",
+        label: "结构树：折叠 / 展开",
         action: TuiAction::MoveLeft,
     },
     HelpBinding {
@@ -30,22 +35,22 @@ pub const INSPECT_HELP: &[HelpBinding] = &[
     },
     HelpBinding {
         keys: "Enter",
-        label: "Open",
+        label: "打开 / 进入",
         action: TuiAction::Activate,
     },
     HelpBinding {
         keys: "o",
-        label: "Toggle",
+        label: "结构树 / 字段：展开 / 折叠",
         action: TuiAction::Open,
     },
     HelpBinding {
         keys: "/",
-        label: "Search",
+        label: "搜索",
         action: TuiAction::Search,
     },
     HelpBinding {
         keys: "n/N",
-        label: "Match",
+        label: "下一个 / 上一个匹配",
         action: TuiAction::NextMatch,
     },
     HelpBinding {
@@ -53,22 +58,80 @@ pub const INSPECT_HELP: &[HelpBinding] = &[
         label: "跳转到 LBA",
         action: TuiAction::InspectJump,
     },
+];
+
+pub const SECTOR_INSPECT_HELP: &[HelpBinding] = &[
     HelpBinding {
-        keys: "[/]",
-        label: "Sector",
+        keys: "h/l · ←/→",
+        label: "上一 / 下一字节",
+        action: TuiAction::MoveRight,
+    },
+    HelpBinding {
+        keys: "j/k · ↑/↓",
+        label: "下 / 上移动 16 字节",
+        action: TuiAction::MoveDown,
+    },
+    HelpBinding {
+        keys: "0 / $",
+        label: "当前行首 / 行尾",
+        action: TuiAction::RowStart,
+    },
+    HelpBinding {
+        keys: "gg / G",
+        label: "当前扇区首字节 / 末字节",
+        action: TuiAction::Top,
+    },
+    HelpBinding {
+        keys: "Ctrl-u / Ctrl-d",
+        label: "上 / 下移动半页",
+        action: TuiAction::HalfPageUp,
+    },
+    HelpBinding {
+        keys: "PgUp / PgDn",
+        label: "上 / 下移动一页",
+        action: TuiAction::PageUp,
+    },
+    HelpBinding {
+        keys: "[ / ]",
+        label: "上一 / 下一扇区",
         action: TuiAction::SectorPrevious,
     },
     HelpBinding {
-        keys: "?",
-        label: "Help",
-        action: TuiAction::Help,
+        keys: "v",
+        label: "切换 Raw / Decode / Mixed",
+        action: TuiAction::ViewOrVerify,
+    },
+    HelpBinding {
+        keys: "o",
+        label: "展开 / 折叠字段详情",
+        action: TuiAction::Open,
+    },
+    HelpBinding {
+        keys: "y / Y",
+        label: "复制当前值 / 原始字节",
+        action: TuiAction::Yank,
+    },
+    HelpBinding {
+        keys: "/ · n/N",
+        label: "搜索 · 下一个 / 上一个匹配",
+        action: TuiAction::Search,
+    },
+    HelpBinding {
+        keys: "J",
+        label: "跳转到 LBA",
+        action: TuiAction::InspectJump,
+    },
+    HelpBinding {
+        keys: "Esc",
+        label: "返回检查",
+        action: TuiAction::Back,
     },
 ];
 
 pub const DEVICES_HELP: &[HelpBinding] = &[
     HelpBinding {
         keys: "j/k · ↑/↓",
-        label: "选择设备 / 当前 Pane 内移动",
+        label: "选择设备 / 当前窗口内移动",
         action: TuiAction::MoveDown,
     },
     HelpBinding {
@@ -80,6 +143,16 @@ pub const DEVICES_HELP: &[HelpBinding] = &[
         keys: "o",
         label: "展开 / 折叠结构树",
         action: TuiAction::Open,
+    },
+    HelpBinding {
+        keys: "r",
+        label: "刷新设备列表",
+        action: TuiAction::Refresh,
+    },
+    HelpBinding {
+        keys: "Ctrl-w h/j/k/l · w/W",
+        label: "切换设备工作台窗口",
+        action: TuiAction::PanelNext,
     },
     HelpBinding {
         keys: "p",
@@ -115,6 +188,11 @@ pub const BACKUPS_HELP: &[HelpBinding] = &[
         action: TuiAction::TableScrollRight,
     },
     HelpBinding {
+        keys: "Ctrl-w h/j/k/l · w/W",
+        label: "切换备份工作台窗口",
+        action: TuiAction::PanelNext,
+    },
+    HelpBinding {
         keys: "Space",
         label: "勾选 / 取消勾选",
         action: TuiAction::Toggle,
@@ -146,62 +224,6 @@ pub const BACKUPS_HELP: &[HelpBinding] = &[
     },
 ];
 
-pub const PROVISION_HELP: &[HelpBinding] = &[
-    HelpBinding {
-        keys: "j/k · ↑/↓",
-        label: "选择字段 / 当前 Pane 内移动",
-        action: TuiAction::MoveDown,
-    },
-    HelpBinding {
-        keys: "i",
-        label: "编辑当前字段",
-        action: TuiAction::Insert,
-    },
-    HelpBinding {
-        keys: "h / l",
-        label: "当前选项上一个 / 下一个",
-        action: TuiAction::MoveRight,
-    },
-    HelpBinding {
-        keys: "Space",
-        label: "切换当前选项 / 容量单位 / 新密码透传",
-        action: TuiAction::Toggle,
-    },
-    HelpBinding {
-        keys: "f",
-        label: "起点/容量自动求解可用空间",
-        action: TuiAction::Fill,
-    },
-    HelpBinding {
-        keys: "Enter",
-        label: "进入下一阶段",
-        action: TuiAction::Activate,
-    },
-    HelpBinding {
-        keys: "e",
-        label: "计划页导出镜像",
-        action: TuiAction::Export,
-    },
-];
-
-pub const PICKER_HELP: &[HelpBinding] = &[
-    HelpBinding {
-        keys: "j/k · ↑/↓",
-        label: "切换方案",
-        action: TuiAction::MoveDown,
-    },
-    HelpBinding {
-        keys: "Enter",
-        label: "确认选择",
-        action: TuiAction::Activate,
-    },
-    HelpBinding {
-        keys: "Esc",
-        label: "取消并关闭",
-        action: TuiAction::Back,
-    },
-];
-
 pub const GLOBAL_HELP: &[HelpBinding] = &[
     HelpBinding {
         keys: "Tab / Shift-Tab",
@@ -216,6 +238,19 @@ pub const GLOBAL_HELP: &[HelpBinding] = &[
     HelpBinding {
         keys: "q / Ctrl-C",
         label: "退出",
+        action: TuiAction::Quit,
+    },
+    HelpBinding {
+        keys: "?",
+        label: "打开 / 关闭帮助",
+        action: TuiAction::Help,
+    },
+];
+
+pub const GUARD_GLOBAL_HELP: &[HelpBinding] = &[
+    HelpBinding {
+        keys: "q / Ctrl-C",
+        label: "请求退出；在安全结束点处理",
         action: TuiAction::Quit,
     },
     HelpBinding {

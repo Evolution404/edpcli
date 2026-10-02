@@ -28,7 +28,7 @@ impl TaskHub {
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
-                    "高级检查 worker 异常终止: {}",
+                    "高级检查后台任务异常终止: {}",
                     panic_message(payload)
                 ))
             });
@@ -97,11 +97,11 @@ impl TaskHub {
                     .items
                     .into_iter()
                     .next()
-                    .ok_or_else(|| format!("LBA{lba} Inspect 未返回扇区"))
+                    .ok_or_else(|| format!("LBA{lba} 检查未返回扇区"))
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
-                    "扇区 Inspect worker 异常终止: {}",
+                    "扇区检查后台任务异常终止: {}",
                     panic_message(payload)
                 ))
             });

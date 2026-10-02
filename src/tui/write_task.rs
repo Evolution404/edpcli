@@ -7,7 +7,7 @@ impl TaskHub {
         backup_dir: PathBuf,
     ) -> Result<OperationId, &'static str> {
         if intent.kind != crate::tui::state::WriteKind::Restore {
-            return Err("request_write 仅接受 Restore；备份创建使用独立只读 worker");
+            return Err("内部写入请求仅接受恢复操作；备份创建使用独立只读后台任务");
         }
         let operation_id = self.begin_operation()?;
         let tx = self.tx.clone();
@@ -38,11 +38,11 @@ impl TaskHub {
                 let expected = intent
                     .expected_identity
                     .as_ref()
-                    .ok_or_else(|| "错误: TUI 写操作缺少 typed 介质身份 pin".to_string())?;
+                    .ok_or_else(|| "写操作缺少介质身份校验信息".to_string())?;
                 let backup = intent
                     .backup
                     .as_ref()
-                    .ok_or_else(|| "错误: restore 缺少固定备份路径".to_string())?;
+                    .ok_or_else(|| "恢复操作缺少固定备份路径".to_string())?;
                 let mut prompt = ConfirmedPrompter {
                     tx: tx.clone(),
                     operation_id,
@@ -58,7 +58,7 @@ impl TaskHub {
                 .map_err(|error| error.msg)
             }))
             .unwrap_or_else(|payload| {
-                Err(format!("写盘 worker 异常终止: {}", panic_message(payload)))
+                Err(format!("写盘后台任务异常终止: {}", panic_message(payload)))
             });
             let _ = tx.send(WorkerResult::Restore {
                 operation_id,
@@ -104,7 +104,7 @@ impl TaskHub {
                     partition_index: intent.request.partition_index,
                     filesystem: intent.request.filesystem,
                     result: Err(format!(
-                        "格式化 worker 异常终止: {}",
+                        "格式化后台任务异常终止: {}",
                         panic_message(payload)
                     )),
                 }
@@ -154,7 +154,7 @@ impl TaskHub {
                     filesystem: intent.request.filesystem,
                     result: Err(
                         crate::application::post_restore::EncryptedPostRestoreError::Operation(
-                            format!("加密格式化 worker 异常终止: {}", panic_message(payload)),
+                            format!("加密格式化后台任务异常终止: {}", panic_message(payload)),
                         ),
                     ),
                 }
@@ -204,7 +204,7 @@ impl TaskHub {
                     partition_index: intent.request.partition_index,
                     filesystem: intent.filesystem,
                     result: Err(format!(
-                        "密钥域重建 worker 异常终止: {}",
+                        "密钥域重建后台任务异常终止: {}",
                         panic_message(payload)
                     )),
                 }

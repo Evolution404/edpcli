@@ -20,6 +20,12 @@ fn post_restore_key_state(
     }
 }
 
+fn filesystem_display_label(value: &str) -> String {
+    crate::filesystem::FilesystemKind::from_config_token(value)
+        .map(|kind| kind.display_name().to_string())
+        .unwrap_or_else(|| crate::ui::sanitize_terminal_text(value))
+}
+
 impl AppState {
     pub fn result_partition_table_view(&self) -> Option<crate::tui::table_layout::TableViewData> {
         use crate::tui::table_layout::{table_column_schema, TableKind, TableViewData};
@@ -66,7 +72,7 @@ impl AppState {
                         partition
                             .detected_filesystem
                             .map(|value| value.label().to_string())
-                            .or_else(|| partition.filesystem_hint.clone())
+                            .or_else(|| partition.filesystem_hint.as_deref().map(filesystem_display_label))
                             .unwrap_or_else(|| "—".into())
                     };
                     let key_state = post_restore_key_state(partition);
@@ -94,7 +100,7 @@ impl AppState {
                 .map(|(index, partition)| {
                     let filesystem = partition
                         .filesystem
-                        .map(|kind| kind.config_token().to_string())
+                        .map(|kind| kind.display_name().to_string())
                         .unwrap_or_else(|| "—".into());
                     let disposition = |value: crate::provision::RegionDisposition| match value {
                         crate::provision::RegionDisposition::PreserveOpaque => "原样保留",
@@ -237,6 +243,18 @@ mod tests {
             requires_original_key,
             state,
             detail: String::new(),
+        }
+    }
+
+    #[test]
+    fn filesystem_labels_use_canonical_user_facing_names() {
+        for (raw, expected) in [
+            ("fat16", "FAT16"),
+            ("FAT32", "FAT32"),
+            ("exfat", "exFAT"),
+            ("NTFS", "NTFS"),
+        ] {
+            assert_eq!(filesystem_display_label(raw), expected);
         }
     }
 

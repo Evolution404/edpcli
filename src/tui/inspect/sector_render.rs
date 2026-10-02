@@ -89,7 +89,7 @@ pub(super) fn draw_sector_inspector(
                 secondary().add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!(
-                "  · byte +0x{:03X} · absolute 0x{:X} · row {:02}/32{}",
+                "  · 字节 +0x{:03X} · 绝对偏移 0x{:X} · 行 {:02}/32{}",
                 sector.cursor,
                 absolute,
                 sector.cursor / 16 + 1,
@@ -106,8 +106,8 @@ pub(super) fn draw_sector_inspector(
                 .error
                 .as_deref()
                 .or(decode_issue)
-                .map(|value| format!("decode: {}", safe(value)))
-                .unwrap_or_else(|| "decode: available/raw".into())
+                .map(|value| format!("解码：{}", safe(value)))
+                .unwrap_or_else(|| "解码：可用 / Raw".into())
         )),
     ];
     let vertical = Layout::default()
@@ -119,7 +119,7 @@ pub(super) fn draw_sector_inspector(
         ])
         .split(area);
     frame.render_widget(
-        Paragraph::new(header).block(Block::default().borders(Borders::ALL).title("Hex Detail")),
+        Paragraph::new(header).block(Block::default().borders(Borders::ALL).title("Hex 详情")),
         vertical[0],
     );
 
@@ -291,9 +291,9 @@ pub(super) fn draw_sector_inspector(
             }
         } else {
             details.push(Line::from(Span::styled("未归属字段", muted())));
-            details.push(Line::from("当前 byte 不属于任何已知 Field；不推测语义。"));
+            details.push(Line::from("当前字节不属于任何已知字段；不推测语义。"));
             if sector.field_expanded {
-                details.push(Line::from(format!("bits: {:08b}", raw)));
+                details.push(Line::from(format!("位：{:08b}", raw)));
             }
         }
     } else if let Some(error) = sector.error.as_deref() {
@@ -302,7 +302,7 @@ pub(super) fn draw_sector_inspector(
     if let Some(yank) = state.advanced_inspect_yank_register() {
         details.push(Line::from(""));
         details.push(Line::from(vec![
-            Span::styled("Yank  ", muted()),
+            Span::styled("复制  ", muted()),
             Span::styled(safe(yank), secondary()),
         ]));
     }
@@ -319,7 +319,7 @@ pub(super) fn draw_sector_inspector(
 
     frame.render_widget(
         Paragraph::new(Line::from(
-            "h/l byte · j/k ±16B · 0/$ 行 · gg/G 扇区 · Ctrl-u/d · PgUp/PgDn · [/] sector · v mode · o 字段 · / n/N · J 跳转 · Esc 返回 Inspect",
+            "h/l 字节 · j/k ±16B · 0/$ 行首尾 · gg/G 扇区首尾 · [/] 扇区 · v 模式 · / 搜索 · J 跳转 · ? 帮助 · Esc 返回检查",
         ))
         .style(muted()),
         vertical[2],

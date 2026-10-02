@@ -33,4 +33,12 @@ impl AppState {
         viewport.selected = None;
         viewport.scroll_y.bottom(run.log.len(), visible);
     }
+
+    pub fn provision_run_log_start(&self) -> Option<usize> {
+        let viewport = self
+            .provision
+            .pane_focus
+            .viewport(crate::tui::pane::PaneId::ProvisionRunLog);
+        viewport.selected.map(|_| viewport.scroll_y.offset)
+    }
 }

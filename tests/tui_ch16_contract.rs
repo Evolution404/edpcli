@@ -711,13 +711,13 @@ fn provision_breadcrumb_tracks_page_surface_not_overlay_stage() {
 
     let mut state = provision_state();
     let form = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
-    assert!(form.contains("设备/disk6>制盘/mode0>制盘配置"), "{form}");
+    assert!(form.contains("设备>disk6>制盘>mode0>制盘配置"), "{form}");
     assert!(form.contains("Esc返回：设备列表"), "{form}");
 
     state.provision_mut().stage = ProvisionStage::Planning;
     let planning = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
     assert!(
-        planning.contains("设备/disk6>制盘/mode0>制盘配置"),
+        planning.contains("设备>disk6>制盘>mode0>制盘配置"),
         "{planning}"
     );
     assert!(planning.contains("2生成计划"), "{planning}");
@@ -726,7 +726,7 @@ fn provision_breadcrumb_tracks_page_surface_not_overlay_stage() {
     state.provision_mut().pane_focus = edpcli::tui::pane::PaneFocus::provision_review();
     let review = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
     assert!(
-        review.contains("设备/disk6>制盘/mode0>计划确认"),
+        review.contains("设备>disk6>制盘>mode0>计划确认"),
         "{review}"
     );
     assert!(review.contains("Esc返回：制盘配置"), "{review}");
@@ -734,7 +734,7 @@ fn provision_breadcrumb_tracks_page_surface_not_overlay_stage() {
     state.provision_mut().stage = ProvisionStage::Confirm;
     let confirm = rendered_lines(&state, 160, 45).join("\n").replace(' ', "");
     assert!(
-        confirm.contains("设备/disk6>制盘/mode0>计划确认"),
+        confirm.contains("设备>disk6>制盘>mode0>计划确认"),
         "{confirm}"
     );
     assert!(confirm.contains("Esc返回：制盘配置"), "{confirm}");
@@ -1153,7 +1153,8 @@ fn ch16_provision_result_uses_workbench_hero_and_panes() {
         for required in ["制盘结果", "分区结果", "全盘布局", "验收与执行"] {
             assert!(text.contains(required), "missing {required}");
         }
-        assert!(text.contains("Esc/Enter返回设备列表"));
+        assert!(text.contains("Enter/Esc返回设备列表"));
+        assert!(!text.contains("Esc/Enter返回设备列表"));
         assert!(!text.contains("最近进度事件"));
     }
 }

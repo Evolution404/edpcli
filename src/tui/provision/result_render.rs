@@ -134,12 +134,16 @@ fn render_verification_pane(frame: &mut Frame, area: Rect, state: &AppState, foc
         .viewport(PaneId::ResultVerification)
         .scroll_y
         .offset;
-    let lines = verification_lines(state)
+    let mut lines = verification_lines(state)
         .into_iter()
         .skip(offset)
         .take(inner.height as usize)
         .map(|(text, tone)| Line::from(Span::styled(text, tone_style(tone))))
         .collect::<Vec<_>>();
+    if lines.len() < inner.height as usize {
+        lines.push(Line::from(""));
+        lines.push(crate::tui::result_workbench::result_verification_navigation_hint());
+    }
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
 }
 
@@ -161,7 +165,7 @@ pub(super) fn draw_provision_result(frame: &mut Frame, area: Rect, state: &AppSt
     let capacity = plan
         .map(|plan| crate::common::fmt_capacity(plan.total_bytes))
         .unwrap_or_else(|| "—".into());
-    let detail = format!("{disk} · {target} · {capacity} · Esc/Enter 返回设备列表");
+    let detail = format!("{disk} · {target} · {capacity} · Enter / Esc 返回设备列表");
     let hero = crate::tui::result_workbench::ResultHero::new("制盘结果", status, detail, tone);
     let slots = crate::tui::result_workbench::render_result_workbench_shell(
         frame,

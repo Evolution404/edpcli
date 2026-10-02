@@ -962,7 +962,7 @@ fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
     assert!(compact.contains("全盘布局"), "{post_restore}");
     assert!(compact.contains("验收与执行"), "{post_restore}");
     assert!(compact.contains("需要格式化"), "{post_restore}");
-    assert!(compact.contains("Enter处理分区"), "{post_restore}");
+    assert!(compact.contains("Enter处理当前分区"), "{post_restore}");
     assert!(post_restore.contains('▲'), "{post_restore}");
     assert!(!compact.contains("请使用CLI"), "{post_restore}");
     assert!(

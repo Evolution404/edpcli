@@ -14,6 +14,11 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
     let class = ViewportClass::for_width(area.width);
     let focus = state.devices_focused_pane();
 
+    if state.devices().is_empty() {
+        draw_device_list(frame, area, state);
+        return;
+    }
+
     if class == ViewportClass::Compact {
         match focus {
             PaneId::DevicesTree => draw_device_tree(frame, area, state),

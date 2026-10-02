@@ -312,7 +312,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     }
     if wizard.stage == WizardStage::Running {
         if let Some(run) = wizard.run.as_ref() {
-            draw_operation_progress(frame, area, run, state.animation_frame());
+            draw_operation_progress(frame, area, run, state.animation_frame(), None);
         }
         return;
     }
@@ -432,7 +432,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
             if let Some(request) = request {
                 lines.push(Line::from(vec![
                     Span::styled("文件系统  ", muted()),
-                    Span::styled(request.filesystem.config_token(), accent()),
+                    Span::styled(request.filesystem.display_name(), accent()),
                 ]));
             }
             lines.push(Line::from(vec![
@@ -519,7 +519,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                     partition.index,
                     partition.start_lba,
                     partition.sector_count,
-                    request.filesystem.config_token()
+                    request.filesystem.display_name()
                 )));
             }
             lines.push(Line::from(vec![
@@ -597,7 +597,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 lines.push(Line::from(format!(
                     "分区 {}  ·  新文件系统 {}",
                     request.partition_index,
-                    request.filesystem.config_token()
+                    request.filesystem.display_name()
                 )));
             }
             lines.push(Line::from(vec![
@@ -641,7 +641,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 )));
             }
             lines.push(Line::from(Span::styled(
-                "q / Esc / Ctrl-C 将延迟到安全结束点。",
+                "q / Ctrl-C 退出请求将在安全结束点处理；Esc 当前不可返回。",
                 muted(),
             )));
         }
@@ -674,7 +674,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 ]));
                 lines.push(Line::from(vec![
                     Span::styled("文件系统  ", muted()),
-                    Span::styled(request.filesystem.config_token(), accent()),
+                    Span::styled(request.filesystem.display_name(), accent()),
                 ]));
             }
             lines.push(Line::from(vec![
@@ -716,7 +716,7 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                 ),
             ]));
             lines.push(Line::from(Span::styled(
-                "q / Esc / Ctrl-C 将延迟到安全结束点。",
+                "q / Ctrl-C 退出请求将在安全结束点处理；Esc 当前不可返回。",
                 muted(),
             )));
         }

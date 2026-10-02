@@ -105,7 +105,7 @@ impl AppState {
                     part.start_lba,
                     part.end_lba().unwrap_or(part.start_lba),
                     Self::format_sector_size(part.sector_count),
-                    part.filesystem.windows_format_name()
+                    part.filesystem.display_name()
                 ),
             ));
         }

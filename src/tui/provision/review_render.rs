@@ -45,9 +45,9 @@ pub(super) fn draw_provision_review(
     ) && body.height >= 18;
 
     let footer = if class == crate::tui::ui::ViewportClass::Compact {
-        "Tab 切换 · Enter 写入确认 · Esc 返回修改"
+        "Tab / Shift-Tab 切换窗口 · Enter 写入确认 · Esc 返回修改"
     } else {
-        "↑↓/jk 选择区域 · o 详情 · Enter 写入确认 · e 导出镜像 · Esc 返回修改"
+        "j/k 选择区域 · o 详情 · Tab / Shift-Tab 切换窗口 · Enter 写入确认 · e 导出 · Esc 返回修改"
     };
     frame.render_widget(
         Paragraph::new(footer)

@@ -487,7 +487,7 @@ fn inspect_hex_is_fullscreen_and_escape_restores_origin() {
     state.advanced_inspect_sector_set_cursor(37);
     assert_eq!(
         state.advanced_inspect_breadcrumb().unwrap().escape_hint(),
-        "Esc 返回：Inspect"
+        "Esc 返回：检查"
     );
     assert_eq!(
         state.advanced_inspect().unwrap().panel,
@@ -504,14 +504,45 @@ fn inspect_hex_is_fullscreen_and_escape_restores_origin() {
         .map(|cell| cell.symbol())
         .collect::<String>()
         .replace(' ', "");
-    assert!(text.contains("Esc返回：Inspect"), "{text}");
-    assert!(text.contains("HexDetail"), "{text}");
+    assert!(text.contains("Esc返回：检查"), "{text}");
+    assert!(text.contains("Hex详情"), "{text}");
     assert!(!text.contains("扇区树"), "{text}");
     assert!(!text.contains("技术证据"), "{text}");
     assert_eq!(
         state.advanced_inspect_view_mode(),
         Some(edpcli::tui::state::InspectViewMode::Hex)
     );
+    let original_focus = state.advanced_inspect_focused_pane();
+    state.advanced_inspect_shift_panel(false);
+    state.advanced_inspect_spatial_focus(1, 0);
+    state.advanced_inspect_spatial_focus(0, 1);
+    assert_eq!(
+        state.advanced_inspect_focused_pane(),
+        original_focus,
+        "full-screen Hex must not mutate the hidden Inspect pane focus"
+    );
+
+    let _ = state.navigate(NavCommand::Help, 1);
+    let mut help_terminal = Terminal::new(TestBackend::new(120, 36)).unwrap();
+    help_terminal
+        .draw(|frame| render::draw(frame, &state))
+        .unwrap();
+    let help = help_terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(help.contains("快捷键·Hex详情"), "{help}");
+    assert!(help.contains("上一/下一字节"), "{help}");
+    assert!(help.contains("当前扇区首字节/末字节"), "{help}");
+    assert!(
+        !help.contains("切换当前页窗口"),
+        "Hex help must not reuse browser help: {help}"
+    );
+    let _ = state.navigate(NavCommand::Escape, 1);
     assert!(state.advanced_inspect_close_sector());
     assert_eq!(
         state.advanced_inspect().unwrap().panel,
@@ -818,12 +849,28 @@ fn sector_inspector_renders_32x16_offsets_ascii_typed_and_unknown_views() {
         .map(|cell| cell.symbol())
         .collect::<String>();
     let compact = text.replace(' ', "");
-    assert!(compact.contains("HexDetail"), "{text}");
+    assert!(compact.contains("Hex详情"), "{text}");
     assert!(
         !compact.contains("磁盘概览"),
         "full-screen Hex must not keep the Inspect browser panes: {text}"
     );
     assert!(compact.contains("+0x000"), "{text}");
+    assert!(compact.contains("字节+0x000"), "{text}");
+    assert!(compact.contains("绝对偏移"), "{text}");
+    assert!(compact.contains("解码："), "{text}");
+    for stale in [
+        "byte+",
+        "absolute",
+        "decode:",
+        "sector·",
+        "mode·",
+        "返回Inspect",
+    ] {
+        assert!(
+            !compact.contains(stale),
+            "stale mixed-language Inspect chrome {stale}: {text}"
+        );
+    }
     state.advanced_inspect_sector_bottom();
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
     let bottom = terminal

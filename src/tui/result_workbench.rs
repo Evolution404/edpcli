@@ -147,6 +147,18 @@ fn tone_style(tone: ResultTone) -> Style {
     }
 }
 
+pub fn result_verification_navigation_hint() -> Line<'static> {
+    let theme = super::theme::current();
+    Line::from(vec![
+        Span::styled("j/k", theme.muted()),
+        Span::raw(" 滚动 · "),
+        Span::styled("Tab / Shift-Tab", theme.muted()),
+        Span::raw(" 或 "),
+        Span::styled("Ctrl-w w/W", theme.muted()),
+        Span::raw(" 切换窗口"),
+    ])
+}
+
 pub fn render_result_hero(frame: &mut Frame, area: Rect, hero: &ResultHero) {
     let tone = tone_style(hero.tone);
     let block = super::ui::card(hero.title.clone(), false).border_style(tone);

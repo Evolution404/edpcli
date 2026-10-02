@@ -153,6 +153,7 @@ pub(super) fn render_partition_pane(
                 partition,
                 view.rows.get(selected).map(Vec::as_slice),
                 tone_style(partition_status(partition).1),
+                focused,
             );
         }
     }

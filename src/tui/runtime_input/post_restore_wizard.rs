@@ -14,6 +14,10 @@ pub(super) fn handle_post_restore_wizard_key(
             let role = controller::active_widget_role(state);
             if let Some(action) = keys.map_for_role(state::InputMode::Normal, role, key) {
                 let visible_rows = usize::from(terminal_size.height.saturating_sub(12)).max(1);
+                if action == keymap::TuiAction::Help {
+                    let _ = state.navigate(NavCommand::Help, visible_rows);
+                    return Some(KeyOutcome::NextIteration);
+                }
                 if matches!(
                     action,
                     keymap::TuiAction::TableColumnLeft
@@ -56,8 +60,12 @@ pub(super) fn handle_post_restore_wizard_key(
                         .move_post_restore_result_selection(visible_rows as isize, visible_rows),
                     keymap::TuiAction::Top => state.post_restore_result_top(visible_rows),
                     keymap::TuiAction::Bottom => state.post_restore_result_bottom(visible_rows),
-                    keymap::TuiAction::PanelPrevious => state.post_restore_result_shift_pane(true),
-                    keymap::TuiAction::PanelNext => state.post_restore_result_shift_pane(false),
+                    keymap::TuiAction::FocusPrevious | keymap::TuiAction::PanelPrevious => {
+                        state.post_restore_result_shift_pane(true)
+                    }
+                    keymap::TuiAction::FocusNext | keymap::TuiAction::PanelNext => {
+                        state.post_restore_result_shift_pane(false)
+                    }
                     keymap::TuiAction::PanelLeft => state.post_restore_result_spatial_focus(-1, 0),
                     keymap::TuiAction::PanelRight => state.post_restore_result_spatial_focus(1, 0),
                     keymap::TuiAction::PanelUp => state.post_restore_result_spatial_focus(0, -1),
@@ -69,7 +77,6 @@ pub(super) fn handle_post_restore_wizard_key(
                             state.begin_selected_post_restore_action();
                         }
                     }
-                    keymap::TuiAction::Open => state.toggle_wizard_detail(),
                     keymap::TuiAction::Back => {
                         let _ = state.navigate(NavCommand::Escape, 1);
                     }

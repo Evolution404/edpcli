@@ -18,7 +18,7 @@ impl NavigationLocation {
             Self::Devices => "设备列表",
             Self::Backups => "备份列表",
             Self::Provision => "制盘",
-            Self::Inspect => "Inspect",
+            Self::Inspect => "检查",
             Self::SectorInspector => "扇区检查",
         }
     }

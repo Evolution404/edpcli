@@ -474,7 +474,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                 )),
                 Line::from(vec![
                     Span::styled("i", accent()),
-                    Span::raw(" Inspect   "),
+                    Span::raw(" 检查      "),
                     Span::styled("v", success()),
                     Span::raw(" 校验"),
                 ]),

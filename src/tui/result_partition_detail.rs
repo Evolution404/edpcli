@@ -25,12 +25,13 @@ pub(crate) fn render_restore_partition_detail(
     partition: &PostRestorePartition,
     row: Option<&[String]>,
     status_style: Style,
+    focused: bool,
 ) {
     let theme = crate::tui::theme::current();
     let end_lba = partition
         .start_lba
         .saturating_add(partition.sector_count.saturating_sub(1));
-    let detail = vec![
+    let mut detail = vec![
         Line::from(vec![
             Span::styled("状态  ", theme.table_text_muted()),
             Span::styled(row_value(row, 1), status_style),
@@ -54,6 +55,12 @@ pub(crate) fn render_restore_partition_detail(
             Span::raw(row_value(row, 5)),
         ]),
     ];
+    if focused {
+        detail.push(Line::from(vec![
+            Span::styled("Enter", theme.accent()),
+            Span::raw(" 处理当前分区"),
+        ]));
+    }
     frame.render_widget(
         Paragraph::new(detail)
             .block(detail_block(format!("当前分区  P{}", partition.index)))

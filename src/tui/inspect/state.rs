@@ -178,7 +178,7 @@ impl AppState {
             ],
         };
         let mut path = source;
-        path.push("Inspect".into());
+        path.push("检查".into());
         if let Some(row) = self
             .advanced_inspect_tree_rows()
             .get(advanced.tree_selected)
@@ -243,12 +243,9 @@ impl AppState {
     }
 
     pub fn advanced_inspect_spatial_focus(&mut self, dx: i8, dy: i8) {
-        if let Some(state) = self
-            .inspect
-            .advanced
-            .as_mut()
-            .filter(|state| state.stage == AdvancedInspectStage::Browser)
-        {
+        if let Some(state) = self.inspect.advanced.as_mut().filter(|state| {
+            state.stage == AdvancedInspectStage::Browser && state.view_mode != InspectViewMode::Hex
+        }) {
             state.pane_focus.spatial_inspect(dx, dy);
             if let Some(panel) = AdvancedInspectPanel::from_pane_id(state.pane_focus.focused()) {
                 state.panel = panel;
@@ -257,12 +254,9 @@ impl AppState {
     }
 
     pub fn advanced_inspect_shift_panel(&mut self, reverse: bool) {
-        if let Some(state) = self
-            .inspect
-            .advanced
-            .as_mut()
-            .filter(|state| state.stage == AdvancedInspectStage::Browser)
-        {
+        if let Some(state) = self.inspect.advanced.as_mut().filter(|state| {
+            state.stage == AdvancedInspectStage::Browser && state.view_mode != InspectViewMode::Hex
+        }) {
             state
                 .pane_focus
                 .cycle(&crate::tui::pane::PaneId::INSPECT_ORDER, reverse);

@@ -27,7 +27,7 @@ impl TaskHub {
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
-                    "备份校验 worker 异常终止: {}",
+                    "备份校验后台任务异常终止: {}",
                     panic_message(payload)
                 ))
             });
@@ -54,7 +54,7 @@ impl TaskHub {
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
-                    "备份删除 worker 异常终止: {}",
+                    "备份删除后台任务异常终止: {}",
                     panic_message(payload)
                 ))
             });
@@ -85,7 +85,7 @@ impl TaskHub {
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
-                    "批量删除计划 worker 异常终止: {}",
+                    "批量删除计划后台任务异常终止: {}",
                     panic_message(payload)
                 ))
             });
@@ -128,7 +128,7 @@ impl TaskHub {
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
-                    "批量删除 worker 异常终止: {}",
+                    "批量删除后台任务异常终止: {}",
                     panic_message(payload)
                 ))
             });
@@ -168,7 +168,7 @@ impl TaskHub {
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
-                    "备份清理计划 worker 异常终止: {}",
+                    "备份清理计划后台任务异常终止: {}",
                     panic_message(payload)
                 ))
             });
@@ -211,7 +211,7 @@ impl TaskHub {
             }))
             .unwrap_or_else(|payload| {
                 Err(format!(
-                    "备份清理 worker 异常终止: {}",
+                    "备份清理后台任务异常终止: {}",
                     panic_message(payload)
                 ))
             });
@@ -275,7 +275,7 @@ impl TaskHub {
                 .map_err(|error| error.msg)
             }))
             .unwrap_or_else(|payload| {
-                Err(format!("备份 worker 异常终止: {}", panic_message(payload)))
+                Err(format!("备份后台任务异常终止: {}", panic_message(payload)))
             });
             let _ = tx.send(WorkerResult::Write {
                 operation_id,

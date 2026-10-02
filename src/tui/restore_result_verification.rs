@@ -122,16 +122,7 @@ pub(super) fn render_verification_pane(
 
     if lines.len() < inner.height as usize {
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("Enter", crate::tui::theme::current().accent()),
-            Span::raw(" 处理分区  "),
-            Span::styled("j/k", crate::tui::theme::current().muted()),
-            Span::raw(" 移动  "),
-            Span::styled("h/l", crate::tui::theme::current().muted()),
-            Span::raw(" 激活列  "),
-            Span::styled("Tab/Ctrl-w", crate::tui::theme::current().muted()),
-            Span::raw(" 切换窗口"),
-        ]));
+        lines.push(crate::tui::result_workbench::result_verification_navigation_hint());
     }
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
 }

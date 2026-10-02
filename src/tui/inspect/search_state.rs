@@ -140,7 +140,7 @@ impl AppState {
             .advanced
             .as_ref()
             .and_then(|state| state.prompt.clone())
-            .ok_or_else(|| "Inspect 输入面板未打开".to_string())?;
+            .ok_or_else(|| "检查输入面板未打开".to_string())?;
 
         let request = match prompt {
             AdvancedInspectPrompt::Jump {
@@ -203,7 +203,7 @@ impl AppState {
             let workspace = state
                 .result
                 .as_ref()
-                .ok_or_else(|| "Inspect workspace 不可用".to_string())?;
+                .ok_or_else(|| "检查工作区不可用".to_string())?;
             let mut matches = workspace
                 .topology
                 .find_label_paths(query)

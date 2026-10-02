@@ -106,9 +106,15 @@ pub enum WidgetRole {
 
 #[path = "keymap/help.rs"]
 mod help;
+#[path = "keymap/help_workflows.rs"]
+mod help_workflows;
 pub use help::{
-    HelpBinding, BACKUPS_HELP, DEVICES_HELP, GLOBAL_HELP, INSPECT_HELP, PICKER_HELP,
-    PROVISION_HELP, TABLE_HELP,
+    HelpBinding, BACKUPS_HELP, DEVICES_HELP, GLOBAL_HELP, GUARD_GLOBAL_HELP, INSPECT_HELP,
+    SECTOR_INSPECT_HELP, TABLE_HELP,
+};
+pub use help_workflows::{
+    PICKER_HELP, PROVISION_HELP, PROVISION_RESULT_HELP, PROVISION_REVIEW_HELP,
+    PROVISION_RUNNING_HELP, RESTORE_RESULT_HELP,
 };
 
 pub fn is_actionable_key(event: &KeyEvent) -> bool {

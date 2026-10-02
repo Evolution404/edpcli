@@ -293,7 +293,7 @@ pub(super) fn dispatch_action(
     if let Some(stage) = state.advanced_inspect().map(|advanced| advanced.stage) {
         match stage {
             AdvancedInspectStage::Running => {
-                state.set_progress_notice("Inspect 正在后台进行只读分析，请等待完成。");
+                state.set_progress_notice("检查正在后台进行只读分析，请等待完成。");
                 return ActionOutcome::handled();
             }
             AdvancedInspectStage::Failed => {

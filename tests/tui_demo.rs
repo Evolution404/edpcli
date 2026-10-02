@@ -31,6 +31,18 @@ fn all_demo_scenes_build_and_render_at_supported_sizes() {
 }
 
 #[test]
+fn empty_device_state_collapses_unused_detail_panes_and_exposes_refresh_action() {
+    let screen = screen_text("empty-state");
+    let compact = screen.replace(' ', "");
+    assert!(compact.contains("未发现可用设备"), "{screen}");
+    assert!(compact.contains("按r刷新设备列表"), "{screen}");
+    assert!(
+        !compact.contains("请先在设备列表中选择设备") && !compact.contains("选择设备后显示详情"),
+        "zero-device state must not keep meaningless detail panes: {screen}"
+    );
+}
+
+#[test]
 fn demo_fixtures_expose_typed_inspect_layout_backups_and_running_progress() {
     let inspect = demo::build_scene("inspect-lba8").unwrap();
     assert_eq!(inspect.advanced_inspect_selected_sector_lba(), Some(8));
@@ -115,6 +127,104 @@ fn provision_review_demo_uses_read_only_confirmation_projection() {
 }
 
 #[test]
+fn provision_review_help_is_stage_specific_instead_of_reusing_form_controls() {
+    use edpcli::tui::state::NavCommand;
+
+    let mut state = demo::build_scene("provision-review").unwrap();
+    let _ = state.navigate(NavCommand::Help, 20);
+    let (width, height) = (120, 36);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(text.contains("快捷键·计划确认"), "{text}");
+    assert!(text.contains("切换计划确认窗口"), "{text}");
+    assert!(text.contains("进入写入确认"), "{text}");
+    assert!(text.contains("导出当前制盘镜像"), "{text}");
+    for stale in ["编辑当前字段", "切换当前选项", "自动求解可用空间"] {
+        assert!(
+            !text.contains(stale),
+            "review help leaked form control {stale}: {text}"
+        );
+    }
+}
+
+#[test]
+fn provision_running_manual_log_scroll_changes_the_rendered_history_and_g_restores_follow() {
+    fn render_state(state: &edpcli::tui::state::AppState) -> String {
+        let (width, height) = (120, 24);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| render::draw(frame, state)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>()
+            .replace(' ', "")
+    }
+
+    let mut state = demo::build_scene("provision-running-long").unwrap();
+    let follow = render_state(&state);
+    assert!(
+        !follow.contains("+0s"),
+        "follow mode should show the newest history window: {follow}"
+    );
+
+    state.provision_scroll_run_log(-3, 5);
+    let scrolled = render_state(&state);
+    assert!(
+        scrolled.contains("+0s"),
+        "manual scroll must reveal older history: {scrolled}"
+    );
+    assert_ne!(
+        follow, scrolled,
+        "manual log scrolling must change the rendered rows"
+    );
+
+    state.provision_follow_run_log(5);
+    let followed_again = render_state(&state);
+    assert!(
+        !followed_again.contains("+0s"),
+        "G/follow must return to the newest history window: {followed_again}"
+    );
+}
+
+#[test]
+fn provision_running_help_is_stage_specific_and_exposes_real_log_controls() {
+    use edpcli::tui::state::NavCommand;
+
+    let mut state = demo::build_scene("provision-running-long").unwrap();
+    let _ = state.navigate(NavCommand::Help, 20);
+    let mut terminal = Terminal::new(TestBackend::new(120, 36)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(text.contains("快捷键·制盘执行"), "{text}");
+    assert!(text.contains("浏览运行记录"), "{text}");
+    assert!(text.contains("返回最新运行记录并继续跟随"), "{text}");
+    for stale in ["编辑当前字段", "切换当前选项", "自动求解可用空间"] {
+        assert!(
+            !text.contains(stale),
+            "running help leaked form control {stale}: {text}"
+        );
+    }
+}
+
+#[test]
 fn provision_result_demo_uses_real_result_workbench_state() {
     let state = demo::build_scene("provision-result-success").unwrap();
     assert!(state.provision().result_plan.is_some());
@@ -127,6 +237,12 @@ fn provision_result_demo_uses_real_result_workbench_state() {
         .result_workbench
         .region_selection()
         .is_some());
+    let table = state
+        .result_partition_table_view()
+        .expect("result partition table view");
+    assert_eq!(table.rows[0][2], "FAT16");
+    assert_eq!(table.rows[1][2], "exFAT");
+    assert_eq!(table.rows[2][2], "exFAT");
 
     let screen = screen_text("provision-result-success");
     let compact = screen.replace(' ', "");
@@ -145,6 +261,41 @@ fn provision_result_demo_uses_real_result_workbench_state() {
         assert!(
             compact.contains(expected),
             "missing {expected} in result demo"
+        );
+    }
+    assert!(compact.contains("Enter/Esc返回设备列表"));
+    assert!(!compact.contains("Esc/Enter返回设备列表"));
+}
+
+#[test]
+fn provision_result_help_is_stage_specific_instead_of_reusing_form_controls() {
+    use edpcli::tui::state::NavCommand;
+
+    let mut state = demo::build_scene("provision-result-success").unwrap();
+    let _ = state.navigate(NavCommand::Help, 20);
+    let (width, height) = (120, 36);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(text.contains("快捷键·制盘结果"), "{text}");
+    assert!(text.contains("切换结果窗口"), "{text}");
+    assert!(text.contains("返回设备列表"), "{text}");
+    for stale in [
+        "编辑当前字段",
+        "切换当前选项",
+        "自动求解可用空间",
+        "计划页导出镜像",
+    ] {
+        assert!(
+            !text.contains(stale),
+            "result help leaked form control {stale}: {text}"
         );
     }
 }
