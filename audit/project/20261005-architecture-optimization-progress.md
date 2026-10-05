@@ -18,7 +18,7 @@
 | G2 · 任务边界 | 主体完成 | `SingleFlightGate`、`TaskSlot`、`CatalogSnapshot`、秘密值类型与结构化错误已经进入运行时；设备与备份刷新共用一次目录快照。 |
 | G3 · UI 契约 | 主体完成 | `ActionSpec` 已成为帮助/提示/可用性的共享描述；确认窗、表单、备份页等已有宽高响应式和对应行为测试。 |
 | G4 · 职责迁移 | 完成 | 已建立 `domain/` 与 `infrastructure/` 边界，恢复功能状态、写服务及制盘准备/提交职责已按明确边界拆分；crate 根只保留 12 个稳定公开模块，16 个历史兼容模块全部收回 crate 内部。 |
-| G5 · 工程收口 | 完成 | 架构文档、API 门面、fast/full 路由、仓库门禁、跨平台 CI 与五平台 Virtual Disk HIL 均已形成闭环；Windows CRLF 与 cfg 专属 Clippy 问题也已由远端矩阵发现并修复。 |
+| G5 · 工程收口 | 工程门禁完成；实机补验通过 | 架构文档、API 门面、fast/full 路由、仓库门禁、跨平台 CI 与五平台 Virtual Disk HIL 已验证对应历史提交；后续独立复核的会话隔离与窄屏消息问题已修复，本机新版真实 USB/TUI 补验见文末记录。 |
 
 ## 本轮新增收口
 
@@ -64,3 +64,9 @@
 - 初次仓库清理中 `cargo clean` 删除 352,489 个构建文件，共 68.6 GiB；本轮 detector 验收后再次删除 8,204 个测试构建文件、2.7 GiB，并清理 Python `__pycache__`/`.pyc` 与 `.DS_Store`。最终 release 使用临时 `CARGO_TARGET_DIR` 构建并安装，临时目录自动删除，仓库保持无 `target`。
 - 当前安装版：edpcli 2.5.0，Git `b3b73c45e36a`，release/aarch64-apple-darwin，SHA-256 `83033a8a9b5dbaeddda647f8f2782ec97b00077e036dbd519386d8a9893fe243`。
 - 后续新增配置类型轴时，必须同时更新 `profile_axes.tsv` 与 `protocol::profile_detector::PROFILE_AXIS_DETECTORS`；门禁会拒绝缺检测器、状态集合漂移、符号漂移或检测模式不一致。
+
+## 独立复核后的修复与实机补验
+
+后续复核发现来源密码域探测缺少表单会话隔离、窄屏长消息缺少完整访问入口及新版实机证据缺口。现已修复，并增加单列密码字段的区域名称、验证状态和透传显示。最终本地 fast/full、Windows all-targets Clippy 通过；当前安装 SHA-256 为 `877fd6c4eb5a24acda0e20515e282fb3e69baa553ddbc946f1f6543a75ec5e34`，对应 `e98c394bbec6+dirty` 工作区，尚未提交或推送。
+
+使用用户授权的 disk4 HIKSEMI 测试盘完成新版恢复、普通/加密格式化、窄屏确认与详情分页、写入进度、尺寸切换、安全退出和系统文件重挂读回。工程门禁、历史远端 CI、最终安装版与前一个修复安装版的验证范围分别记录，不以虚拟盘验证代替实机。完整结果、测试盘最终状态与本机证据索引见 [工程与 TUI 剩余项验收](20261005-engineering-tui-completion.md)。上文安装和规模数字保留为前一轮历史记录。
