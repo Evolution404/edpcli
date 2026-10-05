@@ -58,8 +58,9 @@
 - 静态源码读取点从 112 降至 91；`repository_suite` 103/103 通过；最终 non-HIL full gate 0 失败，总耗时 41.30 秒。
 - `profile_axes` 检测器目录新增后：`protocol_suite` 76/76、`repository_suite` 103/103、Windows 与本机 `clippy -D warnings`、rustdoc 均通过；full gate 0 失败，总耗时 25.66 秒。
 - 提交 `62154653866326002dbeb1cecf3ee55009b81773` 的 GitHub `Rust CI` 全矩阵成功；`Virtual Disk HIL` 在 macOS arm64、Linux arm64/x86_64、Windows arm64/x86_64 五个平台/架构作业全部成功。
+- `profile_axes` 检测器提交 `b3b73c45e36a8a7a03fe17d99abdc14b5a5601fa` 再次通过 GitHub `Rust CI` 全矩阵与 `Virtual Disk HIL` 5/5，证明 registry/semantic 复用未破坏跨平台协议与写盘链。
 - 本地/远端历史分支已清理，仓库只保留 `main` / `origin/main`；历史 worktree 已全部移除，磁盘上无残留 edpcli worktree 目录。
 - 8 个未跟踪的历史审计/benchmark/repro 文件已在确认结论被后续实现和本记录覆盖后删除；未把带本机路径/实机证据的临时材料补提交到仓库。
-- `cargo clean` 删除 352,489 个构建文件，共 68.6 GiB；随后清理 Python `__pycache__`/`.pyc` 与 `.DS_Store`。最终 release 使用临时 `CARGO_TARGET_DIR` 构建并安装，临时目录自动删除，仓库保持无 `target`。
-- 当前安装版：edpcli 2.5.0，Git `621546538663`，release/aarch64-apple-darwin，SHA-256 `17435d66a9758ac25c9460a47d309d67d78c482c5b1b2c7141d81cb58c58e2b1`。
+- 初次仓库清理中 `cargo clean` 删除 352,489 个构建文件，共 68.6 GiB；本轮 detector 验收后再次删除 8,204 个测试构建文件、2.7 GiB，并清理 Python `__pycache__`/`.pyc` 与 `.DS_Store`。最终 release 使用临时 `CARGO_TARGET_DIR` 构建并安装，临时目录自动删除，仓库保持无 `target`。
+- 当前安装版：edpcli 2.5.0，Git `b3b73c45e36a`，release/aarch64-apple-darwin，SHA-256 `83033a8a9b5dbaeddda647f8f2782ec97b00077e036dbd519386d8a9893fe243`。
 - 后续新增配置类型轴时，必须同时更新 `profile_axes.tsv` 与 `protocol::profile_detector::PROFILE_AXIS_DETECTORS`；门禁会拒绝缺检测器、状态集合漂移、符号漂移或检测模式不一致。
