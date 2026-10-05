@@ -160,6 +160,11 @@ fn desktop_result_fixtures_use_typed_partial_reports_and_do_not_claim_unconfirme
         let lines = screen(&mut state, 200, 60);
         let compact = lines.join("\n").replace(' ', "");
         assert!(compact.contains("后续处理"));
+        let pane_bottom = &lines[58];
+        assert!(
+            pane_bottom.starts_with('└') || pane_bottom.starts_with('┗'),
+            "result partition pane must fill the content height: {pane_bottom}"
+        );
         if scene.contains("rollback") {
             assert!(compact.contains("回滚读回失败"));
         }
@@ -172,7 +177,7 @@ fn desktop_result_fixtures_use_typed_partial_reports_and_do_not_claim_unconfirme
 }
 
 #[test]
-fn bounded_desktop_progress_log_keeps_write_safety_at_the_bottom() {
+fn desktop_progress_log_fills_workspace_and_keeps_write_safety_at_the_bottom() {
     for scene in ["provision-running", "provision-running-long"] {
         let mut state = demo::build_scene(scene).unwrap();
         let lines = screen(&mut state, 200, 60);
@@ -183,7 +188,6 @@ fn bounded_desktop_progress_log_keeps_write_safety_at_the_bottom() {
             .position(|line| line.replace(' ', "").contains("运行记录"))
             .unwrap();
         assert!(log_top < 20);
-        // The card is bounded even though the safety footer stays at row 60.
         let bottom = lines
             .iter()
             .enumerate()
@@ -191,6 +195,10 @@ fn bounded_desktop_progress_log_keeps_write_safety_at_the_bottom() {
             .find(|(_, line)| line.contains('└') || line.contains('┗'))
             .unwrap()
             .0;
-        assert!(bottom - log_top <= 16);
+        assert_eq!(
+            bottom,
+            lines.len() - 2,
+            "progress log card must own all space above the safety footer"
+        );
     }
 }

@@ -70,15 +70,13 @@ pub(crate) fn draw_operation_progress(
         compact::draw_compact_progress(frame, area, run, animation_frame);
         return;
     }
-    // Bound the log instead of stretching a handful of events over the desktop.
-    let log_height = run.log.len().saturating_add(4).clamp(6, 16) as u16;
+    // The outer progress workspace must always fill its parent.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Length(8),
-            Constraint::Length(log_height),
-            Constraint::Min(0),
+            Constraint::Min(6),
             Constraint::Length(1),
         ])
         .split(area);
@@ -237,6 +235,6 @@ pub(crate) fn draw_operation_progress(
     };
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(safety, theme.muted()))),
-        chunks[4],
+        chunks[3],
     );
 }

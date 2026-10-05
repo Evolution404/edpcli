@@ -14,18 +14,6 @@ pub(super) fn render_partition_pane(
     state: &AppState,
     focused: bool,
 ) {
-    let row_count = state
-        .provision()
-        .result_plan
-        .as_ref()
-        .map_or(0, |plan| plan.partitions.len());
-    let area = Rect::new(
-        area.x,
-        area.y,
-        area.width,
-        area.height
-            .min(row_count.saturating_add(22).min(u16::MAX as usize) as u16),
-    );
     let block = crate::tui::ui::card("分区结果", focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
