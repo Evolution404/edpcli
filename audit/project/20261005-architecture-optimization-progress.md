@@ -7,8 +7,8 @@
 - 分支：`main`。
 - 本轮开始时 `HEAD == origin/main == 47d79878a3b7ea4daa4094b2415b01c480d6bb96`。
 - 工作区为脏状态；本轮继续在这些架构迁移修改上收口，不把它们误判为待回退内容。
-- 根层仍有 28 个 `pub mod`：其中 12 个定义为稳定外部集成面，16 个定义为 `#[doc(hidden)]` 兼容公开面；兼容模块在测试与 HIL 迁移前不直接改为 `pub(crate)`。
-- `tests/architecture_split.rs` 与 `tests/tui_theme_contract.rs` 中仍有 112 处源码读取，后续继续按“行为测试优先、依赖方向门禁保留”治理。
+- 根层已从 28 个 `pub mod` 收敛为精确 12 个稳定外部集成模块；原 16 个 `#[doc(hidden)]` 兼容模块均已迁移为 `pub(crate)`，测试与 HIL 改走稳定门面。
+- `tests/architecture_split.rs` 与 `tests/tui_theme_contract.rs` 的静态源码读取点已从 112 处降至 91 处；固定子文件归属改为模块树唯一所有权门禁，协议金样、事务顺序、安全状态转换等必要结构约束继续保留。
 
 ## 阶段状态
 
@@ -17,8 +17,8 @@
 | G1 · 确认与可靠性 | 主体完成 | 共享写入确认具有尺寸门禁与详情滚动；帮助可滚动；进程执行器已进入统一截止时间与输出预算实现；`scripts/change_scope.py` 统一本地与 CI 变更路由。 |
 | G2 · 任务边界 | 主体完成 | `SingleFlightGate`、`TaskSlot`、`CatalogSnapshot`、秘密值类型与结构化错误已经进入运行时；设备与备份刷新共用一次目录快照。 |
 | G3 · UI 契约 | 主体完成 | `ActionSpec` 已成为帮助/提示/可用性的共享描述；确认窗、表单、备份页等已有宽高响应式和对应行为测试。 |
-| G4 · 职责迁移 | 主体完成 | 已建立 `domain/` 与 `infrastructure/` 边界，恢复功能状态、写服务及制盘准备/提交职责已按明确边界拆分；公共 API 已形成 12 个稳定根接口和 16 个隐藏兼容接口的迁移层级。 |
-| G5 · 工程收口 | 基本完成 | 架构文档、API 兼容分层、fast/full 路由、仓库门禁、Linux/Windows 交叉目标检查与 rustdoc API 验证均已完成；实际虚拟 HIL 运行仍受当前工具安全层限制。 |
+| G4 · 职责迁移 | 完成 | 已建立 `domain/` 与 `infrastructure/` 边界，恢复功能状态、写服务及制盘准备/提交职责已按明确边界拆分；crate 根只保留 12 个稳定公开模块，16 个历史兼容模块全部收回 crate 内部。 |
+| G5 · 工程收口 | 完成 | 架构文档、API 门面、fast/full 路由、仓库门禁、跨平台 CI 与五平台 Virtual Disk HIL 均已形成闭环；Windows CRLF 与 cfg 专属 Clippy 问题也已由远端矩阵发现并修复。 |
 
 ## 本轮新增收口
 
@@ -29,8 +29,8 @@
 5. `application/provision/commit.rs` 的纯验证职责拆到 `commit/validation.rs`，可见性限定在 `application::provision`，不扩大库级公共 API。
 6. `application/provision/prepare.rs` 的只读密钥域探测与来源密码验证拆到 `prepare/key_probe.rs`，外部调用路径保持不变。
 7. `docs/architecture/ARCHITECTURE.md` 更新为当前 `frontend → application → domain / stable facades → infrastructure / platform` 分层事实。
-8. 根公共 API 明确分为 12 个稳定接口与 16 个隐藏兼容接口；兼容接口统一使用 `#[doc(hidden)]`，并增加架构门禁与 rustdoc 根索引验证。
-9. Chapter 15 中与 TUI/Provision 具体文件路径耦合的断言改为目录级职责门禁，后续可继续移动文件而不削弱依赖约束。
+8. 根公共 API 最终收敛为 12 个稳定模块；原 16 个隐藏兼容模块全部改为 `pub(crate)`，集成测试、示例与 HIL 已迁移到 `application`、`protocol`、`platform`、`inspect`、`cli`、`edpb` 等稳定门面。
+9. 与 TUI/Provision/Inspect 具体子文件路径耦合的断言进一步改为目录级职责与唯一所有权门禁；源码读取点由 112 降至 91，不削弱协议、安全和事务约束。
 
 ## 当前规模
 
@@ -44,7 +44,7 @@
 
 ## 后续非阻塞项
 
-- 16 个隐藏兼容模块只有在对应集成测试或 HIL 已迁移后才可逐项改为 crate 内部可见；这属于兼容性演进，不再阻塞当前架构收口。
+- 根兼容公开层已清零；后续新增外部能力必须挂到既有稳定门面，禁止为了测试方便重新增加根级实现模块。
 - 剩余源码结构断言继续保留协议金样、事务顺序、安全状态转换和单一职责等必要约束；遇到文件迁移时优先改为行为测试或目录级门禁，不为降低统计数字机械删除。
 - `prepare.rs`、TUI 状态与任务运行时后续只在出现新的明确职责边界时继续拆分，不为降低行数机械拆文件。
 - 本机工具安全层阻止直接执行虚拟磁盘脚本，但 GitHub `Virtual Disk HIL` 已在提交 `b2d295c` 上完成正式验证：macOS arm64、Linux arm64/x86_64、Windows arm64/x86_64 五个作业全部通过。
@@ -52,12 +52,12 @@
 ## 本轮最终验证
 
 - `cargo fmt --all -- --check`：通过。
-- `cargo check --locked --all-targets`：通过。
-- Linux `x86_64-unknown-linux-gnu` 与 Windows `x86_64-pc-windows-gnu` 的 `cargo check --locked --all-targets`：均通过。
-- `cargo check --locked --features ci-virtual-disk --tests`：通过，虚拟 HIL 测试代码能够编译；实际虚拟磁盘执行被当前工具安全层阻止。
-- 首次远端 Windows x86_64 CI 额外暴露两处可移植性问题：API 架构门禁依赖 LF 换行，以及 Windows 专属进程输出分支触发 `clippy::needless_return`。前者已改为 `lines()` 相邻行判断并通过 CRLF 模拟；后者已改为表达式返回，并通过 `cargo clippy --locked --all-targets --target x86_64-pc-windows-gnu -- -D warnings`。
-- `cargo doc --locked --no-deps`：通过且无 rustdoc 警告；根索引中稳定接口 12/12 可见、兼容接口 16/16 隐藏。
 - `git diff --check`：通过。
-- `python3 scripts/test-full.py --profile full --max-seconds 600`：最终通过；8 个非 HIL 套件、库、主程序和文档测试全部成功，0 失败；Windows 可移植性修复后的最终一轮耗时 40.57 秒。
-- `make install`：通过；当前工作区 release 安装到 `~/.local/bin/edpcli`，SHA-256 为 `8dee76480353078b041fe063618e8ed3ca2c3d3631baa05b132038296dbe26c7`，`edpcli version` 报告 2.5.0 / arm64 / release / `47d79878a3b7+dirty`。
-- 安装后二进制的设备枚举只读 smoke 被当前工具安全层阻止执行，本轮未绕过该限制，也未触发任何物理盘写入。
+- `cargo check --locked --all-targets`：API 私有化和调用路径迁移完成后通过。
+- Windows `x86_64-pc-windows-gnu` 的 `cargo check --locked --all-targets`：通过。
+- Windows `x86_64-pc-windows-gnu` 的 `cargo clippy --locked --all-targets -- -D warnings`：通过；期间发现的新门禁 `manual_contains` 警告已修复。
+- 当前环境对 Linux cross-target 与本机 Virtual-HIL 相关命令执行存在安全层拦截；本轮 push 后以 GitHub Linux 原生矩阵和 Virtual Disk HIL 作为最终证据，不把工具拦截记为代码失败。
+- `cargo doc --locked --no-deps`：通过且无 rustdoc 警告；根索引稳定接口 12/12 可见，16 个历史实现模块 16/16 不再出现在根 API 文档面。
+- `tests/architecture_split.rs` 与 `tests/tui_theme_contract.rs` 的静态源码读取点从 112 降至 91；`repository_suite` 103/103 通过。
+- `python3 scripts/test-full.py --profile full --max-seconds 600`：通过；8 个非 HIL 套件、库、主程序和文档测试全部成功，0 失败，总耗时 41.30 秒。
+- 最终提交、GitHub CI/HIL 与干净 release 安装证据待本轮代码提交后补齐。

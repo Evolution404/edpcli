@@ -2,13 +2,13 @@ use std::collections::BTreeMap;
 use std::io;
 
 use edpcli::{
-    common::{EXIT_IO, EXIT_ROLLED_BACK, SECTOR},
+    application::filesystem::FilesystemKind,
+    application::support::{EXIT_IO, EXIT_ROLLED_BACK, SECTOR},
     diskio::{
         atomic_write_official_provision_sectors, execute_write_transaction,
         execute_write_transaction_observed, SectorDev, SectorWriteStage, TransactionActivityPhase,
         WriteTransactionPlan,
     },
-    filesystem::FilesystemKind,
     provision::{
         build_plain_provision_write_plan, PlainCleanupExtent, PlainPartitionSpec,
         PlainProvisionPlan,
@@ -331,7 +331,7 @@ fn transaction_diagnostics_retain_sync_readback_and_rollback_causes() {
         assert!(error.msg.contains(cause), "{}", error.msg);
         assert!(error.msg.contains(stage), "{}", error.msg);
         if matches!(phase, FailurePhase::WriteAndRollback) {
-            assert_eq!(error.code, edpcli::common::EXIT_INTERMEDIATE);
+            assert_eq!(error.code, edpcli::application::support::EXIT_INTERMEDIATE);
             assert!(
                 error.msg.contains("rollback write failure"),
                 "{}",

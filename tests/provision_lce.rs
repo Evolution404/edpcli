@@ -1,5 +1,5 @@
 use edpcli::{
-    crypto::a6b0_full_offset,
+    protocol::crypto::a6b0_full_offset,
     protocol::lba7_compat::{
         locate_lba7_compatibility_extent_from_geometry, LBA7_COMPAT_EXTENT_TOTAL_SIZE,
     },

@@ -3,14 +3,14 @@ use crate::common;
 use std::fs;
 
 use common::*;
+use edpcli::application::backup::{backup_entry_is_healthy, BackupCatalog};
 use edpcli::application::media_identity::{
     match_media_identity, BackupAffinity, BackupAffinityPolicy, ControlledLineageEvidence,
     DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation, MediaIdentitySnapshot,
     ProtocolIdentityEvidence, SerialQuality,
 };
-use edpcli::backup_catalog::BackupCatalog;
+use edpcli::application::metadata::backup_ownership;
 use edpcli::edpb::{self, CoreCapture};
-use edpcli::metainfo::backup_ownership;
 use edpcli::provision::DiskProvisionKind;
 
 fn write_edpb(path: &std::path::Path, data: &[u8], snapshot_id: &str) {
@@ -213,7 +213,7 @@ fn v3_raw_serial_can_form_strong_group_without_persisted_serial_digest() {
 
     let mut legacy_digest = second.clone();
     legacy_digest.hardware.serial = None;
-    legacy_digest.hardware.serial_sha256 = Some(edpcli::sha256::sha256_hex(b"RAW-SERIAL-123"));
+    legacy_digest.hardware.serial_sha256 = Some(edpcli::edpb::sha256_hex(b"RAW-SERIAL-123"));
     let legacy = make_entry("legacy.edpb", legacy_digest);
     assert_eq!(
         backup_group_key(&a),
@@ -420,7 +420,7 @@ fn catalog_and_workspace_share_health_and_fail_closed_on_verification_errors() {
         assert_eq!(entry.health(), expected);
         assert_eq!(row.health(), expected);
         assert_eq!(
-            edpcli::backup_catalog::is_healthy(&entry),
+            backup_entry_is_healthy(&entry),
             expected == BackupHealth::Verified
         );
         assert_eq!(row.is_restorable(), expected == BackupHealth::Verified);

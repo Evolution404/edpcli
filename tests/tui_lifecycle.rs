@@ -1,14 +1,14 @@
 use std::process::{Command, Stdio};
 
-use edpcli::common::EXIT_USAGE;
+use edpcli::application::support::EXIT_USAGE;
 use edpcli::tui::{
     render,
     state::{AppState, NavCommand, ProvisionStage, Workspace, WriteKind},
 };
 use ratatui::{backend::TestBackend, style::Modifier, Terminal};
 
-fn usb_device() -> edpcli::disk_scan::Row {
-    let mut row = edpcli::disk_scan::Row {
+fn usb_device() -> edpcli::cli::Row {
+    let mut row = edpcli::cli::Row {
         disk: 6,
         size: 64_000_000_000,
         vid: "0dd8".into(),

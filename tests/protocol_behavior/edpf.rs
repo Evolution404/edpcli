@@ -1,5 +1,5 @@
 use edpcli::{
-    crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling},
+    protocol::crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling},
     protocol::{
         edpf::{EdpPartitionType, PassInfo},
         lba12::parse_lba12,

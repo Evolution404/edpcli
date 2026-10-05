@@ -3,8 +3,8 @@
 use crate::common;
 
 use common::*;
-use edpcli::common::SECTOR;
-use edpcli::sectors::parse_lba12;
+use edpcli::application::support::SECTOR;
+use edpcli::protocol::sectors::parse_lba12;
 
 fn have_all_fixtures() -> bool {
     KEYS.iter().all(|k| fixture_bin(k).is_some())

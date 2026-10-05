@@ -74,8 +74,8 @@ fn top_level_tabs_are_always_visible_and_active_page_is_highlighted() {
     assert!(active.contains('设'), "{active}");
 }
 
-fn provision_device() -> edpcli::disk_scan::Row {
-    let mut row = edpcli::disk_scan::Row {
+fn provision_device() -> edpcli::cli::Row {
+    let mut row = edpcli::cli::Row {
         disk: 6,
         size: 64_000_000_000,
         vid: "1234".into(),

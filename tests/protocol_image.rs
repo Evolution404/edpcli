@@ -1,5 +1,5 @@
 use edpcli::{
-    crypto::{a6b0_full, a7f0_full, crc32_bare, lba6_decode},
+    protocol::crypto::{a6b0_full, a7f0_full, crc32_bare, lba6_decode},
     protocol::{
         image::{parse_protocol_image, ProtocolImageContext, PROTOCOL_IMAGE_BYTES},
         lba6::encode_safe6,

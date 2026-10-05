@@ -7,17 +7,17 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use common::load_disk_image;
-use edpcli::backup_metadata::{
+use edpcli::application::backup::{
     acquire_metadata, acquire_plain_metadata, parse_lba7_compatibility_geometry,
     parse_partition_geometry, FilesystemKind, LBA7_COMPAT_EXTENT_SECTORS,
 };
-use edpcli::common::SECTOR;
-use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling};
+use edpcli::application::filesystem::{build_empty_exfat, build_empty_fat16, build_empty_fat32};
+use edpcli::application::support::SECTOR;
 use edpcli::diskio::SectorDev;
 use edpcli::edpb::{
     self, CaptureLevel, CoreCapture, MetadataCapture, RestorePolicy, SemanticStatus,
 };
-use edpcli::filesystem::{build_empty_exfat, build_empty_fat16, build_empty_fat32};
+use edpcli::protocol::crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling};
 
 const NETAC_DEVICE_ID: &str = "disk&ven_netac&prod_onlydisk";
 const NETAC_TOTAL_SECTORS: u64 = 122_880_000;

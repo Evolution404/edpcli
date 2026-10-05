@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use edpcli::application::BackupWorkspaceItem;
-use edpcli::disk_scan::Row;
+use edpcli::cli::Row;
 use edpcli::diskio::BackupIntegrityStatus;
 use edpcli::tui::{
     render,
@@ -148,7 +148,7 @@ fn canonical_identity_projection_distinguishes_confirmed_possible_and_conflict()
 
 #[test]
 fn ch14_identity_search_matches_both_workspaces() {
-    let capacity_query = edpcli::common::fmt_capacity(64_000_000_000).to_lowercase();
+    let capacity_query = edpcli::application::support::fmt_capacity(64_000_000_000).to_lowercase();
     for query in [
         "1234:5678".to_string(),
         "test_test".to_string(),

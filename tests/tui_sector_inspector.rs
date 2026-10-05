@@ -43,7 +43,7 @@ fn workspace_with_partition(items: Vec<AdvancedInspectItem>) -> AdvancedInspectW
 }
 
 fn item(lba: u64, decoded: bool) -> AdvancedInspectItem {
-    let mut raw = (0..edpcli::common::SECTOR)
+    let mut raw = (0..edpcli::application::support::SECTOR)
         .map(|index| index as u8)
         .collect::<Vec<_>>();
     raw[0] = 0x12;
@@ -57,7 +57,10 @@ fn item(lba: u64, decoded: bool) -> AdvancedInspectItem {
         raw_nonzero: 510,
         decoded: decoded.then_some(decoded_bytes),
         decode_ranges: if decoded {
-            vec![edpcli::inspect::DecodeRange::new(0, edpcli::common::SECTOR)]
+            vec![edpcli::inspect::DecodeRange::new(
+                0,
+                edpcli::application::support::SECTOR,
+            )]
         } else {
             Vec::new()
         },
@@ -898,7 +901,7 @@ fn sector_inspector_loads_on_demand_navigates_bytes_and_bounds_cache() {
     let non_metadata = loaded
         .items
         .iter()
-        .filter(|value| value.lba >= edpcli::common::METADATA_SECTOR_COUNT as u64)
+        .filter(|value| value.lba >= edpcli::application::support::METADATA_SECTOR_COUNT as u64)
         .map(|value| value.lba)
         .collect::<Vec<_>>();
     assert_eq!(non_metadata.len(), 5);
@@ -996,7 +999,7 @@ fn field_to_hex_link_preserves_cross_sector_range_and_yank_register() {
         key: edpcli::inspect::InspectFieldKey::Synthetic,
         range: AbsoluteByteRange {
             start: 0x1f0,
-            end_exclusive: edpcli::common::SECTOR as u64 + 0x30,
+            end_exclusive: edpcli::application::support::SECTOR as u64 + 0x30,
         },
         field_type: InspectFieldType::Identity,
         raw: (0..64).map(|value| value as u8).collect(),
@@ -1448,8 +1451,8 @@ fn structured_search_next_and_previous_cycle_all_cached_matches() {
     second.fields = vec![InspectField {
         key: edpcli::inspect::InspectFieldKey::Synthetic,
         range: AbsoluteByteRange {
-            start: edpcli::common::SECTOR as u64,
-            end_exclusive: edpcli::common::SECTOR as u64 + 2,
+            start: edpcli::application::support::SECTOR as u64,
+            end_exclusive: edpcli::application::support::SECTOR as u64 + 2,
         },
         field_type: InspectFieldType::Identity,
         raw: vec![0x12, 0x01],

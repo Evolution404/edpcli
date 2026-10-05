@@ -6,13 +6,13 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use edpcli::common::SECTOR;
+use edpcli::application::support::SECTOR;
+use edpcli::edpb::sha256_hex;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::provision::{
     generate_image, OnlyId, ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
     TargetIdentity,
 };
-use edpcli::sha256::sha256_hex;
 
 pub const FIXTURE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/protocol");
 
@@ -56,12 +56,12 @@ pub fn neg_id_bin() -> Option<PathBuf> {
 /// 严格读取一张 LBA0-12 / 6656B 协议镜像；其它长度直接拒绝。
 pub fn load_disk_image(key: &str) -> Option<Vec<u8>> {
     let data = fs::read(fixture_bin(key)?).ok()?;
-    (data.len() == edpcli::common::METADATA_IMAGE_LEN).then_some(data)
+    (data.len() == edpcli::application::support::METADATA_IMAGE_LEN).then_some(data)
 }
 
 pub fn read_fn_of(
     data: &[u8],
-) -> impl Fn(u32) -> Result<Vec<u8>, edpcli::common::EdpCliError> + '_ {
+) -> impl Fn(u32) -> Result<Vec<u8>, edpcli::application::support::EdpCliError> + '_ {
     move |lba| Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
 }
 
@@ -169,7 +169,7 @@ pub struct FakeRunner {
     pub canned: HashMap<String, String>,
 }
 
-impl edpcli::sysinfo::CmdRunner for FakeRunner {
+impl edpcli::platform::system::CmdRunner for FakeRunner {
     fn check_output(&self, cmd: &[&str], _t: Duration) -> std::io::Result<String> {
         self.canned
             .get(&cmd.join(" "))
@@ -286,15 +286,15 @@ pub fn set_mtime(path: &std::path::Path, epoch: i64) {
 
 /// Upgrade a hand-written test row to the same canonical media-identity shape
 /// that production device scanning provides.
-pub fn confirm_row_identity(row: &mut edpcli::disk_scan::Row) {
+pub fn confirm_row_identity(row: &mut edpcli::cli::Row) {
     use edpcli::application::media_identity::{
         DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation, MediaIdentityPin,
         MediaIdentitySnapshot, ProtocolIdentityEvidence,
     };
 
     let hardware = HardwareIdentityEvidence {
-        total_sectors: Some(row.size / edpcli::common::SECTOR as u64),
-        logical_sector_size: Some(edpcli::common::SECTOR as u32),
+        total_sectors: Some(row.size / edpcli::application::support::SECTOR as u64),
+        logical_sector_size: Some(edpcli::application::support::SECTOR as u32),
         ..HardwareIdentityEvidence::default()
     };
     let snapshot = if row.provision_kind == edpcli::provision::DiskProvisionKind::Plain {
@@ -318,16 +318,16 @@ pub fn confirm_row_identity(row: &mut edpcli::disk_scan::Row) {
     };
     row.identity_pin = Some(MediaIdentityPin::new(
         snapshot,
-        &vec![0; edpcli::common::METADATA_IMAGE_LEN],
+        &vec![0; edpcli::application::support::METADATA_IMAGE_LEN],
     ));
 }
 
 /// Explicit EDP inspect context for TUI tests that exercise the protocol tree.
-pub fn edp_inspect_context(total_sectors: u64) -> edpcli::inspect_target::InspectDiskContext {
-    use edpcli::backup_metadata::{Lba7CompatibilityGeometry, PartitionGeometry};
+pub fn edp_inspect_context(total_sectors: u64) -> edpcli::inspect::InspectDiskContext {
+    use edpcli::application::backup::{Lba7CompatibilityGeometry, PartitionGeometry};
 
-    let mut context = edpcli::inspect_target::InspectDiskContext::new_with_partition_table(
-        vec![0; edpcli::common::METADATA_IMAGE_LEN],
+    let mut context = edpcli::inspect::InspectDiskContext::new_with_partition_table(
+        vec![0; edpcli::application::support::METADATA_IMAGE_LEN],
         Some("disk&ven_test&prod_test".into()),
         total_sectors,
         Some(edpcli::provision::DiskProvisionKind::Mode0),
@@ -341,8 +341,8 @@ pub fn edp_inspect_context(total_sectors: u64) -> edpcli::inspect_target::Inspec
         need_disturb: 0,
         need_encrypt: u32::from(partition_type != 1),
         start_sector,
-        sector_size: edpcli::common::SECTOR as u64,
-        partition_size: sector_count * edpcli::common::SECTOR as u64,
+        sector_size: edpcli::application::support::SECTOR as u64,
+        partition_size: sector_count * edpcli::application::support::SECTOR as u64,
         sector_count,
         user_key_crc: 0,
         file_key_crc: 0,

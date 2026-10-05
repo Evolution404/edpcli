@@ -9,15 +9,15 @@ use crate::gold_name;
 use std::{collections::HashSet, fs};
 
 use common::FIXTURE_DIR;
-use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
-use edpcli::crypto::{
+use edpcli::application::metadata::ownership_from_lba8;
+use edpcli::application::support::{METADATA_IMAGE_LEN, SECTOR};
+use edpcli::diskio::BackupMeta;
+use edpcli::edpb::sha256_hex;
+use edpcli::inspect::InspectMeta;
+use edpcli::protocol::crypto::{
     a6b0_decrypt, a6b0_full, a7f0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling, RCON,
     SBOX, SBOX2,
 };
-use edpcli::diskio::BackupMeta;
-use edpcli::inspect::InspectMeta;
-use edpcli::metainfo::ownership_from_lba8;
-use edpcli::sha256::sha256_hex;
 use encoding_rs::GBK;
 
 fn load(name: &str) -> Vec<u8> {

@@ -16,9 +16,11 @@ pub trait PartitionTransform: Send + Sync {
     ) -> [u8; TRANSFORM_SECTOR_SIZE];
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct IdentityTransform;
 
+#[cfg(test)]
 impl PartitionTransform for IdentityTransform {
     fn transform_sector(
         &self,
@@ -39,10 +41,12 @@ impl EdpSm4Transform {
         Self { file_key }
     }
 
+    #[cfg(test)]
     pub const fn file_key(&self) -> &[u8; 16] {
         &self.file_key
     }
 
+    #[cfg(test)]
     pub fn decrypt_sector(
         &self,
         source: &[u8; TRANSFORM_SECTOR_SIZE],

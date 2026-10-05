@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use edpcli::application::filesystem::FilesystemKind;
 use edpcli::application::post_restore::{
     EncryptedPartitionReinitializeResult, EncryptedPostRestoreError,
     EncryptedPostRestoreFormatResult, MetadataRestoreOutcome, MetadataRestoreReport,
@@ -7,7 +8,6 @@ use edpcli::application::post_restore::{
     PostRestorePartitionState,
 };
 use edpcli::edpb::ManifestPartition;
-use edpcli::filesystem::FilesystemKind;
 use edpcli::provision::ExistingFileKeyError;
 use edpcli::tui::state::{AppState, NavCommand, StateEffect, WizardStage, WriteIntent, WriteKind};
 

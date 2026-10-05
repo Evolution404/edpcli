@@ -4,9 +4,9 @@
 use crate::common;
 
 use common::*;
-use edpcli::common::SECTOR;
-use edpcli::crypto::{a6b0_full, crc32_bare, xor_rolling};
-use edpcli::sectors::EDPF_TABLE_LEN;
+use edpcli::application::support::SECTOR;
+use edpcli::protocol::crypto::{a6b0_full, crc32_bare, xor_rolling};
+use edpcli::protocol::sectors::EDPF_TABLE_LEN;
 
 #[test]
 fn lba12_decrypts_to_edpf() {

@@ -4,8 +4,8 @@
 
 use crate::gold_name;
 
-use edpcli::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
 use edpcli::inspect::{analyze_sector, InspectMeta};
+use edpcli::protocol::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
 use std::{fs, path::Path};
 
 const GOLD: &str = include_str!("../audit/protocol/gold_samples.tsv");
@@ -107,7 +107,7 @@ fn strict_gold_legacy_fingerprints_are_not_a_single_required_conjunction() {
             "observed legacy UsbOnlyInfo shape: {name}"
         );
 
-        let prefix_hash = edpcli::sha256::sha256_hex(&image[..400]);
+        let prefix_hash = edpcli::edpb::sha256_hex(&image[..400]);
         let bootstrap_class = if image[..400].iter().all(|byte| *byte == 0) {
             0
         } else if prefix_hash == "4eeee8d52f8b58d9a1fa35b63a14c8c5dba1b2717eaa44e6fb1ff0327ccbe5ed"
@@ -144,10 +144,10 @@ fn general_census_lba0_bootstrap_is_exhaustively_three_first_party_profiles() {
     assert_eq!(usb_main.len(), 400);
     assert_eq!(netac.len(), 400);
     assert_eq!(
-        edpcli::sha256::sha256_hex(&usb_main),
+        edpcli::edpb::sha256_hex(&usb_main),
         USB_MAIN_BSEC_PREFIX_SHA256
     );
-    assert_eq!(edpcli::sha256::sha256_hex(&netac), NETAC_PREFIX_SHA256);
+    assert_eq!(edpcli::edpb::sha256_hex(&netac), NETAC_PREFIX_SHA256);
 
     let mut counts = [0usize; 3]; // explicit-zero, UsbMainBSec, Netac MBR
     let mut total = 0usize;
@@ -158,7 +158,7 @@ fn general_census_lba0_bootstrap_is_exhaustively_three_first_party_profiles() {
         }
         let image = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join(columns[4])).unwrap();
         let prefix = &image[..400];
-        let hash = edpcli::sha256::sha256_hex(prefix);
+        let hash = edpcli::edpb::sha256_hex(prefix);
         let class = if hash == ZERO_PREFIX_SHA256 {
             assert!(prefix.iter().all(|byte| *byte == 0));
             0

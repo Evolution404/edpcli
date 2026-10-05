@@ -28,7 +28,23 @@ pub mod provision;
 pub mod provision_geometry;
 pub mod target_session;
 pub mod write;
+
+/// 稳定外部接口下的共享容量/退出语义兼容门面；实现仍由 crate 内部 `common` 持有。
+pub mod support {
+    pub use crate::common::*;
+}
+
+/// 稳定 application 门面下的文件系统纯模型与解析/格式化能力。
+pub mod filesystem {
+    pub use crate::filesystem::*;
+}
+
+/// 稳定 application 门面下的元信息汇总能力。
+pub mod metadata {
+    pub use crate::metainfo::*;
+}
 pub use crate::diskio::{BackupHealth, BackupIntegrityStatus};
+pub use crate::selectors::{BackupSelector, DeviceSelector};
 pub use backup::delete_backup_exact;
 use std::cell::RefCell;
 use std::io;

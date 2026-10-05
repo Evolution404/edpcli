@@ -5,10 +5,10 @@
 //!
 //! 全部不碰真盘。
 
+use edpcli::application::support::METADATA_IMAGE_LEN;
 use edpcli::application::WriteEvent;
-use edpcli::common::METADATA_IMAGE_LEN;
-use edpcli::ui;
-use edpcli::ui::render_write_event;
+use edpcli::cli::terminal_ui as ui;
+use edpcli::cli::terminal_ui::render_write_event;
 
 fn plain(event: &WriteEvent) -> String {
     ui::set_enabled_for_tests(false);
@@ -156,7 +156,7 @@ struct SerialRunner {
 }
 
 #[cfg(target_os = "macos")]
-impl edpcli::sysinfo::CmdRunner for SerialRunner {
+impl edpcli::platform::system::CmdRunner for SerialRunner {
     fn check_output(&self, cmd: &[&str], timeout: std::time::Duration) -> std::io::Result<String> {
         self.inner.check_output(cmd, timeout)
     }

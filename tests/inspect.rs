@@ -1,11 +1,11 @@
 use crate::common;
 
 use common::*;
-use edpcli::crypto::{a7f0_full, crc32_bare, xor_rolling};
 use edpcli::inspect::{
     analyze_sector, render_fields, render_hex, FieldStyle, FieldTransform, InspectDiagnosticCode,
     InspectMeta, InspectParseState,
 };
+use edpcli::protocol::crypto::{a7f0_full, crc32_bare, xor_rolling};
 
 #[test]
 fn ch14_lba8_summary_uses_stable_field_keys_not_display_labels() {
@@ -656,7 +656,7 @@ fn lba9_decodes_eppe_as_its_own_canonical_overlay_profile() {
 
 #[test]
 fn hex_renderer_has_offsets_and_field_legend_without_color() {
-    edpcli::ui::set_enabled_for_tests(false);
+    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
     let data = load_disk_image("netac").expect("netac fixture");
     let meta = meta_for("netac");
     let v = analyze_sector(7, &data[7 * 512..8 * 512], &meta);
@@ -665,12 +665,12 @@ fn hex_renderer_has_offsets_and_field_legend_without_color() {
     assert!(out.contains("+0x1F0:"));
     assert!(out.contains("字段图例"));
     assert!(!out.contains("\x1b["));
-    edpcli::ui::reset_enabled_for_tests();
+    edpcli::cli::terminal_ui::reset_enabled_for_tests();
 }
 
 #[test]
 fn lba8_llgb_fields_render_as_vertical_key_value_rows() {
-    edpcli::ui::set_enabled_for_tests(false);
+    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
     let data = load_disk_image("aigo").expect("aigo fixture");
     let meta = meta_for("aigo");
     let view = analyze_sector(8, &data[8 * 512..9 * 512], &meta);
@@ -691,7 +691,7 @@ fn lba8_llgb_fields_render_as_vertical_key_value_rows() {
             .any(|line| line.contains("GLab=") && line.contains("Dept=")),
         "LLGB 子字段不应再拼成一行: {out}"
     );
-    edpcli::ui::reset_enabled_for_tests();
+    edpcli::cli::terminal_ui::reset_enabled_for_tests();
 }
 
 #[test]
@@ -941,7 +941,7 @@ fn lba8_decrypts_one_extra_block_when_logical_length_is_16_byte_aligned() {
 
 #[test]
 fn repeated_structures_render_as_groups_instead_of_repeating_prefixes() {
-    edpcli::ui::set_enabled_for_tests(false);
+    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
     let data = load_disk_image("netac").expect("netac fixture");
     let meta = meta_for("netac");
 
@@ -957,12 +957,12 @@ fn repeated_structures_render_as_groups_instead_of_repeating_prefixes() {
     let mbr = render_fields(&analyze_sector(0, &data[..512], &meta));
     assert!(mbr.contains("分区 P1"), "{mbr}");
     assert_eq!(mbr.matches("P1").count(), 1, "P1 标题应只显示一次: {mbr}");
-    edpcli::ui::reset_enabled_for_tests();
+    edpcli::cli::terminal_ui::reset_enabled_for_tests();
 }
 
 #[test]
 fn structured_output_keeps_known_sector_lines_readable() {
-    edpcli::ui::set_enabled_for_tests(false);
+    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
     let data = load_disk_image("aigo").expect("aigo fixture");
     let meta = meta_for("aigo");
     for lba in [0u32, 4, 6, 7, 8, 9, 11, 12] {
@@ -976,12 +976,12 @@ fn structured_output_keeps_known_sector_lines_readable() {
             );
         }
     }
-    edpcli::ui::reset_enabled_for_tests();
+    edpcli::cli::terminal_ui::reset_enabled_for_tests();
 }
 
 #[test]
 fn edpf_key_material_renders_as_separate_rows() {
-    edpcli::ui::set_enabled_for_tests(false);
+    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
     let data = load_disk_image("netac").expect("netac fixture");
     let meta = meta_for("netac");
     let out = render_fields(&analyze_sector(7, &data[7 * 512..8 * 512], &meta));
@@ -995,12 +995,12 @@ fn edpf_key_material_renders_as_separate_rows() {
         }),
         "密钥字段不应挤在同一行: {out}"
     );
-    edpcli::ui::reset_enabled_for_tests();
+    edpcli::cli::terminal_ui::reset_enabled_for_tests();
 }
 
 #[test]
 fn mbr_empty_partition_slots_are_summarized_not_expanded() {
-    edpcli::ui::set_enabled_for_tests(false);
+    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
     let data = load_disk_image("aigo").expect("aigo fixture");
     let meta = meta_for("aigo");
     let view = analyze_sector(0, &data[..512], &meta);
@@ -1012,5 +1012,5 @@ fn mbr_empty_partition_slots_are_summarized_not_expanded() {
         "{:?}",
         view.notes
     );
-    edpcli::ui::reset_enabled_for_tests();
+    edpcli::cli::terminal_ui::reset_enabled_for_tests();
 }

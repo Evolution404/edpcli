@@ -1,5 +1,5 @@
 use edpcli::{
-    backup_metadata::parse_partition_geometry,
+    application::backup::parse_partition_geometry,
     platform::{HardwareProbe, InquiryInfo, NativeTransport},
     protocol::lba7_compat::{
         locate_lba7_compatibility_extent_from_verified_usb_capacity, Lba7CompatibilityExtentLayout,

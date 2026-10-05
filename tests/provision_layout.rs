@@ -1,4 +1,4 @@
-use edpcli::filesystem::FilesystemKind;
+use edpcli::application::filesystem::FilesystemKind;
 use edpcli::protocol::{
     edpf::EdpPartitionType, lba7_compat::locate_lba7_compatibility_extent_from_geometry,
 };
@@ -12,8 +12,8 @@ use edpcli::provision::{
     OFFICIAL_PARTITION_START_SECTOR, PROVISION_FILESYSTEMS, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use edpcli::{
-    crypto::{a6b0_full, crc32_bare, lba6_decode, xor_rolling},
     platform::{HardwareProbe, InquiryInfo, NativeTransport},
+    protocol::crypto::{a6b0_full, crc32_bare, lba6_decode, xor_rolling},
 };
 
 fn types(mode: OfficialPartitionMode) -> Vec<u32> {

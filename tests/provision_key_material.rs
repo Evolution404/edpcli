@@ -1,5 +1,5 @@
 use edpcli::{
-    crypto::{a6b0_full, crc32_bare, xor_rolling},
+    protocol::crypto::{a6b0_full, crc32_bare, xor_rolling},
     provision::{
         unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
     },

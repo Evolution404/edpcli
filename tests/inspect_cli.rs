@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use common::*;
-use edpcli::backup_metadata::parse_partition_geometry;
-use edpcli::common::SECTOR;
+use edpcli::application::backup::parse_partition_geometry;
+use edpcli::application::support::SECTOR;
 use edpcli::edpb::{
     self, ArtifactCompleteness, ArtifactInput, CoreCapture, Extent, MetadataCapture, Region,
     RestorePolicy, SemanticStatus,

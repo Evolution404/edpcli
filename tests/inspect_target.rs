@@ -1,8 +1,10 @@
-use edpcli::backup_metadata::parse_partition_geometry;
-use edpcli::common::SECTOR;
-use edpcli::crypto::{a6b0_full, a6b0_full_offset, a7f0_full, crc32_bare, sm4_encrypt_block};
-use edpcli::filesystem::FilesystemKind;
-use edpcli::inspect_target::{InspectDiskContext, PhysicalDataState, SectorRegion};
+use edpcli::application::backup::parse_partition_geometry;
+use edpcli::application::filesystem::FilesystemKind;
+use edpcli::application::support::SECTOR;
+use edpcli::inspect::{InspectDiskContext, PhysicalDataState, SectorRegion};
+use edpcli::protocol::crypto::{
+    a6b0_full, a6b0_full_offset, a7f0_full, crc32_bare, sm4_encrypt_block,
+};
 use edpcli::provision::default_file_key;
 
 const LEXAR_DEVICE_ID: &str = "disk&ven_lexar&prod_usb_flash_drive";

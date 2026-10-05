@@ -21,6 +21,7 @@ mod read;
 mod validate;
 mod write;
 
+pub use crate::sha256::{sha256_hex, sha256_reader_hex};
 use codec::*;
 pub use identity::{canonical_media_identity, manifest_identity_from_snapshot};
 use identity::{

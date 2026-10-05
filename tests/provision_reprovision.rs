@@ -1,7 +1,7 @@
 use edpcli::{
-    crypto::{a6b0_full, crc32_bare, xor_rolling},
-    filesystem::FilesystemKind,
+    application::filesystem::FilesystemKind,
     platform::{HardwareProbe, InquiryInfo, NativeTransport},
+    protocol::crypto::{a6b0_full, crc32_bare, xor_rolling},
     protocol::edpf::EdpPartitionType,
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
     provision::{

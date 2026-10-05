@@ -6,9 +6,9 @@ use common::{fixture, fixture_bin, TmpDir};
 use edpcli::application::media_identity::{
     match_media_identity, BackupAffinity, BackupAffinityPolicy,
 };
+use edpcli::application::{BackupSelector, DeviceSelector};
 use edpcli::cli::Prompter;
-use edpcli::selectors::{BackupSelector, DeviceSelector};
-use edpcli::sysinfo::ExtDisk;
+use edpcli::platform::system::ExtDisk;
 
 struct Prompt {
     answers: Vec<String>,
@@ -74,7 +74,7 @@ fn device_selector_handles_explicit_single_and_interactive_targets() {
     let error = DeviceSelector::new(Some(9))
         .choose_from(&disks, &mut prompt)
         .unwrap_err();
-    assert_eq!(error.code, edpcli::common::EXIT_TARGET);
+    assert_eq!(error.code, edpcli::application::support::EXIT_TARGET);
 }
 
 #[test]

@@ -12,6 +12,16 @@ pub use crate::domain::hardware::{
     ExtDisk, HardwareProbe, InquiryInfo, NativeTransport, PlatformKind,
 };
 
+/// 稳定平台门面下的设备标识推导。
+pub mod identity {
+    pub use crate::identify::*;
+}
+
+/// 稳定平台门面下的只读系统探测与命令执行抽象。
+pub mod system {
+    pub use crate::sysinfo::*;
+}
+
 pub struct WriteGuard {
     _inner: imp::WriteGuard,
 }

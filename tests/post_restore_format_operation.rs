@@ -2,17 +2,17 @@
 #![cfg(target_os = "macos")]
 
 use crate::common::{self, load_disk_image, netac_runner};
+use edpcli::application::filesystem::FilesystemKind;
 use edpcli::application::media_identity::MediaIdentityPin;
 use edpcli::application::post_restore::{
     assess_partitions_readonly, format_partition_on_disk, MetadataRestoreOutcome,
     MetadataRestoreReport, PartitionFormatRequest, PostRestorePartitionState,
 };
 use edpcli::application::progress::{FormatStep, OperationKind, ProgressEvent, Severity, Step};
+use edpcli::application::support::SECTOR;
 use edpcli::application::Prompter;
-use edpcli::common::SECTOR;
 use edpcli::diskio::SectorDev;
 use edpcli::edpb::ManifestPartition;
-use edpcli::filesystem::FilesystemKind;
 use std::collections::BTreeMap;
 use std::io;
 use std::time::Duration;
@@ -796,9 +796,10 @@ fn mode1_combined_restore_formats_plaintext_despite_need_encrypt_one() {
 
     let raw_boot = dev.sectors.get(&(target.start_lba as u32)).unwrap();
     assert_eq!(&raw_boot[3..11], b"EXFAT   ");
-    let detected = edpcli::filesystem::detect_boot_sector(target.sector_count, raw_boot)
-        .unwrap()
-        .expect("mode1 combined must be directly mountable plaintext");
+    let detected =
+        edpcli::application::filesystem::detect_boot_sector(target.sector_count, raw_boot)
+            .unwrap()
+            .expect("mode1 combined must be directly mountable plaintext");
     assert_eq!(detected, FilesystemKind::ExFat);
 
     let after = assess_partitions_readonly(
@@ -818,7 +819,7 @@ fn corrupted_file_key_crc_is_typed_and_has_zero_writes() {
     use edpcli::application::post_restore::{
         format_encrypted_partition_on_disk, EncryptedPostRestoreError,
     };
-    use edpcli::crypto::{a6b0_full, a7f0_full, crc32_bare};
+    use edpcli::protocol::crypto::{a6b0_full, a7f0_full, crc32_bare};
     use edpcli::provision::ExistingFileKeyError;
 
     let (runner, mut dev, mut outcome, _) = encrypted_mode0_fixture();

@@ -200,8 +200,8 @@ fn selected_device_identity_is_rechecked_before_the_operation_starts() {
 
 #[test]
 fn plain_identity_recheck_accepts_zero_lba4_and_rejects_explicit_edp_onlyid() {
+    use edpcli::platform::system::CmdRunner;
     use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
-    use edpcli::sysinfo::CmdRunner;
     use std::time::Duration;
 
     struct NativeRunner;
@@ -261,9 +261,9 @@ fn plain_identity_recheck_accepts_zero_lba4_and_rejects_explicit_edp_onlyid() {
 
 #[test]
 fn edp_identity_recheck_accepts_short_and_revision_candidates_for_same_hardware() {
-    use edpcli::crypto::{crc32_bare, xor_rolling};
+    use edpcli::platform::system::CmdRunner;
     use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
-    use edpcli::sysinfo::CmdRunner;
+    use edpcli::protocol::crypto::{crc32_bare, xor_rolling};
     use std::time::Duration;
 
     struct NativeRunner;
@@ -317,8 +317,8 @@ fn edp_identity_recheck_accepts_short_and_revision_candidates_for_same_hardware(
 #[cfg(target_os = "macos")]
 #[test]
 fn plain_identity_recheck_accepts_whole_disk_ntfs_with_nonzero_lba4_code() {
+    use edpcli::platform::system::CmdRunner;
     use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
-    use edpcli::sysinfo::CmdRunner;
     use std::time::Duration;
 
     struct MacPlainRunner;

@@ -20,6 +20,10 @@ mod spec;
 mod validate;
 mod write_plan;
 
+pub use crate::filesystem_capability::{
+    EXFAT_MAX_VALIDATED_CLUSTERS, EXFAT_MAX_VALIDATED_CLUSTER_SHIFT,
+};
+pub use crate::partition_transform::{decrypt_mode2, EdpSm4Transform};
 pub use filesystem_policy::{
     is_provision_filesystem_supported, shift_provision_filesystem, validate_provision_filesystem,
     PROVISION_FILESYSTEMS,

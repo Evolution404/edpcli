@@ -5,11 +5,11 @@ use std::process::Command;
 #[cfg(target_os = "macos")]
 use crate::common::*;
 #[cfg(target_os = "macos")]
+use edpcli::application::support::SECTOR;
+#[cfg(target_os = "macos")]
 use edpcli::cli::{print_disk_table, scan_disks};
 #[cfg(target_os = "macos")]
-use edpcli::common::SECTOR;
-#[cfg(target_os = "macos")]
-use edpcli::identify::identify;
+use edpcli::platform::identity::identify;
 
 #[cfg(target_os = "macos")]
 #[test]
@@ -237,8 +237,13 @@ fn scan_prefers_live_plain_filesystem_over_stale_edp_protocol_fields() {
     stale[entry + 12..entry + 16]
         .copy_from_slice(&u32::try_from(TOTAL - 2_048).unwrap().to_le_bytes());
     stale[510..512].copy_from_slice(&[0x55, 0xaa]);
-    let fs =
-        edpcli::filesystem::build_empty_exfat(2_048, TOTAL - 2_048, 0x1234_5678, "PLAIN").unwrap();
+    let fs = edpcli::application::filesystem::build_empty_exfat(
+        2_048,
+        TOTAL - 2_048,
+        0x1234_5678,
+        "PLAIN",
+    )
+    .unwrap();
     let boot = fs.sectors().get(&0).unwrap().to_vec();
 
     let mut m = std::collections::HashMap::new();

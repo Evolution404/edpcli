@@ -12,21 +12,21 @@ mod macos {
     use std::process::Command;
 
     use edpcli::application::device::guard_usb_disk;
+    use edpcli::application::filesystem::FilesystemKind;
     use edpcli::application::provision::{
         commit_provision_with_backup_on_disk, prepare_provision_on_disk, FormatOptions,
         OfficialProvisionRequest, ProvisionCommitOutcome, ProvisionRequest,
     };
+    use edpcli::application::support::SECTOR;
     use edpcli::application::Prompter;
-    use edpcli::common::SECTOR;
     use edpcli::diskio::{raw_path, FileDev, SectorDev};
-    use edpcli::filesystem::FilesystemKind;
+    use edpcli::platform::system::{disk_total_sectors, CmdRunner, SysRunner};
     use edpcli::provision::{
         parse_existing_provision, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
         OfficialPartitionMode, PartitionAction, PartitionRole, ProvisionImage, ProvisionTarget,
         RegionDisposition, SourcePasswordKnowledge, TargetIdentity, DEFAULT_KEY_DOMAIN_PASSWORD,
         DEFAULT_SAFE6_LABEL,
     };
-    use edpcli::sysinfo::{disk_total_sectors, CmdRunner, SysRunner};
 
     const ENABLE_ENV: &str = "EDPCLI_REAL_USB_PASSWORD_HIL";
     const EXPECTED_VID: u16 = 0x3535;
@@ -206,7 +206,7 @@ mod macos {
     }
 
     fn sha256_hex(data: &[u8]) -> String {
-        edpcli::sha256::sha256_hex(data)
+        edpcli::edpb::sha256_hex(data)
     }
 
     fn probe_target(
@@ -554,7 +554,7 @@ mod macos {
         let raw = dev
             .read_sector(lba)
             .map_err(|error| format!("读取 {} 首扇区失败: {error}", role.label()))?;
-        let plain = edpcli::partition_transform::decrypt_mode2(&raw, &raw_file_key)
+        let plain = edpcli::provision::decrypt_mode2(&raw, &raw_file_key)
             .map_err(|error| format!("解密 {} 首扇区失败: {error}", role.label()))?;
         if !strict_exfat_boot(&plain, part.start_lba, part.sector_count) {
             return Err(format!(

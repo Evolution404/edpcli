@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::backup_catalog::{self, canonical_entry_path};
+pub use crate::backup_catalog::{is_healthy as backup_entry_is_healthy, BackupCatalog};
+pub use crate::backup_metadata::*;
 use crate::diskio::{self, BackupEntry};
 use crate::selectors::BackupSelector;
 

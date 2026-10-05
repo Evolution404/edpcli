@@ -1,19 +1,18 @@
 use std::io;
 
 use edpcli::{
-    application::provision::{plan_format_targets, FormatOptions},
-    backup_metadata::PartitionGeometry,
-    filesystem::{
+    application::backup::PartitionGeometry,
+    application::filesystem::{
         analysis::{analyze_partition, AnalysisStatus, PartitionReader},
         build_empty_exfat, build_empty_fat16, build_empty_fat32, FilesystemKind,
         SparseFilesystemImage,
     },
-    partition_transform::{decrypt_mode2, EdpSm4Transform},
+    application::provision::{plan_format_targets, FormatOptions},
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
     provision::{
-        build_official_partition_filesystem, wrap_file_key, wrap_legacy_lba7_file_key,
-        FileKeyWrapMode, OfficialPartitionFilesystems, OfficialPartitionMode,
-        OfficialPartitionSizes, OfficialProvisionPlan, PartitionRole,
+        build_official_partition_filesystem, decrypt_mode2, wrap_file_key,
+        wrap_legacy_lba7_file_key, EdpSm4Transform, FileKeyWrapMode, OfficialPartitionFilesystems,
+        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, PartitionRole,
     },
 };
 
@@ -226,7 +225,7 @@ fn ch14_q0_475_gib_exfat_formatter_round_trips_through_canonical_parser() {
         .expect("formatter must choose a geometry within the parser's validated domain");
     let boot = image.sector_or_zero(0).unwrap();
     let cluster_count = u32::from_le_bytes(boot[92..96].try_into().unwrap());
-    assert!(cluster_count <= edpcli::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS);
+    assert!(cluster_count <= edpcli::provision::EXFAT_MAX_VALIDATED_CLUSTERS);
     assert!(
         boot[109] >= 8,
         "64 KiB clusters exceed this geometry's budget"
@@ -255,7 +254,7 @@ fn assert_exfat_boot_geometry(boot: &[u8; 512], volume: u64) {
     assert!(heap_offset + clusters * (1u64 << boot[109]) <= volume);
     assert_eq!(u32_at(96), 2);
     assert_eq!(boot[108], 9);
-    assert!(boot[109] <= edpcli::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTER_SHIFT);
+    assert!(boot[109] <= edpcli::provision::EXFAT_MAX_VALIDATED_CLUSTER_SHIFT);
     assert_eq!(boot[110], 1);
 }
 
@@ -288,7 +287,7 @@ fn exfat_boundary_matrix_round_trips_through_canonical_parser() {
         let boot = image.sector_or_zero(0).unwrap();
         assert_exfat_boot_geometry(&boot, volume);
         let cluster_count = u32::from_le_bytes(boot[92..96].try_into().unwrap());
-        assert!(cluster_count <= edpcli::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS);
+        assert!(cluster_count <= edpcli::provision::EXFAT_MAX_VALIDATED_CLUSTERS);
         let mut reader = ImageReader {
             image: &image,
             decrypt_key: None,

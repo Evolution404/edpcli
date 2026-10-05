@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use common::*;
-use edpcli::common::{
+use edpcli::application::support::{
     EXIT_INTERMEDIATE, EXIT_ROLLED_BACK, METADATA_IMAGE_LEN, METADATA_LAST_LBA, SECTOR,
 };
 use edpcli::diskio::{atomic_write_sectors, pwrite_loop, FileDev, SectorDev};
@@ -238,7 +238,7 @@ fn unsupported_sync_is_rejected_before_any_write() {
         writes: 0,
     };
     let e = atomic_write_sectors(&mut dev, &im.patch).unwrap_err();
-    assert_eq!(e.code, edpcli::common::EXIT_IO, "{}", e.msg);
+    assert_eq!(e.code, edpcli::application::support::EXIT_IO, "{}", e.msg);
     assert_eq!(dev.writes, 0, "sync 能力预检失败时不得开始写入");
     assert_eq!(img_bytes(&im.path), im.base);
 }
@@ -255,7 +255,7 @@ fn rejects_non_sector_sized_patch_before_any_write() {
         FileDev::open_rdwr(im.path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
 
     let e = atomic_write_sectors(&mut dev, &malformed).unwrap_err();
-    assert_eq!(e.code, edpcli::common::EXIT_IO, "{}", e.msg);
+    assert_eq!(e.code, edpcli::application::support::EXIT_IO, "{}", e.msg);
     assert!(
         e.msg.contains("512B") || e.msg.contains("扇区"),
         "{}",
@@ -280,7 +280,7 @@ fn rejects_patch_outside_metadata_lba_range_before_any_write() {
         FileDev::open_rdwr(path.to_str().unwrap(), std::time::Duration::from_secs(1)).unwrap();
 
     let e = atomic_write_sectors(&mut dev, &malformed).unwrap_err();
-    assert_eq!(e.code, edpcli::common::EXIT_IO, "{}", e.msg);
+    assert_eq!(e.code, edpcli::application::support::EXIT_IO, "{}", e.msg);
     assert!(
         e.msg.contains("0-12") || e.msg.contains(&(METADATA_LAST_LBA + 1).to_string()),
         "{}",

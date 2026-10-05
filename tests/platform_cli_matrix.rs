@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use edpcli::common::{EXIT_OK, EXIT_TARGET, METADATA_IMAGE_LEN};
+use edpcli::application::support::{EXIT_OK, EXIT_TARGET, METADATA_IMAGE_LEN};
 use edpcli::edpb::{self, CoreCapture};
 
 fn run(args: &[&str]) -> std::process::Output {

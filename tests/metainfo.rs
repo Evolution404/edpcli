@@ -1,7 +1,7 @@
 use crate::common;
 
 use common::*;
-use edpcli::metainfo::{render, summarize};
+use edpcli::application::metadata::{render, summarize};
 use edpcli::protocol::semantic::SemanticContext;
 
 fn meta_for(key: &str) -> SemanticContext {
@@ -72,7 +72,7 @@ fn aigo_summary_contains_identity_and_ownership() {
     }
     assert!(summary.safe6_register.is_none());
 
-    edpcli::ui::set_enabled_for_tests(false);
+    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
     let out = render(&summary);
     assert!(out.contains("设备"));
     assert!(out.contains("身份"));
@@ -80,7 +80,7 @@ fn aigo_summary_contains_identity_and_ownership() {
     assert!(out.contains("User"));
     assert!(out.contains("状态"));
     assert!(out.contains("分区摘要"));
-    edpcli::ui::reset_enabled_for_tests();
+    edpcli::cli::terminal_ui::reset_enabled_for_tests();
 }
 
 #[test]
@@ -107,7 +107,7 @@ fn render_uses_semantic_colors_and_no_color_remains_plain() {
     })
     .unwrap();
 
-    edpcli::ui::set_enabled_for_tests(true);
+    edpcli::cli::terminal_ui::set_enabled_for_tests(true);
     let colored = render(&summary);
     assert!(colored.contains("\x1b[1;36m设备\x1b[0m"), "{colored:?}");
     assert!(colored.contains("\x1b[1;36m身份\x1b[0m"), "{colored:?}");
@@ -117,7 +117,7 @@ fn render_uses_semantic_colors_and_no_color_remains_plain() {
         colored.contains("\x1b[36m输电运检中心\x1b[0m"),
         "{colored:?}"
     );
-    let capacity = edpcli::common::fmt_capacity(245_760_000 * 512);
+    let capacity = edpcli::application::support::fmt_capacity(245_760_000 * 512);
     assert!(
         colored.contains(&format!("\x1b[35m{capacity}\x1b[0m")),
         "{colored:?}"
@@ -127,12 +127,12 @@ fn render_uses_semantic_colors_and_no_color_remains_plain() {
         "{colored:?}"
     );
 
-    edpcli::ui::set_enabled_for_tests(false);
+    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
     let plain = render(&summary);
     assert!(!plain.contains("\x1b["));
     assert!(plain.contains("设备"));
     assert!(plain.contains("身份"));
     assert!(plain.contains("状态"));
     assert!(plain.contains("输电运检中心"));
-    edpcli::ui::reset_enabled_for_tests();
+    edpcli::cli::terminal_ui::reset_enabled_for_tests();
 }

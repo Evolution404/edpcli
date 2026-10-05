@@ -1,5 +1,15 @@
 //! Typed, read-only EDP protocol API. Parsing never performs device I/O.
 //! Profile axes stay orthogonal; unidentified states remain Unknown.
+
+/// 稳定 protocol 门面下的协议密码学原语。
+pub mod crypto {
+    pub use crate::crypto::*;
+}
+
+/// 稳定 protocol 门面下的协议扇区兼容解析。
+pub mod sectors {
+    pub use crate::sectors::*;
+}
 pub mod edpf;
 pub mod iir;
 pub mod image;

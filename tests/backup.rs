@@ -10,8 +10,8 @@ use edpcli::application::media_identity::{
     DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation, MediaIdentitySnapshot,
     ProtocolIdentityEvidence, SerialQuality,
 };
+use edpcli::application::support::{METADATA_IMAGE_LEN, SECTOR};
 use edpcli::cli::{backup_delete, backup_list, backup_prune, backup_verify};
-use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
 use edpcli::diskio::Clock;
 use edpcli::diskio::{
     create_backup, find_backups, parse_backup_name, prune_candidates, scan_backup_dir, BackupEntry,
@@ -1059,7 +1059,7 @@ fn cli_and_tui_delete_share_retention_floor_and_execution() {
     assert!(!cli_tmp.0.join(SHARED_GROUP_A).exists());
 
     let first_path = tui_tmp.0.join(SHARED_GROUP_A);
-    let sha = edpcli::sha256::sha256_hex(&fs::read(&first_path).unwrap());
+    let sha = edpcli::edpb::sha256_hex(&fs::read(&first_path).unwrap());
     assert_eq!(
         edpcli::application::delete_backup_exact(&tui_tmp.0, &first_path, &sha),
         Ok(())
@@ -1072,7 +1072,7 @@ fn cli_and_tui_delete_share_retention_floor_and_execution() {
         5
     );
     let second_path = tui_tmp.0.join(SHARED_GROUP_B);
-    let second_sha = edpcli::sha256::sha256_hex(&fs::read(&second_path).unwrap());
+    let second_sha = edpcli::edpb::sha256_hex(&fs::read(&second_path).unwrap());
     let refusal = edpcli::application::delete_backup_exact(&tui_tmp.0, &second_path, &second_sha)
         .unwrap_err();
     assert!(matches!(
@@ -1107,8 +1107,8 @@ fn batch_delete_plan_pins_each_path_and_sha_before_execution() {
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170002.edpb",
         &original,
     );
-    let first_sha = edpcli::sha256::sha256_hex(&fs::read(&first).unwrap());
-    let second_sha = edpcli::sha256::sha256_hex(&fs::read(&second).unwrap());
+    let first_sha = edpcli::edpb::sha256_hex(&fs::read(&first).unwrap());
+    let second_sha = edpcli::edpb::sha256_hex(&fs::read(&second).unwrap());
 
     let session = edpcli::application::backup::DeleteSession::open(&tmp.0);
     match session.plan_exact_many(&[(first.clone(), "00".repeat(32))]) {

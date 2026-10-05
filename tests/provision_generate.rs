@@ -1,7 +1,7 @@
-use edpcli::crypto::{a7f0_full, crc32_bare};
+use edpcli::application::metadata::ownership_from_lba8;
 use edpcli::inspect::{analyze_sector, InspectMeta};
-use edpcli::metainfo::ownership_from_lba8;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
+use edpcli::protocol::crypto::{a7f0_full, crc32_bare};
 use edpcli::protocol::{
     lba6::parse_lba6,
     lba9::{parse_lba9, reconstruct_dept, reconstruct_user},
@@ -291,7 +291,7 @@ fn lba8_writer_length_excludes_nul_but_encrypts_the_following_block() {
     let image = generate_image(&spec, &entropy()).unwrap();
     let raw = sector(image.as_bytes(), 8);
     let crc = crc32_bare(spec.target().device_id().as_bytes());
-    let plain = edpcli::crypto::a6b0_full(&raw[..0x190], &crc.to_le_bytes(), 0);
+    let plain = edpcli::protocol::crypto::a6b0_full(&raw[..0x190], &crc.to_le_bytes(), 0);
 
     assert_eq!(&plain[..4], b"LLGB");
     assert_eq!(u32::from_le_bytes(plain[4..8].try_into().unwrap()), 0x180);

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use edpcli::filesystem::{
+use edpcli::application::filesystem::{
     DetectionConfidence, DetectionResult, DriverRegistry, FilesystemCapabilities, FilesystemDriver,
     FilesystemError, FilesystemErrorKind, FilesystemGeometry, FilesystemKind, FilesystemReader,
     FormatRequest, EXFAT_DRIVER, FAT16_DRIVER, FAT32_DRIVER,
@@ -146,7 +146,9 @@ fn fat16_driver_owns_format_metadata_detection_and_verification() {
     let plan = FAT16_DRIVER
         .build_format_plan(geometry, &request)
         .expect("driver format plan");
-    let legacy = edpcli::filesystem::build_empty_fat16(63, 20_417, 0x1234_5678, "BOOT").unwrap();
+    let legacy =
+        edpcli::application::filesystem::build_empty_fat16(63, 20_417, 0x1234_5678, "BOOT")
+            .unwrap();
     let writes = plan
         .writes
         .iter()
@@ -250,7 +252,7 @@ fn fat32_driver_owns_format_metadata_geometry_and_verification() {
         .iter()
         .map(|write| (write.relative_lba, write.data))
         .collect::<BTreeMap<_, _>>();
-    let legacy = edpcli::filesystem::build_empty_fat32(
+    let legacy = edpcli::application::filesystem::build_empty_fat32(
         geometry.partition_offset,
         geometry.sector_count,
         0x89ab_cdef,
@@ -324,7 +326,8 @@ fn exfat_driver_owns_format_metadata_detection_and_verification() {
         .build_format_plan(geometry, &request)
         .expect("driver format plan");
     let legacy =
-        edpcli::filesystem::build_empty_exfat(2_048, 100_000, 0x8765_4321, "DATA").unwrap();
+        edpcli::application::filesystem::build_empty_exfat(2_048, 100_000, 0x8765_4321, "DATA")
+            .unwrap();
     let writes = plan
         .writes
         .iter()

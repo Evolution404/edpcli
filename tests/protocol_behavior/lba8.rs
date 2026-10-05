@@ -1,5 +1,5 @@
 use edpcli::{
-    crypto::{a6b0_full, a7f0_full, crc32_bare},
+    protocol::crypto::{a6b0_full, a7f0_full, crc32_bare},
     protocol::{
         lba4::{parse_lba4, Lba4Context},
         lba8::{parse_lba8, Lba8Context, UsbOnlyInfo},

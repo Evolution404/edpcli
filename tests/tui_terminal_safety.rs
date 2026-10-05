@@ -1,4 +1,4 @@
-use edpcli::ui::sanitize_terminal_text;
+use edpcli::cli::terminal_ui::sanitize_terminal_text;
 
 #[test]
 fn terminal_text_sanitizer_neutralizes_control_sequences_without_losing_cjk() {

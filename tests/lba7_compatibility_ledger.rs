@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs, path::Path};
 
-use edpcli::{backup_metadata::parse_lba7_compatibility_geometry, sha256::sha256_hex};
+use edpcli::{application::backup::parse_lba7_compatibility_geometry, edpb::sha256_hex};
 
 const EVIDENCE: &str = include_str!("../audit/protocol/lba7_compatibility/evidence_manifest.tsv");
 const LEDGER: &str = include_str!("../audit/protocol/lba7_compatibility/byte_ledger.tsv");

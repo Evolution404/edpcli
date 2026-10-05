@@ -61,6 +61,27 @@ fn assert_sources_exclude(paths: impl IntoIterator<Item = PathBuf>, forbidden: &
     }
 }
 
+fn marker_owners_under(path: &str, marker: &str) -> Vec<PathBuf> {
+    rust_sources_under(path)
+        .into_iter()
+        .filter(|source_path| {
+            fs::read_to_string(source_path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", source_path.display()))
+                .contains(marker)
+        })
+        .collect()
+}
+
+fn assert_unique_marker_owner_under(path: &str, marker: &str) -> PathBuf {
+    let owners = marker_owners_under(path, marker);
+    assert_eq!(
+        owners.len(),
+        1,
+        "{marker} must have exactly one owner under {path}; owners={owners:?}"
+    );
+    owners.into_iter().next().expect("unique marker owner")
+}
+
 fn near_hard_limit(actual: usize, hard_limit: usize) -> bool {
     actual.saturating_mul(5) >= hard_limit.saturating_mul(4)
 }
@@ -284,7 +305,28 @@ fn library_root_exposes_stable_interfaces_only() {
     let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
         .expect("read library root");
     let source_lines = source.lines().collect::<Vec<_>>();
-    for module in ["backup_cli", "build_info", "elevate", "plist"] {
+    for module in [
+        "backup_catalog",
+        "backup_cli",
+        "backup_metadata",
+        "build_info",
+        "common",
+        "crypto",
+        "disk_scan",
+        "elevate",
+        "filesystem",
+        "filesystem_capability",
+        "identify",
+        "inspect_target",
+        "metainfo",
+        "partition_transform",
+        "plist",
+        "sectors",
+        "selectors",
+        "sha256",
+        "sysinfo",
+        "ui",
+    ] {
         assert!(
             source.contains(&format!("pub(crate) mod {module};")),
             "{module} is an internal implementation module"
@@ -309,32 +351,33 @@ fn library_root_exposes_stable_interfaces_only() {
             "{module} is a maintained external integration surface"
         );
     }
-    for module in [
-        "backup_catalog",
-        "backup_metadata",
-        "common",
-        "crypto",
-        "disk_scan",
-        "filesystem",
-        "filesystem_capability",
-        "identify",
-        "inspect_target",
-        "metainfo",
-        "partition_transform",
-        "sectors",
-        "selectors",
-        "sha256",
-        "sysinfo",
-        "ui",
-    ] {
-        let declaration = format!("pub mod {module};");
-        assert!(
-            source_lines
-                .windows(2)
-                .any(|pair| pair[0] == "#[doc(hidden)]" && pair[1] == declaration),
-            "{module} is compatibility-public for integration/HIL consumers but must stay hidden from the documented stable API"
-        );
-    }
+    let public_root_modules = source_lines
+        .iter()
+        .filter_map(|line| line.strip_prefix("pub mod "))
+        .filter_map(|line| line.strip_suffix(';'))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        public_root_modules,
+        [
+            "application",
+            "cli",
+            "cli_args",
+            "command_spec",
+            "completion",
+            "diskio",
+            "edpb",
+            "inspect",
+            "platform",
+            "protocol",
+            "provision",
+            "tui",
+        ],
+        "crate root must expose exactly the maintained stable integration modules"
+    );
+    assert!(
+        !source_lines.contains(&"#[doc(hidden)]"),
+        "crate root must not keep compatibility-public modules hidden behind rustdoc"
+    );
 }
 
 #[test]
@@ -1289,20 +1332,15 @@ fn app_state_owns_backups_through_backups_substate() {
 
 #[test]
 fn inspect_tree_and_detail_renderers_are_split_from_workspace_root() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let render =
-        fs::read_to_string(root.join("src/tui/inspect/render.rs")).expect("read inspect renderer");
-    let tree = fs::read_to_string(root.join("src/tui/inspect/tree_render.rs"))
-        .expect("read inspect tree renderer");
-    let detail = fs::read_to_string(root.join("src/tui/inspect/detail_render.rs"))
-        .expect("read inspect detail renderer");
-
-    assert!(!render.contains("fn draw_inspect_tree_pane"));
-    assert!(tree.contains("fn draw_inspect_tree_pane"));
-    assert!(!render.contains("fn draw_inspect_object_panes"));
-    assert!(detail.contains("fn draw_inspect_object_panes"));
+    let render = read_source("src/tui/inspect/render.rs");
+    for marker in ["fn draw_inspect_tree_pane", "fn draw_inspect_object_panes"] {
+        assert!(
+            !render.contains(marker),
+            "{marker} leaked back into inspect/render.rs"
+        );
+        assert_unique_marker_owner_under("src/tui/inspect", marker);
+    }
 }
-
 #[test]
 fn inspect_cached_decode_enriches_topology_nodes_instead_of_rebuilding_identity() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1362,48 +1400,33 @@ fn tui_renderers_do_not_assume_parent_surface_palette_colors() {
 #[test]
 fn media_write_yes_prompt_has_one_ui_owner_and_backup_management_does_not_reuse_it() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let confirmation = fs::read_to_string(root.join("src/tui/ui/confirmation.rs"))
-        .expect("read confirmation component");
-    let root_render = fs::read_to_string(root.join("src/tui/render.rs")).expect("read root render");
-    let provision_render = fs::read_to_string(root.join("src/tui/provision/render.rs"))
-        .expect("read provision render");
-    let backup_render =
-        fs::read_to_string(root.join("src/tui/backups/render.rs")).expect("read backup render");
-    let backup_state =
-        fs::read_to_string(root.join("src/tui/backups/state.rs")).expect("read backup state");
-    let batch_input = fs::read_to_string(root.join("src/tui/runtime_input/backup_batch.rs"))
-        .expect("read batch input");
-    let prune_input = fs::read_to_string(root.join("src/tui/runtime_input/backup_prune.rs"))
-        .expect("read prune input");
-
-    assert!(confirmation.contains("输入 YES 确认写入"));
+    let owner = assert_unique_marker_owner_under("src/tui", "输入 YES 确认写入");
+    let confirmation = fs::read_to_string(&owner)
+        .unwrap_or_else(|error| panic!("read {}: {error}", owner.display()));
     assert!(confirmation.contains("Enter\", theme.accent().add_modifier(Modifier::BOLD)"));
     assert!(confirmation.contains("开始恢复"));
-    assert!(root_render.contains("render_write_confirmation_modal"));
-    assert!(provision_render.contains("render_write_confirmation_modal"));
-    assert!(backup_render.contains("render_action_confirmation_modal"));
-    for (name, source) in [
-        ("root renderer", root_render.as_str()),
-        ("provision renderer", provision_render.as_str()),
-        ("backup renderer", backup_render.as_str()),
+
+    for path in [
+        "src/tui/render.rs",
+        "src/tui/provision/render.rs",
+        "src/tui/backups/render.rs",
     ] {
+        let source = read_source(path);
         assert!(
             !source.contains("输入 YES"),
-            "{name} must delegate the write-authorization prompt to the shared component"
+            "{path} must delegate the write-authorization prompt to the shared component"
         );
     }
-    for (name, source) in [
-        ("backup state", backup_state.as_str()),
-        ("backup batch input", batch_input.as_str()),
-        ("backup prune input", prune_input.as_str()),
-    ] {
-        assert!(
-            !source.contains("YES"),
-            "{name} must not reuse media-write authorization for backup-file management"
-        );
-    }
-}
 
+    assert_sources_exclude(
+        [
+            root.join("src/tui/backups/state.rs"),
+            root.join("src/tui/runtime_input/backup_batch.rs"),
+            root.join("src/tui/runtime_input/backup_prune.rs"),
+        ],
+        &["YES"],
+    );
+}
 #[test]
 fn help_and_status_information_architecture_has_single_owners() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1516,52 +1539,38 @@ fn modal_surface_is_a_shared_theme_primitive_not_a_business_local_clear_block() 
 #[test]
 fn provision_stage_renderers_are_split_from_workspace_root() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let render = fs::read_to_string(root.join("src/tui/provision/render.rs"))
-        .expect("read provision renderer");
-    for (path, marker) in [
-        ("form_render.rs", "fn draw_provision_form"),
-        ("review_render.rs", "fn draw_provision_review"),
-    ] {
-        let source = fs::read_to_string(root.join("src/tui/provision").join(path))
-            .unwrap_or_else(|error| panic!("read {path}: {error}"));
-        assert!(source.contains(marker), "{path} must own {marker}");
+    let render = read_source("src/tui/provision/render.rs");
+    for marker in ["fn draw_provision_form", "fn draw_provision_review"] {
         assert!(!render.contains(marker), "{marker} leaked into render.rs");
+        assert_unique_marker_owner_under("src/tui/provision", marker);
     }
-    let shared = fs::read_to_string(root.join("src/tui/operation_progress_render.rs"))
-        .expect("read shared operation progress renderer");
-    assert!(shared.contains("fn draw_operation_progress"));
+
+    let progress_owner = assert_unique_marker_owner_under("src/tui", "fn draw_operation_progress");
+    assert!(
+        !progress_owner.starts_with(root.join("src/tui/provision")),
+        "operation progress renderer must remain shared outside provision: {}",
+        progress_owner.display()
+    );
     assert!(!root.join("src/tui/provision/running_render.rs").exists());
     assert!(!root.join("src/tui/provision/selection_render.rs").exists());
-    let provision_state =
-        fs::read_to_string(root.join("src/tui/provision/state.rs")).expect("read provision state");
-    let table_state =
-        fs::read_to_string(root.join("src/tui/table_state.rs")).expect("read table state");
-    let table_layout =
-        fs::read_to_string(root.join("src/tui/table_layout.rs")).expect("read table layout");
-    for forbidden in [
-        "ProvisionStage::SelectDisk",
-        "provision_select_disk",
-        "ProvisionDevices",
-    ] {
-        assert!(
-            !provision_state.contains(forbidden)
-                && !table_state.contains(forbidden)
-                && !table_layout.contains(forbidden),
-            "redundant provision device-selection surface returned: {forbidden}"
-        );
-    }
+
+    let mut provision_surfaces = rust_sources_under("src/tui/provision");
+    provision_surfaces.push(root.join("src/tui/table_state.rs"));
+    provision_surfaces.push(root.join("src/tui/table_layout.rs"));
+    assert_sources_exclude(
+        provision_surfaces,
+        &[
+            "ProvisionStage::SelectDisk",
+            "provision_select_disk",
+            "ProvisionDevices",
+        ],
+    );
     assert!(!root.join("src/tui/runtime_input/backup_choice.rs").exists());
     assert!(!root.join("src/tui/backups/result_render.rs").exists());
 }
-
 #[test]
 fn inspect_tree_model_and_navigation_are_split_from_workspace_root() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let state =
-        fs::read_to_string(root.join("src/tui/inspect/state.rs")).expect("read inspect state");
-    let tree = fs::read_to_string(root.join("src/tui/inspect/tree_state.rs"))
-        .expect("read inspect tree state");
-
+    let state = read_source("src/tui/inspect/state.rs");
     for marker in [
         "pub struct AdvancedInspectTreeRow",
         "pub fn advanced_inspect_tree_rows",
@@ -1572,21 +1581,12 @@ fn inspect_tree_model_and_navigation_are_split_from_workspace_root() {
             !state.contains(marker),
             "{marker} leaked back into inspect/state.rs"
         );
-        assert!(
-            tree.contains(marker),
-            "{marker} missing from inspect/tree_state.rs"
-        );
+        assert_unique_marker_owner_under("src/tui/inspect", marker);
     }
 }
-
 #[test]
 fn inspect_detail_and_pane_state_is_split_from_workspace_root() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let state =
-        fs::read_to_string(root.join("src/tui/inspect/state.rs")).expect("read inspect state");
-    let detail = fs::read_to_string(root.join("src/tui/inspect/detail_state.rs"))
-        .expect("read inspect detail state");
-
+    let state = read_source("src/tui/inspect/state.rs");
     for marker in [
         "pub fn advanced_inspect_detail_rows",
         "pub fn advanced_inspect_detail_toggle_selected",
@@ -1597,48 +1597,25 @@ fn inspect_detail_and_pane_state_is_split_from_workspace_root() {
             !state.contains(marker),
             "{marker} leaked back into inspect/state.rs"
         );
-        assert!(
-            detail.contains(marker),
-            "{marker} missing from inspect/detail_state.rs"
-        );
+        assert_unique_marker_owner_under("src/tui/inspect", marker);
     }
 }
-
 #[test]
 fn inspect_search_and_jump_state_is_split_from_workspace_root() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let state =
-        fs::read_to_string(root.join("src/tui/inspect/state.rs")).expect("read inspect state");
-    let search = fs::read_to_string(root.join("src/tui/inspect/search_state.rs"))
-        .expect("read inspect search state");
-    let jump = fs::read_to_string(root.join("src/tui/inspect/jump_state.rs"))
-        .expect("read inspect jump state");
-
+    let state = read_source("src/tui/inspect/state.rs");
     for marker in [
         "pub fn advanced_inspect_begin_jump",
         "pub fn advanced_inspect_begin_search",
         "pub fn advanced_inspect_search_next",
+        "pub fn advanced_inspect_jump_lba",
     ] {
         assert!(
             !state.contains(marker),
             "{marker} leaked back into inspect/state.rs"
         );
-        assert!(
-            search.contains(marker),
-            "{marker} missing from inspect/search_state.rs"
-        );
+        assert_unique_marker_owner_under("src/tui/inspect", marker);
     }
-    let jump_marker = "pub fn advanced_inspect_jump_lba";
-    assert!(
-        !state.contains(jump_marker) && !search.contains(jump_marker),
-        "{jump_marker} must stay isolated from workspace/search state"
-    );
-    assert!(
-        jump.contains(jump_marker),
-        "{jump_marker} missing from inspect/jump_state.rs"
-    );
 }
-
 #[test]
 fn app_state_owns_inspect_through_inspect_substate() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));

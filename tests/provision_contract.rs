@@ -36,13 +36,13 @@ fn plain_request_resolves_mib_gib_fill_and_keeps_explicit_gaps() {
             PlainPartitionRequest {
                 start_lba: 2_048,
                 size: PlainPartitionSize::MiB(16),
-                filesystem: edpcli::filesystem::FilesystemKind::ExFat,
+                filesystem: edpcli::application::filesystem::FilesystemKind::ExFat,
                 volume_label: "DATA".into(),
             },
             PlainPartitionRequest {
                 start_lba: 50_000,
                 size: PlainPartitionSize::Fill,
-                filesystem: edpcli::filesystem::FilesystemKind::Fat16,
+                filesystem: edpcli::application::filesystem::FilesystemKind::Fat16,
                 volume_label: "TOOLS".into(),
             },
         ],
@@ -59,7 +59,7 @@ fn plain_request_resolves_mib_gib_fill_and_keeps_explicit_gaps() {
         partitions: vec![PlainPartitionRequest {
             start_lba: 2_048,
             size: PlainPartitionSize::GiB(1),
-            filesystem: edpcli::filesystem::FilesystemKind::ExFat,
+            filesystem: edpcli::application::filesystem::FilesystemKind::ExFat,
             volume_label: "BIG".into(),
         }],
     };

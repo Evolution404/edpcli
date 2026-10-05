@@ -12,9 +12,9 @@ use edpcli::application::media_identity::{
 use edpcli::application::media_identity_observer::media_identity_from_protocol_image;
 use edpcli::application::media_identity_observer::observe_media_identity_readonly;
 use edpcli::diskio::SectorDev;
+use edpcli::platform::system::CmdRunner;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::provision::DiskProvisionKind;
-use edpcli::sysinfo::CmdRunner;
 
 fn hardware(serial: Option<&str>, vid: u16, pid: u16, sectors: u64) -> HardwareIdentityEvidence {
     let raw_serial = serial.map(str::to_string);
@@ -578,8 +578,13 @@ fn formatted_plain_layout_overrides_stale_valid_edp_protocol_for_readonly_identi
         .copy_from_slice(&u32::try_from(TOTAL - 2_048).unwrap().to_le_bytes());
     protocol[510..512].copy_from_slice(&[0x55, 0xaa]);
 
-    let fs = edpcli::filesystem::build_empty_exfat(2_048, TOTAL - 2_048, 0x1234_5678, "PLAIN")
-        .expect("build strict exFAT boot");
+    let fs = edpcli::application::filesystem::build_empty_exfat(
+        2_048,
+        TOTAL - 2_048,
+        0x1234_5678,
+        "PLAIN",
+    )
+    .expect("build strict exFAT boot");
     let boot = fs.sectors().get(&0).expect("exFAT boot sector").to_vec();
     let mut dev = StaleEdpPlainDev {
         protocol,

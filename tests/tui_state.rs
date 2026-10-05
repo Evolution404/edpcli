@@ -4,7 +4,7 @@ use edpcli::tui::state::{
 };
 
 fn configured_quick_unit_label(unit: edpcli::provision::QuickCapacityUnit) -> &'static str {
-    use edpcli::common::{CapacityUnitSystem, CAPACITY_UNIT_SYSTEM};
+    use edpcli::application::support::{CapacityUnitSystem, CAPACITY_UNIT_SYSTEM};
     use edpcli::provision::QuickCapacityUnit;
     match (CAPACITY_UNIT_SYSTEM, unit) {
         (CapacityUnitSystem::Decimal, QuickCapacityUnit::MiB) => "MB",
@@ -15,7 +15,7 @@ fn configured_quick_unit_label(unit: edpcli::provision::QuickCapacityUnit) -> &'
 }
 
 fn configured_quick_unit_bytes(unit: edpcli::provision::QuickCapacityUnit) -> u64 {
-    use edpcli::common::{CapacityUnitSystem, CAPACITY_UNIT_SYSTEM};
+    use edpcli::application::support::{CapacityUnitSystem, CAPACITY_UNIT_SYSTEM};
     use edpcli::provision::QuickCapacityUnit;
     match (CAPACITY_UNIT_SYSTEM, unit) {
         (CapacityUnitSystem::Decimal, QuickCapacityUnit::MiB) => 1_000_000,
@@ -26,7 +26,7 @@ fn configured_quick_unit_bytes(unit: edpcli::provision::QuickCapacityUnit) -> u6
 }
 
 fn configured_capacity_3(sectors: u64, unit: edpcli::provision::QuickCapacityUnit) -> String {
-    let bytes = sectors as u128 * edpcli::common::SECTOR as u128;
+    let bytes = sectors as u128 * edpcli::application::support::SECTOR as u128;
     let unit_bytes = configured_quick_unit_bytes(unit) as u128;
     let scaled = (bytes * 1_000 + unit_bytes / 2) / unit_bytes;
     format!("{}.{:03}", scaled / 1_000, scaled % 1_000)
@@ -42,7 +42,7 @@ fn configured_text_to_sectors(value: &str, unit: edpcli::provision::QuickCapacit
             fraction.parse::<u128>().unwrap()
         };
     let scaled_bytes = numerator * configured_quick_unit_bytes(unit) as u128;
-    let sector_denominator = denominator * edpcli::common::SECTOR as u128;
+    let sector_denominator = denominator * edpcli::application::support::SECTOR as u128;
     let quotient = scaled_bytes / sector_denominator;
     let remainder = scaled_bytes % sector_denominator;
     u64::try_from(quotient + u128::from(remainder * 2 >= sector_denominator)).unwrap()
@@ -120,7 +120,7 @@ fn provision_result_survives_transient_device_rescan_absence() {
 }
 
 fn plain_result_plan() -> edpcli::tui::state::ProvisionResultSnapshot {
-    use edpcli::filesystem::FilesystemKind;
+    use edpcli::application::filesystem::FilesystemKind;
     use edpcli::tui::state::{ProvisionResultPartition, ProvisionResultSnapshot};
 
     ProvisionResultSnapshot {
@@ -367,8 +367,8 @@ fn provision_review_escape_restores_form_layout_snapshot() {
     assert!(state.provision().prepared.is_none());
 }
 
-fn device(size: u64) -> edpcli::disk_scan::Row {
-    let mut row = edpcli::disk_scan::Row {
+fn device(size: u64) -> edpcli::cli::Row {
+    let mut row = edpcli::cli::Row {
         disk: 6,
         size,
         vid: "1234".into(),
@@ -400,12 +400,9 @@ fn device(size: u64) -> edpcli::disk_scan::Row {
     row
 }
 
-fn official_device(
-    size: u64,
-    kind: edpcli::provision::DiskProvisionKind,
-) -> edpcli::disk_scan::Row {
+fn official_device(size: u64, kind: edpcli::provision::DiskProvisionKind) -> edpcli::cli::Row {
+    use edpcli::protocol::sectors::EdpfPartition;
     use edpcli::provision::DiskProvisionKind;
-    use edpcli::sectors::EdpfPartition;
 
     let mut row = device(size);
     row.provision_kind = kind;
@@ -487,7 +484,7 @@ fn official_device(
     row
 }
 
-fn mode0_device(size: u64) -> edpcli::disk_scan::Row {
+fn mode0_device(size: u64) -> edpcli::cli::Row {
     official_device(size, edpcli::provision::DiskProvisionKind::Mode0)
 }
 
@@ -1012,7 +1009,7 @@ fn every_source_kind_to_plain_uses_one_clean_plain_plan_without_password_fields(
         assert_eq!(plan.partitions[0].start_lba, 2_048, "{source:?} -> Plain");
         assert_eq!(
             plan.partitions[0].sector_count,
-            64_000_000_000u64 / edpcli::common::SECTOR as u64 - 2_048,
+            64_000_000_000u64 / edpcli::application::support::SECTOR as u64 - 2_048,
             "{source:?} -> Plain"
         );
     }
@@ -1068,8 +1065,8 @@ fn mode2_preserved_encrypt_geometry_explains_unallocated_space_until_user_edits_
 
 #[test]
 fn registered_mode0_to_mode1_form_keeps_exact_encrypt_geometry() {
+    use edpcli::protocol::sectors::EdpfPartition;
     use edpcli::provision::{CapacityInputMode, DiskProvisionKind};
-    use edpcli::sectors::EdpfPartition;
     let mut row = device(64_000_000_000);
     row.provision_kind = DiskProvisionKind::Mode0;
     crate::common::confirm_row_identity(&mut row);
@@ -1113,8 +1110,8 @@ fn registered_mode0_to_mode1_form_keeps_exact_encrypt_geometry() {
 
 #[test]
 fn registered_identity_prefills_custom_label_and_force_policy_but_remains_editable() {
+    use edpcli::protocol::sectors::EdpfPartition;
     use edpcli::provision::DiskProvisionKind;
-    use edpcli::sectors::EdpfPartition;
 
     let mut row = device(64_000_000_000);
     row.provision_kind = DiskProvisionKind::Mode0;
@@ -1344,9 +1341,18 @@ fn provision_label_defaults_to_jiangsu_safe6_and_remains_editable() {
     assert!(edpcli::provision::OnlyId::parse(&form.label_id).is_ok());
     assert!(!form.force_change_password);
     assert!(!form.format_boot && !form.format_share && !form.format_encrypt);
-    assert_eq!(form.boot_fs, edpcli::filesystem::FilesystemKind::Fat16);
-    assert_eq!(form.share_fs, edpcli::filesystem::FilesystemKind::ExFat);
-    assert_eq!(form.encrypt_fs, edpcli::filesystem::FilesystemKind::ExFat);
+    assert_eq!(
+        form.boot_fs,
+        edpcli::application::filesystem::FilesystemKind::Fat16
+    );
+    assert_eq!(
+        form.share_fs,
+        edpcli::application::filesystem::FilesystemKind::ExFat
+    );
+    assert_eq!(
+        form.encrypt_fs,
+        edpcli::application::filesystem::FilesystemKind::ExFat
+    );
     form.label = "自定义标签!SAFE6".into();
     form.label_id = "123456789".into();
     assert_eq!(form.label, "自定义标签!SAFE6");
@@ -1431,8 +1437,8 @@ fn editing_source_password_invalidates_cached_verification_state() {
 
 #[test]
 fn mode0_to_mode1_unknown_encrypt_requires_explicit_format_for_password_change() {
+    use edpcli::protocol::sectors::EdpfPartition;
     use edpcli::provision::{DiskProvisionKind, SourcePasswordKnowledge};
-    use edpcli::sectors::EdpfPartition;
 
     let mut row = device(64_000_000_000);
     row.provision_kind = DiskProvisionKind::Mode0;
@@ -1520,8 +1526,8 @@ fn mode0_to_mode1_unknown_encrypt_requires_explicit_format_for_password_change()
 
 #[test]
 fn unknown_source_password_geometry_change_is_blocked_synchronously_by_same_preflight_as_layout() {
+    use edpcli::protocol::sectors::EdpfPartition;
     use edpcli::provision::{CapacityInputMode, DiskProvisionKind, SourcePasswordKnowledge};
-    use edpcli::sectors::EdpfPartition;
 
     let mut row = device(64_000_000_000);
     row.provision_kind = DiskProvisionKind::Mode0;
@@ -1910,17 +1916,17 @@ fn provision_format_controls_follow_current_mode_targets() {
     assert!(state.provision_toggle_selected_option());
     assert_eq!(
         state.provision().form.share_fs,
-        edpcli::filesystem::FilesystemKind::Fat16
+        edpcli::application::filesystem::FilesystemKind::Fat16
     );
     assert!(state.provision_toggle_selected_option());
     assert_eq!(
         state.provision().form.share_fs,
-        edpcli::filesystem::FilesystemKind::Fat32
+        edpcli::application::filesystem::FilesystemKind::Fat32
     );
     assert!(state.provision_shift_selected_option(true));
     assert_eq!(
         state.provision().form.share_fs,
-        edpcli::filesystem::FilesystemKind::Fat16
+        edpcli::application::filesystem::FilesystemKind::Fat16
     );
 
     state.provision_mut().kind = ProvisionKind::Mode2;
@@ -2340,7 +2346,7 @@ fn plain_form_defaults_to_one_partition_at_lba2048_filling_the_disk() {
     enter_plain_form(&mut state);
 
     let plan = state.provision_plain_plan().unwrap();
-    let total_sectors = 64_000_000_000u64 / edpcli::common::SECTOR as u64;
+    let total_sectors = 64_000_000_000u64 / edpcli::application::support::SECTOR as u64;
     assert_eq!(plan.partitions.len(), 1);
     assert_eq!(plan.partitions[0].start_lba, 2048);
     assert_eq!(plan.partitions[0].sector_count, total_sectors - 2048);
@@ -2792,8 +2798,8 @@ fn provision_layout_rows_are_sorted_by_start_lba_including_free_space() {
 
 #[test]
 fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
+    use edpcli::protocol::sectors::EdpfPartition;
     use edpcli::provision::{CapacityInputMode, DiskProvisionKind};
-    use edpcli::sectors::EdpfPartition;
     let encrypt_start = 4_020_480u64;
     let mut row = device(64_000_000_000);
     row.provision_kind = DiskProvisionKind::Mode0;
@@ -3209,12 +3215,15 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
         AdvancedInspectItem {
             lba,
             regions: vec![format!("LBA{lba}")],
-            raw: vec![0x5a; edpcli::common::SECTOR],
+            raw: vec![0x5a; edpcli::application::support::SECTOR],
             raw_sha256: format!("raw-{lba}"),
-            raw_nonzero: edpcli::common::SECTOR,
+            raw_nonzero: edpcli::application::support::SECTOR,
             decoded_sha256: decoded.as_ref().map(|_| format!("decoded-{lba}")),
             decode_ranges: if decoded.is_some() {
-                vec![edpcli::inspect::DecodeRange::new(0, edpcli::common::SECTOR)]
+                vec![edpcli::inspect::DecodeRange::new(
+                    0,
+                    edpcli::application::support::SECTOR,
+                )]
             } else {
                 Vec::new()
             },
@@ -3277,7 +3286,7 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
         0,
         Ok(item(
             0,
-            Some(vec![0xa5; edpcli::common::SECTOR]),
+            Some(vec![0xa5; edpcli::application::support::SECTOR]),
             None,
             None,
         )),
@@ -3290,7 +3299,7 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
     state.advanced_inspect_sector_move_cursor(10_000);
     assert_eq!(
         state.advanced_inspect_sector().unwrap().cursor,
-        edpcli::common::SECTOR - 1
+        edpcli::application::support::SECTOR - 1
     );
     state.advanced_inspect_sector_move_cursor(-10_000);
     assert_eq!(state.advanced_inspect_sector().unwrap().cursor, 0);
@@ -3328,7 +3337,7 @@ fn advanced_sector_inspector_is_on_demand_bounded_and_fail_soft() {
             lba,
             Ok(item(
                 lba,
-                Some(vec![lba as u8; edpcli::common::SECTOR]),
+                Some(vec![lba as u8; edpcli::application::support::SECTOR]),
                 None,
                 None,
             )),

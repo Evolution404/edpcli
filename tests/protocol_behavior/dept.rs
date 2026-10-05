@@ -1,5 +1,5 @@
 use edpcli::{
-    crypto::{a6b0_full, a7f0_full, crc32_bare, lba6_decode},
+    protocol::crypto::{a6b0_full, a7f0_full, crc32_bare, lba6_decode},
     protocol::{lba6::*, lba9::*, profile::*},
 };
 fn hex(text: &str) -> [u8; 512] {

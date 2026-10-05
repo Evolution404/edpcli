@@ -1,5 +1,5 @@
 use edpcli::{
-    crypto::crc32_bare,
+    protocol::crypto::crc32_bare,
     protocol::{
         lba10::{parse_lba10, Lba10View},
         profile::Lba10Eesi,

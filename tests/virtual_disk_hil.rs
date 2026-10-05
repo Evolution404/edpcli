@@ -7,9 +7,9 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use edpcli::common::{METADATA_SECTOR_COUNT, SECTOR};
+use edpcli::application::filesystem::FilesystemKind;
+use edpcli::application::support::{METADATA_SECTOR_COUNT, SECTOR};
 use edpcli::diskio::{atomic_write_sectors, FileDev, SectorDev};
-use edpcli::filesystem::FilesystemKind;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use edpcli::provision::{

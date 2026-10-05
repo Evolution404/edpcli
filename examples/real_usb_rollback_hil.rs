@@ -11,19 +11,19 @@ mod macos {
     use std::process::Command;
     use std::time::Duration;
 
-    use edpcli::application::device::guard_usb_disk;
-    use edpcli::backup_metadata::{
+    use edpcli::application::backup::{
         parse_lba7_compatibility_geometry, parse_partition_geometry,
         TAIL_END4_MIRROR_OFFSET_SECTORS, TAIL_METADATA_MIRROR_OFFSET_SECTORS,
         TAIL_METADATA_MIRROR_SECTORS,
     };
-    use edpcli::common::{EXIT_ROLLED_BACK, SECTOR};
+    use edpcli::application::device::guard_usb_disk;
+    use edpcli::application::support::{EXIT_ROLLED_BACK, SECTOR};
     use edpcli::diskio::{
         execute_write_transaction, raw_path, FileDev, SectorDev, SectorWriteStage,
         WriteTransactionPlan,
     };
-    use edpcli::identify::{generate_candidates, identify};
-    use edpcli::sysinfo::{disk_total_sectors, CmdRunner, SysRunner};
+    use edpcli::platform::identity::{generate_candidates, identify};
+    use edpcli::platform::system::{disk_total_sectors, CmdRunner, SysRunner};
 
     struct FailOnceDev {
         inner: FileDev,

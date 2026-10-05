@@ -2,9 +2,9 @@ use edpcli::application::inspect::{
     decode_sector, AdvancedInspectMode, AdvancedInspectWorkspace, InspectErrorKind,
 };
 use edpcli::application::inspect_tree::{build_inspect_topology, InspectNodeKind};
-use edpcli::common::{METADATA_IMAGE_LEN, SECTOR};
+use edpcli::application::support::{METADATA_IMAGE_LEN, SECTOR};
+use edpcli::inspect::InspectDiskContext;
 use edpcli::inspect::InspectMeta;
-use edpcli::inspect_target::InspectDiskContext;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry;
 use edpcli::provision::{

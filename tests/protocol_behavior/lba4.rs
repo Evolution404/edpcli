@@ -1,5 +1,5 @@
 use edpcli::{
-    crypto::xor_rolling,
+    protocol::crypto::xor_rolling,
     protocol::{lba4::*, profile::*},
 };
 fn sample(encoding: Lba4Encoding, short: bool) -> [u8; 512] {

@@ -3,7 +3,7 @@ use crate::common;
 use std::path::PathBuf;
 
 use edpcli::application::inspect::load_backup_inspect;
-use edpcli::common::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
+use edpcli::application::support::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
 use edpcli::edpb::{self, CoreCapture};
 use edpcli::tui::{
     pane::PaneId,

@@ -393,9 +393,18 @@ fn provision_password_and_volume_label_have_product_defaults() {
             assert_eq!(opts.encrypt_target_password, "0000aaaa");
             assert_eq!(opts.volume_label, "启动区");
             assert!(!opts.format_boot && !opts.format_share && !opts.format_encrypt);
-            assert_eq!(opts.boot_fs, edpcli::filesystem::FilesystemKind::Fat16);
-            assert_eq!(opts.share_fs, edpcli::filesystem::FilesystemKind::ExFat);
-            assert_eq!(opts.encrypt_fs, edpcli::filesystem::FilesystemKind::ExFat);
+            assert_eq!(
+                opts.boot_fs,
+                edpcli::application::filesystem::FilesystemKind::Fat16
+            );
+            assert_eq!(
+                opts.share_fs,
+                edpcli::application::filesystem::FilesystemKind::ExFat
+            );
+            assert_eq!(
+                opts.encrypt_fs,
+                edpcli::application::filesystem::FilesystemKind::ExFat
+            );
         }
         _ => panic!("expected provision plan"),
     }
@@ -510,9 +519,18 @@ fn provision_format_flags_and_independent_labels_parse() {
                 ),
                 ("启动", "交换", "保密")
             );
-            assert_eq!(opts.boot_fs, edpcli::filesystem::FilesystemKind::ExFat);
-            assert_eq!(opts.share_fs, edpcli::filesystem::FilesystemKind::Fat16);
-            assert_eq!(opts.encrypt_fs, edpcli::filesystem::FilesystemKind::Fat32);
+            assert_eq!(
+                opts.boot_fs,
+                edpcli::application::filesystem::FilesystemKind::ExFat
+            );
+            assert_eq!(
+                opts.share_fs,
+                edpcli::application::filesystem::FilesystemKind::Fat16
+            );
+            assert_eq!(
+                opts.encrypt_fs,
+                edpcli::application::filesystem::FilesystemKind::Fat32
+            );
         }
         _ => panic!("expected provision write"),
     }

@@ -1,4 +1,4 @@
-use edpcli::disk_scan::Row;
+use edpcli::cli::Row;
 use edpcli::tui::command::{parse_command, PaletteAction};
 use edpcli::tui::{
     render,

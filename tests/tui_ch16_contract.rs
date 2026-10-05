@@ -91,8 +91,8 @@ fn lba8_state() -> AppState {
     state
 }
 
-fn device() -> edpcli::disk_scan::Row {
-    let mut row = edpcli::disk_scan::Row {
+fn device() -> edpcli::cli::Row {
+    let mut row = edpcli::cli::Row {
         disk: 6,
         size: 64_000_000_000,
         vid: "1234".into(),
@@ -583,8 +583,8 @@ fn provision_source_password_edit_auto_verify_contract_is_revision_safe() {
 
 #[test]
 fn provision_source_password_failure_uses_red_cross_and_keeps_opaque_passthrough() {
+    use edpcli::protocol::sectors::EdpfPartition;
     use edpcli::provision::KeyDomainRole;
-    use edpcli::sectors::EdpfPartition;
 
     let mut row = device();
     row.partitions = Some(vec![

@@ -16,6 +16,7 @@ pub use crate::inspect_adapter::{
     FieldTransform, InspectDiagnostic, InspectDiagnosticCode, InspectFieldKey, InspectMeta,
     InspectParseState, SectorField, SectorFieldStatus, SectorView,
 };
+pub use crate::inspect_target::{InspectDiskContext, PhysicalDataState, SectorRegion};
 
 mod render;
 pub use render::{overview_line, render_hex};

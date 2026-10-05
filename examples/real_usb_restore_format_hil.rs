@@ -1,11 +1,11 @@
 //! Explicitly enabled destructive restore/format HIL on a serial-pinned external USB disk.
 use edpcli::application::device::guard_usb_disk;
+use edpcli::application::filesystem::FilesystemKind;
 use edpcli::application::post_restore::{self, PartitionFormatRequest};
 use edpcli::application::progress::{FormatStep, ProgressEvent, Step};
 use edpcli::application::write::restore_on_disk_typed;
 use edpcli::application::Prompter;
-use edpcli::filesystem::FilesystemKind;
-use edpcli::sysinfo::{CmdRunner, SysRunner};
+use edpcli::platform::system::{CmdRunner, SysRunner};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -46,7 +46,7 @@ fn pin(runner: &SysRunner, disk: u32, expected: &str) -> Result<(), String> {
     let serial = runner
         .hardware_serial(disk)
         .ok_or("Hardware serial missing; HIL refused")?;
-    let digest = edpcli::sha256::sha256_hex(serial.as_bytes());
+    let digest = edpcli::edpb::sha256_hex(serial.as_bytes());
     if !digest.eq_ignore_ascii_case(expected) {
         return Err("Hardware serial changed; HIL refused".into());
     }
@@ -60,8 +60,8 @@ fn invalidate_filesystems(
     backup: &std::path::Path,
     only_boot: bool,
 ) -> Result<(), String> {
+    use edpcli::application::support::{EdpCliError, EXIT_TARGET, SECTOR};
     use edpcli::application::target_session::{ReadOnly, TargetSession};
-    use edpcli::common::{EdpCliError, EXIT_TARGET, SECTOR};
     use edpcli::diskio::{
         execute_write_transaction, raw_path, FileDev, SectorDev, SectorWriteStage,
         WriteTransactionPlan,
@@ -70,8 +70,8 @@ fn invalidate_filesystems(
     pin(runner, disk, expected)?;
     let verified = edpcli::edpb::VerifiedBackupReader::open(backup)?;
     let manifest = &verified.verified().manifest;
-    let total =
-        edpcli::sysinfo::disk_total_sectors(runner, disk).ok_or("Target geometry missing")?;
+    let total = edpcli::platform::system::disk_total_sectors(runner, disk)
+        .ok_or("Target geometry missing")?;
     if manifest.geometry.total_sectors != Some(total) {
         return Err("Backup geometry differs from target".into());
     }
@@ -81,7 +81,7 @@ fn invalidate_filesystems(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?
         .concat();
-    let partitions = edpcli::backup_metadata::parse_partition_geometry(
+    let partitions = edpcli::application::backup::parse_partition_geometry(
         &protocol,
         &manifest.device.device_id,
         total,
@@ -152,11 +152,11 @@ fn run() -> Result<(), String> {
             .ok_or("Hardware probe missing")?;
         println!(
             "disk={disk} total_sectors={:?} vid={:?} pid={:?} inquiry={:?} serial_sha256={}",
-            edpcli::sysinfo::disk_total_sectors(&runner, disk),
+            edpcli::platform::system::disk_total_sectors(&runner, disk),
             probe.vid,
             probe.pid,
             probe.inquiry,
-            edpcli::sha256::sha256_hex(serial.as_bytes())
+            edpcli::edpb::sha256_hex(serial.as_bytes())
         );
         return Ok(());
     }

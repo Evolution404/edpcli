@@ -16,12 +16,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::*;
+use edpcli::application::support::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, SECTOR};
 use edpcli::application::write::{backup_create_flow, restore_flow, Ctx};
-use edpcli::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, SECTOR};
 use edpcli::diskio::FileDev;
 use edpcli::diskio::SectorDev;
 use edpcli::edpb::{self, CoreCapture};
-use edpcli::sysinfo::CmdRunner;
+use edpcli::platform::system::CmdRunner;
 
 // ══════════════════════════════════════════════════════════════════
 // 子进程测试(真二进制)
@@ -39,7 +39,7 @@ fn removed_offline_convert_command_is_a_usage_error() {
 #[test]
 fn system_disk_refused_without_elevation() {
     // 系统盘拒绝发生在提权之前: 无 sudo 提示, 直接退出码 3。
-    let runner = edpcli::sysinfo::SysRunner;
+    let runner = edpcli::platform::system::SysRunner;
     let system_disk = (0..128u32)
         .find(|&disk| edpcli::platform::is_system_disk(&runner, disk))
         .expect("macOS system disk");
@@ -159,7 +159,7 @@ fn write_test_edpb_with_notes(
 fn hardware_serial_note(serial: &str) -> String {
     format!(
         "hardware_serial_sha256={}",
-        edpcli::sha256::sha256_hex(serial.trim().as_bytes())
+        edpcli::edpb::sha256_hex(serial.trim().as_bytes())
     )
 }
 
@@ -1493,7 +1493,7 @@ fn restore_metadata_edpb_restores_lba0_12_and_validated_lce_together() {
     };
     let device_id = "disk&ven_netac&prod_onlydisk";
     let total_sectors = 122_880_000u64;
-    let geometry = edpcli::backup_metadata::parse_lba7_compatibility_geometry(
+    let geometry = edpcli::application::backup::parse_lba7_compatibility_geometry(
         &original,
         device_id,
         total_sectors,
@@ -1514,13 +1514,13 @@ fn restore_metadata_edpb_restores_lba0_12_and_validated_lce_together() {
         current_lce.insert(lba, corrupt);
     }
     let tail_mirror_start =
-        total_sectors - edpcli::backup_metadata::TAIL_METADATA_MIRROR_OFFSET_SECTORS;
+        total_sectors - edpcli::application::backup::TAIL_METADATA_MIRROR_OFFSET_SECTORS;
     let tail_restore_start =
-        total_sectors - edpcli::backup_metadata::TAIL_END4_MIRROR_OFFSET_SECTORS;
+        total_sectors - edpcli::application::backup::TAIL_END4_MIRROR_OFFSET_SECTORS;
     let tail_mirror_backup =
-        vec![0xA5; edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS as usize * SECTOR];
+        vec![0xA5; edpcli::application::backup::TAIL_METADATA_MIRROR_SECTORS as usize * SECTOR];
     let tail_restore_backup = vec![0x5A; SECTOR];
-    for offset in 0..edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS {
+    for offset in 0..edpcli::application::backup::TAIL_METADATA_MIRROR_SECTORS {
         current_lce.insert(
             u32::try_from(tail_mirror_start + offset).unwrap(),
             vec![0x11; SECTOR],
@@ -1563,7 +1563,7 @@ fn restore_metadata_edpb_restores_lba0_12_and_validated_lce_together() {
                 id: "region.tail.metadata_mirror_512k".into(),
                 role: "lba4_lba12_backup_mirror".into(),
                 start_lba: Some(tail_mirror_start),
-                sector_count: Some(edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS),
+                sector_count: Some(edpcli::application::backup::TAIL_METADATA_MIRROR_SECTORS),
                 semantic_status: SemanticStatus::Identified,
             },
             Region {
@@ -1586,7 +1586,7 @@ fn restore_metadata_edpb_restores_lba0_12_and_validated_lce_together() {
                 id: "extent.tail.metadata_mirror_512k".into(),
                 region_id: "region.tail.metadata_mirror_512k".into(),
                 start_lba: tail_mirror_start,
-                sector_count: edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS,
+                sector_count: edpcli::application::backup::TAIL_METADATA_MIRROR_SECTORS,
                 purpose: "historical_lba4_lba12_mirror".into(),
             },
             Extent {
@@ -1656,7 +1656,7 @@ fn restore_metadata_edpb_restores_lba0_12_and_validated_lce_together() {
     assert_eq!(
         dev.writes,
         13 + geometry.sector_count as usize
-            + edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS as usize
+            + edpcli::application::backup::TAIL_METADATA_MIRROR_SECTORS as usize
             + 1,
         "one transaction must restore protocol, LCE and confirmed tail metadata"
     );
@@ -1668,7 +1668,7 @@ fn restore_metadata_edpb_restores_lba0_12_and_validated_lce_together() {
             &lce_backup[start..start + SECTOR]
         );
     }
-    for offset in 0..edpcli::backup_metadata::TAIL_METADATA_MIRROR_SECTORS {
+    for offset in 0..edpcli::application::backup::TAIL_METADATA_MIRROR_SECTORS {
         let lba = u32::try_from(tail_mirror_start + offset).unwrap();
         let start = offset as usize * SECTOR;
         assert_eq!(

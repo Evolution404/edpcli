@@ -1,5 +1,5 @@
 use edpcli::{
-    filesystem::FilesystemKind,
+    application::filesystem::FilesystemKind,
     provision::{
         build_plain_provision_write_plan, max_plain_sector_count, PlainCleanupExtent,
         PlainPartitionSpec, PlainProvisionPlan, PlainSectorOwner, DEFAULT_PLAIN_START_LBA,

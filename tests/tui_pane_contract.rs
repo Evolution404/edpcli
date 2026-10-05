@@ -27,8 +27,8 @@ fn inspect_workspace() -> AdvancedInspectWorkspace {
     }
 }
 
-fn device() -> edpcli::disk_scan::Row {
-    let mut row = edpcli::disk_scan::Row {
+fn device() -> edpcli::cli::Row {
+    let mut row = edpcli::cli::Row {
         disk: 6,
         size: 64_000_000_000,
         vid: "1234".into(),
@@ -60,7 +60,7 @@ fn device() -> edpcli::disk_scan::Row {
     row
 }
 
-fn confirm_kind(row: &mut edpcli::disk_scan::Row, kind: edpcli::provision::DiskProvisionKind) {
+fn confirm_kind(row: &mut edpcli::cli::Row, kind: edpcli::provision::DiskProvisionKind) {
     use edpcli::application::media_identity::{
         DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation, MediaIdentityPin,
         MediaIdentitySnapshot, ProtocolIdentityEvidence,
@@ -88,7 +88,7 @@ fn confirm_kind(row: &mut edpcli::disk_scan::Row, kind: edpcli::provision::DiskP
     };
     row.identity_pin = Some(MediaIdentityPin::new(
         snapshot,
-        &vec![0; edpcli::common::METADATA_IMAGE_LEN],
+        &vec![0; edpcli::application::support::METADATA_IMAGE_LEN],
     ));
 }
 
@@ -121,15 +121,15 @@ fn backup(
 
 fn related_backup(
     index: usize,
-    row: &edpcli::disk_scan::Row,
+    row: &edpcli::cli::Row,
 ) -> edpcli::application::BackupWorkspaceItem {
     let mut item = backup(index, Some(row.provision_kind));
     item.identity = row.identity_pin.as_ref().map(|pin| pin.snapshot.clone());
     item
 }
 
-fn edp_device_with_layout() -> edpcli::disk_scan::Row {
-    use edpcli::sectors::EdpfPartition;
+fn edp_device_with_layout() -> edpcli::cli::Row {
+    use edpcli::protocol::sectors::EdpfPartition;
 
     let mut row = device();
     row.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
@@ -157,8 +157,8 @@ fn edp_device_with_layout() -> edpcli::disk_scan::Row {
             size_bytes: 120_000_000,
         },
     ]);
-    let total_sectors = row.size / edpcli::common::SECTOR as u64;
-    row.lce = Some(edpcli::backup_metadata::Lba7CompatibilityGeometry {
+    let total_sectors = row.size / edpcli::application::support::SECTOR as u64;
+    row.lce = Some(edpcli::application::backup::Lba7CompatibilityGeometry {
         start_lba: total_sectors - 2_000,
         sector_count: 6,
         lba7_pointer_entries: Vec::new(),
@@ -1003,19 +1003,19 @@ fn assert_complete_layout(model: &DiskLayoutModel) {
 fn same_edp_fixture_has_identical_devices_inspect_and_provision_source_geometry() {
     let context = crate::common::edp_inspect_context(2_000_000);
     let mut row = device();
-    row.size = context.total_sectors * edpcli::common::SECTOR as u64;
+    row.size = context.total_sectors * edpcli::application::support::SECTOR as u64;
     row.provision_kind = edpcli::provision::DiskProvisionKind::Mode0;
     confirm_kind(&mut row, edpcli::provision::DiskProvisionKind::Mode0);
     row.partitions = Some(
         context
             .partitions
             .iter()
-            .map(|part| edpcli::sectors::EdpfPartition {
+            .map(|part| edpcli::protocol::sectors::EdpfPartition {
                 ptype: part.partition_type,
                 active: 1,
                 enc: u32::from(part.partition_type != 1),
                 start_lba: part.start_sector,
-                size_bytes: part.sector_count * edpcli::common::SECTOR as u64,
+                size_bytes: part.sector_count * edpcli::application::support::SECTOR as u64,
             })
             .collect(),
     );
@@ -1089,7 +1089,7 @@ fn official_provision_disk_layout_covers_the_whole_physical_disk() {
     assert_complete_layout(&model);
     assert_eq!(
         model.total_sectors,
-        device().size / edpcli::common::SECTOR as u64
+        device().size / edpcli::application::support::SECTOR as u64
     );
     let kinds = model
         .segments
@@ -1111,7 +1111,7 @@ fn plain_provision_disk_layout_covers_mbr_free_and_partitions_to_last_sector() {
     assert_complete_layout(&model);
     assert_eq!(
         model.total_sectors,
-        device().size / edpcli::common::SECTOR as u64
+        device().size / edpcli::application::support::SECTOR as u64
     );
     assert_eq!(model.segments[0].kind, DiskRegionKind::Metadata);
     assert_eq!(model.segments[0].start_lba, 0);

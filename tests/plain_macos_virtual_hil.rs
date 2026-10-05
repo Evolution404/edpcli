@@ -3,14 +3,14 @@
 use std::time::Duration;
 
 use edpcli::{
-    common::SECTOR,
+    application::filesystem::FilesystemKind,
+    application::support::SECTOR,
     diskio::{execute_write_transaction, FileDev, SectorDev, WriteTransactionPlan},
-    filesystem::FilesystemKind,
     platform,
+    platform::system::SysRunner,
     provision::{
         build_plain_provision_write_plan, DiskProvisionKind, PlainPartitionSpec, PlainProvisionPlan,
     },
-    sysinfo::SysRunner,
 };
 
 #[test]

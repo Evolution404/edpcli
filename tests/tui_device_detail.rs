@@ -1,4 +1,4 @@
-use edpcli::disk_scan::Row;
+use edpcli::cli::Row;
 use edpcli::tui::state::AppState;
 
 fn device() -> Row {
