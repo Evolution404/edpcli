@@ -114,6 +114,47 @@ pub(crate) struct ProvisionConfirmationRegion {
     pub technical_basis: Vec<String>,
 }
 
+impl ProvisionConfirmationRegion {
+    pub(crate) fn result_summary(&self) -> String {
+        match self.filesystem_effect {
+            ProvisionConfirmationFilesystemEffect::Format(filesystem)
+            | ProvisionConfirmationFilesystemEffect::Create(filesystem) => {
+                return format!("创建新的空 {} 文件系统。", filesystem.display_name());
+            }
+            ProvisionConfirmationFilesystemEffect::Keep
+            | ProvisionConfirmationFilesystemEffect::None => {}
+        }
+
+        if self.action == ProvisionConfirmationAction::Delete {
+            return "该来源区域不会保留在最终布局中。".into();
+        }
+        if self.action == ProvisionConfirmationAction::Free {
+            return "该范围保持未分配，不创建文件系统。".into();
+        }
+        if self.action == ProvisionConfirmationAction::Rewrap {
+            return "仅更新密码封装；FileKey、数据范围和文件系统保持不变。".into();
+        }
+        if self.password_effect == ProvisionConfirmationPasswordEffect::Preserve
+            && self.data_effect == ProvisionConfirmationDataEffect::Preserve
+        {
+            return "原 FileKey、数据范围和文件系统保持不变。".into();
+        }
+        if self.data_effect == ProvisionConfirmationDataEffect::Preserve {
+            return "原数据范围和文件系统保持不变。".into();
+        }
+        match self.action {
+            ProvisionConfirmationAction::Fixed => "按最终计划生成固定协议结构。".into(),
+            ProvisionConfirmationAction::New => "按最终计划新建该区域。".into(),
+            ProvisionConfirmationAction::Preserve => "该区域按最终布局保留。".into(),
+            ProvisionConfirmationAction::FormatRebuild => "按最终几何重建该区域。".into(),
+            ProvisionConfirmationAction::Passthrough => "原数据范围和密钥材料保持不变。".into(),
+            ProvisionConfirmationAction::Rewrap
+            | ProvisionConfirmationAction::Free
+            | ProvisionConfirmationAction::Delete => unreachable!(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProvisionConfirmationOverall {
     pub cleared_regions: usize,

@@ -40,6 +40,9 @@ pub(super) fn draw_execution_summary(
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("原因", muted())));
         lines.push(Line::from(safe(&region.reason_summary)));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("结果", muted())));
+        lines.push(Line::from(safe(&region.result_summary())));
         if expanded {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled("技术依据", muted())));

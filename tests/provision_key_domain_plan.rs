@@ -380,6 +380,9 @@ fn confirmation_ui_uses_one_handling_vocabulary_and_symbolic_statuses() {
     assert!(summary.contains("status_line("));
     assert!(summary.contains("\"处理\""));
     assert!(!summary.contains("动作"));
+    assert!(summary.contains("\"原因\""));
+    assert!(summary.contains("\"结果\""));
+    assert!(summary.contains("region.result_summary()"));
     for token in [
         "● 固定",
         "● 保留",
