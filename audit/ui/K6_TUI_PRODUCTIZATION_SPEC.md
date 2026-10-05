@@ -2,7 +2,11 @@
 
 日期：2026-09-27
 
-状态：**待实现的专项产品规格**。本文件不表示这些行为已经实现。
+状态：**已废止 / SUPERSEDED / CLOSED**。本文件保留为 2026-09-27 历史设计记录，不再表示待办，也不得据此恢复文件级迁移功能。
+
+当前产品事实已经反向收口：Provision 明确不提供文件级迁移；Plain/EDP 转换只允许原地保留/重新包装，或经明确授权重建，不遍历、暂存或搬运用户文件。架构门禁 `tests/architecture_split.rs::chapter_15_identity_write_boundaries_remain_separate` 强制 `RegionDisposition::Migrate`、迁移实现文件和旧 K6 实盘示例保持删除；`provisioning_docs_keep_file_migration_out_of_the_product_contract` 同时约束现行用户文档不得再次宣称 K6 能力。当前事实源为 `docs/provisioning/PROVISIONING.md`、`docs/architecture/ARCHITECTURE.md`、`docs/user/USAGE.md` 与 `docs/user/RELEASE.md`。
+
+因此本文件第 4～21 节中的来源密码补齐、迁移清单、规划进度、P4～P7 K6 展示和真实盘 K6 往返验收均属于被后续产品决策取消的历史方案，不属于主分支未完成任务。
 
 关联总规范：`audit/ui/UI_REDESIGN_SPEC.md`
 
