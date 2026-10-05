@@ -4,6 +4,9 @@ use edpcli::{
         image::{parse_protocol_image, ProtocolImageContext, PROTOCOL_IMAGE_BYTES},
         lba6::encode_safe6,
         profile::*,
+        profile_detector::{
+            detect_profile_axes, ProfileDetection, ProfileDetectionContext, PROFILE_AXIS_DETECTORS,
+        },
         types::ProtocolError,
     },
 };
@@ -172,4 +175,85 @@ fn protocol_image_rejects_lba12_partition_type_that_disagrees_with_lba7() {
             field: "edpf_type_cross_lba"
         })
     ));
+}
+
+#[test]
+fn unified_profile_detector_registry_classifies_committed_gold_without_guessing_provenance() {
+    let detections = detect_profile_axes(
+        NETAC_GOLD,
+        ProfileDetectionContext {
+            device_id: Some(DEVICE_ID),
+            vid: Some(VID),
+            pid: Some(PID),
+            disk_size_bytes: Some(DISK_SIZE_BYTES),
+            onlyid: Some(1_402_259_934),
+        },
+    );
+    assert_eq!(detections.len(), PROFILE_AXIS_DETECTORS.len());
+    assert_eq!(detections.len(), 18);
+
+    let get = |axis: &str| {
+        &detections
+            .iter()
+            .find(|entry| entry.axis == axis)
+            .unwrap_or_else(|| panic!("missing detector result for {axis}"))
+            .detection
+    };
+
+    for (axis, expected) in [
+        ("lba0_bootstrap", "usb-main-bsec"),
+        ("lba0_sector_size_overlay", "absent"),
+        ("gpt_layout", "absent"),
+        ("lba3_metadata", "zero"),
+        ("dept_layout", "short"),
+        ("lba6_mbr_underlay", "zero-underlay"),
+        ("lba7_entry_count", "three-entry"),
+        ("lba7_passinfo_version", "legacy-v0064"),
+        ("lba8_usb_only_info", "strict-legacy-absent"),
+        ("lba9_eetu", "eetu"),
+        ("lba9_overlay", "sapf"),
+        ("lba10_eesi", "absent-zero"),
+        ("lba11_capacity", "disk-size"),
+        ("lba12_mode", "mode2"),
+    ] {
+        assert_eq!(get(axis), &ProfileDetection::Unique(expected), "{axis}");
+    }
+
+    for axis in [
+        "lba4_encoding",
+        "lba4_second_key_source",
+        "lba4_hserial_source",
+        "host_hardinfo_source",
+    ] {
+        assert!(
+            matches!(get(axis), ProfileDetection::Candidates(states) if states.len() == 2),
+            "producer provenance axis must remain candidate-only: {axis}={:?}",
+            get(axis)
+        );
+    }
+}
+
+#[test]
+fn contextual_detectors_report_missing_context_instead_of_guessing() {
+    let detections = detect_profile_axes(NETAC_GOLD, ProfileDetectionContext::default());
+    let get = |axis: &str| {
+        &detections
+            .iter()
+            .find(|entry| entry.axis == axis)
+            .unwrap()
+            .detection
+    };
+    assert_eq!(
+        get("lba7_entry_count"),
+        &ProfileDetection::MissingContext(vec!["device_id"])
+    );
+    assert_eq!(
+        get("lba11_capacity"),
+        &ProfileDetection::MissingContext(vec!["vid", "pid", "disk_size_bytes"])
+    );
+    assert_eq!(
+        get("lba10_eesi"),
+        &ProfileDetection::Unique("absent-zero"),
+        "wire-level absent-zero remains detectable without identity context"
+    );
 }

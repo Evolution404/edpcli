@@ -16,6 +16,8 @@ const TOTAL_BYTES: usize = 13 * 512;
 struct AxisState {
     role: String,
     effect_kind: String,
+    detector_symbol: String,
+    detection_kind: String,
     bytes: BTreeSet<usize>,
 }
 
@@ -81,14 +83,14 @@ fn parse_axes() -> BTreeMap<(String, String), AxisState> {
     let mut lines = text.lines();
     assert_eq!(
         lines.next(),
-        Some("axis\tstate\trole\tranges\teffect_kind\tdescription\tevidence"),
+        Some("axis\tstate\trole\tranges\teffect_kind\tdescription\tevidence\tdetector_symbol\tdetection_kind"),
         "profile_axes.tsv header drift"
     );
 
     let mut axes = BTreeMap::new();
     for line in lines.filter(|line| !line.trim().is_empty()) {
         let cols: Vec<_> = line.split('\t').collect();
-        assert_eq!(cols.len(), 7, "bad profile axis row: {line}");
+        assert_eq!(cols.len(), 9, "bad profile axis row: {line}");
         assert!(
             matches!(cols[2], "owner" | "overlay"),
             "bad profile axis role: {line}"
@@ -105,6 +107,14 @@ fn parse_axes() -> BTreeMap<(String, String), AxisState> {
             "axis description is empty: {line}"
         );
         assert!(!cols[6].trim().is_empty(), "axis evidence is empty: {line}");
+        assert!(
+            cols[7].starts_with("edpcli::protocol::profile_detector::detect_"),
+            "bad detector symbol: {line}"
+        );
+        assert!(
+            matches!(cols[8], "wire" | "contextual" | "provenance-only"),
+            "bad detector kind: {line}"
+        );
         let key = (cols[0].to_owned(), cols[1].to_owned());
         let previous = axes.insert(
             key.clone(),
@@ -112,6 +122,8 @@ fn parse_axes() -> BTreeMap<(String, String), AxisState> {
                 role: cols[2].to_owned(),
                 bytes: expand_range_spec(cols[3]),
                 effect_kind: cols[4].to_owned(),
+                detector_symbol: cols[7].to_owned(),
+                detection_kind: cols[8].to_owned(),
             },
         );
         assert!(previous.is_none(), "duplicate axis/state: {key:?}");
@@ -286,6 +298,14 @@ fn orthogonal_profile_axes_keep_required_historical_forks_independent() {
                 state.bytes, first.bytes,
                 "axis states must describe the same physical scope for {axis}"
             );
+            assert_eq!(
+                state.detector_symbol, first.detector_symbol,
+                "axis states disagree on detector symbol for {axis}"
+            );
+            assert_eq!(
+                state.detection_kind, first.detection_kind,
+                "axis states disagree on detection kind for {axis}"
+            );
         }
     }
 
@@ -305,6 +325,62 @@ fn orthogonal_profile_axes_keep_required_historical_forks_independent() {
                 overlap
             );
         }
+    }
+}
+
+#[test]
+fn profile_detector_registry_matches_axis_catalog_exactly() {
+    use edpcli::protocol::profile_detector::PROFILE_AXIS_DETECTORS;
+
+    let axes = parse_axes();
+    let mut catalog: BTreeMap<String, (BTreeSet<String>, String, String)> = BTreeMap::new();
+    for ((axis, state), meta) in &axes {
+        let entry = catalog.entry(axis.clone()).or_insert_with(|| {
+            (
+                BTreeSet::new(),
+                meta.detector_symbol.clone(),
+                meta.detection_kind.clone(),
+            )
+        });
+        assert_eq!(
+            entry.1, meta.detector_symbol,
+            "detector symbol drift: {axis}"
+        );
+        assert_eq!(entry.2, meta.detection_kind, "detector kind drift: {axis}");
+        entry.0.insert(state.clone());
+    }
+
+    assert_eq!(PROFILE_AXIS_DETECTORS.len(), catalog.len());
+    let mut runtime_axes = BTreeSet::new();
+    for detector in PROFILE_AXIS_DETECTORS {
+        assert!(
+            runtime_axes.insert(detector.axis),
+            "duplicate runtime detector: {}",
+            detector.axis
+        );
+        let (states, symbol, kind) = catalog.get(detector.axis).unwrap_or_else(|| {
+            panic!(
+                "runtime detector missing from profile_axes.tsv: {}",
+                detector.axis
+            )
+        });
+        assert_eq!(
+            detector.states.iter().copied().collect::<BTreeSet<_>>(),
+            states.iter().map(String::as_str).collect::<BTreeSet<_>>(),
+            "runtime detector state set drift: {}",
+            detector.axis
+        );
+        assert_eq!(
+            detector.symbol, symbol,
+            "runtime detector symbol drift: {}",
+            detector.axis
+        );
+        assert_eq!(
+            detector.kind.as_str(),
+            kind,
+            "runtime detector kind drift: {}",
+            detector.axis
+        );
     }
 }
 

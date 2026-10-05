@@ -75,7 +75,7 @@ pub fn render() -> String {
     let translations = translations();
     let mut out = String::from("# EDP LBA0–LBA12 字段手册\n\n\
 > 自动生成：请修改标准 TSV 后重新生成，勿直接编辑本文件。\n\n\
-事实源：[field_catalog.tsv](../../audit/protocol/field_catalog.tsv)、[profile_axes.tsv](../../audit/protocol/profile_axes.tsv)。\n\
+事实源：[field_catalog.tsv](../../audit/protocol/field_catalog.tsv)、[profile_axes.tsv](../../audit/protocol/profile_axes.tsv)；后者同时登记每个轴的 detector 符号与检测模式。\n\
 证据 ID 的类型、定位与限制见 [evidence_manifest.tsv](../../audit/protocol/evidence_manifest.tsv)。\n\
 生成器：[generate_field_guide.rs](../../scripts/protocol/generate_field_guide.rs)；\n\
 运行 `rustc --edition=2021 scripts/protocol/generate_field_guide.rs -o target/generate-field-guide`，\n\
@@ -212,6 +212,8 @@ pub fn render() -> String {
                     "角色",
                     "完整轴范围（可跨 LBA）",
                     "演进类型",
+                    "检测模式",
+                    "Detector",
                     "差异说明",
                     "证据",
                 ],
@@ -223,6 +225,8 @@ pub fn render() -> String {
                             "role",
                             "ranges",
                             "effect_kind",
+                            "detection_kind",
+                            "detector_symbol",
                             "description",
                             "evidence",
                         ]
@@ -288,7 +292,22 @@ pub fn render() -> String {
             );
         }
         out.push_str("### 实现与测试入口\n\n");
-        out.push_str("正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。\n\n");
+        out.push_str("正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。\n\n");
+        let detector_axes: BTreeSet<_> = local
+            .iter()
+            .map(|r| r["profile_axis"])
+            .filter(|axis| *axis != "base")
+            .collect();
+        for axis in detector_axes {
+            let detector = axes.iter().find(|row| row["axis"] == axis).unwrap();
+            writeln!(
+                out,
+                "- Detector：`{axis}` → `{}`（`{}`）。",
+                detector["detector_symbol"], detector["detection_kind"]
+            )
+            .unwrap();
+        }
+        out.push('\n');
         let tests: BTreeSet<_> = local.iter().map(|r| r["ownership_test_symbol"]).collect();
         for test in tests {
             writeln!(

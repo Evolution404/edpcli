@@ -2,7 +2,7 @@
 
 > 自动生成：请修改标准 TSV 后重新生成，勿直接编辑本文件。
 
-事实源：[field_catalog.tsv](../../audit/protocol/field_catalog.tsv)、[profile_axes.tsv](../../audit/protocol/profile_axes.tsv)。
+事实源：[field_catalog.tsv](../../audit/protocol/field_catalog.tsv)、[profile_axes.tsv](../../audit/protocol/profile_axes.tsv)；后者同时登记每个轴的 detector 符号与检测模式。
 证据 ID 的类型、定位与限制见 [evidence_manifest.tsv](../../audit/protocol/evidence_manifest.tsv)。
 生成器：[generate_field_guide.rs](../../scripts/protocol/generate_field_guide.rs)；
 运行 `rustc --edition=2021 scripts/protocol/generate_field_guide.rs -o target/generate-field-guide`，
@@ -359,11 +359,11 @@
 
 **lba0_bootstrap**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| zero | owner | 0:000-18f | ProducerChanged | LBA0 引导代码 家族；上层选择器来源与 盘面 语义分开。 | S-WIN-CURRENT;S-NETAC-MBR;P-GOLD-ENC |
-| usb-main-bsec | owner | 0:000-18f | ProducerChanged | LBA0 引导代码 家族；上层选择器来源与 盘面 语义分开。 | S-WIN-CURRENT;S-NETAC-MBR;P-GOLD-ENC |
-| netac-mbr | owner | 0:000-18f | ProducerChanged | LBA0 引导代码 家族；上层选择器来源与 盘面 语义分开。 | S-WIN-CURRENT;S-NETAC-MBR;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| zero | owner | 0:000-18f | ProducerChanged | wire | edpcli::protocol::profile_detector::detect_lba0_bootstrap | LBA0 引导代码 家族；上层选择器来源与 盘面 语义分开。 | S-WIN-CURRENT;S-NETAC-MBR;P-GOLD-ENC |
+| usb-main-bsec | owner | 0:000-18f | ProducerChanged | wire | edpcli::protocol::profile_detector::detect_lba0_bootstrap | LBA0 引导代码 家族；上层选择器来源与 盘面 语义分开。 | S-WIN-CURRENT;S-NETAC-MBR;P-GOLD-ENC |
+| netac-mbr | owner | 0:000-18f | ProducerChanged | wire | edpcli::protocol::profile_detector::detect_lba0_bootstrap | LBA0 引导代码 家族；上层选择器来源与 盘面 语义分开。 | S-WIN-CURRENT;S-NETAC-MBR;P-GOLD-ENC |
 
 | 区域（含首尾） | zero | usb-main-bsec | netac-mbr |
 | --- | --- | --- | --- |
@@ -371,10 +371,10 @@
 
 **lba0_sector_size_overlay**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| absent | owner | 0:1a0-1a3 | AddedRemoved | 可选 SAFE1/旧版 SectorSize 覆盖项 与 引导代码 家族相互独立。 | S-WIN-CURRENT;P-GOLD-ENC |
-| sector-size-512 | owner | 0:1a0-1a3 | AddedRemoved | 可选 SAFE1/旧版 SectorSize 覆盖项 与 引导代码 家族相互独立。 | S-WIN-CURRENT;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| absent | owner | 0:1a0-1a3 | AddedRemoved | wire | edpcli::protocol::profile_detector::detect_lba0_sector_size_overlay | 可选 SAFE1/旧版 SectorSize 覆盖项 与 引导代码 家族相互独立。 | S-WIN-CURRENT;P-GOLD-ENC |
+| sector-size-512 | owner | 0:1a0-1a3 | AddedRemoved | wire | edpcli::protocol::profile_detector::detect_lba0_sector_size_overlay | 可选 SAFE1/旧版 SectorSize 覆盖项 与 引导代码 家族相互独立。 | S-WIN-CURRENT;P-GOLD-ENC |
 
 | 区域（含首尾） | absent | sector-size-512 |
 | --- | --- | --- |
@@ -382,7 +382,10 @@
 
 ### 实现与测试入口
 
-正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。
+正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。
+
+- Detector：`lba0_bootstrap` → `edpcli::protocol::profile_detector::detect_lba0_bootstrap`（`wire`）。
+- Detector：`lba0_sector_size_overlay` → `edpcli::protocol::profile_detector::detect_lba0_sector_size_overlay`（`wire`）。
 
 - 所有权：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
 - 测试夹具定位：通过各行物理/写入端/消费端证据 ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其证据类型和限制。
@@ -455,10 +458,10 @@
 
 **gpt_layout**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| absent | owner | 1:000-1ff;2:000-1ff | AddedRemoved | GPT LBA1/LBA2 是否存在与 SAFE6 元数据 配置类型 相互独立。 | V-GPT;P-GOLD-ENC |
-| enabled | owner | 1:000-1ff;2:000-1ff | AddedRemoved | GPT LBA1/LBA2 是否存在与 SAFE6 元数据 配置类型 相互独立。 | V-GPT;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| absent | owner | 1:000-1ff;2:000-1ff | AddedRemoved | wire | edpcli::protocol::profile_detector::detect_gpt_layout | GPT LBA1/LBA2 是否存在与 SAFE6 元数据 配置类型 相互独立。 | V-GPT;P-GOLD-ENC |
+| enabled | owner | 1:000-1ff;2:000-1ff | AddedRemoved | wire | edpcli::protocol::profile_detector::detect_gpt_layout | GPT LBA1/LBA2 是否存在与 SAFE6 元数据 配置类型 相互独立。 | V-GPT;P-GOLD-ENC |
 
 | 区域（含首尾） | absent | enabled |
 | --- | --- | --- |
@@ -466,7 +469,9 @@
 
 ### 实现与测试入口
 
-正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。
+正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。
+
+- Detector：`gpt_layout` → `edpcli::protocol::profile_detector::detect_gpt_layout`（`wire`）。
 
 - 所有权：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
 - 测试夹具定位：通过各行物理/写入端/消费端证据 ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其证据类型和限制。
@@ -564,10 +569,10 @@
 
 **gpt_layout**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| absent | owner | 1:000-1ff;2:000-1ff | AddedRemoved | GPT LBA1/LBA2 是否存在与 SAFE6 元数据 配置类型 相互独立。 | V-GPT;P-GOLD-ENC |
-| enabled | owner | 1:000-1ff;2:000-1ff | AddedRemoved | GPT LBA1/LBA2 是否存在与 SAFE6 元数据 配置类型 相互独立。 | V-GPT;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| absent | owner | 1:000-1ff;2:000-1ff | AddedRemoved | wire | edpcli::protocol::profile_detector::detect_gpt_layout | GPT LBA1/LBA2 是否存在与 SAFE6 元数据 配置类型 相互独立。 | V-GPT;P-GOLD-ENC |
+| enabled | owner | 1:000-1ff;2:000-1ff | AddedRemoved | wire | edpcli::protocol::profile_detector::detect_gpt_layout | GPT LBA1/LBA2 是否存在与 SAFE6 元数据 配置类型 相互独立。 | V-GPT;P-GOLD-ENC |
 
 | 区域（含首尾） | absent | enabled |
 | --- | --- | --- |
@@ -576,7 +581,9 @@
 
 ### 实现与测试入口
 
-正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。
+正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。
+
+- Detector：`gpt_layout` → `edpcli::protocol::profile_detector::detect_gpt_layout`（`wire`）。
 
 - 所有权：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
 - 测试夹具定位：通过各行物理/写入端/消费端证据 ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其证据类型和限制。
@@ -674,11 +681,11 @@
 
 **lba3_metadata**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| zero | owner | 3:000-1ff | ProducerChanged | 制造商 MP 元数据状态共享 EDP 仅保留生命周期。 | S-WIN-CURRENT;S-WIN-191141-LBA3;P-GOLD-ENC |
-| kingston-mp-a | owner | 3:000-1ff | ProducerChanged | 制造商 MP 元数据状态共享 EDP 仅保留生命周期。 | S-WIN-CURRENT;S-WIN-191141-LBA3;P-GOLD-ENC |
-| historical-mp-b | owner | 3:000-1ff | ProducerChanged | 制造商 MP 元数据状态共享 EDP 仅保留生命周期。 | S-WIN-CURRENT;S-WIN-191141-LBA3;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| zero | owner | 3:000-1ff | ProducerChanged | wire | edpcli::protocol::profile_detector::detect_lba3_metadata | 制造商 MP 元数据状态共享 EDP 仅保留生命周期。 | S-WIN-CURRENT;S-WIN-191141-LBA3;P-GOLD-ENC |
+| kingston-mp-a | owner | 3:000-1ff | ProducerChanged | wire | edpcli::protocol::profile_detector::detect_lba3_metadata | 制造商 MP 元数据状态共享 EDP 仅保留生命周期。 | S-WIN-CURRENT;S-WIN-191141-LBA3;P-GOLD-ENC |
+| historical-mp-b | owner | 3:000-1ff | ProducerChanged | wire | edpcli::protocol::profile_detector::detect_lba3_metadata | 制造商 MP 元数据状态共享 EDP 仅保留生命周期。 | S-WIN-CURRENT;S-WIN-191141-LBA3;P-GOLD-ENC |
 
 | 区域（含首尾） | zero | kingston-mp-a | historical-mp-b |
 | --- | --- | --- | --- |
@@ -686,7 +693,9 @@
 
 ### 实现与测试入口
 
-正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。
+正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。
+
+- Detector：`lba3_metadata` → `edpcli::protocol::profile_detector::detect_lba3_metadata`（`wire`）。
 
 - 所有权：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
 - 测试夹具定位：通过各行物理/写入端/消费端证据 ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其证据类型和限制。
@@ -1472,10 +1481,10 @@
 
 **host_hardinfo_source**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| current-zero | overlay | 4:035-038;8:014-017 | ProducerChanged | LBA4/LBA8 host-hardinfo 镜像共享一条独立的写入端轴。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
-| legacy-host-identity | overlay | 4:035-038;8:014-017 | ProducerChanged | LBA4/LBA8 host-hardinfo 镜像共享一条独立的写入端轴。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| current-zero | overlay | 4:035-038;8:014-017 | ProducerChanged | provenance-only | edpcli::protocol::profile_detector::detect_host_hardinfo_source | LBA4/LBA8 host-hardinfo 镜像共享一条独立的写入端轴。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
+| legacy-host-identity | overlay | 4:035-038;8:014-017 | ProducerChanged | provenance-only | edpcli::protocol::profile_detector::detect_host_hardinfo_source | LBA4/LBA8 host-hardinfo 镜像共享一条独立的写入端轴。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
 
 | 区域（含首尾） | current-zero | legacy-host-identity |
 | --- | --- | --- |
@@ -1483,10 +1492,10 @@
 
 **lba4_encoding**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| post-xor | owner | 4:018-1ff | EncodingChanged | 恢复节点 逻辑字段稳定，但 盘面 表示不同。 | S-WIN-CURRENT;S-WIN-191141;V-LBA4;V-LBA4-V19 |
-| ordinary-rolling | owner | 4:018-1ff | EncodingChanged | 恢复节点 逻辑字段稳定，但 盘面 表示不同。 | S-WIN-CURRENT;S-WIN-191141;V-LBA4;V-LBA4-V19 |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| post-xor | owner | 4:018-1ff | EncodingChanged | provenance-only | edpcli::protocol::profile_detector::detect_lba4_encoding | 恢复节点 逻辑字段稳定，但 盘面 表示不同。 | S-WIN-CURRENT;S-WIN-191141;V-LBA4;V-LBA4-V19 |
+| ordinary-rolling | owner | 4:018-1ff | EncodingChanged | provenance-only | edpcli::protocol::profile_detector::detect_lba4_encoding | 恢复节点 逻辑字段稳定，但 盘面 表示不同。 | S-WIN-CURRENT;S-WIN-191141;V-LBA4;V-LBA4-V19 |
 
 | 区域（含首尾） | post-xor | ordinary-rolling |
 | --- | --- | --- |
@@ -1505,10 +1514,10 @@
 
 **lba4_hserial_source**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| current-zero | overlay | 4:020-033 | ProducerChanged | HSerialCRC 向量可独立处于缺失状态或由调用方提供。 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19;P-GOLD-ENC |
-| legacy-caller-vector | overlay | 4:020-033 | ProducerChanged | HSerialCRC 向量可独立处于缺失状态或由调用方提供。 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| current-zero | overlay | 4:020-033 | ProducerChanged | provenance-only | edpcli::protocol::profile_detector::detect_lba4_hserial_source | HSerialCRC 向量可独立处于缺失状态或由调用方提供。 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19;P-GOLD-ENC |
+| legacy-caller-vector | overlay | 4:020-033 | ProducerChanged | provenance-only | edpcli::protocol::profile_detector::detect_lba4_hserial_source | HSerialCRC 向量可独立处于缺失状态或由调用方提供。 | S-WIN-CURRENT;S-WIN-191141;V-LBA4-V19;P-GOLD-ENC |
 
 | 区域（含首尾） | current-zero | legacy-caller-vector |
 | --- | --- | --- |
@@ -1516,10 +1525,10 @@
 
 **lba4_second_key_source**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| current-main-onlyid | overlay | 4:01c-01f | ProducerChanged | OnllyID2Nd 含义稳定，但写入端种子来源会变化。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
-| legacy-guid-crc | overlay | 4:01c-01f | ProducerChanged | OnllyID2Nd 含义稳定，但写入端种子来源会变化。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| current-main-onlyid | overlay | 4:01c-01f | ProducerChanged | provenance-only | edpcli::protocol::profile_detector::detect_lba4_second_key_source | OnllyID2Nd 含义稳定，但写入端种子来源会变化。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
+| legacy-guid-crc | overlay | 4:01c-01f | ProducerChanged | provenance-only | edpcli::protocol::profile_detector::detect_lba4_second_key_source | OnllyID2Nd 含义稳定，但写入端种子来源会变化。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
 
 | 区域（含首尾） | current-main-onlyid | legacy-guid-crc |
 | --- | --- | --- |
@@ -1527,7 +1536,12 @@
 
 ### 实现与测试入口
 
-正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。
+正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。
+
+- Detector：`host_hardinfo_source` → `edpcli::protocol::profile_detector::detect_host_hardinfo_source`（`provenance-only`）。
+- Detector：`lba4_encoding` → `edpcli::protocol::profile_detector::detect_lba4_encoding`（`provenance-only`）。
+- Detector：`lba4_hserial_source` → `edpcli::protocol::profile_detector::detect_lba4_hserial_source`（`provenance-only`）。
+- Detector：`lba4_second_key_source` → `edpcli::protocol::profile_detector::detect_lba4_second_key_source`（`provenance-only`）。
 
 - 所有权：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
 - 测试夹具定位：通过各行物理/写入端/消费端证据 ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其证据类型和限制。
@@ -1577,7 +1591,8 @@
 
 ### 实现与测试入口
 
-正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。
+正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。
+
 
 - 所有权：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
 - 测试夹具定位：通过各行物理/写入端/消费端证据 ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其证据类型和限制。
@@ -2274,11 +2289,11 @@
 
 **dept_layout**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| short | owner | 6:000-03f;9:080-0ff | OwnershipChanged | Dept 拼接边界是跨 LBA6/LBA9 的独立序列化轴。 | S-JOIN59-SEMANTIC;P-GOLD-ENC |
-| join59 | owner | 6:000-03f;9:080-0ff | OwnershipChanged | Dept 拼接边界是跨 LBA6/LBA9 的独立序列化轴。 | S-JOIN59-SEMANTIC;P-GOLD-ENC |
-| join60 | owner | 6:000-03f;9:080-0ff | OwnershipChanged | Dept 拼接边界是跨 LBA6/LBA9 的独立序列化轴。 | S-JOIN59-SEMANTIC;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| short | owner | 6:000-03f;9:080-0ff | OwnershipChanged | wire | edpcli::protocol::profile_detector::detect_dept_layout | Dept 拼接边界是跨 LBA6/LBA9 的独立序列化轴。 | S-JOIN59-SEMANTIC;P-GOLD-ENC |
+| join59 | owner | 6:000-03f;9:080-0ff | OwnershipChanged | wire | edpcli::protocol::profile_detector::detect_dept_layout | Dept 拼接边界是跨 LBA6/LBA9 的独立序列化轴。 | S-JOIN59-SEMANTIC;P-GOLD-ENC |
+| join60 | owner | 6:000-03f;9:080-0ff | OwnershipChanged | wire | edpcli::protocol::profile_detector::detect_dept_layout | Dept 拼接边界是跨 LBA6/LBA9 的独立序列化轴。 | S-JOIN59-SEMANTIC;P-GOLD-ENC |
 
 | 区域（含首尾） | short | join59 | join60 |
 | --- | --- | --- | --- |
@@ -2287,10 +2302,10 @@
 
 **lba6_mbr_underlay**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| zero-underlay | owner | 6:1e0-1ed | OwnershipChanged | LBA6 的 NUL 后切片为全零底层字节或残留的 MBR entry3 快照。 | S-MBR-SNAPSHOT-SEMANTIC;P-GOLD-ENC |
-| legacy-mbr-snapshot | owner | 6:1e0-1ed | OwnershipChanged | LBA6 的 NUL 后切片为全零底层字节或残留的 MBR entry3 快照。 | S-MBR-SNAPSHOT-SEMANTIC;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| zero-underlay | owner | 6:1e0-1ed | OwnershipChanged | wire | edpcli::protocol::profile_detector::detect_lba6_mbr_underlay | LBA6 的 NUL 后切片为全零底层字节或残留的 MBR entry3 快照。 | S-MBR-SNAPSHOT-SEMANTIC;P-GOLD-ENC |
+| legacy-mbr-snapshot | owner | 6:1e0-1ed | OwnershipChanged | wire | edpcli::protocol::profile_detector::detect_lba6_mbr_underlay | LBA6 的 NUL 后切片为全零底层字节或残留的 MBR entry3 快照。 | S-MBR-SNAPSHOT-SEMANTIC;P-GOLD-ENC |
 
 | 区域（含首尾） | zero-underlay | legacy-mbr-snapshot |
 | --- | --- | --- |
@@ -2298,7 +2313,10 @@
 
 ### 实现与测试入口
 
-正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。
+正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。
+
+- Detector：`dept_layout` → `edpcli::protocol::profile_detector::detect_dept_layout`（`wire`）。
+- Detector：`lba6_mbr_underlay` → `edpcli::protocol::profile_detector::detect_lba6_mbr_underlay`（`wire`）。
 
 - 所有权：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
 - 测试夹具定位：通过各行物理/写入端/消费端证据 ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其证据类型和限制。
@@ -2471,10 +2489,10 @@
 
 **lba7_entry_count**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| two-entry | owner | 7:080-0bf | AddedRemoved | 第三个打包旧版 EDPF 条目可独立缺失或存在。 | S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-MODE1 |
-| three-entry | owner | 7:080-0bf | AddedRemoved | 第三个打包旧版 EDPF 条目可独立缺失或存在。 | S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-MODE1 |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| two-entry | owner | 7:080-0bf | AddedRemoved | contextual | edpcli::protocol::profile_detector::detect_lba7_entry_count | 第三个打包旧版 EDPF 条目可独立缺失或存在。 | S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-MODE1 |
+| three-entry | owner | 7:080-0bf | AddedRemoved | contextual | edpcli::protocol::profile_detector::detect_lba7_entry_count | 第三个打包旧版 EDPF 条目可独立缺失或存在。 | S-WIN-CURRENT;P-GOLD-ENC;P-GOLD-MODE1 |
 
 | 区域（含首尾） | two-entry | three-entry |
 | --- | --- | --- |
@@ -2482,10 +2500,10 @@
 
 **lba7_passinfo_version**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| legacy-v0064 | owner | 7:0c0-0cd | ProducerChanged | LBA7 密码信息 版本与打包条目数量相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC |
-| current-v0206 | owner | 7:0c0-0cd | ProducerChanged | LBA7 密码信息 版本与打包条目数量相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| legacy-v0064 | owner | 7:0c0-0cd | ProducerChanged | contextual | edpcli::protocol::profile_detector::detect_lba7_passinfo_version | LBA7 密码信息 版本与打包条目数量相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC |
+| current-v0206 | owner | 7:0c0-0cd | ProducerChanged | contextual | edpcli::protocol::profile_detector::detect_lba7_passinfo_version | LBA7 密码信息 版本与打包条目数量相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC |
 
 | 区域（含首尾） | legacy-v0064 | current-v0206 |
 | --- | --- | --- |
@@ -2493,7 +2511,10 @@
 
 ### 实现与测试入口
 
-正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。
+正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。
+
+- Detector：`lba7_entry_count` → `edpcli::protocol::profile_detector::detect_lba7_entry_count`（`contextual`）。
+- Detector：`lba7_passinfo_version` → `edpcli::protocol::profile_detector::detect_lba7_passinfo_version`（`contextual`）。
 
 - 所有权：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
 - 测试夹具定位：通过各行物理/写入端/消费端证据 ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其证据类型和限制。
@@ -2916,10 +2937,10 @@
 
 **host_hardinfo_source**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| current-zero | overlay | 4:035-038;8:014-017 | ProducerChanged | LBA4/LBA8 host-hardinfo 镜像共享一条独立的写入端轴。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
-| legacy-host-identity | overlay | 4:035-038;8:014-017 | ProducerChanged | LBA4/LBA8 host-hardinfo 镜像共享一条独立的写入端轴。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| current-zero | overlay | 4:035-038;8:014-017 | ProducerChanged | provenance-only | edpcli::protocol::profile_detector::detect_host_hardinfo_source | LBA4/LBA8 host-hardinfo 镜像共享一条独立的写入端轴。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
+| legacy-host-identity | overlay | 4:035-038;8:014-017 | ProducerChanged | provenance-only | edpcli::protocol::profile_detector::detect_host_hardinfo_source | LBA4/LBA8 host-hardinfo 镜像共享一条独立的写入端轴。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
 
 | 区域（含首尾） | current-zero | legacy-host-identity |
 | --- | --- | --- |
@@ -2927,11 +2948,11 @@
 
 **lba8_usb_only_info**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| current | owner | 8:01e-02d | ProducerChanged | UsbOnlyInfo 存在当前、过渡和缺失三种写入端状态。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
-| transitional-2019 | owner | 8:01e-02d | ProducerChanged | UsbOnlyInfo 存在当前、过渡和缺失三种写入端状态。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
-| strict-legacy-absent | owner | 8:01e-02d | ProducerChanged | UsbOnlyInfo 存在当前、过渡和缺失三种写入端状态。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| current | owner | 8:01e-02d | ProducerChanged | contextual | edpcli::protocol::profile_detector::detect_lba8_usb_only_info | UsbOnlyInfo 存在当前、过渡和缺失三种写入端状态。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
+| transitional-2019 | owner | 8:01e-02d | ProducerChanged | contextual | edpcli::protocol::profile_detector::detect_lba8_usb_only_info | UsbOnlyInfo 存在当前、过渡和缺失三种写入端状态。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
+| strict-legacy-absent | owner | 8:01e-02d | ProducerChanged | contextual | edpcli::protocol::profile_detector::detect_lba8_usb_only_info | UsbOnlyInfo 存在当前、过渡和缺失三种写入端状态。 | S-WIN-CURRENT;S-WIN-191141;P-GOLD-ENC |
 
 | 区域（含首尾） | current | transitional-2019 | strict-legacy-absent |
 | --- | --- | --- | --- |
@@ -2939,7 +2960,10 @@
 
 ### 实现与测试入口
 
-正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。
+正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。
+
+- Detector：`host_hardinfo_source` → `edpcli::protocol::profile_detector::detect_host_hardinfo_source`（`provenance-only`）。
+- Detector：`lba8_usb_only_info` → `edpcli::protocol::profile_detector::detect_lba8_usb_only_info`（`contextual`）。
 
 - 所有权：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
 - 测试夹具定位：通过各行物理/写入端/消费端证据 ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其证据类型和限制。
@@ -3312,11 +3336,11 @@
 
 **dept_layout**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| short | owner | 6:000-03f;9:080-0ff | OwnershipChanged | Dept 拼接边界是跨 LBA6/LBA9 的独立序列化轴。 | S-JOIN59-SEMANTIC;P-GOLD-ENC |
-| join59 | owner | 6:000-03f;9:080-0ff | OwnershipChanged | Dept 拼接边界是跨 LBA6/LBA9 的独立序列化轴。 | S-JOIN59-SEMANTIC;P-GOLD-ENC |
-| join60 | owner | 6:000-03f;9:080-0ff | OwnershipChanged | Dept 拼接边界是跨 LBA6/LBA9 的独立序列化轴。 | S-JOIN59-SEMANTIC;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| short | owner | 6:000-03f;9:080-0ff | OwnershipChanged | wire | edpcli::protocol::profile_detector::detect_dept_layout | Dept 拼接边界是跨 LBA6/LBA9 的独立序列化轴。 | S-JOIN59-SEMANTIC;P-GOLD-ENC |
+| join59 | owner | 6:000-03f;9:080-0ff | OwnershipChanged | wire | edpcli::protocol::profile_detector::detect_dept_layout | Dept 拼接边界是跨 LBA6/LBA9 的独立序列化轴。 | S-JOIN59-SEMANTIC;P-GOLD-ENC |
+| join60 | owner | 6:000-03f;9:080-0ff | OwnershipChanged | wire | edpcli::protocol::profile_detector::detect_dept_layout | Dept 拼接边界是跨 LBA6/LBA9 的独立序列化轴。 | S-JOIN59-SEMANTIC;P-GOLD-ENC |
 
 | 区域（含首尾） | short | join59 | join60 |
 | --- | --- | --- | --- |
@@ -3324,10 +3348,10 @@
 
 **lba9_eetu**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| absent-zero | owner | 9:000-07f | AddedRemoved | EETU 为可选项，并与 Dept/User 上层 覆盖项 相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC |
-| eetu | owner | 9:000-07f | AddedRemoved | EETU 为可选项，并与 Dept/User 上层 覆盖项 相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| absent-zero | owner | 9:000-07f | AddedRemoved | contextual | edpcli::protocol::profile_detector::detect_lba9_eetu | EETU 为可选项，并与 Dept/User 上层 覆盖项 相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC |
+| eetu | owner | 9:000-07f | AddedRemoved | contextual | edpcli::protocol::profile_detector::detect_lba9_eetu | EETU 为可选项，并与 Dept/User 上层 覆盖项 相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC |
 
 | 区域（含首尾） | absent-zero | eetu |
 | --- | --- | --- |
@@ -3335,12 +3359,12 @@
 
 **lba9_overlay**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| zero | owner | 9:100-1ff | OwnershipChanged | 上半区在 恢复、User 续段、密码策略和保留底层字节之间复用。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6;P-GOLD-ENC |
-| sapf | owner | 9:100-1ff | OwnershipChanged | 上半区在 恢复、User 续段、密码策略和保留底层字节之间复用。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6;P-GOLD-ENC |
-| long-user | owner | 9:100-1ff | OwnershipChanged | 上半区在 恢复、User 续段、密码策略和保留底层字节之间复用。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6;P-GOLD-ENC |
-| eppe | owner | 9:100-1ff | OwnershipChanged | 上半区在 恢复、User 续段、密码策略和保留底层字节之间复用。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| zero | owner | 9:100-1ff | OwnershipChanged | contextual | edpcli::protocol::profile_detector::detect_lba9_overlay | 上半区在 恢复、User 续段、密码策略和保留底层字节之间复用。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6;P-GOLD-ENC |
+| sapf | owner | 9:100-1ff | OwnershipChanged | contextual | edpcli::protocol::profile_detector::detect_lba9_overlay | 上半区在 恢复、User 续段、密码策略和保留底层字节之间复用。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6;P-GOLD-ENC |
+| long-user | owner | 9:100-1ff | OwnershipChanged | contextual | edpcli::protocol::profile_detector::detect_lba9_overlay | 上半区在 恢复、User 续段、密码策略和保留底层字节之间复用。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6;P-GOLD-ENC |
+| eppe | owner | 9:100-1ff | OwnershipChanged | contextual | edpcli::protocol::profile_detector::detect_lba9_overlay | 上半区在 恢复、User 续段、密码策略和保留底层字节之间复用。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA6;P-GOLD-ENC |
 
 | 区域（含首尾） | zero | sapf | long-user | eppe |
 | --- | --- | --- | --- | --- |
@@ -3352,7 +3376,11 @@
 
 ### 实现与测试入口
 
-正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。
+正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。
+
+- Detector：`dept_layout` → `edpcli::protocol::profile_detector::detect_dept_layout`（`wire`）。
+- Detector：`lba9_eetu` → `edpcli::protocol::profile_detector::detect_lba9_eetu`（`contextual`）。
+- Detector：`lba9_overlay` → `edpcli::protocol::profile_detector::detect_lba9_overlay`（`contextual`）。
 
 - 所有权：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
 - 测试夹具定位：通过各行物理/写入端/消费端证据 ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其证据类型和限制。
@@ -3550,10 +3578,10 @@
 
 **lba10_eesi**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| absent-zero | owner | 10:000-1ff | AddedRemoved | EESI 为可选项；启用负载只负责已定义前缀，并原样保留尾部。 | S-EESI-361018;P-EESI-NETAC;P-GOLD-ENC |
-| eesi-enabled | owner | 10:000-1ff | AddedRemoved | EESI 为可选项；启用负载只负责已定义前缀，并原样保留尾部。 | S-EESI-361018;P-EESI-NETAC;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| absent-zero | owner | 10:000-1ff | AddedRemoved | contextual | edpcli::protocol::profile_detector::detect_lba10_eesi | EESI 为可选项；启用负载只负责已定义前缀，并原样保留尾部。 | S-EESI-361018;P-EESI-NETAC;P-GOLD-ENC |
+| eesi-enabled | owner | 10:000-1ff | AddedRemoved | contextual | edpcli::protocol::profile_detector::detect_lba10_eesi | EESI 为可选项；启用负载只负责已定义前缀，并原样保留尾部。 | S-EESI-361018;P-EESI-NETAC;P-GOLD-ENC |
 
 | 区域（含首尾） | absent-zero | eesi-enabled |
 | --- | --- | --- |
@@ -3566,7 +3594,9 @@
 
 ### 实现与测试入口
 
-正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。
+正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。
+
+- Detector：`lba10_eesi` → `edpcli::protocol::profile_detector::detect_lba10_eesi`（`contextual`）。
 
 - 所有权：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
 - 测试夹具定位：通过各行物理/写入端/消费端证据 ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其证据类型和限制。
@@ -3785,10 +3815,10 @@
 
 **lba11_capacity**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| disk-size | owner | 11:000-1ff | ProducerChanged | LBA11 容量密钥输入取决于写入路径，而不是硬件身份。 | S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC |
-| repair-chs | owner | 11:000-1ff | ProducerChanged | LBA11 容量密钥输入取决于写入路径，而不是硬件身份。 | S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| disk-size | owner | 11:000-1ff | ProducerChanged | contextual | edpcli::protocol::profile_detector::detect_lba11_capacity | LBA11 容量密钥输入取决于写入路径，而不是硬件身份。 | S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC |
+| repair-chs | owner | 11:000-1ff | ProducerChanged | contextual | edpcli::protocol::profile_detector::detect_lba11_capacity | LBA11 容量密钥输入取决于写入路径，而不是硬件身份。 | S-WIN-CURRENT;S-LINUX-DWARF;P-GOLD-ENC |
 
 | 区域（含首尾） | disk-size | repair-chs |
 | --- | --- | --- |
@@ -3799,7 +3829,9 @@
 
 ### 实现与测试入口
 
-正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。
+正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。
+
+- Detector：`lba11_capacity` → `edpcli::protocol::profile_detector::detect_lba11_capacity`（`contextual`）。
 
 - 所有权：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
 - 测试夹具定位：通过各行物理/写入端/消费端证据 ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其证据类型和限制。
@@ -4116,12 +4148,12 @@
 
 **lba12_mode**
 
-| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 差异说明 | 证据 |
-| --- | --- | --- | --- | --- | --- |
-| legacy-v0064 | owner | 12:000-1ff | EncodingChanged | LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF |
-| mode1 | owner | 12:000-1ff | EncodingChanged | LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12 |
-| mode2 | owner | 12:000-1ff | EncodingChanged | LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC;P-GOLD-MODE1 |
-| mode3 | owner | 12:000-1ff | EncodingChanged | LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12 |
+| 状态 | 角色 | 完整轴范围（可跨 LBA） | 演进类型 | 检测模式 | Detector | 差异说明 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| legacy-v0064 | owner | 12:000-1ff | EncodingChanged | contextual | edpcli::protocol::profile_detector::detect_lba12_mode | LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF |
+| mode1 | owner | 12:000-1ff | EncodingChanged | contextual | edpcli::protocol::profile_detector::detect_lba12_mode | LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12 |
+| mode2 | owner | 12:000-1ff | EncodingChanged | contextual | edpcli::protocol::profile_detector::detect_lba12_mode | LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12;P-GOLD-ENC;P-GOLD-MODE1 |
+| mode3 | owner | 12:000-1ff | EncodingChanged | contextual | edpcli::protocol::profile_detector::detect_lba12_mode | LBA12 封装密钥 mode 与所有其他 配置类型 轴相互独立。 | S-WIN-CURRENT;S-LINUX-DWARF;V-LBA12 |
 
 | 区域（含首尾） | legacy-v0064 | mode1 | mode2 | mode3 |
 | --- | --- | --- | --- | --- |
@@ -4131,7 +4163,9 @@
 
 ### 实现与测试入口
 
-正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型检测器尚未在目录中登记。
+正式解析器与行为测试以本节各字段的代码/测试符号及状态为准；未实现链接不代表可调用接口。配置类型 detector 已统一登记在运行时 registry，并由 profile_axes.tsv 锁定符号与检测模式。
+
+- Detector：`lba12_mode` → `edpcli::protocol::profile_detector::detect_lba12_mode`（`contextual`）。
 
 - 所有权：`protocol_field_catalog::field_catalog_has_exact_byte_ownership_for_every_profile_state`（[测试文件](../../tests/protocol_field_catalog.rs)）。
 - 测试夹具定位：通过各行物理/写入端/消费端证据 ID 查询 [证据清单](../../audit/protocol/evidence_manifest.tsv)，保留其证据类型和限制。

@@ -12,6 +12,10 @@ use super::{
         HostHardinfoSource, Lba10Eesi, Lba11Capacity, Lba12Mode, Lba7EntryCount,
         Lba7PassinfoVersion, Lba8UsbOnlyInfo,
     },
+    profile_detector::{
+        lba11_profile_candidates, lba12_profile_candidates, lba7_profile_candidates,
+        lba8_profile_candidates,
+    },
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -158,18 +162,13 @@ pub fn infer_lba7(
     raw: &[u8; 512],
     device_crc: u32,
 ) -> Option<(lba7::Lba7View, Lba7EntryCount, Lba7PassinfoVersion)> {
-    let mut matches = Vec::new();
-    for entry_count in [Lba7EntryCount::TwoEntry, Lba7EntryCount::ThreeEntry] {
-        for passinfo in [
-            Lba7PassinfoVersion::LegacyV0064,
-            Lba7PassinfoVersion::CurrentV0206,
-        ] {
-            if let Ok(view) = lba7::parse_lba7(raw, device_crc, entry_count, passinfo) {
-                matches.push((view, entry_count, passinfo));
-            }
-        }
+    let matches = lba7_profile_candidates(raw, device_crc);
+    if matches.len() != 1 {
+        return None;
     }
-    (matches.len() == 1).then(|| matches.remove(0))
+    let (entry_count, passinfo) = matches[0];
+    let view = lba7::parse_lba7(raw, device_crc, entry_count, passinfo).ok()?;
+    Some((view, entry_count, passinfo))
 }
 
 pub fn infer_lba8(
@@ -181,30 +180,21 @@ pub fn infer_lba8(
     Vec<Lba8UsbOnlyInfo>,
     Vec<HostHardinfoSource>,
 )> {
-    let mut matches = Vec::new();
-    for usb_only_info in [
-        Lba8UsbOnlyInfo::Current,
-        Lba8UsbOnlyInfo::Transitional2019,
-        Lba8UsbOnlyInfo::StrictLegacyAbsent,
-    ] {
-        for host_hardinfo_source in [
-            HostHardinfoSource::CurrentZero,
-            HostHardinfoSource::LegacyHostIdentity,
-        ] {
-            let context = lba8::Lba8Context {
-                usb_only_info,
-                host_hardinfo_source,
-                main_onlyid: onlyid,
-            };
-            if let Ok(view) = lba8::parse_lba8(raw, device_crc, context) {
-                matches.push((view, usb_only_info, host_hardinfo_source));
-            }
-        }
-    }
-    let first = matches.first()?.0.clone();
+    let matches = lba8_profile_candidates(raw, device_crc, onlyid);
+    let (first_usb, first_host) = *matches.first()?;
+    let first = lba8::parse_lba8(
+        raw,
+        device_crc,
+        lba8::Lba8Context {
+            usb_only_info: first_usb,
+            host_hardinfo_source: first_host,
+            main_onlyid: onlyid,
+        },
+    )
+    .ok()?;
     let mut usb_profiles = Vec::new();
     let mut host_profiles = Vec::new();
-    for (_, usb, host) in matches {
+    for (usb, host) in matches {
         if !usb_profiles.contains(&usb) {
             usb_profiles.push(usb);
         }
@@ -228,17 +218,10 @@ pub fn infer_lba11(
     let vid = context.vid.as_deref()?;
     let pid = context.pid.as_deref()?;
     let size = context.size_bytes?;
-    let mut matches = Vec::new();
-    for profile in [Lba11Capacity::DiskSize, Lba11Capacity::RepairChs] {
-        if let Ok(view) = lba11::parse_lba11(raw, vid, pid, size, profile) {
-            matches.push((view, profile));
-        }
-    }
-    let first = matches.first()?.0.clone();
-    Some((
-        first,
-        matches.into_iter().map(|(_, profile)| profile).collect(),
-    ))
+    let matches = lba11_profile_candidates(raw, vid, pid, size);
+    let first_profile = *matches.first()?;
+    let first = lba11::parse_lba11(raw, vid, pid, size, first_profile).ok()?;
+    Some((first, matches))
 }
 
 pub fn pdkb_device_id(raw: &[u8], context: &SemanticContext) -> Option<String> {
@@ -248,19 +231,10 @@ pub fn pdkb_device_id(raw: &[u8], context: &SemanticContext) -> Option<String> {
 }
 
 pub fn infer_lba12(raw: &[u8; 512], device_crc: u32) -> Option<(lba12::Lba12View, Vec<Lba12Mode>)> {
-    let mut matches = Vec::new();
-    for mode in [
-        Lba12Mode::LegacyV0064,
-        Lba12Mode::Mode1,
-        Lba12Mode::Mode2,
-        Lba12Mode::Mode3,
-    ] {
-        if let Ok(view) = lba12::parse_lba12(raw, device_crc, mode) {
-            matches.push((view, mode));
-        }
-    }
-    let first = matches.first()?.0.clone();
-    Some((first, matches.into_iter().map(|(_, mode)| mode).collect()))
+    let matches = lba12_profile_candidates(raw, device_crc);
+    let first_mode = *matches.first()?;
+    let first = lba12::parse_lba12(raw, device_crc, first_mode).ok()?;
+    Some((first, matches))
 }
 
 fn partition64(source: &'static str, index: usize, entry: &EdpfEntry64) -> PartitionSemantics {

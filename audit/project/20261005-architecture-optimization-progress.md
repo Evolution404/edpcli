@@ -45,7 +45,7 @@
 ## 后续非阻塞项
 
 - 当前产品工程没有已知阻塞任务：GitHub open issue=0、open PR=0，现行架构/TUI/制盘治理文档均已明确收口，源码未发现真实 TODO/FIXME。
-- 协议字段指南仍明确提示“配置类型检测器尚未在目录中登记”：`profile_axes.tsv` 已登记 18 个轴与 44 个状态，但尚未维护“轴状态 → 运行时 detector 符号”的统一目录。这属于协议目录/研究增强，不影响当前解析、制盘或验收。
+- `profile_axes` 统一检测器目录已完成：18 个轴、44 个状态全部登记运行时检测器符号与 `wire / contextual / provenance-only` 检测模式；字段指南自动投影该目录，协议测试锁定 TSV 与 Rust 运行时目录一致。生产者来源轴继续按失败关闭原则返回候选，不根据盘面形状猜写入来源。
 - 协议逆向文档仍保留少数写入端来源/配置类型选择器的溯源缺口，例如 LBA0 引导代码配置类型选择与制造商元数据来源；字段语义、实现和行为测试目录本身保持已闭环口径，不将来源研究缺口误写成产品功能故障。
 - FAT32/NTFS 目标写入器仍按 2.5.0 发布契约明确拒绝；这是显式能力边界，不是静默降级或当前回归。
 - `prepare.rs`、TUI 状态与任务运行时只有在出现新的明确职责边界时才继续拆分，不为降低行数机械拆文件。
@@ -56,8 +56,10 @@
 - Windows `x86_64-pc-windows-gnu` 的 all-targets check 与 `clippy -D warnings`：通过；期间发现的新门禁 `manual_contains` 警告已修复。
 - `cargo doc --locked --no-deps`：通过且无 rustdoc 警告；根索引稳定接口 12/12 可见，16 个历史实现模块 16/16 不再进入根 API 文档面。
 - 静态源码读取点从 112 降至 91；`repository_suite` 103/103 通过；最终 non-HIL full gate 0 失败，总耗时 41.30 秒。
+- `profile_axes` 检测器目录新增后：`protocol_suite` 76/76、`repository_suite` 103/103、Windows 与本机 `clippy -D warnings`、rustdoc 均通过；full gate 0 失败，总耗时 25.66 秒。
 - 提交 `62154653866326002dbeb1cecf3ee55009b81773` 的 GitHub `Rust CI` 全矩阵成功；`Virtual Disk HIL` 在 macOS arm64、Linux arm64/x86_64、Windows arm64/x86_64 五个平台/架构作业全部成功。
 - 本地/远端历史分支已清理，仓库只保留 `main` / `origin/main`；历史 worktree 已全部移除，磁盘上无残留 edpcli worktree 目录。
 - 8 个未跟踪的历史审计/benchmark/repro 文件已在确认结论被后续实现和本记录覆盖后删除；未把带本机路径/实机证据的临时材料补提交到仓库。
 - `cargo clean` 删除 352,489 个构建文件，共 68.6 GiB；随后清理 Python `__pycache__`/`.pyc` 与 `.DS_Store`。最终 release 使用临时 `CARGO_TARGET_DIR` 构建并安装，临时目录自动删除，仓库保持无 `target`。
 - 当前安装版：edpcli 2.5.0，Git `621546538663`，release/aarch64-apple-darwin，SHA-256 `17435d66a9758ac25c9460a47d309d67d78c482c5b1b2c7141d81cb58c58e2b1`。
+- 后续新增配置类型轴时，必须同时更新 `profile_axes.tsv` 与 `protocol::profile_detector::PROFILE_AXIS_DETECTORS`；门禁会拒绝缺检测器、状态集合漂移、符号漂移或检测模式不一致。
