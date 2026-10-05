@@ -1,6 +1,6 @@
 # 架构优化进度审计 · 2026-10-05
 
-本记录描述当前工作区的真实实现状态，用于承接 `20261005-engineering-and-tui-audit.md` 的 G0～G5 方案。当前工作区仍保留此前的大范围未提交修改，本轮没有执行 `git reset`、`git clean`，也没有覆盖既有修改。
+本记录描述 2026-10-05 架构优化从 G0～G5 到最终收口的真实状态。历史临时审计、复现脚本与基准文件在结论并入本记录后已清理；全过程未使用 `git reset`、`git clean` 覆盖既有工作。
 
 ## 基线
 
@@ -44,20 +44,20 @@
 
 ## 后续非阻塞项
 
-- 根兼容公开层已清零；后续新增外部能力必须挂到既有稳定门面，禁止为了测试方便重新增加根级实现模块。
-- 剩余源码结构断言继续保留协议金样、事务顺序、安全状态转换和单一职责等必要约束；遇到文件迁移时优先改为行为测试或目录级门禁，不为降低统计数字机械删除。
-- `prepare.rs`、TUI 状态与任务运行时后续只在出现新的明确职责边界时继续拆分，不为降低行数机械拆文件。
-- 本机工具安全层阻止直接执行虚拟磁盘脚本，但 GitHub `Virtual Disk HIL` 已在提交 `b2d295c` 上完成正式验证：macOS arm64、Linux arm64/x86_64、Windows arm64/x86_64 五个作业全部通过。
+- 当前产品工程没有已知阻塞任务：GitHub open issue=0、open PR=0，现行架构/TUI/制盘治理文档均已明确收口，源码未发现真实 TODO/FIXME。
+- 协议字段指南仍明确提示“配置类型检测器尚未在目录中登记”：`profile_axes.tsv` 已登记 18 个轴与 44 个状态，但尚未维护“轴状态 → 运行时 detector 符号”的统一目录。这属于协议目录/研究增强，不影响当前解析、制盘或验收。
+- 协议逆向文档仍保留少数写入端来源/配置类型选择器的溯源缺口，例如 LBA0 引导代码配置类型选择与制造商元数据来源；字段语义、实现和行为测试目录本身保持已闭环口径，不将来源研究缺口误写成产品功能故障。
+- FAT32/NTFS 目标写入器仍按 2.5.0 发布契约明确拒绝；这是显式能力边界，不是静默降级或当前回归。
+- `prepare.rs`、TUI 状态与任务运行时只有在出现新的明确职责边界时才继续拆分，不为降低行数机械拆文件。
 
-## 本轮最终验证
+## 本轮最终验证与仓库卫生
 
-- `cargo fmt --all -- --check`：通过。
-- `git diff --check`：通过。
-- `cargo check --locked --all-targets`：API 私有化和调用路径迁移完成后通过。
-- Windows `x86_64-pc-windows-gnu` 的 `cargo check --locked --all-targets`：通过。
-- Windows `x86_64-pc-windows-gnu` 的 `cargo clippy --locked --all-targets -- -D warnings`：通过；期间发现的新门禁 `manual_contains` 警告已修复。
-- 当前环境对 Linux cross-target 与本机 Virtual-HIL 相关命令执行存在安全层拦截；本轮 push 后以 GitHub Linux 原生矩阵和 Virtual Disk HIL 作为最终证据，不把工具拦截记为代码失败。
-- `cargo doc --locked --no-deps`：通过且无 rustdoc 警告；根索引稳定接口 12/12 可见，16 个历史实现模块 16/16 不再出现在根 API 文档面。
-- `tests/architecture_split.rs` 与 `tests/tui_theme_contract.rs` 的静态源码读取点从 112 降至 91；`repository_suite` 103/103 通过。
-- `python3 scripts/test-full.py --profile full --max-seconds 600`：通过；8 个非 HIL 套件、库、主程序和文档测试全部成功，0 失败，总耗时 41.30 秒。
-- 最终提交、GitHub CI/HIL 与干净 release 安装证据待本轮代码提交后补齐。
+- `cargo fmt --all -- --check`、`git diff --check`、`cargo check --locked --all-targets`：通过。
+- Windows `x86_64-pc-windows-gnu` 的 all-targets check 与 `clippy -D warnings`：通过；期间发现的新门禁 `manual_contains` 警告已修复。
+- `cargo doc --locked --no-deps`：通过且无 rustdoc 警告；根索引稳定接口 12/12 可见，16 个历史实现模块 16/16 不再进入根 API 文档面。
+- 静态源码读取点从 112 降至 91；`repository_suite` 103/103 通过；最终 non-HIL full gate 0 失败，总耗时 41.30 秒。
+- 提交 `62154653866326002dbeb1cecf3ee55009b81773` 的 GitHub `Rust CI` 全矩阵成功；`Virtual Disk HIL` 在 macOS arm64、Linux arm64/x86_64、Windows arm64/x86_64 五个平台/架构作业全部成功。
+- 本地/远端历史分支已清理，仓库只保留 `main` / `origin/main`；历史 worktree 已全部移除，磁盘上无残留 edpcli worktree 目录。
+- 8 个未跟踪的历史审计/benchmark/repro 文件已在确认结论被后续实现和本记录覆盖后删除；未把带本机路径/实机证据的临时材料补提交到仓库。
+- `cargo clean` 删除 352,489 个构建文件，共 68.6 GiB；随后清理 Python `__pycache__`/`.pyc` 与 `.DS_Store`。最终 release 使用临时 `CARGO_TARGET_DIR` 构建并安装，临时目录自动删除，仓库保持无 `target`。
+- 当前安装版：edpcli 2.5.0，Git `621546538663`，release/aarch64-apple-darwin，SHA-256 `17435d66a9758ac25c9460a47d309d67d78c482c5b1b2c7141d81cb58c58e2b1`。
