@@ -297,6 +297,8 @@ impl PaneFocus {
         let next = match (self.focused, dx.signum(), dy.signum()) {
             (ProvisionDiskLayout, _, 1) => Some(ProvisionPartitionPlan),
             (ProvisionPartitionPlan, _, -1) => Some(ProvisionDiskLayout),
+            (ProvisionPartitionPlan, _, 1) => Some(ProvisionExecutionSummary),
+            (ProvisionExecutionSummary, _, -1) => Some(ProvisionPartitionPlan),
             (ProvisionPartitionPlan, 1, _) => Some(ProvisionExecutionSummary),
             (ProvisionExecutionSummary, -1, _) => Some(ProvisionPartitionPlan),
             _ => None,

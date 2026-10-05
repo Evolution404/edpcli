@@ -39,7 +39,10 @@ impl InspectBrowserLayout {
                 .split(content_area);
             let right = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
+                .constraints([
+                    Constraint::Length((upper[1].height / 3).clamp(8, 14)),
+                    Constraint::Min(1),
+                ])
                 .split(upper[1]);
             (Some(upper[0]), Some(right[0]), Some(right[1]))
         };

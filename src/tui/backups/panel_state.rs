@@ -34,7 +34,36 @@ impl AppState {
         size: ratatui::layout::Size,
     ) -> StateEffect {
         self.set_viewport_size(size);
-        self.navigate(command, usize::from(size.height.saturating_sub(9)).max(1))
+        self.navigate(command, self.workspace_navigation_rows(size))
+    }
+
+    pub fn workspace_navigation_rows(&self, size: ratatui::layout::Size) -> usize {
+        let body = crate::tui::backup_layout::shell_areas(
+            ratatui::layout::Rect::new(0, 0, size.width, size.height),
+            1,
+        )[2];
+        if crate::tui::ui::ViewportClass::for_width(size.width)
+            == crate::tui::ui::ViewportClass::Compact
+        {
+            return usize::from(body.height.saturating_sub(6)).max(1);
+        }
+        match self.workspace() {
+            Workspace::Devices => usize::from(
+                crate::tui::workspace_layout::device_list_height(
+                    body.height,
+                    self.visible_device_count(),
+                )
+                .saturating_sub(6),
+            )
+            .max(1),
+            Workspace::Backups => {
+                crate::tui::backup_layout::pane_areas(body, self.backups_focused_pane())
+                    .0
+                    .map(|area| usize::from(area.height.saturating_sub(6)).max(1))
+                    .unwrap_or(1)
+            }
+            _ => usize::from(size.height.saturating_sub(9)).max(1),
+        }
     }
 
     fn backup_capacity_model(&self) -> Option<&DiskLayoutModel> {

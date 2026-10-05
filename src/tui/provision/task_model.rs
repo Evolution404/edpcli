@@ -1,5 +1,10 @@
 //! Provision-owned events, read-task slots and update batch.
 use super::*;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KeyProbeContext {
+    pub disk: u32,
+    pub session_id: u64,
+}
 #[derive(Debug)]
 pub(super) struct PasswordVerifyRequest {
     pub(super) disk: u32,
@@ -18,6 +23,7 @@ pub(super) fn password_domain_index(domain: crate::provision::KeyDomainRole) -> 
 pub(super) enum ProvisionWorkerResult {
     KeyProbe {
         generation: u64,
+        context: KeyProbeContext,
         result: Result<
             crate::application::provision::ProvisionKeyProbe,
             crate::application::error::OperationError,
@@ -56,12 +62,13 @@ pub(super) enum ProvisionWorkerResult {
 }
 #[derive(Default)]
 pub struct ProvisionUpdates {
-    pub key_probe: Option<
+    pub key_probe: Option<(
+        KeyProbeContext,
         Result<
             crate::application::provision::ProvisionKeyProbe,
             crate::application::error::OperationError,
         >,
-    >,
+    )>,
     pub key_verify: Vec<(
         u64,
         crate::provision::KeyDomainRole,
@@ -86,8 +93,7 @@ pub struct ProvisionUpdates {
 }
 impl ProvisionUpdates {
     pub fn has_updates(&self) -> bool {
-        false
-            || self.key_probe.is_some()
+        self.key_probe.is_some()
             || !self.key_verify.is_empty()
             || self.plan.is_some()
             || !self.progress.is_empty()
@@ -97,7 +103,8 @@ impl ProvisionUpdates {
 }
 #[derive(Default)]
 pub(super) struct ProvisionTaskState {
-    pub(super) key_probe_slot: TaskSlot<()>,
+    pub(super) key_probe_slot: TaskSlot<KeyProbeContext>,
+    pub(super) key_probe_context: Option<KeyProbeContext>,
     pub(super) password_verify_slots: [TaskSlot<PasswordVerifyRequest>; 2],
     pub(super) password_session: Option<u64>,
     pub(super) plan_slot: TaskSlot<()>,

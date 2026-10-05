@@ -32,6 +32,32 @@ pub(super) fn handle_key(
     terminal_size: ratatui::layout::Size,
 ) -> KeyOutcome {
     state.set_viewport_size(terminal_size);
+    if key.code == ct_event::KeyCode::F(2) && key.modifiers.is_empty() {
+        // Reset any multi-key prefix without changing the underlying input mode.
+        let _ = keys.map(state.input_mode(), key);
+        if state.notice_details().is_some() {
+            state.close_notice_details();
+        } else {
+            state.open_notice_details();
+        }
+        return KeyOutcome::NextIteration;
+    }
+    if state.notice_details().is_some() {
+        if let Some(action) = keys.map(state::InputMode::Normal, key) {
+            match action {
+                keymap::TuiAction::Back => state.close_notice_details(),
+                keymap::TuiAction::Quit => {
+                    if state.navigate(NavCommand::Quit, usize::from(terminal_size.height))
+                        == StateEffect::ExitRequested
+                    {
+                        return KeyOutcome::Exit;
+                    }
+                }
+                action => state.scroll_notice_details(action),
+            }
+        }
+        return KeyOutcome::NextIteration;
+    }
     if state.help_open() {
         if let Some(action) = keys.map(state::InputMode::Normal, key) {
             let effect = dispatch_tui_action(

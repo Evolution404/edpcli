@@ -191,7 +191,7 @@ impl AppState {
 
         match kind {
             TableKind::Devices => self.devices.table_view.content_widths.clone(),
-            TableKind::Backups => self.backups.table_view.content_widths.clone(),
+            TableKind::Backups => self.backup_view_snapshot().content_widths.clone(),
             TableKind::RelatedBackups => self.device_related_backup_table_view().content_widths,
             TableKind::InspectFields => {
                 let mut widths = INSPECT_DETAIL_HEADINGS

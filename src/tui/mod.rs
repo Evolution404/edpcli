@@ -21,10 +21,13 @@ mod help_overlay;
 #[path = "inspect/layout.rs"]
 mod inspect_layout;
 pub mod keymap;
+mod notice_overlay;
 mod operation_progress_status;
 mod overview;
 pub mod pane;
 mod progress_transport;
+#[path = "provision/result_presentation.rs"]
+mod provision_result_presentation;
 #[path = "provision/runtime_updates.rs"]
 mod provision_runtime_updates;
 pub mod render;
@@ -41,6 +44,7 @@ pub mod table_layout;
 pub mod task;
 pub mod theme;
 pub mod ui;
+mod workspace_layout;
 pub use resume::{parse_resume_args, resume_argv};
 
 use std::io::{self, IsTerminal, Stdout};
@@ -154,20 +158,15 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
     let result = (|| -> io::Result<LoopExit> {
         loop {
             let now = Instant::now();
-            if let Some(interval) = motion_mode.tick_interval() {
+            let activity_pending = status::activity_pending(&state);
+            if let Some(interval) = motion_mode.redraw_interval(activity_pending) {
                 if now.duration_since(last_animation_tick) >= interval {
-                    state.advance_animation();
+                    if motion_mode != animation::MotionMode::Off {
+                        state.advance_animation();
+                    }
                     last_animation_tick = now;
                     redraw_requested = true;
                 }
-            }
-            // Elapsed/wait status must advance even when decorative motion is off.
-            if motion_mode == animation::MotionMode::Off
-                && state.post_restore_format_running()
-                && now.duration_since(last_animation_tick) >= Duration::from_secs(1)
-            {
-                last_animation_tick = now;
-                redraw_requested = true;
             }
 
             tasks.retain_provision_context(&state);
@@ -205,7 +204,11 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     .unwrap_or_default()
                     .min(Duration::from_millis(animation::TICK_INTERVAL_MS))
             } else {
-                Duration::from_millis(animation::TICK_INTERVAL_MS)
+                Duration::from_millis(if activity_pending {
+                    animation::TICK_INTERVAL_MS
+                } else {
+                    250
+                })
             };
             if !ct_event::poll(poll_timeout)? {
                 continue;

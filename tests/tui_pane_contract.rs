@@ -1832,10 +1832,21 @@ fn device_capacity_map_stays_visible_and_tracks_selected_region() {
         .join("\n")
         .replace(' ', "")
         .contains("当前区域：保密区"));
-    assert!(
-        encrypt_col > boot_col,
-        "marker must track the selected region: boot={boot_col}, encrypt={encrypt_col}"
-    );
+    // Tiny regions retain distinct blocks and selection markers in the
+    // original single-map style.
+    assert!(encrypt_col > boot_col);
+    assert!(!compact_capacity.contains("区域示意"));
+    let axis = boot_lines
+        .iter()
+        .find(|line| line.contains("0%") && line.contains("100%"))
+        .unwrap();
+    let display_width = edpcli::tui::table_layout::display_width;
+    let origin = display_width(&axis[..axis.find("0%").unwrap()]);
+    let map_width = display_width(&axis[..axis.find("100%").unwrap()]) + 4 - origin;
+    for marker in [boot_marker, encrypt_marker] {
+        let actual = display_width(&marker[..marker.find('▲').unwrap()]);
+        assert!((origin..origin + map_width).contains(&actual));
+    }
 }
 
 #[test]
@@ -1930,22 +1941,25 @@ fn device_capacity_map_uses_axis_three_visual_rows_and_selection_card() {
 
 #[test]
 fn device_capacity_map_uses_shared_semantic_component_without_partition_borders() {
-    let devices = include_str!("../src/tui/devices/presentation.rs");
-    let layout = include_str!("../src/tui/disk_layout.rs");
-    let theme = include_str!("../src/tui/theme.rs");
-    assert!(devices.contains("DiskCapacityMapProfile::Full"));
-    assert!(layout.contains("pub struct DiskCapacityMap"));
-    assert!(layout.contains("capacity_map_half_band_line"));
-    assert!(layout.contains("disk_region_fill("));
-    assert!(
-        layout.contains("'┈'"),
-        "full map axis should stay lightweight"
-    );
-    assert!(theme.contains("pub fn disk_region_fill"));
-    for source in [devices, layout] {
-        assert!(!source.contains("QUADRANT_INSIDE"));
-        assert!(!source.contains("disk_map_internal_boundary_span"));
-        assert!(!source.contains("disk_map_outer_vertical_span"));
+    use edpcli::tui::disk_layout::{DiskCapacityMap, DiskCapacityMapProfile};
+    let mut state = AppState::new();
+    state.replace_devices(vec![edp_device_with_layout()]);
+    let model = state.selected_device().unwrap().canonical_layout().unwrap();
+    let lines = DiskCapacityMap::new(&model, DiskCapacityMapProfile::Full)
+        .with_marker(false)
+        .lines(98);
+    assert_eq!(lines.len(), 6);
+    assert!(lines[0].to_string().contains("100%"));
+    assert!(lines[1].to_string().contains('┈'));
+    assert!(!lines
+        .iter()
+        .any(|line| line.to_string().contains("区域示意")));
+    for line in &lines[2..] {
+        assert_eq!(
+            edpcli::tui::table_layout::display_width(&line.to_string()),
+            98
+        );
+        assert!(!line.to_string().contains('│'));
     }
 }
 

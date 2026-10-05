@@ -17,11 +17,25 @@ impl TaskHub {
         updates: &mut ProvisionUpdates,
     ) {
         match result {
-            ProvisionWorkerResult::KeyProbe { generation, result } => {
-                if self.provision.key_probe_slot.finish(generation) {
-                    updates.key_probe = Some(result.map_err(|error| error.in_phase("制盘")));
+            ProvisionWorkerResult::KeyProbe {
+                generation,
+                context,
+                result,
+            } => match self.provision.key_probe_slot.finish_latest(generation) {
+                LatestCompletion::Restart {
+                    generation,
+                    request,
+                } => {
+                    self.start_key_probe(generation, request);
                 }
-            }
+                LatestCompletion::Deliver(true)
+                    if self.provision.key_probe_context == Some(context) =>
+                {
+                    updates.key_probe =
+                        Some((context, result.map_err(|error| error.in_phase("制盘"))));
+                }
+                LatestCompletion::Deliver(_) => {}
+            },
             ProvisionWorkerResult::KeyVerify {
                 generation,
                 session_id,

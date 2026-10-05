@@ -15,7 +15,9 @@ pub(crate) fn pane_areas(
         };
     }
     let parts = Layout::vertical([
-        Constraint::Length((area.height / 2).clamp(8, 16)),
+        // Give desktop lists room to grow while keeping the core metadata and
+        // capacity layout visible. Rendering and navigation share this geometry.
+        Constraint::Length(area.height.saturating_sub(24).max(area.height / 2)),
         Constraint::Min(12),
     ])
     .split(area);

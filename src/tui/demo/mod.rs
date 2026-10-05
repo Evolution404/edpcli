@@ -27,6 +27,8 @@ pub const SCENES: &[&str] = &[
     "provision-result-success",
     "provision-result-warning",
     "provision-result-failure",
+    "provision-result-partial",
+    "provision-result-rollback-failure",
     "backups",
     "backup-detail",
     "backup-coverage",
@@ -120,6 +122,9 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
             }
             state.provision_mut().message =
                 Some(crate::tui::ui::UiMessage::info("演示模式不会执行真实操作"));
+            if stage == ProvisionStage::Result {
+                fixtures::hydrate_result(&mut state, name);
+            }
             if name == "provision-running-long" {
                 let tick = timeline::DemoTimeline::LONG_INITIAL_TICK;
                 state.provision_mut().run = Some(timeline::DemoTimeline::long_at_tick(
@@ -127,7 +132,7 @@ pub fn build_scene(scene: &str) -> Result<AppState, String> {
                     std::time::Instant::now() - Duration::from_secs(tick as u64),
                 ));
             } else if matches!(stage, ProvisionStage::Running | ProvisionStage::Result) {
-                let tick = if stage == ProvisionStage::Running {
+                let tick = if stage == ProvisionStage::Running || name.ends_with("failure") {
                     3
                 } else {
                     5
@@ -271,7 +276,7 @@ pub(super) fn run_interactive(scene: &str) -> i32 {
                 })
                 .unwrap_or(1)
         } else {
-            usize::from(height.saturating_sub(8)).max(1)
+            state.workspace_navigation_rows(ratatui::layout::Size::new(width, height))
         };
         let outcome = super::controller::dispatch_action(
             &mut state,

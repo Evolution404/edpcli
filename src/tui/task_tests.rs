@@ -1,6 +1,92 @@
 use super::*;
 
 #[test]
+fn key_probe_keeps_latest_form_and_discards_requests_on_exit() {
+    let mut hub = TaskHub::new();
+    let first = KeyProbeContext {
+        disk: 6,
+        session_id: 100,
+    };
+    hub.retain_key_probe_context(Some(first));
+    let generation = hub.provision.key_probe_slot.try_begin().unwrap();
+    for session_id in 101..1101 {
+        hub.request_key_probe_session(KeyProbeContext {
+            disk: 7,
+            session_id,
+        })
+        .unwrap();
+    }
+    assert!(hub.provision.key_probe_slot.single_flight.is_running());
+    match hub.provision.key_probe_slot.finish_latest(generation) {
+        LatestCompletion::Restart { request, .. } => assert_eq!(
+            request,
+            KeyProbeContext {
+                disk: 7,
+                session_id: 1100
+            }
+        ),
+        _ => panic!("latest target must be restarted after old read completes"),
+    }
+    hub.request_key_probe_session(KeyProbeContext {
+        disk: 8,
+        session_id: 1101,
+    })
+    .unwrap();
+    hub.retain_key_probe_context(None);
+    assert!(hub.provision.key_probe_slot.pending_latest.is_none());
+    hub.tx
+        .send(WorkerResult::Provision(ProvisionWorkerResult::KeyProbe {
+            generation,
+            context: first,
+            result: Err("stale".into()),
+        }))
+        .unwrap();
+    assert!(hub.poll().provision.key_probe.is_none());
+    assert!(!hub.provision.key_probe_slot.single_flight.is_running());
+}
+
+#[test]
+fn key_probe_batch_cannot_mutate_a_reopened_form() {
+    let mut state = crate::tui::demo::build_scene("provision-form").unwrap();
+    let old = KeyProbeContext {
+        disk: state.selected_device_disk().unwrap(),
+        session_id: state.provision().session_id,
+    };
+    state.provision_reset();
+    state.provision_mut().form.share_opaque_profile = false;
+    let new = KeyProbeContext {
+        disk: state.selected_device_disk().unwrap(),
+        session_id: state.provision().session_id,
+    };
+    assert_ne!(old.session_id, new.session_id);
+    let probe = crate::application::provision::ProvisionKeyProbe {
+        source_kind: crate::provision::DiskProvisionKind::Mode0,
+        share: None,
+        encrypt: None,
+        share_opaque_profile: true,
+        encrypt_opaque_profile: true,
+    };
+    let mut hub = TaskHub::new();
+    for (context, expected) in [
+        (old, false),
+        (KeyProbeContext { disk: 7, ..new }, false),
+        (new, true),
+    ] {
+        let updates = ProvisionUpdates {
+            key_probe: Some((context, Ok(probe))),
+            ..ProvisionUpdates::default()
+        };
+        crate::tui::provision_runtime_updates::apply(
+            &mut state,
+            &mut hub,
+            updates,
+            std::path::Path::new("unused"),
+        );
+        assert_eq!(state.provision().form.share_opaque_profile, expected);
+    }
+}
+
+#[test]
 fn post_restore_format_progress_is_gated_and_survives_a_result_in_the_same_poll() {
     use crate::application::progress::{FormatStep, OperationKind, Phase, ProgressEvent, Step};
     let mut hub = TaskHub::new();

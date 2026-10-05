@@ -102,51 +102,19 @@ impl AppState {
                         .filesystem
                         .map(|kind| kind.display_name().to_string())
                         .unwrap_or_else(|| "—".into());
-                    let disposition = |value: crate::provision::RegionDisposition| match value {
-                        crate::provision::RegionDisposition::PreserveOpaque => "原样保留",
-                        crate::provision::RegionDisposition::PreserveVerified => "验证保留",
-                        crate::provision::RegionDisposition::RewrapVerified => "密钥已更新",
-                        crate::provision::RegionDisposition::Rebuild => "已重建",
-                        crate::provision::RegionDisposition::Drop => "已移除",
-                    };
+                    let disposition =
+                        super::super::provision_result_presentation::disposition_label;
                     let action = if partition.selected_for_format {
                         "格式化"
                     } else {
                         partition.disposition.map(disposition).unwrap_or("写入")
                     };
-                    let final_status = if plan.target == crate::provision::ProvisionTarget::Plain {
-                        if self.provision.result_outcome.is_some() {
-                            "已写入 · 读回通过".to_string()
-                        } else {
-                            "未确认".to_string()
-                        }
-                    } else if partition.selected_for_format {
-                        let format_status = partition.role.and_then(|role| {
-                            self.provision.result_outcome.as_ref().and_then(|outcome| {
-                                match &outcome.commit {
-                                    crate::application::provision::ProvisionCommitOutcome::Official(report) => report
-                                        .formats
-                                        .iter()
-                                        .find(|item| item.role == role)
-                                        .map(|format| {
-                                            if format.result.is_ok() {
-                                                "已格式化 · 读回通过"
-                                            } else {
-                                                "格式化失败"
-                                            }
-                                        }),
-                                    crate::application::provision::ProvisionCommitOutcome::Plain { .. } => None,
-                                }
-                            })
-                        });
-                        format_status.unwrap_or("已写入").to_string()
-                    } else {
-                        partition
-                            .disposition
-                            .map(disposition)
-                            .unwrap_or("未格式化")
-                            .to_string()
-                    };
+                    let (final_status, _) =
+                        super::super::provision_result_presentation::partition_final_status(
+                            &self.provision,
+                            plan,
+                            partition,
+                        );
                     vec![
                         format!("P{}", index + 1),
                         partition

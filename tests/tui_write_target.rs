@@ -248,6 +248,59 @@ fn refresh_preserves_targets_by_stable_identity_after_reordering() {
 }
 
 #[test]
+fn sorted_device_refresh_preserves_selection_through_filter_reorder_and_removal() {
+    use edpcli::tui::table_layout::TableKind;
+    fn rows() -> Vec<Row> {
+        [6, 7, 8]
+            .into_iter()
+            .zip([64_000_000_000, 128_000_000_000, 32_000_000_000])
+            .map(|(disk, size)| {
+                let mut row = device(disk);
+                row.size = size;
+                row.user = Some(if disk == 7 { "other" } else { "keep" }.into());
+                row
+            })
+            .collect()
+    }
+    for descending in [false, true] {
+        for filtered in [false, true] {
+            let mut state = AppState::new();
+            state.replace_devices(rows());
+            state.move_table_column(TableKind::Devices, false);
+            state.toggle_table_sort(TableKind::Devices);
+            if descending {
+                state.toggle_table_sort(TableKind::Devices);
+            }
+            if filtered {
+                state.navigate(NavCommand::Search, 20);
+                for ch in "keep".chars() {
+                    state.push_input_char(ch);
+                }
+                state.submit_search();
+                // Search selects its first result; choose disk6 explicitly via navigation.
+                if state.selected_device_disk() != Some(6) {
+                    state.navigate(NavCommand::Down, 20);
+                }
+            }
+            assert_eq!(state.selected_device_disk(), Some(6));
+            state.replace_devices(rows());
+            assert_eq!(state.selected_device_disk(), Some(6));
+            let mut reordered = rows();
+            reordered.reverse();
+            state.replace_devices(reordered);
+            assert_eq!(state.selected_device_disk(), Some(6));
+            let mut added = rows();
+            added.push(device(9));
+            state.replace_devices(added);
+            assert_eq!(state.selected_device_disk(), Some(6));
+            state.replace_devices(rows().into_iter().filter(|row| row.disk != 6).collect());
+            assert_ne!(state.selected_device_disk(), Some(6));
+            assert!(state.selected_device().is_some());
+        }
+    }
+}
+
+#[test]
 fn filtered_backup_selection_maps_to_the_real_backup_for_actions() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(7)]);

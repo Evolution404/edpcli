@@ -3,6 +3,38 @@ use super::state::{
     ProvisionStage, WizardStage,
 };
 
+pub(super) fn activity_pending(state: &AppState) -> bool {
+    state.active_scan_pending()
+        || state.is_critical_operation()
+        || state.backup_verify_run().is_some()
+        || state.post_restore_format_running()
+        || matches!(
+            state.provision().stage,
+            ProvisionStage::Planning | ProvisionStage::Exporting | ProvisionStage::Running
+        )
+        || state
+            .advanced_inspect()
+            .is_some_and(|inspect| inspect.stage == AdvancedInspectStage::Running)
+        || state.wizard().is_some_and(|wizard| {
+            matches!(
+                wizard.stage,
+                WizardStage::Running | WizardStage::Formatting | WizardStage::Reinitializing
+            )
+        })
+        || state.backup_batch_delete().is_some_and(|batch| {
+            matches!(
+                batch.stage,
+                BackupBatchDeleteStage::Planning | BackupBatchDeleteStage::Running
+            )
+        })
+        || state.backup_prune().is_some_and(|prune| {
+            matches!(
+                prune.stage,
+                BackupPruneStage::Planning | BackupPruneStage::Running
+            )
+        })
+}
+
 pub(super) fn dynamic_status(state: &AppState) -> Option<String> {
     let operation_progress_running = state.provision().stage == ProvisionStage::Running
         || state.wizard().is_some_and(|wizard| {
@@ -70,6 +102,13 @@ pub(super) fn dynamic_status(state: &AppState) -> Option<String> {
     }
 
     if state.workspace() == super::state::Workspace::Backups {
+        if state.viewport_size().width < 80 {
+            return Some(match state.backups_focused_pane() {
+                super::pane::PaneId::BackupCoverage => "j/k 选择 · Ctrl-w w 切窗 · Esc 返回".into(),
+                super::pane::PaneId::BackupSummary => "j/k 滚动 · Ctrl-w w 切窗 · Esc 返回".into(),
+                _ => super::actions::context_hint(state),
+            });
+        }
         return Some(match state.backups_focused_pane() {
             super::pane::PaneId::BackupCoverage => {
                 "j/k 选择容量区域 · Ctrl-w w 切换窗口 · Esc 返回列表".into()

@@ -864,6 +864,9 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     }
 
     draw_advanced_inspect_overlay(frame, state);
+    if state.notice_details().is_some() {
+        super::notice_overlay::draw(frame, state);
+    }
 
     if footer_height > 0 {
         super::shell::message_bar(frame, chunks[3], notice, status.as_deref());

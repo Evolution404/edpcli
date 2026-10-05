@@ -141,7 +141,16 @@ pub(super) fn context_hint(state: &AppState) -> String {
             } else {
                 key
             };
-            let label = spec.label.split(' ').next().unwrap_or(spec.label);
+            let label = if state.viewport_size().width < 80 {
+                match spec.action {
+                    TuiAction::PanelNext => "切窗",
+                    TuiAction::Activate => "打开",
+                    TuiAction::Insert => "编辑",
+                    _ => spec.label,
+                }
+            } else {
+                spec.label.split(' ').next().unwrap_or(spec.label)
+            };
             hints.push(format!("{key} {label}"));
         }
     }

@@ -1,5 +1,4 @@
 use super::*;
-use crate::tui::state::{ProvisionResultPartition, ProvisionState};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     widgets::{Block, Cell, Paragraph, Row, Table},
@@ -7,63 +6,7 @@ use ratatui::{
 
 use crate::tui::ui::tone_style;
 
-fn disposition_label(disposition: crate::provision::RegionDisposition) -> &'static str {
-    use crate::provision::RegionDisposition as D;
-    match disposition {
-        D::PreserveOpaque => "原样保留",
-        D::PreserveVerified => "验证保留",
-        D::RewrapVerified => "密钥已更新",
-        D::Rebuild => "已重建",
-        D::Drop => "已移除",
-    }
-}
-
-fn partition_final_status(
-    provision: &ProvisionState,
-    plan: &crate::tui::state::ProvisionResultSnapshot,
-    partition: &ProvisionResultPartition,
-) -> (String, crate::tui::ui::ResultTone) {
-    let outcome = provision.result_outcome.as_ref();
-    if plan.target == crate::provision::ProvisionTarget::Plain {
-        return if outcome.is_some() {
-            (
-                "已写入 · 读回通过".into(),
-                crate::tui::ui::ResultTone::Success,
-            )
-        } else {
-            ("未确认".into(), crate::tui::ui::ResultTone::Warning)
-        };
-    }
-
-    if partition.selected_for_format {
-        if let (
-            Some(role),
-            Some(crate::application::provision::ProvisionCommitOutcome::Official(report)),
-        ) = (partition.role, outcome.map(|value| &value.commit))
-        {
-            if let Some(format) = report.formats.iter().find(|item| item.role == role) {
-                return if format.result.is_ok() {
-                    (
-                        "已格式化 · 读回通过".into(),
-                        crate::tui::ui::ResultTone::Success,
-                    )
-                } else {
-                    ("格式化失败".into(), crate::tui::ui::ResultTone::Warning)
-                };
-            }
-        }
-        return ("已写入".into(), crate::tui::ui::ResultTone::Primary);
-    }
-
-    (
-        partition
-            .disposition
-            .map(disposition_label)
-            .unwrap_or("未格式化")
-            .into(),
-        crate::tui::ui::ResultTone::Success,
-    )
-}
+use crate::tui::provision_result_presentation::partition_final_status;
 
 pub(super) fn render_partition_pane(
     frame: &mut Frame,
@@ -71,6 +14,18 @@ pub(super) fn render_partition_pane(
     state: &AppState,
     focused: bool,
 ) {
+    let row_count = state
+        .provision()
+        .result_plan
+        .as_ref()
+        .map_or(0, |plan| plan.partitions.len());
+    let area = Rect::new(
+        area.x,
+        area.y,
+        area.width,
+        area.height
+            .min(row_count.saturating_add(22).min(u16::MAX as usize) as u16),
+    );
     let block = crate::tui::ui::card("分区结果", focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -175,13 +130,46 @@ pub(super) fn render_partition_pane(
     if let (Some(detail_area), Some(selected)) = (detail_area, selected) {
         if let Some(partition) = plan.partitions.get(selected) {
             let (_, tone) = partition_final_status(state.provision(), plan, partition);
+            let sections =
+                Layout::vertical([Constraint::Length(7), Constraint::Min(1)]).split(detail_area);
             crate::tui::result_partition_detail::render_provision_partition_detail(
                 frame,
-                detail_area,
+                sections[0],
                 selected,
                 partition,
                 view.rows.get(selected).map(Vec::as_slice),
                 tone_style(tone),
+            );
+            let theme = crate::tui::theme::current();
+            let mut lines = Vec::new();
+            if let Some(message) = state.provision().message.as_ref() {
+                lines.push(Line::from(Span::styled(
+                    safe(message.text()),
+                    theme.warning(),
+                )));
+            }
+            if let Some(crate::application::provision::ProvisionCommitOutcome::Official(report)) =
+                state
+                    .provision()
+                    .result_outcome
+                    .as_ref()
+                    .map(|outcome| &outcome.commit)
+            {
+                if let Some(error) = report
+                    .formats
+                    .iter()
+                    .find(|item| Some(item.role) == partition.role)
+                    .and_then(|item| item.result.as_ref().err())
+                {
+                    lines.push(Line::from(Span::styled(safe(error), theme.danger())));
+                }
+            }
+            lines.push(Line::from("Enter 检查当前分区 · Esc 返回设备列表"));
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .block(crate::tui::ui::card("后续处理", false))
+                    .wrap(ratatui::widgets::Wrap { trim: true }),
+                sections[1],
             );
         }
     }

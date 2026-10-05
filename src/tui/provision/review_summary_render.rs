@@ -10,7 +10,7 @@ pub(super) fn draw_execution_summary(
     expanded: bool,
     focused: bool,
 ) {
-    let mut lines = overall_lines(view);
+    let mut lines = Vec::new();
     if let Some(region) = view.regions.get(selected) {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
@@ -55,12 +55,22 @@ pub(super) fn draw_execution_summary(
         }
     }
 
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(crate::tui::ui::card("执行摘要", focused))
-            .wrap(Wrap { trim: true }),
-        area,
-    );
+    let block = crate::tui::ui::card("执行摘要", focused);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width >= 120 {
+        let columns = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .split(inner);
+        frame.render_widget(
+            Paragraph::new(overall_lines(view)).wrap(Wrap { trim: true }),
+            columns[0],
+        );
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), columns[1]);
+    } else {
+        let mut overall = overall_lines(view);
+        overall.extend(lines);
+        frame.render_widget(Paragraph::new(overall).wrap(Wrap { trim: true }), inner);
+    }
 }
 
 fn status_line(label: &'static str, value: impl Into<String>, style: Style) -> Line<'static> {

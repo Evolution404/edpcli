@@ -71,6 +71,9 @@ pub struct BackupsState {
     pub(super) verify_run: Option<BackupVerifyRunState>,
     pub(super) table_view: super::super::table_layout::TableViewData,
     pub(super) scan_pending: bool,
+    pub(super) group_keys: Vec<Option<String>>,
+    pub(super) tree_nodes: Vec<BackupDeviceTreeNode>,
+    pub(super) view_cache: super::backup_view_state::BackupViewCache,
     pub(super) delete: Option<BackupDeleteState>,
     pub(super) batch_delete: Option<BackupBatchDeleteState>,
     pub(super) selection: std::collections::BTreeSet<std::path::PathBuf>,
@@ -91,6 +94,14 @@ impl Default for BackupsState {
             verify_run: None,
             table_view: super::super::table_layout::TableViewData::default(),
             scan_pending: false,
+            group_keys: Vec::new(),
+            tree_nodes: vec![BackupDeviceTreeNode {
+                filter: BackupDeviceFilter::All,
+                label: "全部备份".into(),
+                count: 0,
+                depth: 0,
+            }],
+            view_cache: Default::default(),
             delete: None,
             batch_delete: None,
             selection: std::collections::BTreeSet::new(),
@@ -107,7 +118,9 @@ impl Default for BackupsState {
 }
 
 impl AppState {
-    fn backup_strong_group_key(backup: &crate::application::BackupWorkspaceItem) -> Option<String> {
+    pub(super) fn backup_strong_group_key(
+        backup: &crate::application::BackupWorkspaceItem,
+    ) -> Option<String> {
         backup.identity.as_ref()?.strong_backup_group_key()
     }
 
@@ -160,29 +173,37 @@ impl AppState {
     }
 
     pub fn backup_device_tree_nodes(&self) -> Vec<BackupDeviceTreeNode> {
+        self.backup_device_tree_snapshot().to_vec()
+    }
+
+    pub(crate) fn backup_device_tree_snapshot(&self) -> &[BackupDeviceTreeNode] {
+        if self.backups.device_tree_expanded {
+            &self.backups.tree_nodes
+        } else {
+            &self.backups.tree_nodes[..1]
+        }
+    }
+
+    pub(super) fn build_backup_device_tree_nodes(&self) -> Vec<BackupDeviceTreeNode> {
         let mut nodes = vec![BackupDeviceTreeNode {
             filter: BackupDeviceFilter::All,
             label: "全部备份".into(),
             count: self.backups.rows.len(),
             depth: 0,
         }];
-        if !self.backups.device_tree_expanded {
-            return nodes;
-        }
-
         let mut groups: Vec<(String, String, usize)> = Vec::new();
         let mut positions = std::collections::BTreeMap::<String, usize>::new();
         let mut unresolved = 0usize;
-        for backup in &self.backups.rows {
-            let Some(key) = Self::backup_strong_group_key(backup) else {
+        for (backup, key) in self.backups.rows.iter().zip(&self.backups.group_keys) {
+            let Some(key) = key.as_ref() else {
                 unresolved += 1;
                 continue;
             };
-            if let Some(index) = positions.get(&key).copied() {
+            if let Some(index) = positions.get(key).copied() {
                 groups[index].2 += 1;
             } else {
                 positions.insert(key.clone(), groups.len());
-                groups.push((key, Self::backup_group_display_label(backup), 1));
+                groups.push((key.clone(), Self::backup_group_display_label(backup), 1));
             }
         }
         Self::disambiguate_backup_group_labels(&mut groups);
@@ -258,22 +279,30 @@ impl AppState {
         &self,
         index: usize,
     ) -> Option<(&'static str, String, usize)> {
-        let nodes = self.backup_device_tree_nodes();
-        let node = nodes.get(index)?;
+        let nodes = self.backup_device_tree_snapshot();
+        nodes
+            .get(index)
+            .map(|node| self.backup_device_tree_node_parts(node))
+    }
+
+    pub(crate) fn backup_device_tree_node_parts(
+        &self,
+        node: &BackupDeviceTreeNode,
+    ) -> (&'static str, String, usize) {
         if node.depth == 0 {
             if self.backups.device_tree_expanded {
-                Some(("▾ ", node.label.clone(), node.count))
+                ("▾ ", node.label.clone(), node.count)
             } else if self.backup_device_filter_active() {
-                Some((
+                (
                     "▸ ",
                     self.backup_device_filter_label(),
                     self.backup_device_filtered_count(),
-                ))
+                )
             } else {
-                Some(("▸ ", node.label.clone(), node.count))
+                ("▸ ", node.label.clone(), node.count)
             }
         } else {
-            Some(("  ", node.label.clone(), node.count))
+            ("  ", node.label.clone(), node.count)
         }
     }
 

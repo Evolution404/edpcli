@@ -462,6 +462,12 @@ def main() -> int:
         print(runner_checks.stderr, end="", file=sys.stderr)
         return runner_checks.returncode
     print("[PASS] test-runner behavior checks", flush=True)
+    if os.name == "posix":
+        replay_checks = run_text([sys.executable, "scripts/tests/test_tui_replay.py"])
+        if replay_checks.returncode != 0:
+            print(replay_checks.stdout, flush=True)
+            return replay_checks.returncode
+        print("[PASS] PTY replay validation / owned-process cleanup checks", flush=True)
     try:
         artifacts = cargo_compile(suites, env)
     except RuntimeError as error:

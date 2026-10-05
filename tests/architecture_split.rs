@@ -1390,7 +1390,10 @@ fn tui_renderers_do_not_assume_parent_surface_palette_colors() {
     }
     let layout =
         fs::read_to_string(root.join("src/tui/disk_layout.rs")).expect("read disk layout renderer");
-    assert!(layout.contains("disk_region_half_block"));
+    assert!(layout.contains("pub use capacity_map::"));
+    let capacity = fs::read_to_string(root.join("src/tui/disk_layout/capacity_map.rs"))
+        .expect("capacity map owner");
+    assert!(capacity.contains("disk_region_half_block"));
     let table = fs::read_to_string(root.join("src/tui/ui/table.rs")).expect("read shared table");
     let card = fs::read_to_string(root.join("src/tui/ui/card.rs")).expect("read shared card");
     assert!(table.contains("table_surface(focused)"));

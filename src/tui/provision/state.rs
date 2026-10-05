@@ -1,4 +1,5 @@
 use super::*;
+pub(crate) use password_verification::SourcePasswordState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionKind {

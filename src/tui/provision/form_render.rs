@@ -6,7 +6,8 @@ use crate::tui::state::{
 #[path = "form_special_rows.rs"]
 mod form_special_rows;
 use form_special_rows::{
-    advanced_settings_row, compact_field_label, password_domain_row, two_column_widths,
+    advanced_settings_row, compact_field_label, password_domain_row, single_column_field,
+    two_column_widths,
 };
 
 pub(super) fn draw_provision_form(
@@ -95,7 +96,11 @@ pub(super) fn draw_provision_form(
         let two_columns = indexes.len() == 2;
         for (position, index) in indexes.into_iter().enumerate() {
             let (label, value, secret) = &fields[index];
-            let display_label = compact_field_label(label);
+            let (display_label, value, secret) = if two_columns {
+                (compact_field_label(label), *value, *secret)
+            } else {
+                single_column_field(state, index, label, value, *secret)
+            };
             let active = index == provision.field_selected;
             if position > 0 {
                 spans.push(Span::styled(separator, muted()));
@@ -120,7 +125,13 @@ pub(super) fn draw_provision_form(
             } else {
                 cell_width
             };
-            let label_width = if position == 0 { metrics.0 } else { metrics.1 };
+            let label_width = if !two_columns && section == ProvisionFieldSection::PasswordDomain {
+                crate::ui::disp_width(&display_label)
+            } else if position == 0 {
+                metrics.0
+            } else {
+                metrics.1
+            };
             let label_width = label_width.min(cell_width.saturating_sub(4));
             let value_width = cell_width
                 .saturating_sub(2)
@@ -153,12 +164,14 @@ pub(super) fn draw_provision_form(
                     value,
                     state.provision_field_cursor(),
                     value_width.saturating_sub(2),
-                    *secret,
+                    secret,
                 )
             } else if value.is_empty() {
                 "〈请输入〉".to_string()
-            } else if *secret {
-                "•".repeat(value.chars().count())
+            } else if secret {
+                fit_display_width(&"•".repeat(value.chars().count()), value_width)
+                    .trim_end()
+                    .to_string()
             } else {
                 fit_display_width(value, value_width).trim_end().to_string()
             };

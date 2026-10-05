@@ -3,9 +3,50 @@ use std::process::{Command, Stdio};
 use edpcli::application::support::EXIT_USAGE;
 use edpcli::tui::{
     render,
-    state::{AppState, NavCommand, ProvisionStage, Workspace, WriteKind},
+    state::{AppState, NavCommand, ProvisionKind, ProvisionStage, Workspace, WriteKind},
 };
 use ratatui::{backend::TestBackend, style::Modifier, Terminal};
+
+#[test]
+fn compact_password_rows_identify_domains_and_show_passthrough_without_exposing_secrets() {
+    let mut state = edpcli::tui::demo::build_scene("provision-form").unwrap();
+    state.provision_mut().form.share_source_password = "render-test-secret".repeat(6).into();
+    for (kind, share) in [
+        (ProvisionKind::Mode0, "交换区"),
+        (ProvisionKind::Mode1, "二合一区"),
+    ] {
+        state.provision_mut().kind = kind;
+        for width in [40, 60] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+            terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+            let rows = terminal
+                .backend()
+                .buffer()
+                .content()
+                .chunks(width as usize)
+                .map(|row| {
+                    row.iter()
+                        .map(|cell| cell.symbol())
+                        .collect::<String>()
+                        .replace(' ', "")
+                })
+                .collect::<Vec<_>>();
+            for label in [format!("{share}原密码"), "保密区原密码".into()] {
+                assert!(rows.iter().any(|row| row.contains(&label)), "{rows:?}");
+            }
+            for label in [format!("{share}新密码"), "保密区新密码".into()] {
+                assert!(
+                    rows.iter()
+                        .any(|row| row.contains(&label) && row.contains("透传")),
+                    "{rows:?}"
+                );
+            }
+            let text = rows.join("\n");
+            assert!(!text.contains("render-test-secret"));
+            assert!(text.contains('•'));
+        }
+    }
+}
 
 fn usb_device() -> edpcli::cli::Row {
     let mut row = edpcli::cli::Row {

@@ -46,16 +46,15 @@ fn verification_lines(state: &AppState) -> Vec<(String, crate::tui::ui::ResultTo
                     ));
                 }
                 for item in &report.formats {
-                    lines.push(if item.result.is_ok() {
-                        (
+                    lines.push(match &item.result {
+                        Ok(()) => (
                             format!("✓ {}格式化读回通过", item.role.label()),
                             crate::tui::ui::ResultTone::Success,
-                        )
-                    } else {
-                        (
-                            format!("⚠ {}格式化失败", item.role.label()),
+                        ),
+                        Err(error) => (
+                            format!("⚠ {}格式化失败：{}", item.role.label(), error),
                             crate::tui::ui::ResultTone::Warning,
-                        )
+                        ),
                     });
                 }
             }

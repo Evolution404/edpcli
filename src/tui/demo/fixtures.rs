@@ -572,3 +572,64 @@ pub(super) fn inspect_workspace(
         backup_manifest: None,
     }
 }
+
+/// Result fixtures use the same typed outcome as production, including partial failure.
+pub(super) fn hydrate_result(state: &mut crate::tui::state::AppState, scene: &str) {
+    use crate::application::provision::{
+        PartitionFormatResult, ProvisionCommitOutcome, ProvisionCommitReport,
+        ProvisionExecutionStatus, ProvisionWarning, ProvisionWriteOutcome,
+    };
+    use crate::tui::ui::UiMessage;
+    if scene.ends_with("failure") {
+        state.provision_mut().result_status = Some(ProvisionExecutionStatus::FatalFailure);
+        state.provision_mut().result_outcome = None;
+        state.provision_mut().message = Some(UiMessage::error(if scene.contains("rollback") {
+            "DEMO：协议读回不一致；回滚读回失败，介质状态未确认。停止操作并检查设备。"
+        } else {
+            "DEMO：协议读回不一致；回滚已完成。重新检查设备后再生成计划。"
+        }));
+        return;
+    }
+    let plan = state
+        .provision()
+        .result_plan
+        .as_ref()
+        .expect("demo result plan");
+    let partial = scene.ends_with("partial");
+    let formats = plan
+        .partitions
+        .iter()
+        .filter_map(|partition| partition.role)
+        .enumerate()
+        .map(|(index, role)| PartitionFormatResult {
+            role,
+            result: if partial && index == 1 {
+                Err("DEMO：文件系统读回不一致；该分区不可声明可用".into())
+            } else {
+                Ok(())
+            },
+        })
+        .collect();
+    let outcome = ProvisionWriteOutcome {
+        backup: crate::application::write::BackupReport {
+            path: "DEMO-before-provision.edpb".into(),
+            partition_count: plan.partitions.len(),
+            edp_protocol_saved: true,
+        },
+        commit: ProvisionCommitOutcome::Official(ProvisionCommitReport {
+            provision_succeeded: true,
+            formats,
+        }),
+        warnings: if partial {
+            vec![ProvisionWarning::IncompleteFormat]
+        } else if scene.ends_with("warning") {
+            vec![ProvisionWarning::HostLineagePersistenceFailed(
+                "DEMO：主机历史保存失败".into(),
+            )]
+        } else {
+            vec![]
+        },
+    };
+    state.provision_mut().result_status = Some(outcome.execution_status());
+    state.provision_mut().result_outcome = Some(outcome);
+}

@@ -7,8 +7,13 @@ pub(super) fn apply(
     updates: task::ProvisionUpdates,
     backup_dir: &Path,
 ) {
-    if let Some(result) = updates.key_probe {
-        state.provision_finish_key_probe(result.map_err(|error| error.to_string()));
+    if let Some((context, result)) = updates.key_probe {
+        if context.session_id == state.provision().session_id
+            && state.selected_device_disk() == Some(context.disk)
+            && state.workspace() == state::Workspace::Provision
+        {
+            state.provision_finish_key_probe(result.map_err(|error| error.to_string()));
+        }
     }
     for (session_id, domain, revision, result) in updates.key_verify {
         if session_id != state.provision().session_id {

@@ -28,16 +28,19 @@ pub(super) fn draw_devices(frame: &mut Frame, area: ratatui::layout::Rect, state
         return;
     }
 
-    let (list_percent, tree_percent) = match class {
-        ViewportClass::Standard => (44, 40),
-        ViewportClass::Wide | ViewportClass::UltraWide => (40, 30),
+    let tree_percent = match class {
+        ViewportClass::Standard => 40,
+        ViewportClass::Wide | ViewportClass::UltraWide => 30,
         ViewportClass::Compact => unreachable!(),
     };
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(list_percent),
-            Constraint::Percentage(100 - list_percent),
+            Constraint::Length(crate::tui::workspace_layout::device_list_height(
+                area.height,
+                state.visible_device_count(),
+            )),
+            Constraint::Min(1),
         ])
         .split(area);
     let workbench = Layout::default()

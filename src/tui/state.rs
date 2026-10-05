@@ -5,6 +5,8 @@
 
 #[path = "backups/panel_state.rs"]
 mod backup_panel_state;
+#[path = "backups/view_state.rs"]
+mod backup_view_state;
 #[path = "backups/state.rs"]
 mod backups_state;
 #[path = "devices/state.rs"]
@@ -17,6 +19,8 @@ mod inspect_state;
 mod navigation;
 #[path = "navigation_state.rs"]
 mod navigation_state;
+#[path = "shell/notice_state.rs"]
+mod notice_state;
 #[path = "post_restore_progress_state.rs"]
 mod post_restore_progress_state;
 #[path = "provision/state.rs"]
@@ -466,17 +470,9 @@ impl AppState {
             self.rebuild_workspace_filter();
             if let Some(disk) = selected_disk {
                 let source_index = self.devices.rows.iter().position(|row| row.disk == disk);
+                let visible = self.visible_device_indices();
                 self.shell.selected = source_index
-                    .and_then(|index| {
-                        if self.workspace_filter_active() {
-                            self.shell
-                                .search_matches
-                                .iter()
-                                .position(|value| *value == index)
-                        } else {
-                            Some(index)
-                        }
-                    })
+                    .and_then(|index| visible.iter().position(|value| *value == index))
                     .unwrap_or(0);
             }
             self.reconcile_device_info_selection();
@@ -503,7 +499,7 @@ impl AppState {
     }
 
     pub fn backup_source_index_at_visible(&self, position: usize) -> Option<usize> {
-        self.visible_backup_indices().get(position).copied()
+        self.backup_view_snapshot().indices.get(position).copied()
     }
 
     pub fn visible_device_indices(&self) -> Vec<usize> {
@@ -525,26 +521,11 @@ impl AppState {
     }
 
     pub fn visible_backup_indices(&self) -> Vec<usize> {
-        let search_active =
-            self.shell.workspace == Workspace::Backups && !self.active_search_query().is_empty();
-        let indices = self
-            .backups
-            .rows
-            .iter()
-            .enumerate()
-            .filter(|(_, backup)| self.backup_matches_device_filter(backup))
-            .filter_map(|(index, _)| {
-                (!search_active || self.shell.search_matches.contains(&index)).then_some(index)
-            })
-            .collect::<Vec<_>>();
-        self.backups.table_view.sorted_indices(
-            indices,
-            self.table_interaction(super::table_layout::TableKind::Backups),
-        )
+        self.backup_view_snapshot().indices.clone()
     }
 
     pub fn visible_backup_count(&self) -> usize {
-        self.visible_backup_indices().len()
+        self.backup_view_snapshot().indices.len()
     }
 
     pub fn backup_at_visible(
@@ -638,6 +619,13 @@ impl AppState {
             &self.backups.rows,
             self.backups.table_view.generation.wrapping_add(1),
         );
+        self.backups.group_keys = self
+            .backups
+            .rows
+            .iter()
+            .map(Self::backup_strong_group_key)
+            .collect();
+        self.backups.tree_nodes = self.build_backup_device_tree_nodes();
         let selectable = self
             .backups
             .rows

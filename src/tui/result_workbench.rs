@@ -195,8 +195,11 @@ pub fn result_pane_slots(area: Rect, state: &ResultWorkbenchState) -> Vec<Result
     if matches!(class, ViewportClass::Wide | ViewportClass::UltraWide) && area.height >= 14 {
         let columns = Layout::horizontal([Constraint::Percentage(46), Constraint::Percentage(54)])
             .split(area);
-        let right = Layout::vertical([Constraint::Percentage(62), Constraint::Percentage(38)])
-            .split(columns[1]);
+        let right = Layout::vertical([
+            Constraint::Length((area.height * 62 / 100).min(26)),
+            Constraint::Min(8),
+        ])
+        .split(columns[1]);
         return vec![
             ResultPaneSlot {
                 pane: PaneId::ResultPartitions,

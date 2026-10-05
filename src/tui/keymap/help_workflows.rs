@@ -152,6 +152,11 @@ pub const RESTORE_RESULT_HELP: &[HelpBinding] = &[
 
 pub const BUSY_GLOBAL_HELP: &[HelpBinding] = &[
     HelpBinding {
+        keys: "F2",
+        label: "查看最近消息详情",
+        action: TuiAction::MessageDetails,
+    },
+    HelpBinding {
         keys: "Esc",
         label: "当前不可返回；显示处理进度",
         action: TuiAction::Back,
@@ -169,6 +174,11 @@ pub const BUSY_GLOBAL_HELP: &[HelpBinding] = &[
 ];
 
 pub const GUARD_GLOBAL_HELP: &[HelpBinding] = &[
+    HelpBinding {
+        keys: "F2",
+        label: "查看最近消息详情",
+        action: TuiAction::MessageDetails,
+    },
     HelpBinding {
         keys: "Esc",
         label: "当前安全阶段不可返回",

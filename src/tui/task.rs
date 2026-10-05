@@ -25,10 +25,10 @@ mod inspect_task;
 mod provision_model;
 #[path = "provision/task.rs"]
 mod provision_task;
-pub use provision_model::ProvisionUpdates;
 use provision_model::{
     password_domain_index, PasswordVerifyRequest, ProvisionTaskState, ProvisionWorkerResult,
 };
+pub use provision_model::{KeyProbeContext, ProvisionUpdates};
 #[path = "provision/task_updates.rs"]
 mod provision_updates;
 #[path = "task_progress.rs"]

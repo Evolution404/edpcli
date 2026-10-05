@@ -228,7 +228,10 @@ fn execute_action_request(
             StateEffect::None
         }
         controller::ActionRequest::ProvisionKeyProbe { disk } => {
-            if let Err(message) = tasks.request_provision_key_probe(disk) {
+            if let Err(message) = tasks.request_key_probe_session(task::KeyProbeContext {
+                disk,
+                session_id: state.provision().session_id,
+            }) {
                 state.provision_finish_key_probe(Err(message.to_string()));
             }
             StateEffect::None

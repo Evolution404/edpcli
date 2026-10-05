@@ -5,43 +5,29 @@ mod capacity_render;
 #[path = "detail_render.rs"]
 mod detail_render;
 
-fn backup_table_values(
+fn backup_cell_style(
     backup: &crate::application::BackupWorkspaceItem,
+    id: crate::tui::table_layout::ColumnId,
     checked: bool,
-    columns: &[crate::tui::table_layout::TableColumnSpec],
-) -> Vec<(String, Style)> {
+) -> Style {
     use crate::tui::table_layout::ColumnId;
-    let health = backup.health();
-    let health_style = crate::tui::theme::current().backup_health(health);
-    let identity = crate::application::identity::WorkspaceIdentity::from_backup(backup);
-    let cells = identity.display_cells();
-    columns
-        .iter()
-        .map(|column| match column.id {
-            ColumnId::Selected => (
-                if checked { "✓".into() } else { String::new() },
-                if checked { warning() } else { muted() },
-            ),
-            ColumnId::Index => (backup.index.to_string(), accent()),
-            ColumnId::Name => (safe(&backup.file_name), Style::default()),
-            ColumnId::Time => (safe(&backup.display_time), Style::default()),
-            ColumnId::Capacity => (safe(&cells[0]), Style::default()),
-            ColumnId::VidPid => (safe(&cells[1]), secondary()),
-            ColumnId::Model => (safe(&cells[2]), Style::default()),
-            ColumnId::Onlyid => (safe(&cells[3]), Style::default()),
-            ColumnId::User => (safe(&cells[4]), Style::default()),
-            ColumnId::Dept => (safe(&cells[5]), Style::default()),
-            ColumnId::ProvisionKind => (
-                safe(&cells[6]),
-                backup
-                    .provision_kind
-                    .map(|kind| crate::tui::theme::current().provision_kind(kind))
-                    .unwrap_or_else(warning),
-            ),
-            ColumnId::Health => (health.label().into(), health_style),
-            _ => unreachable!("backup schema only contains backup and identity columns"),
-        })
-        .collect()
+    match id {
+        ColumnId::Selected => {
+            if checked {
+                warning()
+            } else {
+                muted()
+            }
+        }
+        ColumnId::Index => accent(),
+        ColumnId::VidPid => secondary(),
+        ColumnId::Health => crate::tui::theme::current().backup_health(backup.health()),
+        ColumnId::ProvisionKind => backup
+            .provision_kind
+            .map(|kind| crate::tui::theme::current().provision_kind(kind))
+            .unwrap_or_else(warning),
+        _ => Style::default(),
+    }
 }
 
 fn backup_tree_scroll_offset(
@@ -69,7 +55,7 @@ fn draw_backup_device_tree(frame: &mut Frame, area: ratatui::layout::Rect, state
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let nodes = state.backup_device_tree_nodes();
+    let nodes = state.backup_device_tree_snapshot();
     let selected = state
         .backup_device_tree_selected()
         .min(nodes.len().saturating_sub(1));
@@ -77,15 +63,19 @@ fn draw_backup_device_tree(frame: &mut Frame, area: ratatui::layout::Rect, state
 
     let inner_width = usize::from(inner.width);
     let marker_width = 2usize;
-    let count_width = state.backup_device_tree_count_width();
+    let count_width = nodes
+        .first()
+        .map_or(3, |root| root.count.to_string().len() + 2)
+        .max(3);
     let gap_width = 1usize;
     let info_width = inner_width
         .saturating_sub(marker_width)
         .saturating_sub(count_width)
         .saturating_sub(gap_width)
         .max(1);
-    let selected_info_width = state
-        .backup_device_tree_row_parts(selected)
+    let selected_info_width = nodes
+        .get(selected)
+        .map(|node| state.backup_device_tree_node_parts(node))
         .map(|(prefix, label, _count)| {
             crate::tui::table_layout::display_width(prefix)
                 .saturating_add(crate::tui::table_layout::display_width(&safe(&label)))
@@ -96,12 +86,17 @@ fn draw_backup_device_tree(frame: &mut Frame, area: ratatui::layout::Rect, state
         .min(selected_info_width.saturating_sub(info_width));
     let theme = crate::tui::theme::current();
 
-    for (index, node) in nodes.iter().enumerate() {
+    let visible_rows = usize::from(inner.height).max(1);
+    let scroll_offset = backup_tree_scroll_offset(nodes.len(), selected, visible_rows);
+    for (index, node) in nodes
+        .iter()
+        .enumerate()
+        .skip(scroll_offset)
+        .take(visible_rows)
+    {
         let active = index == selected;
         let marker = if active && focused { "▌ " } else { "  " };
-        let Some((prefix, label, count)) = state.backup_device_tree_row_parts(index) else {
-            continue;
-        };
+        let (prefix, label, count) = state.backup_device_tree_node_parts(node);
         let full_info = format!("{prefix}{}", safe(&label));
         let row_scroll_x = if node.depth == 0 { 0 } else { scroll_x };
         let mut info =
@@ -138,12 +133,7 @@ fn draw_backup_device_tree(frame: &mut Frame, area: ratatui::layout::Rect, state
     if lines.is_empty() {
         lines.push(Line::from(Span::styled("暂无备份设备", muted())));
     }
-    let visible_rows = usize::from(inner.height).max(1);
-    let scroll_offset = backup_tree_scroll_offset(nodes.len(), selected, visible_rows);
-    frame.render_widget(
-        Paragraph::new(lines).scroll((scroll_offset.min(u16::MAX as usize) as u16, 0)),
-        inner,
-    );
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
@@ -183,7 +173,8 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
     let (list_area, detail_area, coverage_area) =
         crate::tui::backup_layout::pane_areas(area, focused);
     if let Some(list_area) = list_area {
-        let visible_count = state.visible_backup_count();
+        let snapshot = state.backup_view_snapshot();
+        let visible_count = snapshot.indices.len();
         let total_count = state.backups().len();
         let count_label = if state.workspace_filter_active() || state.backup_device_filter_active()
         {
@@ -270,29 +261,21 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             );
         } else {
             use crate::tui::table_layout::{
-                display_width, render_table_scrollbars, table_column_schema, table_heading,
-                table_position_label, visible_cell, TableKind,
+                render_table_scrollbars, table_column_schema, table_heading, table_position_label,
+                visible_cell, TableKind,
             };
             let columns = table_column_schema(TableKind::Backups).expect("backup schema");
             let headings = columns
                 .iter()
                 .map(|column| column.heading)
                 .collect::<Vec<_>>();
-            let mut content_widths = headings
-                .iter()
-                .map(|heading| display_width(heading))
-                .collect::<Vec<_>>();
-            for backup in state.backups() {
-                for (index, (value, _)) in backup_table_values(backup, false, &columns)
-                    .iter()
-                    .enumerate()
-                {
-                    content_widths[index] = content_widths[index].max(display_width(value));
-                }
-            }
+            let view = state
+                .table_view_data(TableKind::Backups)
+                .expect("backup table projection");
+            let content_widths = &snapshot.content_widths;
             let order = state.table_column_order(TableKind::Backups);
             let layout = state.table_visual_layout(TableKind::Backups);
-            let visual_widths = state.table_visual_widths(TableKind::Backups, &content_widths);
+            let visual_widths = state.table_visual_widths(TableKind::Backups, content_widths);
             let interaction = state.table_interaction(TableKind::Backups);
             let viewport = layout.layout_with_active(
                 table_area.width.saturating_sub(4),
@@ -310,23 +293,32 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             let window_start = window.start;
             let window_len = window.len();
             let rows = window
-                .filter_map(|position| state.backup_at_visible(position))
-                .map(|backup| {
-                    let values = backup_table_values(
-                        backup,
-                        state.backup_is_selected(&backup.path),
-                        &columns,
-                    );
+                .filter_map(|position| snapshot.indices.get(position).copied())
+                .map(|index| {
+                    let backup = &state.backups()[index];
+                    let values = &view.rows[index];
+                    let checked = state.backup_is_selected(&backup.path);
                     TableRow::new(
                         viewport
                             .columns
                             .iter()
                             .map(|column| {
                                 let logical = order[column.index];
-                                let (value, style) = &values[logical];
+                                let value = if columns[logical].id
+                                    == crate::tui::table_layout::ColumnId::Selected
+                                {
+                                    if checked {
+                                        "✓"
+                                    } else {
+                                        ""
+                                    }
+                                } else {
+                                    &values[logical]
+                                };
+                                let style = backup_cell_style(backup, columns[logical].id, checked);
                                 Cell::from(visible_cell(value, column)).style(
                                     crate::tui::theme::current().table_cell(
-                                        *style,
+                                        style,
                                         column.index == interaction.active_column(),
                                         pane_focused,
                                     ),

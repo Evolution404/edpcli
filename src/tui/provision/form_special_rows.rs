@@ -1,6 +1,53 @@
 use super::*;
 use crate::tui::state::ProvisionFieldSection;
 
+pub(super) fn single_column_field<'a>(
+    state: &AppState,
+    index: usize,
+    label: &'a str,
+    value: &'a str,
+    secret: bool,
+) -> (std::borrow::Cow<'a, str>, &'a str, bool) {
+    use crate::tui::state::ProvisionFieldId;
+    use crate::tui::state::SourcePasswordState;
+    let Some(id) = state.provision_field_id(index) else {
+        return (compact_field_label(label), value, secret);
+    };
+    let domain = match id {
+        ProvisionFieldId::SourcePassword(domain) | ProvisionFieldId::TargetPassword(domain) => {
+            domain
+        }
+        _ => return (compact_field_label(label), value, secret),
+    };
+    let region = match domain {
+        crate::provision::KeyDomainRole::Share if state.provision().kind.mode() == Some(1) => {
+            "二合一区"
+        }
+        crate::provision::KeyDomainRole::Share => "交换区",
+        crate::provision::KeyDomainRole::Encrypt => "保密区",
+    };
+    let status = if matches!(id, ProvisionFieldId::SourcePassword(_)) {
+        match state.provision_source_password_state(domain) {
+            SourcePasswordState::NotApplicable => {
+                return (format!("{region}{label}").into(), "— 不涉及", false)
+            }
+            SourcePasswordState::Verifying => " ◑",
+            SourcePasswordState::VerifiedDefault | SourcePasswordState::VerifiedUser => " ✓",
+            SourcePasswordState::Failed => " ✗",
+            SourcePasswordState::Unknown => " —",
+        }
+    } else {
+        ""
+    };
+    let passthrough = matches!(id, ProvisionFieldId::TargetPassword(_))
+        && state.provision_target_password_is_passthrough(domain);
+    (
+        format!("{region}{label}{status}").into(),
+        if passthrough { "透传" } else { value },
+        secret && !passthrough,
+    )
+}
+
 pub(super) fn compact_field_label(label: &str) -> std::borrow::Cow<'_, str> {
     match label {
         "初始化密码强制修改" => "首次改密".into(),

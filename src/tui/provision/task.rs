@@ -2,33 +2,67 @@ use super::*;
 
 impl TaskHub {
     pub(crate) fn retain_provision_context(&mut self, state: &crate::tui::state::AppState) {
-        self.retain_password_session(
-            (state.workspace() == crate::tui::state::Workspace::Provision
-                && state.provision().stage == crate::tui::state::ProvisionStage::Form)
-                .then_some(state.provision().session_id),
-        );
+        let in_form = state.workspace() == crate::tui::state::Workspace::Provision
+            && state.provision().stage == crate::tui::state::ProvisionStage::Form;
+        self.retain_key_probe_context(in_form.then(|| state.selected_device_disk()).flatten().map(
+            |disk| KeyProbeContext {
+                disk,
+                session_id: state.provision().session_id,
+            },
+        ));
+        self.retain_password_session(in_form.then_some(state.provision().session_id));
+    }
+
+    pub(super) fn retain_key_probe_context(&mut self, context: Option<KeyProbeContext>) {
+        if self.provision.key_probe_context != context {
+            self.provision.key_probe_context = context;
+            self.provision.key_probe_slot.invalidate_pending();
+        }
     }
 
     pub fn request_provision_key_probe(&mut self, disk: u32) -> Result<u64, &'static str> {
-        let generation = self
-            .provision
-            .key_probe_slot
-            .try_begin()
-            .ok_or("已有来源密码域探测正在执行")?;
+        self.request_key_probe_session(KeyProbeContext {
+            disk,
+            session_id: 0,
+        })
+    }
+
+    pub(crate) fn request_key_probe_session(
+        &mut self,
+        context: KeyProbeContext,
+    ) -> Result<u64, &'static str> {
+        self.retain_key_probe_context(Some(context));
+        let generation = match self.provision.key_probe_slot.request_latest(context) {
+            LatestRequest::Started {
+                generation,
+                request,
+            } => {
+                self.start_key_probe(generation, request);
+                generation
+            }
+            LatestRequest::Queued { generation } => generation,
+        };
+        Ok(generation)
+    }
+
+    pub(super) fn start_key_probe(&mut self, generation: u64, context: KeyProbeContext) {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
                 let runner = SysRunner;
-                crate::application::provision::probe_provision_key_domains_on_disk(&runner, disk)
-                    .map_err(crate::application::error::OperationError::from)
+                crate::application::provision::probe_provision_key_domains_on_disk(
+                    &runner,
+                    context.disk,
+                )
+                .map_err(crate::application::error::OperationError::from)
             }))
             .unwrap_or_else(|_| Err("来源密码域探测后台任务异常终止".into()));
             let _ = tx.send(WorkerResult::Provision(ProvisionWorkerResult::KeyProbe {
                 generation,
+                context,
                 result,
             }));
         });
-        Ok(generation)
     }
 
     // Compatibility entry point; production supplies an explicit form session.

@@ -226,6 +226,11 @@ pub const BACKUPS_HELP: &[HelpBinding] = &[
 
 pub const GLOBAL_HELP: &[HelpBinding] = &[
     HelpBinding {
+        keys: "F2",
+        label: "查看最近消息详情",
+        action: TuiAction::MessageDetails,
+    },
+    HelpBinding {
         keys: "Tab / Shift-Tab",
         label: "切换当前层级焦点 / 顶层标签",
         action: TuiAction::FocusNext,

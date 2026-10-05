@@ -83,16 +83,22 @@ pub fn message_bar(
     let theme = theme::current();
     let mut spans = Vec::new();
     if let Some(notice) = notice {
+        let suffix = " · F2 详情";
+        let available = usize::from(area.width).saturating_sub(2 + crate::ui::disp_width(suffix));
         spans.push(Span::styled(
             format!("{} ", notice.marker()),
             notice.style(),
         ));
         spans.push(Span::styled(
-            crate::ui::sanitize_terminal_text(notice.text()),
+            ui::text::ellipsize(
+                &crate::ui::sanitize_terminal_text(notice.text()).replace('\n', " "),
+                available,
+            ),
             notice.style(),
         ));
+        spans.push(Span::styled(suffix, theme.secondary_text()));
     }
-    if let Some(status) = status {
+    if let Some(status) = status.filter(|_| notice.is_none()) {
         if !spans.is_empty() {
             spans.push(Span::styled("  ·  ", theme.muted()));
         }

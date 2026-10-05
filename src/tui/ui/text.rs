@@ -3,6 +3,27 @@ use ratatui::text::{Line, Span};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+pub(crate) fn ellipsize(text: &str, width: usize) -> String {
+    if UnicodeWidthStr::width(text) <= width {
+        return text.to_owned();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut value = String::new();
+    let mut cells = 0;
+    for grapheme in text.graphemes(true) {
+        let size = UnicodeWidthStr::width(grapheme);
+        if cells + size > width - 1 {
+            break;
+        }
+        value.push_str(grapheme);
+        cells += size;
+    }
+    value.push('…');
+    value
+}
+
 pub(crate) fn wrap_lines(lines: Vec<Line<'_>>, width: u16) -> Vec<Line<'static>> {
     if width == 0 {
         return Vec::new();

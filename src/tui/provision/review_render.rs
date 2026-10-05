@@ -68,8 +68,9 @@ pub(super) fn draw_provision_review(
             state.disk_layout_tail_expansion(),
             focused == crate::tui::pane::PaneId::ProvisionDiskLayout,
         );
-        let lower = Layout::horizontal([Constraint::Percentage(68), Constraint::Percentage(32)])
-            .split(rows[1]);
+        let table_height = view.regions.len().saturating_add(3).clamp(6, 16) as u16;
+        let lower =
+            Layout::vertical([Constraint::Length(table_height), Constraint::Min(8)]).split(rows[1]);
         draw_partition_plan(
             frame,
             lower[0],

@@ -304,6 +304,10 @@ pub(super) fn dispatch_action(
     viewport_width: u16,
     clipboard: &mut dyn ClipboardBackend,
 ) -> ActionOutcome {
+    if action == TuiAction::MessageDetails {
+        state.open_notice_details();
+        return ActionOutcome::handled();
+    }
     if let Some(stage) = state.advanced_inspect().map(|advanced| advanced.stage) {
         match stage {
             AdvancedInspectStage::Running => {

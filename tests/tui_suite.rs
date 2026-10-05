@@ -5,6 +5,8 @@ pub mod common;
 mod canonical_disk_layout;
 #[path = "tui_demo.rs"]
 mod tui_demo;
+#[path = "tui_desktop.rs"]
+mod tui_desktop;
 
 #[path = "tui_animation.rs"]
 mod tui_animation;

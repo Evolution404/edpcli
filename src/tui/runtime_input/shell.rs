@@ -32,7 +32,7 @@ pub(super) fn handle_shell_key(
                         match command::parse_command(&input) {
                             Ok(action) => {
                                 let viewport_height =
-                                    terminal_size.height.saturating_sub(9) as usize;
+                                    state.workspace_navigation_rows(terminal_size);
                                 if action == command::PaletteAction::Provision {
                                     if state.workspace() != state::Workspace::Devices {
                                         let _ = state.navigate(
@@ -72,7 +72,7 @@ pub(super) fn handle_shell_key(
 
     let role = controller::active_widget_role(state);
     if let Some(action) = keys.map_for_role(state.input_mode(), role, key) {
-        let viewport_height = terminal_size.height.saturating_sub(9) as usize;
+        let viewport_height = state.workspace_navigation_rows(terminal_size);
         match dispatch_tui_action(
             state,
             tasks,

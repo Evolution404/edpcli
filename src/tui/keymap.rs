@@ -27,6 +27,7 @@ pub enum TuiAction {
     Back,
     Quit,
     Help,
+    MessageDetails,
     Search,
     NextMatch,
     PreviousMatch,
@@ -174,6 +175,10 @@ impl KeyMapper {
     pub fn map_at(&mut self, mode: InputMode, event: KeyEvent, now: Instant) -> Option<TuiAction> {
         if !is_actionable_key(&event) {
             return None;
+        }
+        if event.code == KeyCode::F(2) && event.modifiers.is_empty() {
+            self.pending = None;
+            return Some(TuiAction::MessageDetails);
         }
 
         if self

@@ -51,6 +51,22 @@ impl MotionMode {
             Self::Off => None,
         }
     }
+
+    /// Off keeps elapsed/wait status current during work; idle pages redraw less.
+    pub const fn redraw_interval(self, active: bool) -> Option<Duration> {
+        if active {
+            match self.tick_interval() {
+                Some(interval) => Some(interval),
+                None => Some(Duration::from_secs(1)),
+            }
+        } else {
+            match self {
+                Self::Full => Some(Duration::from_secs(1)),
+                Self::Reduced => Some(Duration::from_secs(2)),
+                Self::Off => None,
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
