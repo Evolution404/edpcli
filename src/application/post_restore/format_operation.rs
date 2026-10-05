@@ -5,7 +5,7 @@ use crate::application::media_identity::MediaIdentityResumePin;
 use crate::application::progress::FormatStep;
 use crate::application::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use crate::application::Prompter;
-use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_TARGET};
+use crate::common::{EdpCliError, EXIT_TARGET};
 use crate::sysinfo::{self, CmdRunner};
 use std::time::Duration;
 
@@ -41,13 +41,14 @@ pub fn format_partition_after_restore_on_disk_assessed(
     format_progress::emit(prompt, format_progress::stage(FormatStep::VerifyTarget));
     let volume_serial = crate::diskio::Clock::now_epoch(&crate::diskio::SystemClock) as u32;
     let mut assessment = None;
-    let result = (|| -> EdpCliResult<()> {
+    let result = (|| -> Result<(), PostRestoreFormatError> {
         let expected = outcome
             .format_target_pin
             .as_ref()
-            .ok_or_else(|| failure("元数据恢复后未能固定目标介质身份，禁止格式化"))?;
-        let mut dev = crate::application::device::open_readonly_usb_disk(runner, disk)?;
-        let format = format_partition_on_disk_with_key(
+            .ok_or(PostRestoreFormatError::TargetIdentityMissing)?;
+        let mut dev = crate::application::device::open_readonly_usb_disk(runner, disk)
+            .map_err(|error| PostRestoreFormatError::Operation(error.msg))?;
+        format_partition_on_disk_with_key(
             runner,
             disk,
             &mut dev,
@@ -59,10 +60,9 @@ pub fn format_partition_after_restore_on_disk_assessed(
             volume_serial,
             None,
             &mut assessment,
-        );
-        format.result.map_err(failure)
-    })()
-    .map_err(|error: EdpCliError| error.msg);
+        )
+        .result
+    })();
     AssessedPostRestoreFormatResult {
         format: PostRestoreFormatResult {
             partition_index: request.partition_index,
@@ -166,13 +166,19 @@ pub fn format_encrypted_partition_after_restore_on_disk(
     volume_label: &str,
 ) -> EncryptedPostRestoreFormatResult {
     format_progress::emit(prompt, format_progress::stage(FormatStep::VerifyTarget));
-    let result = (|| -> EdpCliResult<Result<(), EncryptedPostRestoreError>> {
-        let expected = outcome
-            .format_target_pin
-            .as_ref()
-            .ok_or_else(|| failure("元数据恢复后未能固定目标介质身份，禁止格式化"))?;
-        let mut dev = crate::application::device::open_readonly_usb_disk(runner, disk)?;
-        Ok(format_encrypted_partition_on_disk(
+    let result = (|| -> Result<(), EncryptedPostRestoreError> {
+        let expected =
+            outcome
+                .format_target_pin
+                .as_ref()
+                .ok_or(EncryptedPostRestoreError::Operation(
+                    PostRestoreFormatError::TargetIdentityMissing,
+                ))?;
+        let mut dev =
+            crate::application::device::open_readonly_usb_disk(runner, disk).map_err(|error| {
+                EncryptedPostRestoreError::Operation(PostRestoreFormatError::Operation(error.msg))
+            })?;
+        format_encrypted_partition_on_disk(
             runner,
             disk,
             &mut dev,
@@ -184,15 +190,12 @@ pub fn format_encrypted_partition_after_restore_on_disk(
             volume_label,
             crate::diskio::Clock::now_epoch(&crate::diskio::SystemClock) as u32,
         )
-        .result)
+        .result
     })();
     EncryptedPostRestoreFormatResult {
         partition_index: request.partition_index,
         filesystem: request.filesystem,
-        result: match result {
-            Ok(result) => result,
-            Err(error) => Err(EncryptedPostRestoreError::Operation(error.msg)),
-        },
+        result,
     }
 }
 
@@ -214,19 +217,20 @@ pub(super) fn verify_current_target(
     outcome: &MetadataRestoreOutcome,
     partition: &ManifestPartition,
     key_check: KeyCheck<'_>,
-) -> EdpCliResult<()> {
+) -> Result<(), PostRestoreFormatError> {
     let total_sectors = outcome.total_sectors;
     let observed = crate::application::media_identity_observer::observe_media_identity_readonly(
         runner, disk, dev,
-    )?;
+    )
+    .map_err(|error| PostRestoreFormatError::Operation(error.msg))?;
     expected
         .verify(&observed.snapshot, &observed.protocol_image)
-        .map_err(|conflict| failure(format!("格式化目标物理身份不一致: {conflict:?}")))?;
+        .map_err(PostRestoreFormatError::TargetIdentity)?;
     if sysinfo::disk_total_sectors(runner, disk) != Some(total_sectors)
         || observed.snapshot.hardware.total_sectors != Some(total_sectors)
         || observed.snapshot.hardware.logical_sector_size != Some(SECTOR as u32)
     {
-        return Err(failure("格式化目标总扇区数或逻辑扇区大小不一致"));
+        return Err(PostRestoreFormatError::TargetGeometryChanged);
     }
     if partition.sector_count == 0
         || partition
@@ -234,53 +238,72 @@ pub(super) fn verify_current_target(
             .checked_add(partition.sector_count)
             .is_none_or(|end| end > total_sectors)
     {
-        return Err(failure("格式化分区几何超出目标盘"));
+        return Err(PostRestoreFormatError::GeometryMismatch {
+            index: partition.index,
+        });
     }
 
     if outcome.device_state.eq_ignore_ascii_case("plain") {
         if !matches!(key_check, KeyCheck::Plain) {
-            return Err(failure("Plain 分区不能使用加密密钥格式化"));
+            return Err(PostRestoreFormatError::Operation(
+                "Plain 分区不能使用加密密钥格式化".into(),
+            ));
         }
         let table = crate::partition_table::read_partition_table(total_sectors, |lba| {
             read_sector(dev, lba)
         })
-        .map_err(|message| failure(format!("重读分区表失败: {message}")))?;
+        .map_err(|message| {
+            PostRestoreFormatError::Operation(format!("重读分区表失败: {message}"))
+        })?;
         if !table.partitions.iter().any(|current| {
             current.index == partition.index as usize
                 && current.start_lba == partition.start_lba
                 && current.sector_count == partition.sector_count
         }) {
-            return Err(failure("目标盘当前分区表与所选分区几何不一致"));
+            return Err(PostRestoreFormatError::GeometryMismatch {
+                index: partition.index,
+            });
         }
     } else {
-        let image = ProvisionImage::from_bytes(observed.protocol_image)
-            .map_err(|message| failure(format!("重读 EDP 协议失败: {message}")))?;
+        let image = ProvisionImage::from_bytes(observed.protocol_image).map_err(|message| {
+            PostRestoreFormatError::Operation(format!("重读 EDP 协议失败: {message}"))
+        })?;
         let parsed = parse_existing_provision(&image, &outcome.device_id, total_sectors)
-            .map_err(|message| failure(format!("重读 EDP 分区失败: {message}")))?
-            .ok_or_else(|| failure("当前盘缺少有效 EDP 分区记录"))?;
+            .map_err(|message| {
+                PostRestoreFormatError::Operation(format!("重读 EDP 分区失败: {message}"))
+            })?
+            .ok_or_else(|| {
+                PostRestoreFormatError::Operation("当前盘缺少有效 EDP 分区记录".into())
+            })?;
         let index = partition
             .index
             .checked_sub(1)
             .and_then(|index| usize::try_from(index).ok())
-            .ok_or_else(|| failure("EDP 分区索引无效"))?;
-        let current = parsed
-            .profile
-            .partitions
-            .get(index)
-            .ok_or_else(|| failure("EDP 分区索引不存在"))?;
+            .ok_or(PostRestoreFormatError::PartitionNotFound {
+                index: partition.index,
+            })?;
+        let current = parsed.profile.partitions.get(index).ok_or(
+            PostRestoreFormatError::PartitionNotFound {
+                index: partition.index,
+            },
+        )?;
         let record = parsed
             .records
             .get(index)
-            .ok_or_else(|| failure("EDP 分区密钥记录不存在"))?;
+            .ok_or_else(|| PostRestoreFormatError::Operation("EDP 分区密钥记录不存在".into()))?;
         if current.start_lba != partition.start_lba
             || current.sector_count != partition.sector_count
         {
-            return Err(failure("当前 EDP 分区几何与所选目标不一致"));
+            return Err(PostRestoreFormatError::GeometryMismatch {
+                index: partition.index,
+            });
         }
         match key_check {
             KeyCheck::Reinitialize => {
                 if record.lba12.need_encrypt == 0 || !current.physically_encrypted {
-                    return Err(failure("所选目标不是 EDP 加密数据分区"));
+                    return Err(PostRestoreFormatError::Operation(
+                        "所选目标不是 EDP 加密数据分区".into(),
+                    ));
                 }
             }
             KeyCheck::Existing(key) => {
@@ -289,11 +312,15 @@ pub(super) fn verify_current_target(
                     || record.lba12.encrypt_mode != FileKeyWrapMode::Sm4.raw()
                     || crate::crypto::crc32_bare(key) != record.lba12.file_key_crc
                 {
-                    return Err(failure("当前密钥域与已验证原 FileKey 不一致"));
+                    return Err(PostRestoreFormatError::Operation(
+                        "当前密钥域与已验证原 FileKey 不一致".into(),
+                    ));
                 }
             }
             KeyCheck::Plain if current.physically_encrypted => {
-                return Err(failure("物理加密分区禁止明文格式化"));
+                return Err(PostRestoreFormatError::Operation(
+                    "物理加密分区禁止明文格式化".into(),
+                ));
             }
             KeyCheck::Plain => {}
         }
@@ -345,24 +372,38 @@ fn format_partition_on_disk_with_key(
     assessment_sink: &mut Option<PostRestoreAssessment>,
 ) -> PostRestoreFormatResult {
     format_progress::emit(prompt, format_progress::stage(FormatStep::VerifyTarget));
-    let result = (|| -> EdpCliResult<()> {
+    let result = (|| -> Result<(), PostRestoreFormatError> {
         if !outcome.report.metadata_restored || !outcome.report.readback_verified {
-            return Err(failure("元数据恢复尚未成功且读回验证，禁止后续格式化"));
+            return Err(PostRestoreFormatError::Operation(
+                "元数据恢复尚未成功且读回验证，禁止后续格式化".into(),
+            ));
         }
+        validate_writable_filesystem(request.filesystem)?;
         expected
             .validate()
-            .map_err(|message| failure(format!("目标身份 pin 无效: {message}")))?;
+            .map_err(|message| PostRestoreFormatError::TargetPinInvalid(message.to_string()))?;
         let partition = outcome
             .partitions
             .iter()
             .find(|partition| partition.index == request.partition_index)
-            .ok_or_else(|| failure("所选分区不在恢复清单中"))?;
+            .ok_or(PostRestoreFormatError::PartitionNotFound {
+                index: request.partition_index,
+            })?;
         let assessed = outcome
             .assessment
             .partitions
             .iter()
             .find(|candidate| candidate.index == request.partition_index)
-            .ok_or_else(|| failure("所选分区没有恢复后评估"))?;
+            .ok_or(PostRestoreFormatError::PartitionNotFound {
+                index: request.partition_index,
+            })?;
+        if assessed.start_lba != partition.start_lba
+            || assessed.sector_count != partition.sector_count
+        {
+            return Err(PostRestoreFormatError::GeometryMismatch {
+                index: request.partition_index,
+            });
+        }
         let eligible = match original_key {
             Some(_) => matches!(
                 assessed.state,
@@ -371,13 +412,14 @@ fn format_partition_on_disk_with_key(
             ),
             None => assessed.state == PostRestorePartitionState::NeedsFormat,
         };
-        if !eligible
-            || assessed.start_lba != partition.start_lba
-            || assessed.sector_count != partition.sector_count
-        {
-            return Err(failure("所选分区不是匹配的 NeedsFormat 分区"));
+        if !eligible {
+            return Err(PostRestoreFormatError::PartitionState {
+                index: request.partition_index,
+                state: assessed.state,
+            });
         }
-        let session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
+        let session = TargetSession::<ReadOnly>::open_usb(runner, disk)
+            .map_err(|error| PostRestoreFormatError::Operation(error.msg))?;
         verify_current_target(
             runner,
             disk,
@@ -405,14 +447,24 @@ fn format_partition_on_disk_with_key(
                 &outcome.partitions,
             ),
         };
-        let fresh_assessment = assess(dev).map_err(failure)?;
-        if !fresh_assessment.partitions.iter().any(|candidate| {
-            candidate.index == request.partition_index
-                && candidate.start_lba == partition.start_lba
-                && candidate.sector_count == partition.sector_count
-                && candidate.state == PostRestorePartitionState::NeedsFormat
-        }) {
-            return Err(failure("当前分区状态已变化，不再允许格式化"));
+        let fresh_assessment = assess(dev).map_err(PostRestoreFormatError::Operation)?;
+        let fresh = fresh_assessment
+            .partitions
+            .iter()
+            .find(|candidate| candidate.index == request.partition_index)
+            .ok_or(PostRestoreFormatError::PartitionNotFound {
+                index: request.partition_index,
+            })?;
+        if fresh.start_lba != partition.start_lba || fresh.sector_count != partition.sector_count {
+            return Err(PostRestoreFormatError::GeometryMismatch {
+                index: request.partition_index,
+            });
+        }
+        if fresh.state != PostRestorePartitionState::NeedsFormat {
+            return Err(PostRestoreFormatError::PartitionState {
+                index: request.partition_index,
+                state: fresh.state,
+            });
         }
         if !prompt.confirm_post_restore_format_yes(&format!(
             "单独确认格式化 disk{disk} 分区 {} (LBA{} + {} sectors) 为 {}；输入 YES: ",
@@ -421,11 +473,11 @@ fn format_partition_on_disk_with_key(
             partition.sector_count,
             request.filesystem.config_token()
         )) {
-            return Err(failure("已取消本次分区格式化"));
+            return Err(PostRestoreFormatError::Cancelled);
         }
         format_progress::emit(prompt, format_progress::stage(FormatStep::LockAndReopen));
         let session = session.prepare_write().map_err(|error| {
-            EdpCliError::new(EXIT_IO, format!("无法卸载/锁定 disk{disk}: {error}"))
+            PostRestoreFormatError::Operation(format!("无法卸载/锁定 disk{disk}: {error}"))
         })?;
         let _session = session
             .reopen_and_verify(dev, REOPEN_WAIT, |dev| {
@@ -438,20 +490,32 @@ fn format_partition_on_disk_with_key(
                     partition,
                     original_key.map_or(KeyCheck::Plain, |(_, key)| KeyCheck::Existing(key)),
                 )?;
-                let reopened = assess(dev).map_err(failure)?;
-                if !reopened.partitions.iter().any(|candidate| {
-                    candidate.index == request.partition_index
-                        && candidate.start_lba == partition.start_lba
-                        && candidate.sector_count == partition.sector_count
-                        && candidate.state == PostRestorePartitionState::NeedsFormat
-                }) {
-                    return Err(failure("重开后分区状态已变化，拒绝格式化"));
+                let reopened = assess(dev).map_err(PostRestoreFormatError::Operation)?;
+                let candidate = reopened
+                    .partitions
+                    .iter()
+                    .find(|candidate| candidate.index == request.partition_index)
+                    .ok_or(PostRestoreFormatError::PartitionNotFound {
+                        index: request.partition_index,
+                    })?;
+                if candidate.start_lba != partition.start_lba
+                    || candidate.sector_count != partition.sector_count
+                {
+                    return Err(PostRestoreFormatError::GeometryMismatch {
+                        index: request.partition_index,
+                    });
+                }
+                if candidate.state != PostRestorePartitionState::NeedsFormat {
+                    return Err(PostRestoreFormatError::PartitionState {
+                        index: request.partition_index,
+                        state: candidate.state,
+                    });
                 }
                 Ok(())
             })
             .map_err(|error| match error {
                 ReopenAndVerifyError::Reopen(error) => {
-                    EdpCliError::new(EXIT_IO, format!("重开 disk{disk} 失败: {error}"))
+                    PostRestoreFormatError::Operation(format!("重开 disk{disk} 失败: {error}"))
                 }
                 ReopenAndVerifyError::Verify(error) => error,
             })?;
@@ -465,22 +529,33 @@ fn format_partition_on_disk_with_key(
             original_key.map(|(_, key)| key),
             &mut |event| prompt.operation_progress(event),
         );
-        format.result.map_err(failure)?;
+        format.result?;
         format_progress::emit(prompt, format_progress::stage(FormatStep::Reassess));
-        let after = assess(dev).map_err(failure)?;
-        if !after.partitions.iter().any(|candidate| {
-            candidate.index == request.partition_index
-                && candidate.start_lba == partition.start_lba
-                && candidate.sector_count == partition.sector_count
-                && candidate.state == PostRestorePartitionState::Usable
-        }) {
-            return Err(failure("格式化读回后重新评估未达到 Usable"));
+        let after = assess(dev).map_err(PostRestoreFormatError::Operation)?;
+        let candidate = after
+            .partitions
+            .iter()
+            .find(|candidate| candidate.index == request.partition_index)
+            .ok_or(PostRestoreFormatError::PartitionNotFound {
+                index: request.partition_index,
+            })?;
+        if candidate.start_lba != partition.start_lba
+            || candidate.sector_count != partition.sector_count
+        {
+            return Err(PostRestoreFormatError::GeometryMismatch {
+                index: request.partition_index,
+            });
+        }
+        if candidate.state != PostRestorePartitionState::Usable {
+            return Err(PostRestoreFormatError::PartitionState {
+                index: request.partition_index,
+                state: candidate.state,
+            });
         }
         *assessment_sink = Some(after);
         format_progress::emit(prompt, format_progress::completed());
         Ok(())
-    })()
-    .map_err(|error| error.msg);
+    })();
     PostRestoreFormatResult {
         partition_index: request.partition_index,
         filesystem: request.filesystem,

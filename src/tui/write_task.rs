@@ -117,10 +117,11 @@ impl TaskHub {
                     format: crate::application::post_restore::PostRestoreFormatResult {
                         partition_index: intent.request.partition_index,
                         filesystem: intent.request.filesystem,
-                        result: Err(format!(
-                            "格式化后台任务异常终止: {}",
-                            panic_message(payload)
-                        )),
+                        result: Err(
+                            crate::application::post_restore::PostRestoreFormatError::Operation(
+                                format!("格式化后台任务异常终止: {}", panic_message(payload)),
+                            ),
+                        ),
                     },
                 }
             });
@@ -140,11 +141,12 @@ impl TaskHub {
         let operation_id = self.begin_operation()?;
         let tx = self.tx.clone();
         let progress = ProgressPublisher::new(self, operation_id, ProgressKind::Format);
-        self.critical_worker =
-            Some(std::thread::spawn(move || {
-                let runner = SysRunner;
-                let result = catch_unwind(AssertUnwindSafe(|| {
-                let mut prompt = FormatPrompter { progress: progress.clone() };
+        self.critical_worker = Some(std::thread::spawn(move || {
+            let runner = SysRunner;
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let mut prompt = FormatPrompter {
+                    progress: progress.clone(),
+                };
                 crate::application::post_restore::format_encrypted_partition_after_restore_on_disk(
                     &runner,
                     intent.disk,
@@ -161,17 +163,19 @@ impl TaskHub {
                     filesystem: intent.request.filesystem,
                     result: Err(
                         crate::application::post_restore::EncryptedPostRestoreError::Operation(
-                            format!("加密格式化后台任务异常终止: {}", panic_message(payload)),
+                            crate::application::post_restore::PostRestoreFormatError::Operation(
+                                format!("加密格式化后台任务异常终止: {}", panic_message(payload)),
+                            ),
                         ),
                     ),
                 }
             });
-                progress.flush();
-                let _ = tx.send(WorkerResult::PostRestoreEncryptedFormat {
-                    operation_id,
-                    result,
-                });
-            }));
+            progress.flush();
+            let _ = tx.send(WorkerResult::PostRestoreEncryptedFormat {
+                operation_id,
+                result,
+            });
+        }));
         Ok(operation_id)
     }
 

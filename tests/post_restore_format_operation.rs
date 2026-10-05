@@ -6,7 +6,8 @@ use edpcli::application::filesystem::FilesystemKind;
 use edpcli::application::media_identity::MediaIdentityPin;
 use edpcli::application::post_restore::{
     assess_partitions_readonly, format_partition_on_disk, MetadataRestoreOutcome,
-    MetadataRestoreReport, PartitionFormatRequest, PostRestorePartitionState,
+    MetadataRestoreReport, PartitionFormatRequest, PostRestoreFormatError,
+    PostRestorePartitionState,
 };
 use edpcli::application::progress::{FormatStep, OperationKind, ProgressEvent, Severity, Step};
 use edpcli::application::support::SECTOR;
@@ -304,7 +305,8 @@ fn run(
 fn unconfirmed_format_has_zero_writes() {
     let mut dev = SparseFormatDev::new();
     let (runner, outcome) = fixture(&mut dev);
-    assert!(run(&runner, &mut dev, false, &outcome).result.is_err());
+    let result = run(&runner, &mut dev, false, &outcome);
+    assert_eq!(result.result, Err(PostRestoreFormatError::Cancelled));
     assert!(dev.writes.is_empty());
 }
 
@@ -313,7 +315,14 @@ fn non_needs_format_has_zero_writes() {
     let mut dev = SparseFormatDev::new();
     let (runner, mut outcome) = fixture(&mut dev);
     outcome.assessment.partitions[0].state = PostRestorePartitionState::Usable;
-    assert!(run(&runner, &mut dev, true, &outcome).result.is_err());
+    let result = run(&runner, &mut dev, true, &outcome);
+    assert!(matches!(
+        result.result,
+        Err(PostRestoreFormatError::PartitionState {
+            state: PostRestorePartitionState::Usable,
+            ..
+        })
+    ));
     assert!(dev.writes.is_empty());
 }
 
@@ -322,7 +331,11 @@ fn physical_identity_mismatch_has_zero_writes() {
     let mut dev = SparseFormatDev::new();
     let (runner, mut outcome) = fixture(&mut dev);
     outcome.format_target_pin.as_mut().unwrap().vid = Some(0xffff);
-    assert!(run(&runner, &mut dev, true, &outcome).result.is_err());
+    let result = run(&runner, &mut dev, true, &outcome);
+    assert!(matches!(
+        result.result,
+        Err(PostRestoreFormatError::TargetIdentity(_))
+    ));
     assert!(dev.writes.is_empty());
 }
 
@@ -331,7 +344,11 @@ fn geometry_mismatch_has_zero_writes() {
     let mut dev = SparseFormatDev::new();
     let (runner, mut outcome) = fixture(&mut dev);
     outcome.partitions[0].sector_count += 1;
-    assert!(run(&runner, &mut dev, true, &outcome).result.is_err());
+    let result = run(&runner, &mut dev, true, &outcome);
+    assert!(matches!(
+        result.result,
+        Err(PostRestoreFormatError::GeometryMismatch { index: 1 })
+    ));
     assert!(dev.writes.is_empty());
 }
 
@@ -340,7 +357,11 @@ fn reopen_media_swap_has_zero_writes() {
     let mut dev = SparseFormatDev::new();
     let (runner, outcome) = fixture(&mut dev);
     dev.swap_on_reopen = true;
-    assert!(run(&runner, &mut dev, true, &outcome).result.is_err());
+    let result = run(&runner, &mut dev, true, &outcome);
+    assert!(matches!(
+        result.result,
+        Err(PostRestoreFormatError::TargetIdentity(_))
+    ));
     assert!(dev.writes.is_empty());
 }
 

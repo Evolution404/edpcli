@@ -58,7 +58,8 @@ pub fn reinitialize_encrypted_partition_on_disk(
         let session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
         verify_current_target(
             runner, disk, dev, expected, outcome, partition, KeyCheck::Reinitialize,
-        )?;
+        )
+        .map_err(|error| failure(error.to_string()))?;
         let original = ProvisionImage::from_bytes(read_protocol_image(dev).map_err(failure)?)
             .map_err(failure)?;
         let parsed = parse_existing_provision(&original, &outcome.device_id, outcome.total_sectors)
@@ -120,7 +121,7 @@ pub fn reinitialize_encrypted_partition_on_disk(
             volume_label,
             volume_serial,
         )
-        .map_err(failure)?;
+        .map_err(|error| failure(error.to_string()))?;
         if plain_image
             .sectors()
             .keys()
@@ -158,6 +159,7 @@ pub fn reinitialize_encrypted_partition_on_disk(
                 verify_current_target(
                     runner, disk, dev, expected, outcome, partition, KeyCheck::Reinitialize,
                 )
+                .map_err(|error| failure(error.to_string()))
             })
             .map_err(|error| match error {
                 ReopenAndVerifyError::Reopen(error) => {

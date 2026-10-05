@@ -449,10 +449,10 @@ pub fn prepare_target_provision(
         serials.push(u32::from_le_bytes(random_array::<4>()?));
     }
     let format_result = plan_format_targets_with_keys(&plan, &format_options, &serials, &file_keys);
-    let format_targets = format_result.map_err(|message| {
+    let format_targets = format_result.map_err(|error| {
         err(
             EXIT_TARGET,
-            format!("错误: 无法构造目标格式化计划: {message}"),
+            format!("错误: 无法构造目标格式化计划: {error}"),
         )
     })?;
     let expected_serial_digest = if format_targets.iter().any(|choice| choice.selected) {
@@ -519,10 +519,10 @@ pub fn prepare_provision(
         ProvisionRequest::Plain(request) => {
             let total_sectors = sysinfo::disk_total_sectors(runner, disk)
                 .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
-            let plan = request.resolve(total_sectors).map_err(|message| {
+            let plan = request.resolve_typed(total_sectors).map_err(|error| {
                 err(
                     EXIT_TARGET,
-                    format!("错误: 无法构造 Plain 分区计划: {message}"),
+                    format!("错误: 无法构造 Plain 分区计划: {error}"),
                 )
             })?;
             prepare_plain_provision(runner, disk, plan, dev)

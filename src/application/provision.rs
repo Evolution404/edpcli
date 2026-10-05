@@ -14,7 +14,7 @@ use crate::backup_metadata::{parse_lba7_compatibility_geometry, PartitionGeometr
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_OK, EXIT_TARGET, SECTOR};
 use crate::diskio::{self, SectorDev};
 use crate::filesystem::analysis::{analyze_partition, AnalysisStatus, PartitionReader};
-use crate::filesystem::{build_empty_filesystem, FilesystemKind, SparseFilesystemImage};
+use crate::filesystem::{FilesystemKind, SparseFilesystemImage};
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
     apply_target_geometry_overrides, build_official_partition_filesystem,
@@ -79,17 +79,17 @@ pub enum PlainPartitionSize {
 }
 
 impl PlainPartitionSize {
-    fn sectors(self) -> Result<Option<u64>, String> {
+    fn sectors_typed(self) -> Result<Option<u64>, ProvisionPlanningError> {
         match self {
             Self::Sectors(value) => Ok(Some(value)),
             Self::MiB(value) => value
                 .checked_mul(1024 * 1024 / SECTOR as u64)
                 .map(Some)
-                .ok_or_else(|| "普通分区 MiB 容量溢出".to_string()),
+                .ok_or(ProvisionPlanningError::SizeOverflow { unit: "MiB" }),
             Self::GiB(value) => value
                 .checked_mul(1024 * 1024 * 1024 / SECTOR as u64)
                 .map(Some)
-                .ok_or_else(|| "普通分区 GiB 容量溢出".to_string()),
+                .ok_or(ProvisionPlanningError::SizeOverflow { unit: "GiB" }),
             Self::Fill => Ok(None),
         }
     }
@@ -124,21 +124,29 @@ impl PlainProvisionRequest {
         }
     }
 
-    pub fn resolve(&self, total_sectors: u64) -> Result<PlainProvisionPlan, String> {
+    pub fn resolve_typed(
+        &self,
+        total_sectors: u64,
+    ) -> Result<PlainProvisionPlan, ProvisionPlanningError> {
         if self.partitions.is_empty() {
-            return PlainProvisionPlan::default_for_disk(total_sectors);
+            return PlainProvisionPlan::default_for_disk(total_sectors)
+                .map_err(ProvisionPlanningError::Geometry);
         }
         if self.partitions.len() > crate::provision::MAX_PLAIN_PARTITIONS {
-            return Err(format!(
-                "普通盘最多支持 {} 个 MBR 主分区",
-                crate::provision::MAX_PLAIN_PARTITIONS
-            ));
+            return Err(ProvisionPlanningError::TooManyPartitions {
+                count: self.partitions.len(),
+                max: crate::provision::MAX_PLAIN_PARTITIONS,
+            });
         }
 
         let mut partitions = Vec::with_capacity(self.partitions.len());
         for (index, request) in self.partitions.iter().enumerate() {
-            crate::provision::validate_provision_filesystem(request.filesystem)
-                .map_err(|message| format!("P{}: {message}", index + 1))?;
+            crate::filesystem::validate_writable_filesystem(request.filesystem).map_err(
+                |source| ProvisionPlanningError::Filesystem {
+                    partition: Some(index),
+                    source,
+                },
+            )?;
             let next_start = self
                 .partitions
                 .iter()
@@ -149,12 +157,12 @@ impl PlainProvisionRequest {
                 .map(|(_, other)| other.start_lba)
                 .min()
                 .unwrap_or(total_sectors);
-            let sector_count = match request.size.sectors()? {
+            let sector_count = match request.size.sectors_typed()? {
                 Some(value) => value,
                 None => next_start
                     .checked_sub(request.start_lba)
                     .filter(|value| *value > 0)
-                    .ok_or_else(|| format!("P{} fill 后没有可用空间", index.saturating_add(1)))?,
+                    .ok_or(ProvisionPlanningError::FillWithoutSpace { partition: index })?,
             };
             partitions.push(PlainPartitionSpec::new(
                 request.start_lba,
@@ -163,7 +171,12 @@ impl PlainProvisionRequest {
                 request.volume_label.clone(),
             ));
         }
-        PlainProvisionPlan::new(total_sectors, partitions)
+        PlainProvisionPlan::new(total_sectors, partitions).map_err(ProvisionPlanningError::Geometry)
+    }
+
+    pub fn resolve(&self, total_sectors: u64) -> Result<PlainProvisionPlan, String> {
+        self.resolve_typed(total_sectors)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -219,118 +232,6 @@ impl FormatOptions {
             PartitionRole::CompatibilityReserve => (false, ""),
         }
     }
-}
-
-fn build_plain_format_image(
-    target: &PartitionFormatTarget,
-    filesystem: FilesystemKind,
-    volume_label: &str,
-    volume_serial: u32,
-) -> Result<SparseFilesystemImage, String> {
-    build_empty_filesystem(
-        filesystem,
-        target.geometry.start_sector,
-        target.geometry.sector_count(),
-        volume_serial,
-        Some(volume_label),
-    )
-}
-
-pub fn plan_format_targets(
-    plan: &OfficialProvisionPlan,
-    options: &FormatOptions,
-    serials: &[u32],
-    file_key: &[u8; 16],
-) -> Result<Vec<PlannedPartitionFormat>, String> {
-    let keys = vec![*file_key; serials.len()];
-    plan_format_targets_with_keys(plan, options, serials, &keys)
-}
-
-fn plan_format_targets_with_keys(
-    plan: &OfficialProvisionPlan,
-    options: &FormatOptions,
-    serials: &[u32],
-    file_keys: &[[u8; 16]],
-) -> Result<Vec<PlannedPartitionFormat>, String> {
-    let targets = plan.format_targets()?;
-    if targets.len() != serials.len() || targets.len() != file_keys.len() {
-        return Err("format serial/key count does not match partition count".into());
-    }
-    if options.boot
-        && !targets
-            .iter()
-            .any(|t| t.format_capable && t.role == PartitionRole::Boot)
-        || options.share
-            && !targets.iter().any(|t| {
-                t.format_capable
-                    && matches!(
-                        t.role,
-                        PartitionRole::Share | PartitionRole::BootShareCombined
-                    )
-            })
-        || options.encrypt
-            && !targets
-                .iter()
-                .any(|t| t.format_capable && t.role == PartitionRole::Encrypt)
-    {
-        return Err("当前模式不包含所选的可格式化分区".into());
-    }
-    let mut planned = targets
-        .into_iter()
-        .enumerate()
-        .map(|(index, target)| {
-            let (selected, label) = options.choice(target.role);
-            PlannedPartitionFormat {
-                target,
-                selected,
-                filesystem: target.filesystem,
-                volume_label: label.to_string(),
-                volume_serial: serials[index],
-                prepared_image: None,
-                verification_image: None,
-            }
-        })
-        .collect::<Vec<_>>();
-    for choice in planned.iter().filter(|choice| choice.target.format_capable) {
-        let filesystem = choice
-            .filesystem
-            .ok_or("format-capable target is missing a filesystem")?;
-        crate::provision::validate_provision_filesystem(filesystem)
-            .map_err(|message| format!("{}: {message}", choice.target.role.label()))?;
-    }
-    for (index, choice) in planned
-        .iter_mut()
-        .enumerate()
-        .filter(|(_, choice)| choice.selected)
-    {
-        let filesystem = choice
-            .filesystem
-            .ok_or("compatibility reserve is not a filesystem")?;
-        let verification_image = build_plain_format_image(
-            &choice.target,
-            filesystem,
-            &choice.volume_label,
-            choice.volume_serial,
-        )
-        .map_err(|message| format!("{} 格式化计划无效: {message}", choice.target.role.label()))?;
-        let prepared_image = build_official_partition_filesystem(
-            plan,
-            &choice.target,
-            &file_keys[index],
-            &choice.volume_label,
-            choice.volume_serial,
-        )
-        .map_err(|message| format!("{} 格式化计划无效: {message}", choice.target.role.label()))?;
-        if !choice.target.physically_encrypted && prepared_image.image != verification_image {
-            return Err(format!(
-                "{} 明文格式化镜像与验证镜像不一致",
-                choice.target.role.label()
-            ));
-        }
-        choice.prepared_image = Some(prepared_image);
-        choice.verification_image = Some(verification_image);
-    }
-    Ok(planned)
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -689,7 +590,9 @@ fn sizes(
 }
 
 mod commit;
+mod error;
 mod export;
+mod format_plan;
 mod identity_lineage;
 mod prepare;
 mod prepared_projection;
@@ -698,9 +601,12 @@ mod progress_projection;
 pub use commit::{
     capture_manufacturer_lba3, commit_new_provision, commit_plain_provision, commit_provision,
 };
+pub use error::ProvisionPlanningError;
 pub use export::{
     export_provision_image, export_sparse_plain_provision_image, export_sparse_provision_image,
 };
+use format_plan::plan_format_targets_with_keys;
+pub use format_plan::{plan_format_targets, plan_format_targets_typed};
 pub use prepare::{
     prepare_plain_provision, prepare_provision, prepare_target_provision,
     probe_provision_key_domains_on_disk, verify_provision_source_password_on_disk,

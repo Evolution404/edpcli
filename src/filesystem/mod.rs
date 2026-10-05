@@ -26,7 +26,8 @@ pub use format::{
 };
 pub use image::{
     build_empty_exfat, build_empty_fat16, build_empty_fat32, build_empty_filesystem,
-    validate_volume_label, SparseFilesystemImage,
+    build_empty_filesystem_typed, validate_volume_label, validate_volume_label_typed,
+    SparseFilesystemImage,
 };
 pub use io::{BootSectorReader, FilesystemReader};
 pub use kind::FilesystemKind;

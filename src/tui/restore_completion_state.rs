@@ -90,7 +90,10 @@ impl AppState {
         let Some(wizard) = self.restore.wizard.as_mut() else {
             return;
         };
-        Self::record_post_restore_format_result(wizard, result.result.as_ref().err().cloned());
+        Self::record_post_restore_format_result(
+            wizard,
+            result.result.as_ref().err().map(ToString::to_string),
+        );
         wizard.stage = WizardStage::PostRestore;
         wizard.pending_format = None;
         Self::clear_post_restore_volume_label(wizard);
@@ -139,7 +142,7 @@ impl AppState {
         Self::record_post_restore_format_result(
             wizard,
             result.result.as_ref().err().map(|error| match error {
-                EncryptedPostRestoreError::Operation(message) => message.clone(),
+                EncryptedPostRestoreError::Operation(error) => error.to_string(),
                 EncryptedPostRestoreError::FileKey(error) => format!("原密钥验证失败: {error:?}"),
             }),
         );

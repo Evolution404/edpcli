@@ -1,5 +1,5 @@
 use edpcli::application::provision::{
-    PlainPartitionRequest, PlainPartitionSize, PlainProvisionRequest,
+    PlainPartitionRequest, PlainPartitionSize, PlainProvisionRequest, ProvisionPlanningError,
 };
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::provision::{
@@ -66,6 +66,44 @@ fn plain_request_resolves_mib_gib_fill_and_keeps_explicit_gaps() {
     assert_eq!(
         gib.resolve(3_000_000).unwrap().partitions[0].sector_count,
         2_097_152
+    );
+}
+
+#[test]
+fn plain_request_typed_errors_preserve_filesystem_and_geometry_categories() {
+    use edpcli::application::filesystem::{FilesystemErrorKind, FilesystemKind};
+
+    let unsupported = PlainProvisionRequest {
+        partitions: vec![PlainPartitionRequest {
+            start_lba: 2_048,
+            size: PlainPartitionSize::Fill,
+            filesystem: FilesystemKind::Ntfs,
+            volume_label: "DATA".into(),
+        }],
+    };
+    assert!(matches!(
+        unsupported.resolve_typed(100_000),
+        Err(ProvisionPlanningError::Filesystem {
+            partition: Some(0),
+            source: edpcli::application::filesystem::FilesystemError {
+                kind: FilesystemErrorKind::FormatUnsupported,
+                filesystem: Some(FilesystemKind::Ntfs),
+                ..
+            }
+        })
+    ));
+
+    let no_space = PlainProvisionRequest {
+        partitions: vec![PlainPartitionRequest {
+            start_lba: 100_000,
+            size: PlainPartitionSize::Fill,
+            filesystem: FilesystemKind::ExFat,
+            volume_label: "DATA".into(),
+        }],
+    };
+    assert_eq!(
+        no_space.resolve_typed(100_000),
+        Err(ProvisionPlanningError::FillWithoutSpace { partition: 0 })
     );
 }
 

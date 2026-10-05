@@ -525,7 +525,11 @@ fn post_restore_format_progress_is_independent_and_failure_never_reaches_complet
     state.finish_post_restore_format(PostRestoreFormatResult {
         partition_index: 1,
         filesystem: FilesystemKind::ExFat,
-        result: Err("写入失败，已完整回滚".into()),
+        result: Err(
+            edpcli::application::post_restore::PostRestoreFormatError::Operation(
+                "写入失败，已完整回滚".into(),
+            ),
+        ),
     });
     let wizard = state.wizard().unwrap();
     assert!(

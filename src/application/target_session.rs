@@ -33,9 +33,9 @@ pub struct TargetSession<'a, State> {
 }
 
 #[derive(Debug)]
-pub enum ReopenAndVerifyError {
+pub enum ReopenAndVerifyError<E = EdpCliError> {
     Reopen(io::Error),
-    Verify(EdpCliError),
+    Verify(E),
 }
 
 impl<'a> TargetSession<'a, ReadOnly> {
@@ -59,12 +59,12 @@ impl<'a> TargetSession<'a, ReadOnly> {
 }
 
 impl<'a> TargetSession<'a, PreparedWrite> {
-    pub fn reopen_and_verify(
+    pub fn reopen_and_verify<E>(
         self,
         dev: &mut dyn SectorDev,
         wait: Duration,
-        verify: impl FnOnce(&mut dyn SectorDev) -> EdpCliResult<()>,
-    ) -> Result<TargetSession<'a, WriteLocked>, ReopenAndVerifyError> {
+        verify: impl FnOnce(&mut dyn SectorDev) -> Result<(), E>,
+    ) -> Result<TargetSession<'a, WriteLocked>, ReopenAndVerifyError<E>> {
         dev.reopen_rdwr(wait)
             .map_err(ReopenAndVerifyError::Reopen)?;
         verify(dev).map_err(ReopenAndVerifyError::Verify)?;

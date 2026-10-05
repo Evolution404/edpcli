@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 
 use crate::partition_transform::PartitionTransform;
 
-use super::{default_registry, FilesystemGeometry, FilesystemKind, FormatRequest};
+use super::{
+    default_registry, FilesystemError, FilesystemErrorKind, FilesystemGeometry, FilesystemKind,
+    FormatRequest,
+};
 
 const SECTOR_SIZE: usize = 512;
 
@@ -59,12 +62,19 @@ impl SparseFilesystemImage {
     }
 }
 
-pub fn validate_volume_label(filesystem: FilesystemKind, label: &str) -> Result<(), String> {
+pub fn validate_volume_label_typed(
+    filesystem: FilesystemKind,
+    label: &str,
+) -> Result<(), FilesystemError> {
     let registry = default_registry();
     let driver = registry.driver(filesystem).ok_or_else(|| {
-        format!(
-            "filesystem {} has no registered driver",
-            filesystem.config_token()
+        FilesystemError::for_filesystem(
+            filesystem,
+            FilesystemErrorKind::Unsupported,
+            format!(
+                "filesystem {} has no registered driver",
+                filesystem.config_token()
+            ),
         )
     })?;
     let request = FormatRequest {
@@ -72,23 +82,29 @@ pub fn validate_volume_label(filesystem: FilesystemKind, label: &str) -> Result<
         volume_label: (!label.is_empty()).then(|| label.to_string()),
         volume_serial: None,
     };
-    driver
-        .validate_format_request(&request)
-        .map_err(|error| error.to_string())
+    driver.validate_format_request(&request)
 }
 
-pub fn build_empty_filesystem(
+pub fn validate_volume_label(filesystem: FilesystemKind, label: &str) -> Result<(), String> {
+    validate_volume_label_typed(filesystem, label).map_err(|error| error.to_string())
+}
+
+pub fn build_empty_filesystem_typed(
     filesystem: FilesystemKind,
     partition_offset: u64,
     volume_sectors: u64,
     volume_serial: u32,
     volume_label: Option<&str>,
-) -> Result<SparseFilesystemImage, String> {
+) -> Result<SparseFilesystemImage, FilesystemError> {
     let registry = default_registry();
     let driver = registry.driver(filesystem).ok_or_else(|| {
-        format!(
-            "filesystem {} has no registered driver",
-            filesystem.config_token()
+        FilesystemError::for_filesystem(
+            filesystem,
+            FilesystemErrorKind::Unsupported,
+            format!(
+                "filesystem {} has no registered driver",
+                filesystem.config_token()
+            ),
         )
     })?;
     let request = FormatRequest {
@@ -99,15 +115,30 @@ pub fn build_empty_filesystem(
         volume_serial: Some(volume_serial),
     };
     let geometry = FilesystemGeometry::new(partition_offset, volume_sectors, SECTOR_SIZE as u32);
-    let plan = driver
-        .build_format_plan(geometry, &request)
-        .map_err(|error| error.to_string())?;
+    let plan = driver.build_format_plan(geometry, &request)?;
     Ok(SparseFilesystemImage::from_writes(
         volume_sectors,
         plan.writes
             .into_iter()
             .map(|write| (write.relative_lba, write.data)),
     ))
+}
+
+pub fn build_empty_filesystem(
+    filesystem: FilesystemKind,
+    partition_offset: u64,
+    volume_sectors: u64,
+    volume_serial: u32,
+    volume_label: Option<&str>,
+) -> Result<SparseFilesystemImage, String> {
+    build_empty_filesystem_typed(
+        filesystem,
+        partition_offset,
+        volume_sectors,
+        volume_serial,
+        volume_label,
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub fn build_empty_fat16(

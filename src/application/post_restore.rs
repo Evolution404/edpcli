@@ -10,7 +10,7 @@ use crate::common::SECTOR;
 use crate::diskio::SectorDev;
 use crate::edpb::ManifestPartition;
 use crate::filesystem::{
-    build_empty_filesystem, validate_writable_filesystem, FilesystemError, FilesystemKind,
+    build_empty_filesystem_typed, validate_writable_filesystem, FilesystemError, FilesystemKind,
     SparseFilesystemImage,
 };
 use crate::partition_transform::{decrypt_mode2, EdpSm4Transform};
@@ -171,10 +171,75 @@ impl PartitionFormatRequest {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PostRestoreFormatError {
+    Filesystem(FilesystemError),
+    RequestPartitionMismatch {
+        requested: u32,
+        actual: u32,
+    },
+    PartitionNotFound {
+        index: u32,
+    },
+    PartitionState {
+        index: u32,
+        state: PostRestorePartitionState,
+    },
+    GeometryMismatch {
+        index: u32,
+    },
+    TargetIdentityMissing,
+    TargetPinInvalid(String),
+    TargetIdentity(crate::media_identity::MediaIdentityPinConflict),
+    TargetGeometryChanged,
+    Cancelled,
+    Operation(String),
+}
+
+impl From<FilesystemError> for PostRestoreFormatError {
+    fn from(error: FilesystemError) -> Self {
+        Self::Filesystem(error)
+    }
+}
+
+impl std::fmt::Display for PostRestoreFormatError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Filesystem(error) => std::fmt::Display::fmt(error, formatter),
+            Self::RequestPartitionMismatch { requested, actual } => write!(
+                formatter,
+                "格式化请求分区 P{requested} 与目标分区 P{actual} 不一致"
+            ),
+            Self::PartitionNotFound { index } => write!(formatter, "找不到恢复后分区 P{index}"),
+            Self::PartitionState { index, state } => write!(
+                formatter,
+                "分区 P{index} 当前状态为 {state:?}，不允许执行该格式化操作"
+            ),
+            Self::GeometryMismatch { index } => {
+                write!(formatter, "分区 P{index} 的几何与已验证恢复状态不一致")
+            }
+            Self::TargetIdentityMissing => {
+                formatter.write_str("元数据恢复后未能固定目标介质身份，禁止格式化")
+            }
+            Self::TargetPinInvalid(message) => write!(formatter, "目标身份 pin 无效: {message}"),
+            Self::TargetIdentity(conflict) => {
+                write!(formatter, "格式化目标物理身份不一致: {conflict:?}")
+            }
+            Self::TargetGeometryChanged => {
+                formatter.write_str("格式化目标总扇区数或逻辑扇区大小不一致")
+            }
+            Self::Cancelled => formatter.write_str("已取消本次分区格式化"),
+            Self::Operation(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for PostRestoreFormatError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PostRestoreFormatResult {
     pub partition_index: u32,
     pub filesystem: FilesystemKind,
-    pub result: Result<(), String>,
+    pub result: Result<(), PostRestoreFormatError>,
 }
 
 /// The assessment comes from the actual post-write readback, not a frontend inference.
@@ -187,7 +252,7 @@ pub struct AssessedPostRestoreFormatResult {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EncryptedPostRestoreError {
     FileKey(ExistingFileKeyError),
-    Operation(String),
+    Operation(PostRestoreFormatError),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -208,8 +273,8 @@ pub(crate) fn build_empty_partition_image(
     filesystem: FilesystemKind,
     volume_label: &str,
     volume_serial: u32,
-) -> Result<SparseFilesystemImage, String> {
-    build_empty_filesystem(
+) -> Result<SparseFilesystemImage, FilesystemError> {
+    build_empty_filesystem_typed(
         filesystem,
         partition.start_lba,
         partition.sector_count,
@@ -254,44 +319,52 @@ pub(crate) fn format_partition_after_restore(
     file_key: Option<&[u8; 16]>,
     observer: &mut dyn FnMut(crate::application::progress::ProgressEvent),
 ) -> PostRestoreFormatResult {
-    let result = (|| {
+    let result = (|| -> Result<(), PostRestoreFormatError> {
+        validate_writable_filesystem(request.filesystem)?;
         if request.partition_index != partition.index {
-            return Err("格式化请求与目标分区索引不一致".to_string());
-        }
-        let state = assessment
-            .partitions
-            .iter()
-            .find(|candidate| candidate.index == partition.index)
-            .ok_or_else(|| "恢复后评估中找不到目标分区".to_string())?
-            .state;
-        if state != PostRestorePartitionState::NeedsFormat {
-            return Err(format!(
-                "分区当前状态为 {state:?}，只有 NeedsFormat 可进入明文格式化"
-            ));
+            return Err(PostRestoreFormatError::RequestPartitionMismatch {
+                requested: request.partition_index,
+                actual: partition.index,
+            });
         }
         let assessed = assessment
             .partitions
             .iter()
             .find(|candidate| candidate.index == partition.index)
-            .expect("state lookup succeeded");
+            .ok_or(PostRestoreFormatError::PartitionNotFound {
+                index: partition.index,
+            })?;
+        if assessed.state != PostRestorePartitionState::NeedsFormat {
+            return Err(PostRestoreFormatError::PartitionState {
+                index: partition.index,
+                state: assessed.state,
+            });
+        }
         if assessed.start_lba != partition.start_lba
             || assessed.sector_count != partition.sector_count
         {
-            return Err("恢复后评估分区几何与格式化目标不一致".into());
+            return Err(PostRestoreFormatError::GeometryMismatch {
+                index: partition.index,
+            });
         }
         crate::application::progress::emit_isolated(
             observer,
             format_progress::stage(crate::application::progress::FormatStep::BuildImage),
         );
-        let plain_image =
-            build_empty_partition_image(partition, request.filesystem, volume_label, volume_serial)
-                .map_err(|error| format!("格式化镜像生成失败: {error}"))?;
+        let plain_image = build_empty_partition_image(
+            partition,
+            request.filesystem,
+            volume_label,
+            volume_serial,
+        )?;
         if plain_image
             .sectors()
             .keys()
             .any(|relative| *relative >= partition.sector_count)
         {
-            return Err("格式化镜像写入范围超出所选分区".into());
+            return Err(PostRestoreFormatError::GeometryMismatch {
+                index: partition.index,
+            });
         }
         let image = if let Some(file_key) = file_key {
             crate::application::progress::emit_isolated(
@@ -313,26 +386,30 @@ pub(crate) fn format_partition_after_restore(
                 );
             },
         )
-        .map_err(|error| error.msg)?;
+        .map_err(|error| PostRestoreFormatError::Operation(error.msg))?;
         crate::application::progress::emit_isolated(
             observer,
             format_progress::stage(crate::application::progress::FormatStep::VerifyFilesystem),
         );
-        let boot = read_sector(dev, partition.start_lba)?;
+        let boot =
+            read_sector(dev, partition.start_lba).map_err(PostRestoreFormatError::Operation)?;
         let plain_boot = if let Some(file_key) = file_key {
-            decrypt_mode2(&boot, file_key)?
+            decrypt_mode2(&boot, file_key).map_err(PostRestoreFormatError::Operation)?
         } else {
             boot
         };
-        let detected = crate::filesystem::detect_boot_sector(partition.sector_count, &plain_boot)
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| "格式化后文件系统 boot sector 未通过严格校验".to_string())?;
+        let detected = crate::filesystem::detect_boot_sector(partition.sector_count, &plain_boot)?
+            .ok_or_else(|| {
+                PostRestoreFormatError::Operation(
+                    "格式化后文件系统 boot sector 未通过严格校验".to_string(),
+                )
+            })?;
         if detected != request.filesystem {
-            return Err(format!(
+            return Err(PostRestoreFormatError::Operation(format!(
                 "格式化后文件系统类型不一致: expected {}, got {}",
                 request.filesystem.config_token(),
                 detected.label()
-            ));
+            )));
         }
         Ok(())
     })();

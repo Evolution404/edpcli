@@ -250,7 +250,8 @@ fn run() -> Result<(), String> {
                 &request,
                 "HILBOOT",
             )
-            .result?;
+            .result
+            .map_err(|error| error.to_string())?;
         }
         if !(progress.completed
             && progress.saw_write
