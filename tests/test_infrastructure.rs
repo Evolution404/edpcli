@@ -148,7 +148,10 @@ fn local_install_has_one_repository_owned_entrypoint() {
 
     assert!(makefile.contains("install:"));
     assert!(makefile.contains("./scripts/install.sh"));
-    assert!(install.contains("cargo build --release --locked"));
+    assert!(install.contains("CARGO_BIN=\"${CARGO:-}\""));
+    assert!(install.contains("command -v cargo"));
+    assert!(install.contains("${HOME:-}/.cargo/bin/cargo"));
+    assert!(install.contains("\"$CARGO_BIN\" build --release --locked"));
     assert!(install.contains("scripts/install-local.sh"));
     assert!(!install.contains("cargo install --path"));
     assert!(installer.contains(".local/bin/edpcli"));
