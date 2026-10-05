@@ -5,9 +5,9 @@ use super::state::{
 
 pub(super) fn dynamic_status(state: &AppState) -> Option<String> {
     let operation_progress_running = state.provision().stage == ProvisionStage::Running
-        || state
-            .wizard()
-            .is_some_and(|wizard| wizard.stage == WizardStage::Running);
+        || state.wizard().is_some_and(|wizard| {
+            matches!(wizard.stage, WizardStage::Running | WizardStage::Formatting)
+        });
     if operation_progress_running {
         return None;
     }
@@ -67,6 +67,24 @@ pub(super) fn dynamic_status(state: &AppState) -> Option<String> {
             BackupPruneStage::Running => Some("正在清理旧备份…".into()),
             _ => None,
         };
+    }
+
+    if state.workspace() == super::state::Workspace::Backups {
+        return Some(match state.backups_focused_pane() {
+            super::pane::PaneId::BackupCoverage => {
+                "j/k 选择容量区域 · Ctrl-w w 切换窗口 · Esc 返回列表".into()
+            }
+            super::pane::PaneId::BackupSummary => {
+                "j/k 滚动元数据 · gg/G 首尾 · Ctrl-w w 切换窗口 · Esc 返回列表".into()
+            }
+            _ => super::actions::context_hint(state),
+        });
+    }
+
+    if state.workspace() == super::state::Workspace::Provision
+        && state.provision().stage == ProvisionStage::Form
+    {
+        return Some(super::actions::context_hint(state));
     }
 
     match state.provision().stage {

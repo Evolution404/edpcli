@@ -208,6 +208,8 @@ pub(super) fn draw_restore_write_confirmation(frame: &mut Frame, state: &AppStat
             kind: crate::tui::ui::MediaWriteConfirmationKind::Restore,
             title: "恢复写入确认",
             warning: format!("确认后将直接开始向 disk{} 写入", wizard.disk),
+            target: state.confirmation_target(wizard.disk),
+            detail_scroll: state.confirmation_offset(),
             details,
             confirmation: &wizard.confirmation,
             message: wizard.message.as_ref(),

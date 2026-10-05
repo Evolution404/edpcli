@@ -20,10 +20,13 @@ pub(super) fn unit_label(unit: Unit) -> &'static str {
 pub(super) fn activity_description(activity: TransactionActivityPhase) -> &'static str {
     use TransactionActivityPhase as Activity;
     match activity {
-        Activity::Mirror => "正在准备镜像数据",
+        Activity::SyncPreflight => "正在同步写前缓存",
+        Activity::Mirror => "正在保存待修改扇区的原始内容",
         Activity::Write => "正在写入目标扇区",
+        Activity::Sync => "正在同步缓存到介质",
         Activity::Readback => "正在读回并校验写入结果",
         Activity::RollbackWrite => "正在执行回滚写入",
+        Activity::RollbackSync => "正在同步回滚缓存到介质",
         Activity::RollbackReadback => "正在校验回滚结果",
         Activity::FormatWrite => "正在写入文件系统结构",
         Activity::FormatReadback => "正在校验文件系统写入",
@@ -72,7 +75,16 @@ pub(super) fn draw_current_status(frame: &mut Frame, area: Rect, run: &Operation
         let last_activity = std::time::Instant::now()
             .saturating_duration_since(run.last_activity_at)
             .as_secs();
-        lines.push(Line::from(format!("最近活动  {last_activity}s 前")));
+        let elapsed = run.started_at.elapsed().as_secs();
+        let activity_label =
+            if run.operation == crate::application::progress::OperationKind::PostRestoreFormat {
+                "最近进度更新"
+            } else {
+                "最近活动"
+            };
+        lines.push(Line::from(format!(
+            "已用时 {elapsed}s · {activity_label} {last_activity}s 前"
+        )));
     } else {
         lines.push(Line::from(format!(
             "阶段  等待开始    目标  {}",

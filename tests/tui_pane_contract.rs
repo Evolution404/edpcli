@@ -112,6 +112,7 @@ fn backup(
         provision_kind: kind,
         integrity_status: edpcli::application::BackupIntegrityStatus::Verified,
         size_ok: true,
+        verification_error: None,
         content_sha256: Some("a".repeat(64)),
         coverage: None,
         restore_preview: None,
@@ -509,7 +510,7 @@ fn backup_device_tree_is_a_sidebar_and_enter_target_is_the_backup_list() {
     state.focus_backups_pane(PaneId::BackupDevices);
 
     let rendered = render_text(&state, 160, 45).replace(' ', "");
-    for expected in ["设备", "全部备份2", "身份未确认1", "备份列表"] {
+    for expected in ["设备", "全部备份[2]", "身份未确认[1]", "备份列表"] {
         assert!(
             rendered.contains(expected),
             "missing {expected}: {rendered}"
@@ -560,7 +561,7 @@ fn backup_device_tree_hl_scroll_reveals_full_active_identity_without_ellipsis() 
         .find(|line| line.contains('▌'))
         .expect("active device row");
     assert!(
-        initial_active.trim_end().ends_with('1'),
+        initial_active.trim_end().ends_with("[1]"),
         "backup count must stay pinned at the right edge before horizontal scrolling: {initial_active}"
     );
 
@@ -592,7 +593,7 @@ fn backup_device_tree_hl_scroll_reveals_full_active_identity_without_ellipsis() 
         "root label must stay anchored while child device information scrolls: {scrolled_sidebar:#?}"
     );
     assert!(
-        scrolled_active.trim_end().ends_with('1'),
+        scrolled_active.trim_end().ends_with("[1]"),
         "backup count must remain visible and fixed while device information scrolls: {scrolled_active}"
     );
 

@@ -1,6 +1,9 @@
 //! Application-owned progress contract shared by provisioning, backup and restore.
 //! Counts describe completed work only; frontends must not manufacture percentages.
 
+mod retention;
+pub(crate) use retention::ProgressRetention;
+
 pub use crate::diskio::{TransactionActivity, TransactionActivityPhase};
 
 pub const OVERALL_BASIS_POINTS: u16 = 10_000;
@@ -11,6 +14,7 @@ pub enum OperationKind {
     Provision,
     Backup,
     Restore,
+    PostRestoreFormat,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -52,6 +56,7 @@ pub enum Step {
     ProtocolWrite,
     ProtocolReadback,
     PartitionFormat(crate::provision::PartitionRole),
+    PostRestoreFormat(FormatStep),
     PostWriteIdentity,
     Completed,
 }
@@ -69,8 +74,49 @@ impl Step {
             Self::ProtocolWrite => "协议事务写盘",
             Self::ProtocolReadback => "协议读回校验",
             Self::PartitionFormat(_) => "分区格式化与读回",
+            Self::PostRestoreFormat(step) => step.label(),
             Self::PostWriteIdentity => "写后身份与历史记录",
             Self::Completed => "操作完成",
+        }
+    }
+}
+
+/// Observable stages of an independently authorized post-restore format.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FormatStep {
+    VerifyTarget,
+    LockAndReopen,
+    BuildImage,
+    EncryptImage,
+    SyncPreflight,
+    Mirror,
+    Write,
+    Sync,
+    Readback,
+    VerifyFilesystem,
+    Reassess,
+    RollbackWrite,
+    RollbackSync,
+    RollbackReadback,
+}
+
+impl FormatStep {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::VerifyTarget => "复核目标身份与分区状态",
+            Self::LockAndReopen => "卸载/锁卷、重开与复核",
+            Self::BuildImage => "生成空文件系统镜像",
+            Self::EncryptImage => "加密文件系统镜像",
+            Self::SyncPreflight => "写前缓存同步预检",
+            Self::Mirror => "保存待修改扇区的原始内容",
+            Self::Write => "写入文件系统结构",
+            Self::Sync => "同步写入缓存到介质",
+            Self::Readback => "读回校验文件系统结构",
+            Self::VerifyFilesystem => "验证文件系统引导扇区",
+            Self::Reassess => "重新评估分区可用性",
+            Self::RollbackWrite => "回滚原始扇区",
+            Self::RollbackSync => "同步回滚缓存到介质",
+            Self::RollbackReadback => "读回校验回滚结果",
         }
     }
 }
@@ -242,8 +288,16 @@ pub enum LogPolicy {
     AppendOnChange,
 }
 
+/// Delivery meaning is independent of Warning severity (for example rollback work).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProgressDelivery {
+    Reliable,
+    WorkSnapshot,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProgressEvent {
+    pub delivery: ProgressDelivery,
     pub operation: OperationKind,
     pub phase: Phase,
     pub step: Step,
@@ -260,6 +314,7 @@ impl ProgressEvent {
     pub fn new(phase: Phase, step: Step, current: u64, total: u64) -> Self {
         assert!(current <= total && total > 0);
         Self {
+            delivery: ProgressDelivery::Reliable,
             operation: OperationKind::Provision,
             phase,
             step,
@@ -284,6 +339,7 @@ impl ProgressEvent {
     }
 
     pub fn with_work(mut self, work: WorkProgress) -> Self {
+        self.delivery = ProgressDelivery::WorkSnapshot;
         self.work = Some(work);
         self
     }
@@ -399,6 +455,7 @@ pub fn project_write_event(
         ),
     };
     ProgressEvent {
+        delivery: ProgressDelivery::Reliable,
         operation,
         phase,
         step,
@@ -442,6 +499,15 @@ impl OperationRunState {
             if event.overall < previous.overall {
                 event.overall = previous.overall;
             }
+            if self.operation == OperationKind::PostRestoreFormat
+                && event.stage.is_none_or(|stage| {
+                    previous
+                        .stage
+                        .is_some_and(|old| stage.current < old.current)
+                })
+            {
+                event.stage = previous.stage;
+            }
         }
 
         let safety_event = matches!(event.severity, Severity::Warning | Severity::Error);
@@ -452,6 +518,7 @@ impl OperationRunState {
                 matches!(
                     phase,
                     TransactionActivityPhase::RollbackWrite
+                        | TransactionActivityPhase::RollbackSync
                         | TransactionActivityPhase::RollbackReadback
                 )
             });

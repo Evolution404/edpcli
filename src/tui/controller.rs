@@ -91,6 +91,8 @@ fn action_to_nav(action: TuiAction) -> Option<NavCommand> {
         TuiAction::MoveDown => NavCommand::Down,
         TuiAction::Top => NavCommand::Top,
         TuiAction::Bottom => NavCommand::Bottom,
+        TuiAction::PageUp => NavCommand::PageUp,
+        TuiAction::PageDown => NavCommand::PageDown,
         TuiAction::HalfPageUp => NavCommand::HalfPageUp,
         TuiAction::HalfPageDown => NavCommand::HalfPageDown,
         TuiAction::Back => NavCommand::Escape,
@@ -325,7 +327,10 @@ pub(super) fn dispatch_action(
             TuiAction::Quit => {
                 ActionOutcome::effect(state.navigate(NavCommand::Quit, viewport_height))
             }
-            _ => ActionOutcome::handled(),
+            _ => {
+                state.scroll_help(action);
+                ActionOutcome::handled()
+            }
         };
     }
 
@@ -386,6 +391,21 @@ pub(super) fn dispatch_action(
         if let Some(outcome) = provision::dispatch_provision(state, action, viewport_height) {
             return outcome;
         }
+    }
+
+    let backup_navigation = match action {
+        TuiAction::MoveUp => Some(NavCommand::Up),
+        TuiAction::MoveDown => Some(NavCommand::Down),
+        TuiAction::Top => Some(NavCommand::Top),
+        TuiAction::Bottom => Some(NavCommand::Bottom),
+        TuiAction::PageUp => Some(NavCommand::PageUp),
+        TuiAction::PageDown => Some(NavCommand::PageDown),
+        TuiAction::HalfPageUp => Some(NavCommand::HalfPageUp),
+        TuiAction::HalfPageDown => Some(NavCommand::HalfPageDown),
+        _ => None,
+    };
+    if backup_navigation.is_some_and(|command| state.navigate_backup_panel(command)) {
+        return ActionOutcome::handled();
     }
 
     if state.workspace() == Workspace::Backups

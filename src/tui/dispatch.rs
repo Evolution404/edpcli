@@ -58,6 +58,10 @@ pub(super) fn dispatch_nav_command(
             StateEffect::None
         }
         NavCommand::BeginRestore => {
+            if let Some(reason) = actions::unavailable_reason(state, keymap::TuiAction::Restore) {
+                state.set_warning_notice(reason);
+                return StateEffect::None;
+            }
             if let (Some(row), Some(backup)) = (
                 state.selected_device(),
                 state.selected_restore_backup_path(),
@@ -274,9 +278,13 @@ pub(super) fn start_provision_source_password_verify(state: &mut AppState, tasks
     };
     match state.provision_source_password_verify_request() {
         Ok(Some((domain, password, revision))) => {
-            if let Err(message) =
-                tasks.request_provision_source_password_verify(disk, domain, password, revision)
-            {
+            if let Err(message) = tasks.request_source_password_verify_session(
+                disk,
+                domain,
+                password.into(),
+                revision,
+                state.provision().session_id,
+            ) {
                 state.provision_finish_source_password_verify(
                     domain,
                     revision,

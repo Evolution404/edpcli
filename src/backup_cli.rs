@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::backup_catalog;
 use crate::cli::Prompter;
 use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, SECTOR};
-use crate::diskio::{self, BackupEntry, BackupIntegrityStatus, BackupMeta};
+use crate::diskio::{self, BackupEntry, BackupHealth, BackupMeta};
 use crate::metainfo;
 
 fn backup_model_name(meta: &BackupMeta) -> String {
@@ -52,12 +52,11 @@ fn backup_kind(entry: &BackupEntry) -> &'static str {
 }
 
 fn backup_health(entry: &BackupEntry) -> String {
-    if !entry.size_ok {
-        return crate::ui::red("EDPB ✗ 核心数据异常");
-    }
-    match entry.integrity_status {
-        BackupIntegrityStatus::Verified => crate::ui::green("EDPB ✓"),
-        BackupIntegrityStatus::Invalid => crate::ui::red("EDPB ✗ 损坏"),
+    match entry.health() {
+        BackupHealth::Verified => crate::ui::green("EDPB ✓"),
+        BackupHealth::VerificationFailed => crate::ui::red("EDPB ✗ 校验失败"),
+        BackupHealth::CoreDataInvalid => crate::ui::red("EDPB ✗ 核心数据异常"),
+        BackupHealth::Invalid => crate::ui::red("EDPB ✗ 损坏"),
     }
 }
 
@@ -89,24 +88,6 @@ fn print_ownership(entry: &BackupEntry, indent: &str) {
     }
 }
 
-fn print_numbered_backup_entries(entries: &[&BackupEntry]) {
-    let width = entries.len().max(1).to_string().len();
-    for (idx, entry) in entries.iter().enumerate() {
-        let time = diskio::backup_display_time(&entry.path, entry.mtime);
-        println!(
-            "  [{}] {}   {}   {}",
-            crate::ui::pad_left(&(idx + 1).to_string(), width),
-            crate::ui::pad_to(&time, 16),
-            crate::ui::pad_to(backup_kind(entry), 12),
-            backup_health(entry)
-        );
-        println!(
-            "      └─ {}",
-            crate::ui::dim(backup_catalog::file_name(entry))
-        );
-    }
-}
-
 fn print_global_numbered_backup_entries(
     entries: &[&BackupEntry],
     global_index: &BTreeMap<PathBuf, usize>,
@@ -129,11 +110,21 @@ fn print_global_numbered_backup_entries(
             "      └─ {}",
             crate::ui::dim(backup_catalog::file_name(entry))
         );
+        if let Some(error) = &entry.verification_error {
+            println!(
+                "      {}",
+                crate::ui::red(&crate::ui::sanitize_terminal_text(error))
+            );
+        }
     }
 }
 
 pub fn backup_list(backup_dir: &Path) -> i32 {
     let selector = crate::application::load_backup_selector(backup_dir);
+    if let Some(error) = selector.catalog().scan_error() {
+        eprintln!("{error}");
+        return crate::common::EXIT_BACKUP;
+    }
     let catalog = selector.catalog();
     let global_index: BTreeMap<PathBuf, usize> = selector
         .numbered()
@@ -190,24 +181,17 @@ pub fn backup_list(backup_dir: &Path) -> i32 {
     }
     if !unknown.is_empty() {
         println!();
-        for entry in unknown {
-            let name = entry
-                .path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("<无效文件名>");
-            println!(
-                "  └─ {}   {}",
-                crate::ui::dim(name),
-                crate::ui::dim("未识别(非本工具命名)")
-            );
-        }
+        print_global_numbered_backup_entries(&unknown, &global_index);
     }
     EXIT_OK
 }
 
 pub fn backup_verify(backup_dir: &Path, target: Option<&str>) -> i32 {
     let selector = crate::application::load_backup_selector(backup_dir);
+    if let Some(error) = selector.catalog().scan_error() {
+        eprintln!("{error}");
+        return crate::common::EXIT_BACKUP;
+    }
     let catalog = selector.catalog();
     let selected: Vec<&BackupEntry> = if let Some(target) = target {
         match selector.resolve_one(target) {
@@ -360,7 +344,7 @@ pub fn backup_delete(
     // 交互选择留在 CLI，但条目解析与确认快照仍来自同一份 DeleteSession 扫描。
     let plan = if targets.is_empty() {
         println!("请选择要删除的备份:");
-        print_numbered_backup_entries(&numbered);
+        print_global_numbered_backup_entries(&numbered, &numbered_index);
         let selected = loop {
             let input = prompt.prompt_line("选择 [如 2 / 1,3 / 2-4，回车取消]: ");
             let input = input.trim();

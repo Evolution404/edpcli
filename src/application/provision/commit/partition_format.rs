@@ -1,0 +1,192 @@
+//! Empty filesystem write, readback and deep verification.
+use super::*;
+
+struct PreparedImageReader<'a> {
+    image: &'a SparseFilesystemImage,
+}
+
+impl PartitionReader for PreparedImageReader<'_> {
+    fn read_sector(&mut self, relative_lba: u64) -> std::io::Result<Vec<u8>> {
+        self.image
+            .sector_or_zero(relative_lba)
+            .map(|sector| sector.to_vec())
+            .ok_or_else(|| std::io::Error::other("format read outside partition"))
+    }
+}
+
+impl crate::filesystem::FilesystemReader for PreparedImageReader<'_> {
+    fn sector_size(&self) -> u32 {
+        SECTOR as u32
+    }
+
+    fn sector_count(&self) -> u64 {
+        self.image.volume_sectors()
+    }
+
+    fn read_sector(
+        &mut self,
+        relative_lba: u64,
+    ) -> Result<[u8; SECTOR], crate::filesystem::FilesystemError> {
+        self.image.sector_or_zero(relative_lba).ok_or_else(|| {
+            crate::filesystem::FilesystemError::new(
+                crate::filesystem::FilesystemErrorKind::ReadFailure,
+                "格式化验证读取超出分区范围",
+            )
+        })
+    }
+}
+
+pub(super) fn format_partition_with_progress(
+    runner: &dyn CmdRunner,
+    dev: &mut dyn SectorDev,
+    prepared: &PreparedNewProvision,
+    choice: &PlannedPartitionFormat,
+    observer: &mut dyn FnMut(diskio::TransactionActivity),
+) -> EdpCliResult<()> {
+    verify_format_identity(runner, dev, prepared)?;
+    execute_partition_format_observed(dev, choice, observer)?;
+    verify_format_identity(runner, dev, prepared)?;
+    Ok(())
+}
+
+/// Format one verified official partition. The caller owns device identity and
+/// protocol verification; this operation never writes the protocol region.
+#[cfg(test)]
+pub(in crate::application::provision) fn execute_partition_format(
+    dev: &mut dyn SectorDev,
+    choice: &PlannedPartitionFormat,
+) -> EdpCliResult<()> {
+    execute_partition_format_observed(dev, choice, &mut |_| {})
+}
+
+fn execute_partition_format_observed(
+    dev: &mut dyn SectorDev,
+    choice: &PlannedPartitionFormat,
+    observer: &mut dyn FnMut(diskio::TransactionActivity),
+) -> EdpCliResult<()> {
+    let filesystem = choice
+        .filesystem
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 兼容保留区不可格式化"))?;
+    let built = choice
+        .prepared_image
+        .as_ref()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化计划缺少预生成物理镜像"))?;
+    let verification_image = choice
+        .verification_image
+        .as_ref()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化计划缺少验证镜像"))?;
+    if built.geometry != choice.target.geometry
+        || built.physically_encrypted != choice.target.physically_encrypted
+        || built.image.volume_sectors() != choice.target.geometry.sector_count()
+        || verification_image.volume_sectors() != choice.target.geometry.sector_count()
+    {
+        return Err(err(EXIT_TARGET, "错误: 预生成格式化镜像与目标几何不一致"));
+    }
+    crate::application::filesystem_format::write_sparse_filesystem_image(
+        dev,
+        choice.target.geometry.start_sector,
+        &built.image,
+        observer,
+    )?;
+    let raw_boot = dev
+        .read_sector(
+            u32::try_from(choice.target.geometry.start_sector)
+                .map_err(|_| err(EXIT_TARGET, "错误: 分区起点 LBA 溢出"))?,
+        )
+        .map_err(|error| err(EXIT_IO, format!("错误: 读取文件系统引导扇区失败: {error}")))?;
+    let raw_plain_filesystem = if choice.target.physically_encrypted {
+        let registry = crate::filesystem::default_registry();
+        let mut raw_reader = crate::filesystem::BootSectorReader::new(
+            &raw_boot,
+            choice.target.geometry.sector_count(),
+        );
+        registry
+            .detect(&mut raw_reader)
+            .map_err(|error| err(EXIT_IO, format!("错误: 文件系统首扇区检测失败: {error}")))?
+            .is_some_and(|detected| {
+                detected.result.confidence == crate::filesystem::DetectionConfidence::Exact
+            })
+    } else {
+        false
+    };
+    if raw_plain_filesystem {
+        return Err(err(EXIT_IO, "错误: 加密分区物理首扇区出现明文文件系统签名"));
+    }
+    let geometry = PartitionGeometry {
+        index: 0,
+        partition_type: choice.target.geometry.partition_type.raw(),
+        partition_count: 1,
+        need_disturb: 0,
+        need_encrypt: 0,
+        start_sector: choice.target.geometry.start_sector,
+        sector_size: SECTOR as u64,
+        partition_size: choice.target.geometry.size_bytes,
+        sector_count: choice.target.geometry.sector_count(),
+        user_key_crc: 0,
+        file_key_crc: 0,
+        encrypt_mode: 0,
+    };
+    let registry = crate::filesystem::default_registry();
+    let driver = registry.driver(filesystem).ok_or_else(|| {
+        err(
+            EXIT_IO,
+            format!("错误: {} 文件系统没有已注册驱动", filesystem.config_token()),
+        )
+    })?;
+    if !driver.capabilities().verify_format {
+        return Err(err(
+            EXIT_IO,
+            format!(
+                "错误: 当前不支持 {} 格式化读回校验",
+                filesystem.config_token()
+            ),
+        ));
+    }
+    let mut request = crate::filesystem::FormatRequest::new(filesystem);
+    request.volume_label = (!choice.volume_label.is_empty()).then(|| choice.volume_label.clone());
+    request.volume_serial = Some(choice.volume_serial);
+    let expected = driver.expected_format_metadata(&request).map_err(|error| {
+        err(
+            EXIT_IO,
+            format!(
+                "错误: {} 格式化预期元数据无效: {error}",
+                filesystem.config_token()
+            ),
+        )
+    })?;
+    let fs_geometry = crate::filesystem::FilesystemGeometry::new(
+        choice.target.geometry.start_sector,
+        choice.target.geometry.sector_count(),
+        SECTOR as u32,
+    );
+    let mut reader = PreparedImageReader {
+        image: verification_image,
+    };
+    driver
+        .verify_format(&mut reader, fs_geometry, &expected)
+        .map_err(|error| {
+            err(
+                EXIT_IO,
+                format!(
+                    "错误: {} 格式化读回校验失败: {error}",
+                    filesystem.config_token()
+                ),
+            )
+        })?;
+
+    let report = analyze_partition(&geometry, &mut reader);
+    if report.status != AnalysisStatus::Parsed
+        || report.filesystem.as_deref() != Some(filesystem.config_token())
+        || report.file_count != Some(0)
+    {
+        return Err(err(
+            EXIT_IO,
+            format!(
+                "错误: {} 深度解析失败: {}",
+                filesystem.config_token(),
+                report.reason
+            ),
+        ));
+    }
+    Ok(())
+}

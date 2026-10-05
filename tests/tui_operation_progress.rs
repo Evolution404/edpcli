@@ -11,6 +11,7 @@ fn event(
     severity: Severity,
 ) -> ProgressEvent {
     ProgressEvent {
+        delivery: edpcli::application::progress::ProgressDelivery::Reliable,
         operation: OperationKind::Provision,
         phase: Phase::Transaction,
         step: Step::ProtocolWrite,

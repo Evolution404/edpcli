@@ -1,10 +1,6 @@
 use super::*;
 
 impl AppState {
-    pub fn provision_result_focused_pane(&self) -> crate::tui::pane::PaneId {
-        self.provision.result_workbench.focused_pane()
-    }
-
     pub fn provision_result_shift_pane(&mut self, reverse: bool) {
         self.provision.result_workbench.cycle_pane(reverse);
     }

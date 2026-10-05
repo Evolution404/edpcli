@@ -367,3 +367,131 @@ fn writer_refuses_wrong_extension_and_short_protocol_image() {
     let err = write_core_backup(&tmp.0.join("short.edpb"), &capture(&short)).unwrap_err();
     assert!(err.contains("LBA0-12"));
 }
+
+#[test]
+fn verified_snapshot_keeps_manifest_and_bytes_after_path_replacement_and_in_place_edit() {
+    let tmp = TempDir::new("edpb_snapshot_identity");
+    let path = tmp.0.join("sample.edpb");
+    let original = vec![0x11; 13 * 512];
+    write_core_backup(&path, &capture(&original)).unwrap();
+    let reader = edpcli::edpb::VerifiedBackupReader::open(&path).unwrap();
+    let original_digest = reader.verified().file_sha256.clone();
+    let replacement = tmp.0.join("new.edpb");
+    let changed = vec![0x22; 13 * 512];
+    write_core_backup(&replacement, &capture(&changed)).unwrap();
+    // Windows cannot atomically replace an open destination; snapshots close it.
+    fs::remove_file(&path).unwrap();
+    fs::rename(&replacement, &path).unwrap();
+    assert_eq!(reader.read_raw_protocol().unwrap(), original);
+    assert_eq!(reader.verified().file_sha256, original_digest);
+    assert_eq!(read_raw_protocol(&path).unwrap(), changed);
+    fs::write(&path, b"corrupt in-place modification").unwrap();
+    assert!(verify_file(&path).is_err());
+    assert_eq!(reader.read_raw_protocol().unwrap(), original);
+}
+
+#[test]
+fn sparse_container_over_budget_is_rejected_before_allocating_payload() {
+    let tmp = TempDir::new("edpb_sparse_budget");
+    let path = tmp.0.join("huge.edpb");
+    let file = fs::File::create(&path).unwrap();
+    file.set_len(256 * 1024 * 1024 + 1).unwrap();
+    let error = verify_file(&path).unwrap_err();
+    assert!(error.contains("exceeds read budget"), "{error}");
+}
+
+// Rebuild locators and manifest hashes so malformed inputs reach the resource
+// and arithmetic checks, rather than failing the outer SHA-256 check first.
+fn rewrite_container(
+    path: &std::path::Path,
+    template: &[u8],
+    manifest: &serde_json::Value,
+    manifest_offset: u64,
+) {
+    use sha2::{Digest, Sha256};
+    use std::io::{Seek, SeekFrom, Write};
+    let mut header = template[..96].to_vec();
+    let mut footer = template[template.len() - 80..].to_vec();
+    let bytes = serde_json::to_vec(manifest).unwrap();
+    let footer_offset = manifest_offset + bytes.len() as u64;
+    let file_len = footer_offset + 80;
+    for part in [&mut header, &mut footer] {
+        part[16..24].copy_from_slice(&manifest_offset.to_le_bytes());
+        part[24..32].copy_from_slice(&(bytes.len() as u64).to_le_bytes());
+    }
+    header[32..40].copy_from_slice(&footer_offset.to_le_bytes());
+    footer[32..40].copy_from_slice(&file_len.to_le_bytes());
+    let hash = Sha256::digest(&bytes);
+    header[48..80].copy_from_slice(&hash);
+    footer[40..72].copy_from_slice(&hash);
+    let mut file = fs::File::create(path).unwrap();
+    file.write_all(&header).unwrap();
+    let mut frame = template[96..160].to_vec();
+    frame[16..24].copy_from_slice(
+        &manifest["artifacts"][0]["storage"]["stored_length"]
+            .as_u64()
+            .unwrap()
+            .to_le_bytes(),
+    );
+    file.write_all(&frame).unwrap();
+    file.seek(SeekFrom::Start(manifest_offset)).unwrap();
+    file.write_all(&bytes).unwrap();
+    file.write_all(&footer).unwrap();
+}
+
+#[test]
+fn verifier_rejects_artifact_count_length_and_chunk_offset_overflow() {
+    let tmp = TempDir::new("edpb_budget_boundaries");
+    let path = tmp.0.join("sample.edpb");
+    let data = vec![0x11; 13 * 512];
+    write_core_backup(&path, &capture(&data)).unwrap();
+    let template = fs::read(&path).unwrap();
+    let original = serde_json::to_value(verify_file(&path).unwrap().manifest).unwrap();
+    let offset = u64::from_le_bytes(template[16..24].try_into().unwrap());
+    let mut too_many = original.clone();
+    too_many["artifacts"] = serde_json::Value::Array(vec![original["artifacts"][0].clone(); 1025]);
+    rewrite_container(&path, &template, &too_many, offset);
+    assert!(verify_file(&path)
+        .unwrap_err()
+        .contains("artifact count exceeds read budget"));
+    let mut oversized = original.clone();
+    let length = 64 * 1024 * 1024 + 1u64;
+    oversized["artifacts"][0]["storage"]["stored_length"] = length.into();
+    rewrite_container(&path, &template, &oversized, 160 + length);
+    assert!(verify_file(&path)
+        .unwrap_err()
+        .contains("artifact exceeds read budget"));
+    let mut overflow = original;
+    overflow["artifacts"][0]["storage"]["frame_offset"] = u64::MAX.into();
+    overflow["artifacts"][0]["storage"]["data_offset"] = 63u64.into();
+    rewrite_container(&path, &template, &overflow, offset);
+    assert!(verify_file(&path)
+        .unwrap_err()
+        .contains("chunk offset mismatch"));
+}
+
+#[test]
+fn oversized_manifest_is_rejected_before_deserialization() {
+    use std::io::{Seek, SeekFrom, Write};
+    let tmp = TempDir::new("edpb_manifest_budget");
+    let path = tmp.0.join("sample.edpb");
+    write_core_backup(&path, &capture(&vec![0; 13 * 512])).unwrap();
+    let template = fs::read(&path).unwrap();
+    let length = 4 * 1024 * 1024 + 1u64;
+    let footer_offset = 96 + length;
+    let mut header = template[..96].to_vec();
+    let mut footer = template[template.len() - 80..].to_vec();
+    for part in [&mut header, &mut footer] {
+        part[16..24].copy_from_slice(&96u64.to_le_bytes());
+        part[24..32].copy_from_slice(&length.to_le_bytes());
+    }
+    header[32..40].copy_from_slice(&footer_offset.to_le_bytes());
+    footer[32..40].copy_from_slice(&(footer_offset + 80).to_le_bytes());
+    let mut file = fs::File::create(&path).unwrap();
+    file.write_all(&header).unwrap();
+    file.seek(SeekFrom::Start(footer_offset)).unwrap();
+    file.write_all(&footer).unwrap();
+    assert!(verify_file(&path)
+        .unwrap_err()
+        .contains("manifest exceeds read budget"));
+}

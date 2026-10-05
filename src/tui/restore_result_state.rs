@@ -32,7 +32,7 @@ impl WizardState {
 
 impl AppState {
     pub fn initialize_post_restore_result_workbench(&mut self) {
-        let Some(wizard) = self.shell.wizard.as_mut() else {
+        let Some(wizard) = self.restore.wizard.as_mut() else {
             return;
         };
         let Some(outcome) = wizard.restore_outcome.as_ref() else {
@@ -54,7 +54,7 @@ impl AppState {
     }
 
     pub fn post_restore_result_focused_pane(&self) -> crate::tui::pane::PaneId {
-        self.shell
+        self.restore
             .wizard
             .as_ref()
             .map(|wizard| wizard.post_restore_workbench.focused_pane())
@@ -62,7 +62,7 @@ impl AppState {
     }
 
     pub fn post_restore_result_shift_pane(&mut self, reverse: bool) {
-        if let Some(wizard) = self.shell.wizard.as_mut() {
+        if let Some(wizard) = self.restore.wizard.as_mut() {
             if wizard.stage == WizardStage::PostRestore {
                 wizard.post_restore_workbench.cycle_pane(reverse);
             }
@@ -70,7 +70,7 @@ impl AppState {
     }
 
     pub fn post_restore_result_spatial_focus(&mut self, dx: i8, dy: i8) {
-        if let Some(wizard) = self.shell.wizard.as_mut() {
+        if let Some(wizard) = self.restore.wizard.as_mut() {
             if wizard.stage == WizardStage::PostRestore {
                 wizard.post_restore_workbench.spatial_pane(dx, dy);
             }
@@ -79,7 +79,7 @@ impl AppState {
 
     pub fn move_post_restore_result_selection(&mut self, delta: isize, visible_rows: usize) {
         let sorted_partitions = self.visible_result_partition_indices();
-        let Some(wizard) = self.shell.wizard.as_mut() else {
+        let Some(wizard) = self.restore.wizard.as_mut() else {
             return;
         };
         if wizard.stage != WizardStage::PostRestore {
@@ -157,7 +157,7 @@ impl AppState {
 
     pub fn post_restore_result_top(&mut self, visible_rows: usize) {
         self.move_post_restore_result_selection(isize::MIN / 2, visible_rows);
-        if let Some(wizard) = self.shell.wizard.as_mut() {
+        if let Some(wizard) = self.restore.wizard.as_mut() {
             if wizard.stage == WizardStage::PostRestore
                 && wizard.post_restore_workbench.focused_pane()
                     == crate::tui::pane::PaneId::ResultVerification
@@ -173,7 +173,7 @@ impl AppState {
 
     pub fn post_restore_result_bottom(&mut self, visible_rows: usize) {
         self.move_post_restore_result_selection(isize::MAX, visible_rows);
-        let Some(wizard) = self.shell.wizard.as_mut() else {
+        let Some(wizard) = self.restore.wizard.as_mut() else {
             return;
         };
         if wizard.stage != WizardStage::PostRestore

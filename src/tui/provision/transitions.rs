@@ -133,6 +133,7 @@ impl AppState {
     }
 
     pub(super) fn provision_transition_begin_confirm(&mut self) {
+        self.shell.confirmation_offset = 0;
         self.provision_capture_review_snapshot();
         self.provision.stage = ProvisionStage::Confirm;
         self.shell.input_mode = InputMode::Confirm;

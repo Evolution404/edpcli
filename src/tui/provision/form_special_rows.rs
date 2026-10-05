@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::state::ProvisionFieldSection;
 
 pub(super) fn compact_field_label(label: &str) -> std::borrow::Cow<'_, str> {
     match label {
@@ -278,4 +279,41 @@ pub(super) fn password_domain_row(
         ));
     }
     Some(Line::from(spans))
+}
+
+pub(super) fn section_metrics(
+    fields: &[(String, &str, bool)],
+    rows: &[(ProvisionFieldSection, Vec<usize>)],
+) -> std::collections::HashMap<ProvisionFieldSection, (usize, usize, usize, usize)> {
+    const INPUT_EDITING_SLACK: usize = 2;
+    let mut section_metrics: std::collections::HashMap<
+        ProvisionFieldSection,
+        (usize, usize, usize, usize),
+    > = std::collections::HashMap::new();
+    for (section, indexes) in rows {
+        let entry = section_metrics.entry(*section).or_insert((0, 0, 0, 0));
+        for (position, index) in indexes.iter().copied().enumerate() {
+            let (label, value, secret) = &fields[index];
+            let display_label = compact_field_label(label);
+            let label_width = crate::ui::disp_width(display_label.as_ref());
+            let shown_width = if value.is_empty() {
+                crate::ui::disp_width("〈请输入〉")
+            } else if *secret {
+                value.chars().count()
+            } else {
+                crate::ui::disp_width(&safe(value))
+            }
+            .saturating_add(INPUT_EDITING_SLACK)
+            .clamp(8, 26);
+            if position == 0 {
+                entry.0 = entry.0.max(label_width);
+                entry.2 = entry.2.max(shown_width);
+            } else {
+                entry.1 = entry.1.max(label_width);
+                entry.3 = entry.3.max(shown_width);
+            }
+        }
+    }
+
+    section_metrics
 }

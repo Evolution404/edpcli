@@ -104,7 +104,7 @@ pub struct OperationResultSpec {
     pub footer: String,
 }
 
-fn tone_style(tone: ResultTone) -> Style {
+pub(crate) fn tone_style(tone: ResultTone) -> Style {
     let theme = crate::tui::theme::current();
     match tone {
         ResultTone::Primary => theme.body_text(),

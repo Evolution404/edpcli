@@ -7,8 +7,22 @@ fn write_and_verify(
     rollback: bool,
     observer: &mut dyn FnMut(TransactionActivity),
 ) -> io::Result<()> {
+    notify_activity(
+        observer,
+        TransactionActivity {
+            phase: if rollback {
+                TransactionActivityPhase::RollbackWrite
+            } else {
+                TransactionActivityPhase::Write
+            },
+            current: 0,
+            total: order.len() as u64,
+        },
+    );
     for (index, &lba) in order.iter().enumerate() {
-        dev.write_sector(lba, &sectors[&lba])?;
+        dev.write_sector(lba, &sectors[&lba]).map_err(|error| {
+            io::Error::new(error.kind(), format!("写入 LBA{lba} 失败: {error}"))
+        })?;
         notify_activity(
             observer,
             TransactionActivity {
@@ -23,9 +37,38 @@ fn write_and_verify(
         );
     }
     // 读回前先把写缓存提交到介质；否则紧随其后的 pread 可能只验证到内核缓存。
-    dev.sync()?;
+    notify_activity(
+        observer,
+        TransactionActivity {
+            phase: if rollback {
+                TransactionActivityPhase::RollbackSync
+            } else {
+                TransactionActivityPhase::Sync
+            },
+            current: 0,
+            total: 0,
+        },
+    );
+    dev.sync()
+        .map_err(|error| io::Error::new(error.kind(), format!("写后缓存同步失败: {error}")))?;
+    notify_activity(
+        observer,
+        TransactionActivity {
+            phase: if rollback {
+                TransactionActivityPhase::RollbackReadback
+            } else {
+                TransactionActivityPhase::Readback
+            },
+            current: 0,
+            total: sectors.len() as u64,
+        },
+    );
     for (index, &lba) in sectors.keys().enumerate() {
-        if dev.read_sector(lba)? != sectors[&lba] {
+        if dev
+            .read_sector(lba)
+            .map_err(|error| io::Error::new(error.kind(), format!("读回 LBA{lba} 失败: {error}")))?
+            != sectors[&lba]
+        {
             return Err(io::Error::other(format!("LBA{} 读回校验不符", lba)));
         }
         notify_activity(
@@ -46,10 +89,13 @@ fn write_and_verify(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TransactionActivityPhase {
+    SyncPreflight,
     Mirror,
     Write,
+    Sync,
     Readback,
     RollbackWrite,
+    RollbackSync,
     RollbackReadback,
     FormatWrite,
     FormatReadback,
@@ -206,6 +252,14 @@ pub fn execute_write_transaction_observed(
         ));
     }
 
+    notify_activity(
+        observer,
+        TransactionActivity {
+            phase: TransactionActivityPhase::SyncPreflight,
+            current: 0,
+            total: 0,
+        },
+    );
     dev.sync().map_err(|e| {
         EdpCliError::new(
             EXIT_IO,
@@ -216,6 +270,14 @@ pub fn execute_write_transaction_observed(
     let sectors = plan.sector_map();
     let order = plan.ordered_lbas();
     let mut mirror = BTreeMap::new();
+    notify_activity(
+        observer,
+        TransactionActivity {
+            phase: TransactionActivityPhase::Mirror,
+            current: 0,
+            total: sectors.len() as u64,
+        },
+    );
     for (index, &lba) in sectors.keys().enumerate() {
         mirror.insert(
             lba,
@@ -234,20 +296,20 @@ pub fn execute_write_transaction_observed(
 
     match write_and_verify(dev, &sectors, &order, false, observer) {
         Ok(()) => Ok(()),
-        Err(_write_error) => {
+        Err(write_error) => {
             for attempt in 0..3 {
                 match write_and_verify(dev, &mirror, &order, true, observer) {
                     Ok(()) => {
                         return Err(EdpCliError::new(
                             EXIT_ROLLED_BACK,
-                            "错误: 事务写入失败，已完整回滚全部 touched sectors；目标仍为写前状态。",
+                            format!("错误: 事务写入失败({write_error})，已完整回滚全部 touched sectors；目标仍为写前状态。"),
                         ));
                     }
                     Err(error) if attempt == 2 => {
                         return Err(EdpCliError::new(
                             EXIT_INTERMEDIATE,
                             format!(
-                                "错误: 事务回滚失败({error})，目标处于中间状态；禁止继续使用该盘。"
+                                "错误: 事务写入失败({write_error})，事务回滚失败({error})，目标处于中间状态；禁止继续使用该盘。"
                             ),
                         ));
                     }

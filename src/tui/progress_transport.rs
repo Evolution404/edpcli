@@ -1,26 +1,13 @@
-use crate::application::progress::{LogPolicy, ProgressEvent, Severity, TransactionActivityPhase};
+use crate::application::progress::{LogPolicy, ProgressEvent, Severity};
 
-fn is_rollback(event: &ProgressEvent) -> bool {
-    event
-        .work
-        .and_then(|work| work.activity)
-        .is_some_and(|activity| {
-            matches!(
-                activity,
-                TransactionActivityPhase::RollbackWrite
-                    | TransactionActivityPhase::RollbackReadback
-            )
-        })
-}
-
-fn can_coalesce(event: &ProgressEvent) -> bool {
-    event.work.is_some()
-        && event.severity == Severity::Info
+pub(super) fn can_coalesce(event: &ProgressEvent) -> bool {
+    event.delivery == crate::application::progress::ProgressDelivery::WorkSnapshot
+        && event.work.is_some()
+        && event.severity != Severity::Error
         && event.log_policy != LogPolicy::Append
-        && !is_rollback(event)
 }
 
-fn same_snapshot_stream(left: &ProgressEvent, right: &ProgressEvent) -> bool {
+pub(super) fn same_snapshot_stream(left: &ProgressEvent, right: &ProgressEvent) -> bool {
     left.operation == right.operation
         && left.phase == right.phase
         && left.step == right.step
@@ -50,12 +37,13 @@ pub(super) fn push_progress_coalesced<T: Copy + Eq>(
 mod tests {
     use super::*;
     use crate::application::progress::{
-        OperationKind, Phase, ProgressEvent, Step, Unit, WorkProgress,
+        OperationKind, Phase, ProgressEvent, Step, TransactionActivityPhase, Unit, WorkProgress,
     };
 
     fn sector_event(current: u64) -> ProgressEvent {
         let mut event = ProgressEvent::new(Phase::Transaction, Step::ProtocolWrite, 2, 5);
         event.operation = OperationKind::Provision;
+        event.delivery = crate::application::progress::ProgressDelivery::WorkSnapshot;
         event.work = Some(WorkProgress::new(current, 1_000, Unit::Sectors));
         event.log_policy = LogPolicy::SnapshotOnly;
         event
@@ -72,10 +60,11 @@ mod tests {
     }
 
     #[test]
-    fn never_coalesces_warning_error_or_rollback() {
+    fn reliable_warnings_and_errors_are_never_coalesced() {
         let mut updates = Vec::new();
         let mut warning = sector_event(1);
         warning.severity = Severity::Warning;
+        warning.delivery = crate::application::progress::ProgressDelivery::Reliable;
         push_progress_coalesced(&mut updates, 7_u64, warning);
 
         let mut error = sector_event(2);
@@ -83,6 +72,7 @@ mod tests {
         push_progress_coalesced(&mut updates, 7_u64, error);
 
         let mut rollback = sector_event(3);
+        rollback.delivery = crate::application::progress::ProgressDelivery::Reliable;
         rollback.work.as_mut().unwrap().activity = Some(TransactionActivityPhase::RollbackWrite);
         push_progress_coalesced(&mut updates, 7_u64, rollback);
 

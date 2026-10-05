@@ -18,8 +18,8 @@ fn scan_task_source_uses_typed_slots_for_background_workers() {
     let gate = include_str!("../src/tui/task_gate.rs");
     let task = include_str!("../src/tui/task.rs");
     assert!(gate.contains("struct TaskSlot<P>"));
-    assert!(task.contains("device_slot: TaskSlot<PathBuf>"));
-    assert!(task.contains("backup_slot: TaskSlot<PathBuf>"));
+    assert!(task.contains("device_slot: TaskSlot<ScanRequest>"));
+    assert!(task.contains("backup_slot: TaskSlot<ScanRequest>"));
     assert!(task.contains("verify_slot: TaskSlot<(PathBuf, PathBuf)>"));
     assert!(!task.contains("device_single_flight:"));
     assert!(!task.contains("backup_single_flight:"));
@@ -31,7 +31,9 @@ fn ch14_q0_progress_transport_preserves_event_batches() {
     assert!(!source.contains("write_progress: Option<"));
     assert!(!source.contains("provision_progress: Option<"));
     assert!(source.contains("write_progress: Vec<"));
-    assert!(source.contains("provision_progress: Vec<"));
+    let feature = include_str!("../src/tui/provision/task_model.rs");
+    assert!(feature.contains("pub progress: Vec<"));
+    assert!(source.contains("Provision(ProvisionWorkerResult)"));
 }
 
 #[test]

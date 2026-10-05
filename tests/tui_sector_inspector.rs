@@ -117,6 +117,89 @@ fn select_protocol_lba0(state: &mut AppState) {
 }
 
 #[test]
+fn rendered_inspect_field_selection_is_continuous_and_status_color_is_scoped() {
+    use edpcli::tui::pane::PaneId;
+    let theme = edpcli::tui::theme::current();
+    for status in [InspectFieldStatus::Known, InspectFieldStatus::Unknown] {
+        let mut sector = item(0, true);
+        sector.fields[0].status = status;
+        sector.fields[0].label = "FIELD".into();
+        sector.fields[0].value = "VALUE".into();
+        sector.fields[0].children.clear();
+        let mut state = AppState::new();
+        assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+        state.advanced_inspect_finish(Ok(workspace(vec![sector])));
+        select_protocol_lba0(&mut state);
+        state.advanced_inspect_focus_pane(PaneId::InspectDetail);
+        let mut terminal = Terminal::new(TestBackend::new(240, 60)).unwrap();
+        terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let row = (0..60)
+            .find(|y| {
+                let text = (0..240)
+                    .map(|x| buffer[(x, *y)].symbol())
+                    .collect::<String>();
+                text.contains("FIELD")
+                    && (text.replace(' ', "").contains("已知")
+                        || text.replace(' ', "").contains("未知"))
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "field row missing: {}",
+                    (0..60)
+                        .map(|y| (0..240)
+                            .map(|x| buffer[(x, y)].symbol())
+                            .collect::<String>())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            });
+        let label_x = (0..230)
+            .find(|x| {
+                (0..5)
+                    .map(|offset| buffer[(*x + offset, row)].symbol())
+                    .collect::<String>()
+                    == "FIELD"
+            })
+            .unwrap();
+        let status_x = (0..label_x)
+            .find(|x| matches!(buffer[(*x, row)].symbol(), "已" | "未"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "status cell missing, row {}: {}",
+                    row,
+                    (0..240)
+                        .map(|x| buffer[(x, row)].symbol())
+                        .collect::<String>()
+                )
+            });
+        let base = if status == InspectFieldStatus::Known {
+            theme.table_text()
+        } else {
+            theme.warning()
+        };
+        assert_eq!(
+            buffer[(status_x, row)].fg,
+            theme.table_cell(base, true, true).fg.unwrap()
+        );
+        assert_eq!(buffer[(label_x, row)].fg, theme.table_text().fg.unwrap());
+        let background = buffer[(label_x, row)].bg;
+        for x in status_x..label_x + 5 {
+            // Terminal-wide glyphs own their continuation cell; TestBackend does
+            // not paint the hidden placeholder's background.
+            if x > 0 && unicode_width::UnicodeWidthStr::width(buffer[(x - 1, row)].symbol()) > 1 {
+                continue;
+            }
+            assert_eq!(
+                buffer[(x, row)].bg,
+                background,
+                "selection gap at {x},{row}"
+            );
+        }
+    }
+}
+
+#[test]
 fn inspect_fields_table_footer_shows_copy_shortcuts() {
     use edpcli::tui::pane::PaneId;
 

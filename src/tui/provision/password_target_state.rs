@@ -196,8 +196,9 @@ impl AppState {
         if !draft_user_edited && source_verified {
             *target = source;
         } else if target.is_empty() {
-            *target =
-                String::from_utf8_lossy(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD).into_owned();
+            *target = crate::domain::secret::SecretText::from(
+                crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT,
+            );
         }
         self.provision_set_target_password_mode(domain, TargetPasswordMode::Explicit);
         self.provision_sync_cursor_to_end();

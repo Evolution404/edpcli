@@ -431,11 +431,22 @@ pub fn render_with_source(summary: &MetaInfoSummary, source: Option<&str>) -> St
     out
 }
 
+/// Convenience adapter; consumers that already verified a file should reuse the snapshot.
 pub fn summarize_backup<C: SemanticContextSource>(
     path: &Path,
     meta: &C,
 ) -> io::Result<MetaInfoSummary> {
-    let data = crate::edpb::read_raw_protocol(path)
+    let reader = crate::edpb::VerifiedBackupReader::open(path)
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
+    summarize_verified_backup(&reader, meta)
+}
+
+pub(crate) fn summarize_verified_backup<C: SemanticContextSource>(
+    reader: &crate::edpb::VerifiedBackupReader,
+    meta: &C,
+) -> io::Result<MetaInfoSummary> {
+    let data = reader
+        .read_raw_protocol()
         .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
     summarize(meta, |lba| {
         let start = lba as usize * SECTOR;

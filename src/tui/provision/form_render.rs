@@ -2,15 +2,12 @@ use super::*;
 use crate::tui::state::{
     ProvisionFieldId, ProvisionFieldSection, ProvisionPasswordVerificationState,
 };
-use std::collections::HashMap;
 
 #[path = "form_special_rows.rs"]
 mod form_special_rows;
 use form_special_rows::{
     advanced_settings_row, compact_field_label, password_domain_row, two_column_widths,
 };
-
-const INPUT_EDITING_SLACK: usize = 2;
 
 pub(super) fn draw_provision_form(
     frame: &mut Frame,
@@ -40,33 +37,8 @@ pub(super) fn draw_provision_form(
     let separator_width = crate::ui::disp_width(separator);
 
     let fields = state.provision_visible_fields();
-    let rows = state.provision_compact_field_rows_typed();
-    let mut section_metrics: HashMap<ProvisionFieldSection, (usize, usize, usize, usize)> =
-        HashMap::new();
-    for (section, indexes) in &rows {
-        let entry = section_metrics.entry(*section).or_insert((0, 0, 0, 0));
-        for (position, index) in indexes.iter().copied().enumerate() {
-            let (label, value, secret) = &fields[index];
-            let display_label = compact_field_label(label);
-            let label_width = crate::ui::disp_width(display_label.as_ref());
-            let shown_width = if value.is_empty() {
-                crate::ui::disp_width("〈请输入〉")
-            } else if *secret {
-                value.chars().count()
-            } else {
-                crate::ui::disp_width(&safe(value))
-            }
-            .saturating_add(INPUT_EDITING_SLACK)
-            .clamp(8, 26);
-            if position == 0 {
-                entry.0 = entry.0.max(label_width);
-                entry.2 = entry.2.max(shown_width);
-            } else {
-                entry.1 = entry.1.max(label_width);
-                entry.3 = entry.3.max(shown_width);
-            }
-        }
-    }
+    let rows = state.provision_field_rows_for_width(content_width);
+    let section_metrics = form_special_rows::section_metrics(&fields, &rows);
 
     let mut form_lines = vec![Line::from(vec![
         Span::styled(
@@ -237,7 +209,11 @@ pub(super) fn draw_provision_form(
         frame.render_widget(
             Paragraph::new(form_lines)
                 .block(crate::tui::ui::card(
-                    "参数",
+                    if content_width < 68 {
+                        "参数 · 单列"
+                    } else {
+                        "参数"
+                    },
                     focused_pane == crate::tui::pane::PaneId::ProvisionParameters,
                 ))
                 .scroll((scroll as u16, 0))

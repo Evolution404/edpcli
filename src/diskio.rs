@@ -1,18 +1,18 @@
 //! 真盘 IO、原子写入、备份/还原与快照读取。
 //! 扇区设备抽象为 SectorDev — 这就是 Python 版 `_raw_path` 的 mock 点(升为参数)。
 
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+#[cfg(test)]
+use std::fs;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::common::{
-    EdpCliError, EdpCliResult, EXIT_BACKUP, EXIT_INTERMEDIATE, EXIT_IO, EXIT_ROLLED_BACK, SECTOR,
+    EdpCliError, EdpCliResult, EXIT_INTERMEDIATE, EXIT_IO, EXIT_ROLLED_BACK, SECTOR,
 };
-use crate::sha256::sha256_hex;
 
 mod backup_catalog;
 mod backup_config;

@@ -91,6 +91,43 @@ fn copied_catalog() -> Option<(TmpDir, BackupCatalog)> {
 }
 
 #[test]
+fn directory_projection_preserves_preview_without_retaining_full_manifest() {
+    let Some((tmp, catalog)) = copied_catalog() else {
+        return;
+    };
+    assert!(!catalog.entries().is_empty());
+    for entry in catalog.entries() {
+        assert!(entry.manifest.is_none());
+        let exact = edpcli::diskio::scan_backup_file(&entry.path).unwrap();
+        assert!(exact.manifest.is_some());
+        assert_eq!(entry.restore_preview, exact.restore_preview);
+    }
+    let rows = edpcli::application::scan_backup_workspace(&tmp.0);
+    assert!(rows.iter().all(|row| row.restore_preview.is_some()));
+}
+
+#[test]
+fn exact_verification_preserves_reason_and_rejects_directory_escape() {
+    let tmp = TmpDir::new("verify_diagnostics");
+    let path = tmp.0.join("broken.edpb");
+    fs::write(&path, b"bad").unwrap();
+    let entry = edpcli::diskio::scan_backup_file(&path).unwrap();
+    let error = edpcli::application::verify_backup_exact(&tmp.0, &path).unwrap_err();
+    assert!(
+        error.contains(entry.verification_error.as_deref().unwrap()),
+        "{error}"
+    );
+    let outside = TmpDir::new("verify_outside");
+    let outside_path = outside.0.join("other.edpb");
+    fs::write(&outside_path, b"bad").unwrap();
+    assert!(
+        edpcli::application::verify_backup_exact(&tmp.0, &outside_path)
+            .unwrap_err()
+            .contains("之外")
+    );
+}
+
+#[test]
 fn backup_affinity_policy_confirms_a_b_c_and_keeps_d_possible_only() {
     let a1 = identity(Some(&"11".repeat(32)), None, None, DiskProvisionKind::Plain);
     let a2 = identity(
@@ -162,9 +199,11 @@ fn v3_raw_serial_can_form_strong_group_without_persisted_serial_digest() {
         integrity_status: BackupIntegrityStatus::Verified,
         size_ok: true,
         lba8: None,
+        verification_error: None,
         content_sha256: None,
         coverage: None,
         manifest: None,
+        restore_preview: None,
     };
 
     let a = make_entry("a.edpb", first);
@@ -293,4 +332,101 @@ fn september_10_netac_backup_with_conflicting_edpf_tables_is_unknown_to_edp_dete
         ),
         None
     );
+}
+
+#[test]
+fn damaged_backup_keeps_shared_number_and_verification_reason() {
+    let tmp = TmpDir::new("damaged-backup-visible");
+    let path = tmp.0.join("broken.edpb");
+    fs::write(&path, b"broken container").unwrap();
+    let selector = edpcli::application::load_backup_selector(&tmp.0);
+    assert_eq!(selector.numbered_with_indices().len(), 1);
+    assert_eq!(selector.resolve_one("1").unwrap().path, path);
+    let rows = edpcli::application::scan_backup_workspace(&tmp.0);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].index, 1);
+    assert!(rows[0]
+        .verification_error
+        .as_ref()
+        .is_some_and(|reason| !reason.is_empty()));
+    assert!(!rows[0].is_restorable());
+    assert!(edpcli::application::verify_backup_exact(&tmp.0, &path).is_err());
+}
+
+#[test]
+fn catalog_and_workspace_share_health_and_fail_closed_on_verification_errors() {
+    use edpcli::application::{BackupHealth, BackupIntegrityStatus};
+    let tmp = TmpDir::new("health-verdict");
+    let path = tmp.0.join("sample.edpb");
+    fs::write(&path, b"not a container").unwrap();
+    let mut entry = edpcli::diskio::scan_backup_file(&path).unwrap();
+    let mut row = edpcli::application::scan_backup_workspace(&tmp.0).remove(0);
+    for (integrity, size_ok, failed, expected) in [
+        (
+            BackupIntegrityStatus::Verified,
+            true,
+            false,
+            BackupHealth::Verified,
+        ),
+        (
+            BackupIntegrityStatus::Verified,
+            false,
+            false,
+            BackupHealth::CoreDataInvalid,
+        ),
+        (
+            BackupIntegrityStatus::Invalid,
+            true,
+            false,
+            BackupHealth::Invalid,
+        ),
+        (
+            BackupIntegrityStatus::Invalid,
+            false,
+            false,
+            BackupHealth::CoreDataInvalid,
+        ),
+        (
+            BackupIntegrityStatus::Verified,
+            true,
+            true,
+            BackupHealth::VerificationFailed,
+        ),
+        (
+            BackupIntegrityStatus::Verified,
+            false,
+            true,
+            BackupHealth::VerificationFailed,
+        ),
+        (
+            BackupIntegrityStatus::Invalid,
+            true,
+            true,
+            BackupHealth::VerificationFailed,
+        ),
+        (
+            BackupIntegrityStatus::Invalid,
+            false,
+            true,
+            BackupHealth::VerificationFailed,
+        ),
+    ] {
+        entry.integrity_status = integrity;
+        entry.size_ok = size_ok;
+        entry.verification_error = failed.then(|| "artifact SHA-256 mismatch".into());
+        row.integrity_status = integrity;
+        row.size_ok = size_ok;
+        row.verification_error = entry.verification_error.clone();
+        assert_eq!(entry.health(), expected);
+        assert_eq!(row.health(), expected);
+        assert_eq!(
+            edpcli::backup_catalog::is_healthy(&entry),
+            expected == BackupHealth::Verified
+        );
+        assert_eq!(row.is_restorable(), expected == BackupHealth::Verified);
+        assert_eq!(
+            edpcli::tui::table_layout::backup_health_text(&row),
+            expected.label()
+        );
+    }
 }

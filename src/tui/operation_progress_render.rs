@@ -1,12 +1,14 @@
+#[path = "operation_progress_compact.rs"]
+mod compact;
+
 use crate::application::progress::{
     LogPolicy, OperationKind, OperationRunState, ProgressEvent, Severity, Step,
 };
-use crate::tui::operation_progress_status::{draw_current_status, phase_label, unit_label};
+use crate::tui::operation_progress_status::draw_current_status;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::Modifier,
     text::{Line, Span},
-    widgets::{Cell, Gauge, Paragraph, Row, Table, Wrap},
+    widgets::{Cell, Gauge, Paragraph, Row, Table},
     Frame,
 };
 
@@ -14,6 +16,7 @@ fn operation_title(kind: OperationKind) -> &'static str {
     match kind {
         OperationKind::Backup => "备份制作",
         OperationKind::Restore => "恢复备份",
+        OperationKind::PostRestoreFormat => "恢复后格式化",
         OperationKind::Provision => "制盘执行",
     }
 }
@@ -47,6 +50,13 @@ fn current_snapshot(run: &OperationRunState) -> Option<&ProgressEvent> {
     })
 }
 
+fn stage_completion_label(event: Option<&ProgressEvent>) -> String {
+    event
+        .and_then(|event| event.stage)
+        .map(|stage| format!("已完成 {} / {} 阶段", stage.current, stage.total))
+        .unwrap_or_else(|| "正在准备格式化".into())
+}
+
 pub(crate) fn draw_operation_progress(
     frame: &mut Frame,
     area: Rect,
@@ -57,47 +67,7 @@ pub(crate) fn draw_operation_progress(
     let theme = crate::tui::theme::current();
     let latest = run.latest.as_ref();
     if area.height < 18 {
-        let compact_mode = match run.operation {
-            OperationKind::Backup => "只读",
-            OperationKind::Restore | OperationKind::Provision => "安全事务",
-        };
-        let mut lines = vec![Line::from(vec![
-            Span::styled(
-                format!("{} · {compact_mode}", operation_title(run.operation)),
-                theme.accent().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(format!("  {}", run.target)),
-        ])];
-        if let Some(event) = latest {
-            lines.push(Line::from(format!(
-                "总体进度 {} · 当前阶段 {} · 当前步骤 {}",
-                overall_label(event.overall.basis_points()),
-                phase_label(event),
-                event.step.label()
-            )));
-            if let Some(work) = event.work {
-                lines.push(Line::from(format!(
-                    "{} / {} {} · {}%",
-                    work.current,
-                    work.total,
-                    unit_label(work.unit),
-                    work.percent()
-                )));
-            }
-        }
-        let safety = match run.operation {
-            OperationKind::Backup => "安全提示  只读操作执行中；等待安全结束点。",
-            OperationKind::Restore | OperationKind::Provision => {
-                "安全提示  关键写入安全事务执行中；不会绕过同步、读回或回滚安全点。"
-            }
-        };
-        lines.push(Line::from(Span::styled(safety, theme.muted())));
-        frame.render_widget(
-            Paragraph::new(lines)
-                .block(crate::tui::ui::card(operation_title(run.operation), true))
-                .wrap(Wrap { trim: false }),
-            area,
-        );
+        compact::draw_compact_progress(frame, area, run, animation_frame);
         return;
     }
     let chunks = Layout::default()
@@ -110,13 +80,31 @@ pub(crate) fn draw_operation_progress(
         ])
         .split(area);
 
-    let overall = latest.map_or(0.0, |event| event.overall.ratio());
-    let overall_label = latest
-        .map(|event| overall_label(event.overall.basis_points()))
-        .unwrap_or_else(|| "0.00%".into());
+    let formatting = run.operation == OperationKind::PostRestoreFormat;
+    let overall = if formatting {
+        latest
+            .and_then(|event| event.stage)
+            .map_or(0.0, |stage| stage.current as f64 / stage.total as f64)
+    } else {
+        latest.map_or(0.0, |event| event.overall.ratio())
+    };
+    let overall_label = if formatting {
+        stage_completion_label(latest)
+    } else {
+        latest
+            .map(|event| overall_label(event.overall.basis_points()))
+            .unwrap_or_else(|| "0.00%".into())
+    };
     frame.render_widget(
         Gauge::default()
-            .block(crate::tui::ui::card("总体进度", true))
+            .block(crate::tui::ui::card(
+                if formatting {
+                    "恢复后格式化 · 流程阶段"
+                } else {
+                    "总体进度"
+                },
+                true,
+            ))
             .gauge_style(theme.accent())
             .ratio(overall)
             .label(Span::styled(overall_label, theme.progress_label())),
@@ -240,7 +228,7 @@ pub(crate) fn draw_operation_progress(
 
     let safety = match run.operation {
         OperationKind::Backup => "安全提示  只读操作执行中；等待安全结束点。",
-        OperationKind::Restore | OperationKind::Provision => {
+        OperationKind::Restore | OperationKind::Provision | OperationKind::PostRestoreFormat => {
             "安全提示  关键写入安全事务执行中；q / Ctrl-C 退出请求在安全结束点处理；Esc 当前不可返回。"
         }
     };

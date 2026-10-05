@@ -42,6 +42,11 @@ impl<P> TaskSlot<P> {
         }
     }
 
+    pub(super) fn invalidate_pending(&mut self) {
+        self.pending_latest = None;
+        self.generation.begin();
+    }
+
     pub(super) fn try_begin(&mut self) -> Option<u64> {
         self.single_flight
             .try_start()

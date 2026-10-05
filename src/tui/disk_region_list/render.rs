@@ -1,3 +1,4 @@
+use crate::common::fmt_sector_percentage as percentage;
 use ratatui::{
     style::Modifier,
     text::{Line, Span},
@@ -38,6 +39,42 @@ fn region_row(segment: &DiskLayoutSegment, total_sectors: u64) -> String {
         ),
         percentage(segment.sector_count, total_sectors)
     )
+}
+
+pub(crate) fn region_row_height(width: u16) -> usize {
+    if usize::from(width) >= crate::tui::table_layout::display_width(&region_header()) {
+        1
+    } else {
+        3
+    }
+}
+
+fn compact_region_rows(
+    segment: &DiskLayoutSegment,
+    total: u64,
+    width: u16,
+    style: ratatui::style::Style,
+) -> Vec<Line<'static>> {
+    let capacity = crate::common::fmt_capacity_sectors(segment.sector_count);
+    let name_width =
+        usize::from(width).saturating_sub(crate::tui::table_layout::display_width(&capacity) + 2);
+    let name = crate::tui::table_layout::truncate_cell(
+        &segment.label,
+        name_width,
+        crate::tui::table_layout::TruncatePolicy::Ellipsis,
+    );
+    [
+        format!("{name}  {capacity}"),
+        format!("LBA {}", segment.closed_range()),
+        format!(
+            "扇区数 {} · {}",
+            segment.sector_count,
+            percentage(segment.sector_count, total)
+        ),
+    ]
+    .into_iter()
+    .map(|text| Line::from(Span::styled(text, style)))
+    .collect()
 }
 
 pub(crate) fn disk_region_list_lines(model: &DiskLayoutModel) -> Vec<Line<'static>> {
@@ -91,36 +128,35 @@ pub(crate) fn render_disk_region_list_body(
         DiskRegionListMode::Readonly => None,
         DiskRegionListMode::Interactive { .. } => selection.as_ref(),
     };
-    let row_capacity = area.height.saturating_sub(1) as usize;
+    let row_height = region_row_height(area.width);
+    let row_capacity = (area.height.saturating_sub(1) as usize / row_height).max(1);
+    let mut state = state.clone();
+    state.reconcile(model, row_capacity);
     let start = state.viewport.offset.min(visible.segments.len());
     let end = start
         .saturating_add(row_capacity)
         .min(visible.segments.len());
     let theme = crate::tui::theme::current();
     let mut lines = vec![Line::from(Span::styled(
-        region_header(),
+        if row_height == 1 {
+            region_header()
+        } else {
+            "区域 / 容量 · LBA 范围 · 扇区数 / 占比".into()
+        },
         theme.secondary_accent(),
     ))];
-    lines.extend(visible.segments[start..end].iter().map(|segment| {
+    lines.extend(visible.segments[start..end].iter().flat_map(|segment| {
         let active =
             selected.is_some_and(|selection| segment_matches_selection(segment, selection));
         let style = theme.apply_selection(theme.disk_region(segment.kind), active, focused);
-        Line::from(Span::styled(
-            region_row(segment, model.total_sectors),
-            style,
-        ))
+        if row_height == 1 {
+            vec![Line::from(Span::styled(
+                region_row(segment, model.total_sectors),
+                style,
+            ))]
+        } else {
+            compact_region_rows(segment, model.total_sectors, area.width, style)
+        }
     }));
     frame.render_widget(Paragraph::new(lines), area);
-}
-
-fn percentage(sectors: u64, total: u64) -> String {
-    if total == 0 {
-        return "0.00%".into();
-    }
-    let ratio = sectors as f64 * 100.0 / total as f64;
-    if ratio > 0.0 && ratio < 0.01 {
-        "<0.01%".into()
-    } else {
-        format!("{ratio:.2}%")
-    }
 }

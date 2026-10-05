@@ -63,7 +63,7 @@ fn backup_flow(opts: InfoOpts) -> i32 {
             return EXIT_BACKUP;
         }
     };
-    let verified = match crate::edpb::verify_file(&path) {
+    let reader = match crate::edpb::VerifiedBackupReader::open(&path) {
         Ok(container) => container,
         Err(message) => {
             eprintln!(
@@ -77,7 +77,7 @@ fn backup_flow(opts: InfoOpts) -> i32 {
         }
     };
     let source_label = path.display().to_string();
-    let manifest = &verified.manifest;
+    let manifest = &reader.verified().manifest;
     let identity = match crate::edpb::canonical_media_identity(manifest) {
         Ok(identity) => identity,
         Err(message) => {
@@ -106,7 +106,7 @@ fn backup_flow(opts: InfoOpts) -> i32 {
                 manifest.geometry.capacity_bytes,
             )
         } else {
-            match metainfo::summarize_backup(&path, &inspect_meta) {
+            match metainfo::summarize_verified_backup(&reader, &inspect_meta) {
                 Ok(summary) => summary,
                 Err(e) => {
                     eprintln!(

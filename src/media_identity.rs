@@ -4,7 +4,7 @@
 //! authorize writes.  It describes evidence collected elsewhere and derives an explainable
 //! relationship/confidence result.  Destructive operations must apply their own stricter policy.
 
-use crate::platform::NativeTransport;
+use crate::domain::hardware::NativeTransport;
 use crate::provision::DiskProvisionKind;
 use serde::{Deserialize, Serialize};
 

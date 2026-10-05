@@ -3,7 +3,7 @@
 
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Modifier, Style},
+    style::Modifier,
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
     Frame,
@@ -96,10 +96,6 @@ impl ResultWorkbenchState {
         self.region_list.selection()
     }
 
-    pub fn selected_region_index(&self, model: &DiskLayoutModel) -> Option<usize> {
-        self.region_list.selected_index(model)
-    }
-
     pub fn reconcile_regions(&mut self, model: &DiskLayoutModel, visible_rows: usize) {
         self.region_list.reconcile(model, visible_rows);
     }
@@ -135,17 +131,7 @@ pub struct ResultPaneSlot {
     pub focused: bool,
 }
 
-fn tone_style(tone: ResultTone) -> Style {
-    let theme = super::theme::current();
-    match tone {
-        ResultTone::Primary => theme.body_text(),
-        ResultTone::Muted => theme.muted(),
-        ResultTone::Accent => theme.accent(),
-        ResultTone::Success => theme.success(),
-        ResultTone::Warning => theme.warning(),
-        ResultTone::Danger => theme.danger(),
-    }
-}
+use crate::tui::ui::tone_style;
 
 pub fn result_verification_navigation_hint() -> Line<'static> {
     let theme = super::theme::current();

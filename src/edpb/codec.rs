@@ -4,14 +4,7 @@ pub(super) fn sha256_bytes(data: &[u8]) -> [u8; 32] {
     Sha256::digest(data).into()
 }
 
-pub(super) fn hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(&mut out, "{byte:02x}").expect("write to String");
-    }
-    out
-}
+pub(super) use crate::common::hex_lower as hex;
 
 pub(super) fn put_u16(dst: &mut [u8], offset: usize, value: u16) {
     dst[offset..offset + 2].copy_from_slice(&value.to_le_bytes());

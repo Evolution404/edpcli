@@ -103,6 +103,9 @@ pub struct BackupSelector {
 }
 
 impl BackupSelector {
+    pub(crate) fn from_catalog(catalog: BackupCatalog) -> Self {
+        Self { catalog }
+    }
     pub fn load(root: &Path) -> Self {
         Self {
             catalog: BackupCatalog::load(root),
@@ -126,19 +129,22 @@ impl BackupSelector {
     }
 
     pub fn resolve_one(&self, target: &str) -> Result<&BackupEntry, String> {
+        if let Some(error) = self.catalog.scan_error() {
+            return Err(error.to_string());
+        }
         resolve_one(&self.catalog, target)
     }
 
     pub fn resolve_many(&self, targets: &[String]) -> Result<Vec<&BackupEntry>, String> {
+        if let Some(error) = self.catalog.scan_error() {
+            return Err(error.to_string());
+        }
         resolve_many(&self.catalog, targets)
     }
 }
 
 fn numbered_entries(entries: &[BackupEntry]) -> Vec<&BackupEntry> {
-    let mut visible: Vec<_> = entries
-        .iter()
-        .filter(|entry| entry.meta.is_some())
-        .collect();
+    let mut visible: Vec<_> = entries.iter().collect();
     visible.sort_by(|a, b| {
         diskio::cmp_backup_newest_first(a, b)
             .then_with(|| backup_catalog::file_name(a).cmp(backup_catalog::file_name(b)))

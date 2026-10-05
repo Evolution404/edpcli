@@ -2,21 +2,10 @@ use super::*;
 use crate::tui::state::{ProvisionResultPartition, ProvisionState};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::Style,
     widgets::{Block, Cell, Paragraph, Row, Table},
 };
 
-fn tone_style(tone: crate::tui::ui::ResultTone) -> Style {
-    let theme = crate::tui::theme::current();
-    match tone {
-        crate::tui::ui::ResultTone::Primary => theme.body_text(),
-        crate::tui::ui::ResultTone::Muted => theme.muted(),
-        crate::tui::ui::ResultTone::Accent => theme.accent(),
-        crate::tui::ui::ResultTone::Success => theme.success(),
-        crate::tui::ui::ResultTone::Warning => theme.warning(),
-        crate::tui::ui::ResultTone::Danger => theme.danger(),
-    }
-}
+use crate::tui::ui::tone_style;
 
 fn disposition_label(disposition: crate::provision::RegionDisposition) -> &'static str {
     use crate::provision::RegionDisposition as D;

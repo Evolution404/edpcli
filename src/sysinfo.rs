@@ -4,10 +4,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io::{self, ErrorKind};
-use std::process::{Command, Stdio};
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub use crate::platform::ExtDisk;
 use crate::platform::HardwareProbe;
@@ -32,52 +29,7 @@ pub struct SysRunner;
 
 impl CmdRunner for SysRunner {
     fn check_output(&self, cmd: &[&str], timeout: Duration) -> io::Result<String> {
-        let mut child = Command::new(cmd[0])
-            .args(&cmd[1..])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| io::Error::new(e.kind(), format!("无法启动 {}: {}", cmd[0], e)))?;
-        let mut stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| io::Error::other(format!("{} 未提供 stdout 管道", cmd[0])))?;
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            use std::io::Read;
-            let mut buf = Vec::new();
-            let _ = stdout.read_to_end(&mut buf);
-            let _ = tx.send(String::from_utf8_lossy(&buf).into_owned());
-        });
-        let start = Instant::now();
-        let output = loop {
-            match rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(s) => break s,
-                Err(RecvTimeoutError::Timeout) => {
-                    if start.elapsed() > timeout {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Err(io::Error::new(
-                            ErrorKind::TimedOut,
-                            format!("{} 超时({}s)", cmd[0], timeout.as_secs()),
-                        ));
-                    }
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    return Err(io::Error::other("读取输出失败"))
-                }
-            }
-        };
-        let status = child.wait()?;
-        if status.success() {
-            Ok(output)
-        } else {
-            Err(io::Error::other(format!(
-                "{} 退出码 {:?}",
-                cmd[0],
-                status.code()
-            )))
-        }
+        crate::infrastructure::process::check_output(cmd, timeout)
     }
 
     fn hardware_probe(&self, disk: u32) -> Option<HardwareProbe> {

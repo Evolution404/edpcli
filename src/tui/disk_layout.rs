@@ -1,5 +1,6 @@
 //! Shared sector geometry and proportional disk bar for Provision and Inspect.
 
+use crate::common::fmt_sector_percentage as percentage;
 use ratatui::{
     layout::Rect,
     style::Style,
@@ -7,8 +8,6 @@ use ratatui::{
     widgets::{Paragraph, Wrap},
     Frame,
 };
-
-use super::state::ProvisionBarKind;
 
 pub use crate::application::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
 
@@ -527,127 +526,14 @@ impl<'a> DiskLayoutPresentation<'a> {
             .collect()
     }
 
-    pub fn compact_grid_lines(&self, width: usize) -> Vec<Line<'static>> {
-        use crate::tui::table_layout::display_width;
-
-        let visible = self.visible_model();
-        let mut entries = vec![(
-            None,
-            format!("总容量  {}", format_sector_size(visible.total_sectors)),
-        )];
-        entries.extend(visible.segments.iter().map(|segment| {
-            (
-                Some(segment.kind),
-                format!(
-                    "{}  {}",
-                    segment.label,
-                    format_sector_size(segment.sector_count)
-                ),
-            )
-        }));
-        let available = width.max(1);
-        let gap = 4usize;
-        let max_entry_width = entries
-            .iter()
-            .map(|(kind, text)| display_width(text) + usize::from(kind.is_some()) * 2)
-            .max()
-            .unwrap_or(1)
-            .max(1);
-        let mut columns = entries.len().clamp(1, 4);
-        while columns > 1
-            && max_entry_width
-                .saturating_mul(columns)
-                .saturating_add(gap.saturating_mul(columns - 1))
-                > available
-        {
-            columns -= 1;
-        }
-        let cell_width = if columns == 1 {
-            available
-        } else {
-            available.saturating_sub(gap.saturating_mul(columns - 1)) / columns
-        }
-        .max(1);
-        entries
-            .chunks(columns)
-            .map(|chunk| {
-                let mut spans = vec![Span::raw("    ")];
-                for (position, (kind, text)) in chunk.iter().enumerate() {
-                    if position > 0 {
-                        spans.push(Span::raw(" ".repeat(gap)));
-                    }
-                    let prefix_width = if let Some(kind) = kind {
-                        spans.push(Span::styled(
-                            "■ ",
-                            super::theme::current().disk_region(*kind),
-                        ));
-                        2
-                    } else {
-                        0
-                    };
-                    let room = cell_width.saturating_sub(prefix_width);
-                    let text = if display_width(text) <= room {
-                        text.clone()
-                    } else {
-                        crate::tui::table_layout::truncate_cell(
-                            text,
-                            room,
-                            crate::tui::table_layout::TruncatePolicy::Clip,
-                        )
-                    };
-                    spans.push(Span::styled(
-                        crate::ui::pad_to(&text, room),
-                        if kind.is_some() {
-                            super::theme::current().muted()
-                        } else {
-                            ratatui::style::Style::default()
-                        },
-                    ));
-                }
-                Line::from(spans)
-            })
-            .collect()
-    }
-
     pub fn pane_line_count(&self, summary: &str, details: &[DiskLayoutDetail]) -> usize {
         self.visible_model().pane_line_count(summary, details)
             + usize::from(self.tail == TailExpansion::Expanded && self.model.tail_group().is_some())
     }
 }
 
-fn percentage(sectors: u64, total: u64) -> String {
-    if total == 0 {
-        return "0.00%".into();
-    }
-    let ratio = sectors as f64 * 100.0 / total as f64;
-    if ratio > 0.0 && ratio < 0.01 {
-        "<0.01%".into()
-    } else {
-        format!("{ratio:.2}%")
-    }
-}
-
 fn format_sector_size(sectors: u64) -> String {
     crate::common::fmt_capacity_sectors(sectors)
-}
-
-impl DiskRegionKind {
-    pub const fn visual_kind(self) -> ProvisionBarKind {
-        match self {
-            Self::Protocol | Self::Boot => ProvisionBarKind::Boot,
-            Self::Share | Self::Combined => ProvisionBarKind::Share,
-            Self::Encrypt => ProvisionBarKind::Encrypt,
-            Self::Metadata
-            | Self::Compatibility
-            | Self::Reserved
-            | Self::Lce
-            | Self::BackupMirror
-            | Self::RestoreNode
-            | Self::Tail => ProvisionBarKind::Compatibility,
-            Self::Plain => ProvisionBarKind::Plain,
-            Self::Free | Self::Unknown | Self::Conflict => ProvisionBarKind::Free,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

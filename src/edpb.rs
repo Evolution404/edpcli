@@ -14,6 +14,8 @@ use sha2::{Digest, Sha256};
 mod codec;
 mod identity;
 mod legacy;
+mod limits;
+pub(crate) use limits::MAX_CONTAINER_BYTES;
 mod model;
 mod read;
 mod validate;
@@ -28,7 +30,7 @@ pub use legacy::write_legacy_v1_core_backup_with_notes;
 use legacy::{legacy_hardware_serial_digest, valid_sha256_hex};
 pub use model::*;
 use model::{CHUNK_MAGIC, FILE_MAGIC, FOOTER_MAGIC};
-pub use read::{read_artifact, read_raw_protocol, verify_file};
+pub use read::{read_artifact, read_raw_protocol, verify_file, VerifiedBackupReader};
 use validate::validate_manifest_graph;
 use write::write_container;
 pub use write::{

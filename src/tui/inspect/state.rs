@@ -51,15 +51,6 @@ pub enum AdvancedInspectPanel {
 }
 
 impl AdvancedInspectPanel {
-    pub const fn pane_id(self) -> crate::tui::pane::PaneId {
-        use crate::tui::pane::PaneId;
-        match self {
-            Self::Tree => PaneId::InspectTree,
-            Self::Overview => PaneId::InspectOverview,
-            Self::Detail => PaneId::InspectDetail,
-        }
-    }
-
     pub const fn from_pane_id(pane: crate::tui::pane::PaneId) -> Option<Self> {
         use crate::tui::pane::PaneId;
         match pane {

@@ -59,6 +59,7 @@ fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
         provision_kind: Some(edpcli::provision::DiskProvisionKind::Plain),
         integrity_status: BackupIntegrityStatus::Verified,
         size_ok: true,
+        verification_error: None,
         content_sha256: Some(
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
         ),

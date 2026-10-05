@@ -304,12 +304,6 @@ impl Theme {
         Style::default().fg(self.palette.text_body)
     }
 
-    pub fn active_text(self) -> Style {
-        Style::default()
-            .fg(self.palette.table_text_active)
-            .add_modifier(Modifier::BOLD)
-    }
-
     pub fn progress_label(self) -> Style {
         Style::default()
             .fg(self.palette.text_primary)
@@ -542,6 +536,14 @@ impl Theme {
             })
         } else {
             base
+        }
+    }
+
+    pub fn backup_health(self, health: crate::application::BackupHealth) -> Style {
+        if health.is_healthy() {
+            self.success()
+        } else {
+            self.danger()
         }
     }
 

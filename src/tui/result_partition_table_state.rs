@@ -31,12 +31,12 @@ impl AppState {
         use crate::tui::table_layout::{table_column_schema, TableKind, TableViewData};
 
         let rows = if self
-            .shell
+            .restore
             .wizard
             .as_ref()
             .is_some_and(|wizard| wizard.stage == WizardStage::PostRestore)
         {
-            let wizard = self.shell.wizard.as_ref()?;
+            let wizard = self.restore.wizard.as_ref()?;
             let outcome = wizard.restore_outcome.as_ref()?;
             outcome
                 .assessment
@@ -185,12 +185,12 @@ impl AppState {
 
     pub fn result_partition_selected_source_index(&self) -> Option<usize> {
         if self
-            .shell
+            .restore
             .wizard
             .as_ref()
             .is_some_and(|wizard| wizard.stage == WizardStage::PostRestore)
         {
-            self.shell
+            self.restore
                 .wizard
                 .as_ref()
                 .and_then(|wizard| wizard.post_restore_workbench.selected_partition)

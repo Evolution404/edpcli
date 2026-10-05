@@ -183,11 +183,12 @@ pub(crate) use review::{
 mod validation;
 
 use form::{shift_supported_fs, toggle_supported_fs, ProvisionInputPolicy};
-pub use form::{PlainPartitionForm, PlainProvisionForm, ProvisionForm};
+pub use form::{PlainPartitionForm, PlainProvisionForm, ProvisionForm, SecretText};
 
 #[derive(Debug, Clone)]
 pub struct ProvisionState {
     pub stage: ProvisionStage,
+    pub(crate) session_id: u64,
     pub kind: ProvisionKind,
     pub scheme_selected: usize,
     pub scheme_picker_open: bool,
@@ -221,10 +222,16 @@ pub struct ProvisionState {
     form_initialized_for: Option<(u32, u64, Option<String>, ProvisionKind)>,
 }
 
+pub(super) fn next_form_session() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 impl Default for ProvisionState {
     fn default() -> Self {
         Self {
             stage: ProvisionStage::Form,
+            session_id: next_form_session(),
             kind: ProvisionKind::Mode0,
             scheme_selected: 0,
             scheme_picker_open: false,

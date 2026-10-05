@@ -179,7 +179,7 @@ pub const DEVICES_HELP: &[HelpBinding] = &[
 pub const BACKUPS_HELP: &[HelpBinding] = &[
     HelpBinding {
         keys: "j/k · ↑/↓",
-        label: "选择备份",
+        label: "选择备份 / 容量区域；滚动元数据",
         action: TuiAction::MoveDown,
     },
     HelpBinding {

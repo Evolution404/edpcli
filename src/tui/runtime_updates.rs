@@ -29,20 +29,23 @@ pub(super) fn apply_task_updates(
             && state
                 .wizard()
                 .is_some_and(|wizard| matches!(wizard.kind, state::WriteKind::BackupCreate));
-        state.finish_write(result);
+        state.finish_write(result.map_err(|error| error.to_string()));
         if refresh_backups {
             tasks.request_backup_scan(backup_dir.to_path_buf());
             state.set_backup_scan_pending(true);
         }
     }
     if let Some((_operation_id, result)) = updates.restore {
-        state.finish_restore(result);
+        state.finish_restore(result.map_err(|error| error.to_string()));
         tasks.request_device_scan(backup_dir.to_path_buf());
         state.set_device_scan_pending(true);
     }
+    for (_operation_id, event) in updates.post_restore_format_progress {
+        state.set_post_restore_format_progress(event);
+    }
     if let Some((_operation_id, result)) = updates.post_restore_format {
         let success = result.result.is_ok();
-        state.finish_post_restore_format(result);
+        state.finish_post_restore_format_assessed(result, updates.post_restore_assessment);
         if success {
             tasks.request_device_scan(backup_dir.to_path_buf());
             state.set_device_scan_pending(true);
@@ -106,31 +109,7 @@ pub(super) fn apply_task_updates(
             state.set_backup_scan_pending(true);
         }
     }
-    if let Some(result) = updates.provision_key_probe {
-        state.provision_finish_key_probe(result);
-    }
-    for (domain, revision, result) in updates.provision_key_verify {
-        state.provision_finish_source_password_verify(domain, revision, result);
-    }
-    if let Some(result) = updates.provision_plan {
-        state.provision_finish_plan(result);
-    }
-    for (_operation_id, event) in updates.provision_progress {
-        state.provision_push_progress(event);
-    }
-    if let Some((_operation_id, result)) = updates.provision_write {
-        let success = result.is_ok();
-        state.provision_finish_write(result);
-        if success {
-            tasks.request_device_scan(backup_dir.to_path_buf());
-            tasks.request_backup_scan(backup_dir.to_path_buf());
-            state.set_device_scan_pending(true);
-            state.set_backup_scan_pending(true);
-        }
-    }
-    if let Some(result) = updates.provision_export {
-        state.provision_finish_export(result);
-    }
+    super::provision_runtime_updates::apply(state, tasks, updates.provision, backup_dir);
     if let Some(result) = updates.advanced_inspect {
         state.advanced_inspect_finish(result);
     }

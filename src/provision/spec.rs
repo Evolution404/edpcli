@@ -1,7 +1,7 @@
 use encoding_rs::GBK;
 
+use crate::domain::hardware::{HardwareProbe, NativeTransport};
 use crate::identify::windows_pnp_identity_from_probe;
-use crate::platform::{HardwareProbe, NativeTransport};
 
 use super::ProvisionProfile;
 

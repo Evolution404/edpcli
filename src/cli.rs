@@ -3,8 +3,8 @@
 //! 用法:
 //!   edpcli                                     交互式 TTY 默认进入 TUI；非 TTY 等价于 list
 //!   edpcli list                                列出外接盘(只读)
-//!   edpcli info [备份.edpb] [--disk N]          查看设备/备份详情
-//!   edpcli backup restore [备份] [--disk N]    还原
+//!   `edpcli info [备份.edpb] [--disk N]`          查看设备/备份详情
+//!   `edpcli backup restore [备份] [--disk N]`    还原
 //!
 //! 历史备份可通过 edpcli backup restore 还原。
 

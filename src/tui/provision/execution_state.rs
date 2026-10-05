@@ -93,6 +93,9 @@ impl AppState {
     }
 
     pub fn provision_take_for_write(&mut self) -> Option<ProvisionPrepared> {
+        if !self.write_confirmation_ready() {
+            return None;
+        }
         if self.provision.stage != ProvisionStage::Confirm {
             return None;
         }

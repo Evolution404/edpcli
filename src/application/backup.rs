@@ -330,9 +330,11 @@ mod tests {
             integrity_status: BackupIntegrityStatus::Verified,
             size_ok: true,
             lba8: None,
+            verification_error: None,
             content_sha256: None,
             coverage: None,
             manifest: None,
+            restore_preview: None,
         }
     }
 

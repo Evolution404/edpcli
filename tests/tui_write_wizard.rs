@@ -302,6 +302,18 @@ fn restore_post_processing_requires_a_second_yes_before_plain_format() {
             .metadata_restored,
         "format result must not rewrite restore success"
     );
+    assert_eq!(
+        wizard
+            .restore_outcome
+            .as_ref()
+            .unwrap()
+            .assessment
+            .partitions[0]
+            .detected_filesystem,
+        Some(FilesystemKind::ExFat),
+        "the completion row must show the filesystem verified by formatting"
+    );
+    assert!(format_screen(&state, 120, 40).contains("exFAT"));
     assert!(!state.is_critical_operation());
 }
 
@@ -324,6 +336,276 @@ fn begin_post_restore(state: &mut AppState, outcome: MetadataRestoreOutcome) {
     }
     let _ = state.submit_wizard_confirmation();
     state.finish_restore(Ok(outcome));
+}
+
+fn start_format_with_restore(outcome: MetadataRestoreOutcome, encrypted: bool) -> AppState {
+    let mut state = AppState::new();
+    begin_post_restore(&mut state, outcome);
+    state.begin_selected_post_restore_action();
+    if state.wizard().unwrap().stage == WizardStage::PasswordInput {
+        for ch in "progress-secret-123".chars() {
+            state.push_wizard_secret_char(ch);
+        }
+        state.submit_wizard_secret();
+    }
+    state.submit_wizard_volume_label();
+    for ch in "YES".chars() {
+        state.push_wizard_confirmation(ch);
+    }
+    if encrypted {
+        assert!(state.submit_encrypted_format_confirmation().is_some());
+    } else {
+        assert!(state.submit_post_restore_format_confirmation().is_some());
+    }
+    state
+}
+
+fn format_work_event() -> edpcli::application::progress::ProgressEvent {
+    use edpcli::application::progress::{
+        FormatStep, LogPolicy, OperationKind, Phase, ProgressEvent, Step, TransactionActivity,
+        TransactionActivityPhase, WorkProgress,
+    };
+    let mut event = ProgressEvent::new(
+        Phase::Format,
+        Step::PostRestoreFormat(FormatStep::Write),
+        5,
+        10,
+    )
+    .with_work(WorkProgress::from_activity(TransactionActivity {
+        phase: TransactionActivityPhase::FormatWrite,
+        current: 32,
+        total: 64,
+    }));
+    event.operation = OperationKind::PostRestoreFormat;
+    event.log_policy = LogPolicy::SnapshotOnly;
+    event
+}
+
+fn format_screen(state: &AppState, width: u16, height: u16) -> String {
+    use ratatui::{backend::TestBackend, Terminal};
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal
+        .draw(|frame| edpcli::tui::render::draw(frame, state))
+        .unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect()
+}
+
+#[test]
+fn post_restore_format_renders_real_work_and_sync_wait_at_all_sizes() {
+    use edpcli::application::progress::{FormatStep, LogPolicy, Phase, Step};
+    let mut state = start_format_with_restore(plain_needs_format_outcome(), false);
+    let restored = state.wizard().unwrap().run.clone().unwrap();
+    state.set_post_restore_format_progress(format_work_event());
+    for (width, height) in [(40, 12), (80, 24), (120, 40)] {
+        let text = format_screen(&state, width, height);
+        for required in [
+            "恢复后格式化",
+            "disk4",
+            "分区1",
+            "写入文件系统结构",
+            "32/64sector·50%",
+            "已用时",
+        ] {
+            assert!(
+                text.contains(required),
+                "{width}x{height}: missing {required}\n{text}"
+            );
+        }
+    }
+    let mut sync = format_work_event();
+    sync.step = Step::PostRestoreFormat(FormatStep::Sync);
+    sync.work = None;
+    sync.detail = Some("同步写入缓存到介质".into());
+    sync.log_policy = LogPolicy::AppendOnChange;
+    state.set_post_restore_format_progress(sync);
+    for (width, height) in [(40, 12), (80, 24), (120, 40)] {
+        let text = format_screen(&state, width, height);
+        assert!(
+            text.contains("同步写入缓存到介质"),
+            "{width}x{height}: {text}"
+        );
+        assert!(text.contains("已用时"));
+        assert!(
+            !text.contains("32/64sector"),
+            "old work must disappear during sync"
+        );
+    }
+    assert_eq!(
+        state.wizard().unwrap().run.as_ref().unwrap().latest,
+        restored.latest
+    );
+    assert_eq!(
+        state
+            .wizard()
+            .unwrap()
+            .format_run
+            .as_ref()
+            .unwrap()
+            .operation,
+        edpcli::application::progress::OperationKind::PostRestoreFormat
+    );
+    assert!(
+        state
+            .wizard()
+            .unwrap()
+            .format_run
+            .as_ref()
+            .unwrap()
+            .latest
+            .as_ref()
+            .unwrap()
+            .phase
+            != Phase::Complete
+    );
+}
+
+#[test]
+fn post_restore_format_progress_is_independent_and_failure_never_reaches_completion() {
+    use edpcli::application::progress::{FormatStep, Severity, Step};
+    let mut state = start_format_with_restore(plain_needs_format_outcome(), false);
+    let start = state
+        .wizard()
+        .unwrap()
+        .format_run
+        .as_ref()
+        .unwrap()
+        .started_at;
+    state.set_post_restore_format_progress(format_work_event());
+    let mut rollback = format_work_event();
+    rollback.step = Step::PostRestoreFormat(FormatStep::RollbackWrite);
+    rollback.severity = Severity::Warning;
+    rollback.stage = Some(edpcli::application::progress::StageProgress::new(0, 10));
+    state.set_post_restore_format_progress(rollback);
+    state.finish_post_restore_format(PostRestoreFormatResult {
+        partition_index: 1,
+        filesystem: FilesystemKind::ExFat,
+        result: Err("写入失败，已完整回滚".into()),
+    });
+    let wizard = state.wizard().unwrap();
+    assert!(
+        wizard
+            .restore_outcome
+            .as_ref()
+            .unwrap()
+            .report
+            .metadata_restored
+    );
+    assert!(
+        wizard
+            .restore_outcome
+            .as_ref()
+            .unwrap()
+            .report
+            .readback_verified
+    );
+    assert_eq!(
+        wizard
+            .format_run
+            .as_ref()
+            .unwrap()
+            .latest
+            .as_ref()
+            .unwrap()
+            .severity,
+        Severity::Error
+    );
+    assert_eq!(
+        wizard
+            .format_run
+            .as_ref()
+            .unwrap()
+            .latest
+            .as_ref()
+            .unwrap()
+            .stage
+            .unwrap()
+            .current,
+        5
+    );
+    assert!(
+        wizard
+            .format_run
+            .as_ref()
+            .unwrap()
+            .latest
+            .as_ref()
+            .unwrap()
+            .overall
+            .basis_points()
+            < 10_000
+    );
+    let latest = wizard.format_run.as_ref().unwrap().latest.clone();
+    state.set_post_restore_format_progress(format_work_event());
+    assert_eq!(
+        state.wizard().unwrap().format_run.as_ref().unwrap().latest,
+        latest,
+        "late progress after the result must be ignored"
+    );
+
+    state.begin_selected_post_restore_action();
+    state.submit_wizard_volume_label();
+    for ch in "YES".chars() {
+        state.push_wizard_confirmation(ch);
+    }
+    assert!(state.submit_post_restore_format_confirmation().is_some());
+    let run = state.wizard().unwrap().format_run.as_ref().unwrap();
+    assert!(run.started_at > start);
+    assert_eq!(run.log.len(), 1);
+    assert_eq!(run.latest.as_ref().unwrap().overall.basis_points(), 0);
+}
+
+#[test]
+fn encrypted_post_restore_format_shares_progress_without_disclosing_passwords() {
+    let mut state = start_format_with_restore(
+        encrypted_post_restore_outcome(PostRestorePartitionState::PasswordRequired),
+        true,
+    );
+    state.set_post_restore_format_progress(format_work_event());
+    let text = format_screen(&state, 120, 40);
+    assert!(text.contains("32/64sector·50%"));
+    assert!(!text.contains("progress-secret-123"));
+    assert!(!format!("{:?}", state.wizard().unwrap().format_run).contains("progress-secret-123"));
+    state.finish_post_restore_encrypted_format(EncryptedPostRestoreFormatResult {
+        partition_index: 1,
+        filesystem: FilesystemKind::ExFat,
+        result: Ok(()),
+    });
+    assert_eq!(
+        state
+            .wizard()
+            .unwrap()
+            .restore_outcome
+            .as_ref()
+            .unwrap()
+            .assessment
+            .partitions[0]
+            .detected_filesystem,
+        Some(FilesystemKind::ExFat)
+    );
+    assert!(format_screen(&state, 120, 40).contains("exFAT"));
+    assert_eq!(
+        state
+            .wizard()
+            .unwrap()
+            .format_run
+            .as_ref()
+            .unwrap()
+            .latest
+            .as_ref()
+            .unwrap()
+            .overall
+            .basis_points(),
+        10_000
+    );
 }
 
 #[test]
@@ -469,6 +751,19 @@ fn crypto_invalid_reinitialize_requires_two_matching_passwords_and_independent_y
         filesystem: FilesystemKind::ExFat,
         result: Ok(()),
     });
+    assert_eq!(
+        state
+            .wizard()
+            .unwrap()
+            .restore_outcome
+            .as_ref()
+            .unwrap()
+            .assessment
+            .partitions[0]
+            .detected_filesystem,
+        Some(FilesystemKind::ExFat)
+    );
+    assert!(format_screen(&state, 120, 40).contains("exFAT"));
     let wizard = state.wizard().unwrap();
     assert_eq!(wizard.stage, WizardStage::PostRestore);
     assert_eq!(
@@ -512,4 +807,86 @@ fn legacy_backup_without_volume_label_stays_empty_instead_of_inventing_a_name() 
         .submit_post_restore_format_confirmation()
         .expect("empty label is a valid explicit choice");
     assert_eq!(intent.volume_label, "");
+}
+
+#[test]
+fn shrinking_after_yes_cannot_construct_any_media_write_intent() {
+    use ratatui::layout::Size;
+    let mut state = AppState::new();
+    state.begin_write_wizard(WriteKind::Restore, 9, Some("backup.edpb".into()));
+    for ch in "YES".chars() {
+        state.push_wizard_confirmation(ch);
+    }
+    for size in [Size::new(39, 24), Size::new(80, 17), Size::new(12, 8)] {
+        state.set_viewport_size(size);
+        assert!(state.submit_wizard_confirmation().is_none());
+        assert!(state.submit_post_restore_format_confirmation().is_none());
+        assert!(state.submit_encrypted_format_confirmation().is_none());
+        assert!(state.submit_reinitialize_confirmation().is_none());
+        assert!(state.provision_take_for_write().is_none());
+        assert!(!state.is_critical_operation());
+        assert_eq!(state.wizard().unwrap().stage, WizardStage::Confirm);
+    }
+    state.set_viewport_size(Size::new(40, 24));
+    assert!(state.submit_wizard_confirmation().is_some());
+}
+
+#[test]
+fn all_confirmation_types_keep_target_warning_input_and_escape_visible() {
+    use edpcli::tui::ui::{
+        render_write_confirmation_modal, MediaWriteConfirmationKind, WriteConfirmationSpec,
+    };
+    use ratatui::{backend::TestBackend, text::Line, Terminal};
+    for kind in [
+        MediaWriteConfirmationKind::Provision,
+        MediaWriteConfirmationKind::Restore,
+        MediaWriteConfirmationKind::Format,
+        MediaWriteConfirmationKind::EncryptedFormat,
+        MediaWriteConfirmationKind::Reinitialize,
+    ] {
+        for (width, height) in [(40, 18), (40, 24), (80, 24), (160, 24)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| {
+                    render_write_confirmation_modal(
+                        frame,
+                        WriteConfirmationSpec {
+                            kind,
+                            title: "确认",
+                            target: "disk9 · 125.83GB".into(),
+                            warning: "写入不可撤销".into(),
+                            details: (0..100)
+                                .map(|i| Line::from(format!("详情 {i} 长身份标识")))
+                                .collect(),
+                            detail_scroll: 0,
+                            confirmation: "YES",
+                            message: None,
+                        },
+                    )
+                })
+                .unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            for required in [
+                "disk9",
+                "125.83GB",
+                "写入不可撤销",
+                "> YES",
+                "Esc 取消",
+                "PgUp/PgDn",
+            ] {
+                assert!(
+                    text.split_whitespace()
+                        .collect::<String>()
+                        .contains(&required.split_whitespace().collect::<String>()),
+                    "{kind:?} {width}x{height} missing {required}: {text}"
+                );
+            }
+        }
+    }
 }

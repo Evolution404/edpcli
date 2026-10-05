@@ -4,7 +4,6 @@
 //! geometry and sector-reading interface regardless of where the evidence came
 //! from. This module never enters a write-capable state.
 
-use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -110,46 +109,46 @@ pub struct EvidenceIdentity {
 }
 
 struct BackupSectorReader {
-    path: PathBuf,
-    manifest: Manifest,
+    snapshot: crate::edpb::VerifiedBackupReader,
     protocol: Vec<u8>,
     has_full_protocol: bool,
-    cache: BTreeMap<String, Vec<u8>>,
 }
 
 impl BackupSectorReader {
+    fn manifest(&self) -> &Manifest {
+        &self.snapshot.verified().manifest
+    }
+
     fn has_sector(&self, lba: u64) -> bool {
         if self.has_full_protocol && lba < METADATA_SECTOR_COUNT as u64 {
             return true;
         }
-        self.manifest.extents.iter().any(|extent| {
+        self.manifest().extents.iter().any(|extent| {
             let Some(end) = extent.start_lba.checked_add(extent.sector_count) else {
                 return false;
             };
             lba >= extent.start_lba
                 && lba < end
-                && self.manifest.artifacts.iter().any(|artifact| {
+                && self.manifest().artifacts.iter().any(|artifact| {
                     artifact.kind == "raw_sectors"
                         && artifact.source_extent_ids.iter().any(|id| id == &extent.id)
                 })
         })
     }
 
-    fn read_artifact(&mut self, artifact_id: &str) -> io::Result<Option<Vec<u8>>> {
+    fn read_artifact(&self, artifact_id: &str) -> io::Result<Option<&[u8]>> {
         if !self
-            .manifest
+            .manifest()
             .artifacts
             .iter()
             .any(|artifact| artifact.id == artifact_id)
         {
             return Ok(None);
         }
-        if !self.cache.contains_key(artifact_id) {
-            let data =
-                crate::edpb::read_artifact(&self.path, artifact_id).map_err(io::Error::other)?;
-            self.cache.insert(artifact_id.to_string(), data);
-        }
-        Ok(self.cache.get(artifact_id).cloned())
+        self.snapshot
+            .read_artifact(artifact_id)
+            .map(Some)
+            .map_err(io::Error::other)
     }
 }
 
@@ -166,12 +165,12 @@ impl SectorReader for BackupSectorReader {
                 .map(|sector| sector.to_vec())
                 .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "EDPB 协议镜像截断"));
         }
-        let found = self.manifest.extents.iter().find_map(|extent| {
+        let found = self.manifest().extents.iter().find_map(|extent| {
             let end = extent.start_lba.checked_add(extent.sector_count)?;
             if lba < extent.start_lba || lba >= end {
                 return None;
             }
-            let artifact = self.manifest.artifacts.iter().find(|artifact| {
+            let artifact = self.manifest().artifacts.iter().find(|artifact| {
                 artifact.kind == "raw_sectors"
                     && artifact.source_extent_ids.iter().any(|id| id == &extent.id)
             })?;
@@ -209,7 +208,11 @@ pub struct EvidenceSource {
     reader: EvidenceReader,
 }
 
-fn plain_protocol_context(path: &Path, manifest: &Manifest) -> Result<Vec<u8>, EvidenceError> {
+fn plain_protocol_context(
+    path: &Path,
+    reader: &crate::edpb::VerifiedBackupReader,
+) -> Result<Vec<u8>, EvidenceError> {
+    let manifest = &reader.verified().manifest;
     let mut protocol = vec![0u8; METADATA_IMAGE_LEN];
     for artifact in manifest
         .artifacts
@@ -226,7 +229,7 @@ fn plain_protocol_context(path: &Path, manifest: &Manifest) -> Result<Vec<u8>, E
         if !touches_prefix {
             continue;
         }
-        let data = crate::edpb::read_artifact(path, &artifact.id).map_err(|message| {
+        let data = reader.read_artifact(&artifact.id).map_err(|message| {
             EvidenceError::BackupProtocolRead {
                 path: path.to_path_buf(),
                 message,
@@ -269,7 +272,7 @@ fn plain_protocol_context(path: &Path, manifest: &Manifest) -> Result<Vec<u8>, E
 impl EvidenceSource {
     pub fn backup_manifest(&self) -> Option<&Manifest> {
         match &self.reader {
-            EvidenceReader::Backup(reader) => Some(&reader.manifest),
+            EvidenceReader::Backup(reader) => Some(reader.manifest()),
             EvidenceReader::Disk(_) => None,
         }
     }
@@ -286,11 +289,13 @@ impl EvidenceSource {
     }
 
     pub fn open_backup(path: &Path) -> Result<Self, EvidenceError> {
-        let verified =
-            crate::edpb::verify_file(path).map_err(|error| EvidenceError::BackupVerify {
+        let snapshot = crate::edpb::VerifiedBackupReader::open(path).map_err(|error| {
+            EvidenceError::BackupVerify {
                 path: path.to_path_buf(),
                 message: error.to_string(),
-            })?;
+            }
+        })?;
+        let verified = snapshot.verified();
         let canonical =
             crate::edpb::canonical_media_identity(&verified.manifest).map_err(|message| {
                 EvidenceError::BackupVerify {
@@ -315,14 +320,15 @@ impl EvidenceSource {
             });
         }
         let protocol = if has_full_protocol {
-            crate::edpb::read_raw_protocol(path).map_err(|error| {
-                EvidenceError::BackupProtocolRead {
+            snapshot
+                .read_raw_protocol()
+                .map(<[u8]>::to_vec)
+                .map_err(|error| EvidenceError::BackupProtocolRead {
                     path: path.to_path_buf(),
                     message: error.to_string(),
-                }
-            })?
+                })?
         } else if current_plain_v3 {
-            plain_protocol_context(path, &verified.manifest)?
+            plain_protocol_context(path, &snapshot)?
         } else {
             return Err(EvidenceError::BackupProtocolRead {
                 path: path.to_path_buf(),
@@ -334,7 +340,7 @@ impl EvidenceSource {
                 actual: protocol.len(),
             });
         }
-        let manifest = verified.manifest;
+        let manifest = &verified.manifest;
         let total_sectors = manifest.geometry.total_sectors.ok_or_else(|| {
             EvidenceError::BackupMissingGeometry {
                 path: path.to_path_buf(),
@@ -380,11 +386,9 @@ impl EvidenceSource {
             protocol: protocol.clone(),
             identity,
             reader: EvidenceReader::Backup(Box::new(BackupSectorReader {
-                path: path.to_path_buf(),
-                manifest,
+                snapshot,
                 protocol,
                 has_full_protocol,
-                cache: BTreeMap::new(),
             })),
         })
     }
@@ -455,7 +459,9 @@ impl EvidenceSource {
     pub fn read_artifact(&mut self, artifact_id: &str) -> io::Result<Option<Vec<u8>>> {
         match &mut self.reader {
             EvidenceReader::Disk(_) => Ok(None),
-            EvidenceReader::Backup(reader) => reader.read_artifact(artifact_id),
+            EvidenceReader::Backup(reader) => reader
+                .read_artifact(artifact_id)
+                .map(|data| data.map(<[u8]>::to_vec)),
         }
     }
 }

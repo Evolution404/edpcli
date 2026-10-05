@@ -166,7 +166,9 @@ fn fast_and_full_gate_entrypoints_are_repository_owned() {
     assert!(fast.contains("test-full.py"));
     assert!(fast.contains("cargo clippy --all-targets --locked -- -D warnings"));
     assert!(fast.contains("clippy skipped: no Rust/Cargo inputs changed"));
-    assert!(fast.contains("git diff-tree --no-commit-id --name-only -r HEAD"));
+    assert!(fast.contains("--list-changed-paths"));
+    assert!(full.contains("ls-files"));
+    assert!(full.contains("--exclude-standard"));
     assert!(full.contains("--message-format=json"));
     assert!(full.contains("ThreadPoolExecutor"));
     assert!(full.contains("EDPCLI_TEST_THREADS"));

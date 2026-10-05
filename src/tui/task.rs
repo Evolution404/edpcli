@@ -6,6 +6,7 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 
 use crate::application::BackupWorkspaceItem;
 use crate::disk_scan::Row;
@@ -20,8 +21,20 @@ use task_gate::{LatestCompletion, LatestRequest, TaskSlot};
 mod backups_task;
 #[path = "inspect/task.rs"]
 mod inspect_task;
+#[path = "provision/task_model.rs"]
+mod provision_model;
 #[path = "provision/task.rs"]
 mod provision_task;
+pub use provision_model::ProvisionUpdates;
+use provision_model::{
+    password_domain_index, PasswordVerifyRequest, ProvisionTaskState, ProvisionWorkerResult,
+};
+#[path = "provision/task_updates.rs"]
+mod provision_updates;
+#[path = "task_progress.rs"]
+mod task_progress;
+use task_progress::{ProgressKind, ProgressPublisher, ProgressSlot};
+
 #[path = "write_task.rs"]
 mod write_task;
 
@@ -45,15 +58,23 @@ enum WorkerResult {
     },
     Write {
         operation_id: OperationId,
-        result: Result<(), String>,
+        result: Result<(), crate::application::error::OperationError>,
     },
     Restore {
         operation_id: OperationId,
-        result: Result<crate::application::post_restore::MetadataRestoreOutcome, String>,
+        result: Result<
+            crate::application::post_restore::MetadataRestoreOutcome,
+            crate::application::error::OperationError,
+        >,
     },
     PostRestoreFormat {
         operation_id: OperationId,
+        assessment: Option<crate::application::post_restore::PostRestoreAssessment>,
         result: crate::application::post_restore::PostRestoreFormatResult,
+    },
+    PostRestoreFormatProgress {
+        operation_id: OperationId,
+        event: crate::application::progress::ProgressEvent,
     },
     PostRestoreEncryptedFormat {
         operation_id: OperationId,
@@ -109,42 +130,25 @@ enum WorkerResult {
         operation_id: OperationId,
         result: Result<usize, String>,
     },
-    ProvisionKeyProbe {
-        generation: u64,
-        result: Result<crate::application::provision::ProvisionKeyProbe, String>,
-    },
-    ProvisionKeyVerify {
-        revision: u64,
-        domain: crate::provision::KeyDomainRole,
-        result: Result<crate::provision::SourcePasswordKnowledge, String>,
-    },
-    ProvisionPlan {
-        generation: u64,
-        result: Result<crate::tui::state::ProvisionPrepared, String>,
-    },
-    ProvisionProgress {
-        operation_id: OperationId,
-        event: crate::application::progress::ProgressEvent,
-    },
-    ProvisionWrite {
-        operation_id: OperationId,
-        result: Result<crate::application::provision::ProvisionWriteOutcome, String>,
-    },
-    ProvisionExport {
-        generation: u64,
-        result: Result<PathBuf, String>,
-    },
+    Provision(ProvisionWorkerResult),
 }
 
 #[derive(Default)]
 pub struct TaskUpdates {
     pub devices: Option<Vec<Row>>,
     pub backups: Option<Vec<BackupWorkspaceItem>>,
-    pub write: Option<(OperationId, Result<(), String>)>,
+    pub write: Option<(
+        OperationId,
+        Result<(), crate::application::error::OperationError>,
+    )>,
     pub restore: Option<(
         OperationId,
-        Result<crate::application::post_restore::MetadataRestoreOutcome, String>,
+        Result<
+            crate::application::post_restore::MetadataRestoreOutcome,
+            crate::application::error::OperationError,
+        >,
     )>,
+    pub post_restore_assessment: Option<crate::application::post_restore::PostRestoreAssessment>,
     pub post_restore_format: Option<(
         OperationId,
         crate::application::post_restore::PostRestoreFormatResult,
@@ -158,6 +162,8 @@ pub struct TaskUpdates {
         crate::application::post_restore::EncryptedPartitionReinitializeResult,
     )>,
     pub write_progress: Vec<(OperationId, crate::application::WriteEvent)>,
+    pub post_restore_format_progress:
+        Vec<(OperationId, crate::application::progress::ProgressEvent)>,
     pub advanced_inspect:
         Option<Result<crate::application::inspect::AdvancedInspectWorkspace, String>>,
     pub advanced_inspect_sector: Option<(
@@ -172,20 +178,7 @@ pub struct TaskUpdates {
     pub backup_batch_delete_execute: Option<(OperationId, Result<usize, String>)>,
     pub backup_prune_plan: Option<Result<crate::tui::state::BackupPrunePrepared, String>>,
     pub backup_prune_execute: Option<(OperationId, Result<usize, String>)>,
-    pub provision_key_probe:
-        Option<Result<crate::application::provision::ProvisionKeyProbe, String>>,
-    pub provision_key_verify: Vec<(
-        crate::provision::KeyDomainRole,
-        u64,
-        Result<crate::provision::SourcePasswordKnowledge, String>,
-    )>,
-    pub provision_plan: Option<Result<crate::tui::state::ProvisionPrepared, String>>,
-    pub provision_progress: Vec<(OperationId, crate::application::progress::ProgressEvent)>,
-    pub provision_write: Option<(
-        OperationId,
-        Result<crate::application::provision::ProvisionWriteOutcome, String>,
-    )>,
-    pub provision_export: Option<Result<PathBuf, String>>,
+    pub provision: ProvisionUpdates,
 }
 
 impl TaskUpdates {
@@ -198,6 +191,7 @@ impl TaskUpdates {
             || self.post_restore_encrypted_format.is_some()
             || self.post_restore_reinitialize.is_some()
             || !self.write_progress.is_empty()
+            || !self.post_restore_format_progress.is_empty()
             || self.advanced_inspect.is_some()
             || self.advanced_inspect_sector.is_some()
             || self.device_error.is_some()
@@ -208,12 +202,7 @@ impl TaskUpdates {
             || self.backup_batch_delete_execute.is_some()
             || self.backup_prune_plan.is_some()
             || self.backup_prune_execute.is_some()
-            || self.provision_key_probe.is_some()
-            || !self.provision_key_verify.is_empty()
-            || self.provision_plan.is_some()
-            || !self.provision_progress.is_empty()
-            || self.provision_write.is_some()
-            || self.provision_export.is_some()
+            || self.provision.has_updates()
     }
 }
 
@@ -227,19 +216,24 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
+#[derive(Debug)]
+struct ScanRequest {
+    root: PathBuf,
+    snapshot: Option<Arc<crate::application::catalog_snapshot::CatalogSnapshot>>,
+}
+
 pub struct TaskHub {
     tx: Sender<WorkerResult>,
     rx: Receiver<WorkerResult>,
-    device_slot: TaskSlot<PathBuf>,
-    backup_slot: TaskSlot<PathBuf>,
+    device_slot: TaskSlot<ScanRequest>,
+    backup_slot: TaskSlot<ScanRequest>,
     advanced_inspect_slot: TaskSlot<()>,
     advanced_inspect_sector_slot: TaskSlot<()>,
     verify_slot: TaskSlot<(PathBuf, PathBuf)>,
-    provision_key_probe_slot: TaskSlot<()>,
-    provision_slot: TaskSlot<()>,
-    provision_export_slot: TaskSlot<()>,
+    provision: ProvisionTaskState,
     prune_slot: TaskSlot<()>,
     batch_delete_slot: TaskSlot<()>,
+    progress_slot: ProgressSlot,
     next_operation_id: u64,
     active_operation: Option<OperationId>,
     critical_worker: Option<std::thread::JoinHandle<()>>,
@@ -262,11 +256,10 @@ impl TaskHub {
             advanced_inspect_slot: TaskSlot::new(),
             advanced_inspect_sector_slot: TaskSlot::new(),
             verify_slot: TaskSlot::new(),
-            provision_key_probe_slot: TaskSlot::new(),
-            provision_slot: TaskSlot::new(),
-            provision_export_slot: TaskSlot::new(),
+            provision: ProvisionTaskState::default(),
             prune_slot: TaskSlot::new(),
             batch_delete_slot: TaskSlot::new(),
+            progress_slot: Arc::new(Mutex::new(None)),
             next_operation_id: 0,
             active_operation: None,
             critical_worker: None,
@@ -311,8 +304,30 @@ impl TaskHub {
         true
     }
 
+    pub fn request_workspace_scan(&mut self, root: PathBuf) -> (u64, u64) {
+        let snapshot = Arc::new(crate::application::catalog_snapshot::CatalogSnapshot::new(
+            &root,
+        ));
+        let devices = self.request_device_scan_model(ScanRequest {
+            root: root.clone(),
+            snapshot: Some(snapshot.clone()),
+        });
+        let backups = self.request_backup_scan_model(ScanRequest {
+            root,
+            snapshot: Some(snapshot),
+        });
+        (devices, backups)
+    }
+
     pub fn request_device_scan(&mut self, backup_dir: PathBuf) -> u64 {
-        match self.device_slot.request_latest(backup_dir) {
+        self.request_device_scan_model(ScanRequest {
+            root: backup_dir,
+            snapshot: None,
+        })
+    }
+
+    fn request_device_scan_model(&mut self, request: ScanRequest) -> u64 {
+        match self.device_slot.request_latest(request) {
             LatestRequest::Started {
                 generation,
                 request,
@@ -324,12 +339,16 @@ impl TaskHub {
         }
     }
 
-    fn start_device_scan(&mut self, generation: u64, backup_dir: PathBuf) {
+    fn start_device_scan(&mut self, generation: u64, request: ScanRequest) {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let outcome = catch_unwind(AssertUnwindSafe(|| {
                 let runner = SysRunner;
-                crate::application::scan_device_dashboard(&runner, &backup_dir)
+                if let Some(snapshot) = request.snapshot {
+                    crate::application::scan_dashboard_snapshot(&runner, &snapshot)
+                } else {
+                    crate::application::scan_device_dashboard(&runner, &request.root)
+                }
             }));
             let message = match outcome {
                 Ok(rows) => WorkerResult::Devices { generation, rows },
@@ -343,7 +362,14 @@ impl TaskHub {
     }
 
     pub fn request_backup_scan(&mut self, backup_dir: PathBuf) -> u64 {
-        match self.backup_slot.request_latest(backup_dir) {
+        self.request_backup_scan_model(ScanRequest {
+            root: backup_dir,
+            snapshot: None,
+        })
+    }
+
+    fn request_backup_scan_model(&mut self, request: ScanRequest) -> u64 {
+        match self.backup_slot.request_latest(request) {
             LatestRequest::Started {
                 generation,
                 request,
@@ -355,14 +381,22 @@ impl TaskHub {
         }
     }
 
-    fn start_backup_scan(&mut self, generation: u64, backup_dir: PathBuf) {
+    fn start_backup_scan(&mut self, generation: u64, request: ScanRequest) {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let outcome = catch_unwind(AssertUnwindSafe(|| {
-                crate::application::scan_backup_workspace(&backup_dir)
+                if let Some(snapshot) = request.snapshot {
+                    crate::application::workspace_from_snapshot(&snapshot)
+                } else {
+                    crate::application::scan_backup_workspace_checked(&request.root)
+                }
             }));
             let message = match outcome {
-                Ok(rows) => WorkerResult::Backups { generation, rows },
+                Ok(Ok(rows)) => WorkerResult::Backups { generation, rows },
+                Ok(Err(message)) => WorkerResult::BackupError {
+                    generation,
+                    message,
+                },
                 Err(payload) => WorkerResult::BackupError {
                     generation,
                     message: format!("备份扫描异常终止: {}", panic_message(payload)),
@@ -372,10 +406,19 @@ impl TaskHub {
         });
     }
 
-    /// Drain all ready messages exactly once so one result kind cannot consume another.
+    /// Limit each frame to 512 queued boundaries/results; snapshots use a single slot.
     pub fn poll(&mut self) -> TaskUpdates {
         let mut updates = TaskUpdates::default();
-        while let Ok(message) = self.rx.try_recv() {
+        let slot = self.progress_slot.clone();
+        // Publishing and draining share the lock so a newer snapshot cannot
+        // overtake an older queued boundary. Critical workers never wait for UI consumption.
+        let mut pending = slot.lock().unwrap_or_else(|error| error.into_inner());
+        let mut exhausted = false;
+        for _ in 0..512 {
+            let Ok(message) = self.rx.try_recv() else {
+                exhausted = true;
+                break;
+            };
             match message {
                 WorkerResult::Devices { generation, rows } => {
                     match self.device_slot.finish_latest(generation) {
@@ -415,9 +458,11 @@ impl TaskHub {
                 }
                 WorkerResult::PostRestoreFormat {
                     operation_id,
+                    assessment,
                     result,
                 } => {
                     if self.finish_operation(operation_id) {
+                        updates.post_restore_assessment = assessment;
                         updates.post_restore_format = Some((operation_id, result));
                     }
                 }
@@ -443,6 +488,18 @@ impl TaskHub {
                 } => {
                     if self.active_operation == Some(operation_id) {
                         updates.write_progress.push((operation_id, event));
+                    }
+                }
+                WorkerResult::PostRestoreFormatProgress {
+                    operation_id,
+                    event,
+                } => {
+                    if self.active_operation == Some(operation_id) {
+                        super::progress_transport::push_progress_coalesced(
+                            &mut updates.post_restore_format_progress,
+                            operation_id,
+                            event,
+                        );
                     }
                 }
                 WorkerResult::AdvancedInspect { generation, result } => {
@@ -529,49 +586,19 @@ impl TaskHub {
                         updates.backup_prune_execute = Some((operation_id, result));
                     }
                 }
-                WorkerResult::ProvisionKeyProbe { generation, result } => {
-                    if self.provision_key_probe_slot.finish(generation) {
-                        updates.provision_key_probe = Some(result);
-                    }
+                WorkerResult::Provision(result) => {
+                    self.route_provision_result(result, &mut updates.provision)
                 }
-                WorkerResult::ProvisionKeyVerify {
-                    revision,
-                    domain,
-                    result,
-                } => {
-                    updates
-                        .provision_key_verify
-                        .push((domain, revision, result));
-                }
-                WorkerResult::ProvisionPlan { generation, result } => {
-                    if self.provision_slot.finish(generation) {
-                        updates.provision_plan = Some(result);
-                    }
-                }
-                WorkerResult::ProvisionProgress {
-                    operation_id,
-                    event,
-                } => {
-                    if self.active_operation == Some(operation_id) {
-                        super::progress_transport::push_progress_coalesced(
-                            &mut updates.provision_progress,
-                            operation_id,
-                            event,
-                        );
-                    }
-                }
-                WorkerResult::ProvisionWrite {
-                    operation_id,
-                    result,
-                } => {
-                    if self.finish_operation(operation_id) {
-                        updates.provision_write = Some((operation_id, result));
-                    }
-                }
-                WorkerResult::ProvisionExport { generation, result } => {
-                    if self.provision_export_slot.finish(generation) {
-                        updates.provision_export = Some(result);
-                    }
+            }
+        }
+        if exhausted {
+            if let Some((operation_id, kind, event)) = pending.take() {
+                if self.active_operation == Some(operation_id) {
+                    let target = match kind {
+                        ProgressKind::Format => &mut updates.post_restore_format_progress,
+                        ProgressKind::Provision => &mut updates.provision.progress,
+                    };
+                    super::progress_transport::push_progress_coalesced(target, operation_id, event);
                 }
             }
         }
@@ -580,132 +607,5 @@ impl TaskHub {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn critical_operation_slot_is_exclusive_and_ids_do_not_repeat() {
-        let mut hub = TaskHub::new();
-        let first = hub.begin_operation().expect("first operation");
-        assert_eq!(hub.active_operation(), Some(first));
-        assert!(hub.begin_operation().is_err());
-        assert!(hub.finish_operation(first));
-
-        let second = hub.begin_operation().expect("second operation");
-        assert_ne!(first, second);
-    }
-
-    #[test]
-    fn progress_batch_retains_every_worker_event_in_order() {
-        let mut hub = TaskHub::new();
-        let operation_id = hub.begin_operation().unwrap();
-        for (index, phase) in [
-            crate::application::progress::Phase::Backup,
-            crate::application::progress::Phase::Metadata,
-            crate::application::progress::Phase::Readback,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            hub.tx
-                .send(WorkerResult::ProvisionProgress {
-                    operation_id,
-                    event: crate::application::progress::ProgressEvent::new(
-                        phase,
-                        crate::application::progress::Step::ProtocolReadback,
-                        index as u64,
-                        3,
-                    ),
-                })
-                .unwrap();
-        }
-        let updates = hub.poll();
-        assert_eq!(
-            updates
-                .provision_progress
-                .into_iter()
-                .map(|(_, event)| event.phase)
-                .collect::<Vec<_>>(),
-            [
-                crate::application::progress::Phase::Backup,
-                crate::application::progress::Phase::Metadata,
-                crate::application::progress::Phase::Readback,
-            ]
-        );
-    }
-
-    #[test]
-    fn backup_restore_progress_batch_retains_every_event_in_order() {
-        let mut hub = TaskHub::new();
-        let operation_id = hub.begin_operation().unwrap();
-        for event in [
-            crate::application::WriteEvent::BackupCreated {
-                path: std::path::PathBuf::from("a.edpb"),
-            },
-            crate::application::WriteEvent::RestoreWriteCompleted,
-        ] {
-            hub.tx
-                .send(WorkerResult::WriteProgress {
-                    operation_id,
-                    event,
-                })
-                .unwrap();
-        }
-        let updates = hub.poll();
-        assert_eq!(updates.write_progress.len(), 2);
-        assert!(matches!(
-            updates.write_progress[0].1,
-            crate::application::WriteEvent::BackupCreated { .. }
-        ));
-        assert!(matches!(
-            updates.write_progress[1].1,
-            crate::application::WriteEvent::RestoreWriteCompleted
-        ));
-    }
-
-    #[test]
-    fn critical_worker_can_be_joined_after_ui_failure() {
-        let mut hub = TaskHub::new();
-        let operation_id = hub.begin_operation().expect("operation");
-        let completed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let worker_completed = completed.clone();
-        hub.critical_worker = Some(std::thread::spawn(move || {
-            worker_completed.store(true, std::sync::atomic::Ordering::SeqCst);
-        }));
-
-        hub.wait_for_critical_operation();
-        assert!(completed.load(std::sync::atomic::Ordering::SeqCst));
-        assert_eq!(hub.active_operation(), None);
-        assert!(operation_id.get() > 0);
-    }
-
-    #[test]
-    fn refresh_while_scanning_keeps_one_latest_follow_up() {
-        let mut hub = TaskHub::new();
-        assert!(hub.device_slot.single_flight.try_start());
-
-        hub.request_device_scan(PathBuf::from("first"));
-        hub.request_device_scan(PathBuf::from("latest"));
-
-        assert_eq!(
-            hub.device_slot
-                .pending_latest
-                .as_ref()
-                .map(|(_, path)| path.as_path()),
-            Some(std::path::Path::new("latest"))
-        );
-        assert!(hub.device_slot.single_flight.is_running());
-    }
-
-    #[test]
-    fn verify_keeps_only_the_latest_queued_target() {
-        let mut hub = TaskHub::new();
-        assert!(hub.verify_slot.single_flight.try_start());
-        hub.request_backup_verify(PathBuf::from("one.bin"), PathBuf::from("backups"));
-        hub.request_backup_verify(PathBuf::from("two.bin"), PathBuf::from("backups"));
-        assert!(matches!(
-            hub.verify_slot.pending_latest.as_ref(),
-            Some((_, (path, _))) if path == &PathBuf::from("two.bin")
-        ));
-    }
-}
+#[path = "task_tests.rs"]
+mod tests;

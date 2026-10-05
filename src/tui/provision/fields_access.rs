@@ -81,20 +81,38 @@ impl AppState {
             ProvisionFieldId::MaxPasswordErrors(crate::provision::KeyDomainRole::Encrypt) => {
                 Some(&mut self.provision.form.max_encrypt_password_errors)
             }
-            ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Share) => {
-                Some(&mut self.provision.form.share_source_password)
-            }
-            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Share) => {
-                Some(&mut self.provision.form.share_target_password)
-            }
-            ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Encrypt) => {
-                Some(&mut self.provision.form.encrypt_source_password)
-            }
-            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Encrypt) => {
-                Some(&mut self.provision.form.encrypt_target_password)
-            }
+            ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Share) => None,
+            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Share) => None,
+            ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Encrypt) => None,
+            ProvisionFieldId::TargetPassword(crate::provision::KeyDomainRole::Encrypt) => None,
             _ => None,
         }
+    }
+
+    pub(super) fn provision_replace_selected_field(&mut self, value: String) -> bool {
+        use crate::provision::KeyDomainRole;
+        match self.provision_field_id(self.provision.field_selected) {
+            Some(ProvisionFieldId::SourcePassword(KeyDomainRole::Share)) => {
+                self.provision.form.share_source_password = value.into()
+            }
+            Some(ProvisionFieldId::SourcePassword(KeyDomainRole::Encrypt)) => {
+                self.provision.form.encrypt_source_password = value.into()
+            }
+            Some(ProvisionFieldId::TargetPassword(KeyDomainRole::Share)) => {
+                self.provision.form.share_target_password = value.into()
+            }
+            Some(ProvisionFieldId::TargetPassword(KeyDomainRole::Encrypt)) => {
+                self.provision.form.encrypt_target_password = value.into()
+            }
+            _ => {
+                if let Some(field) = self.provision_selected_field_mut() {
+                    *field = value;
+                } else {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     pub(super) fn provision_selected_field(&self) -> Option<&str> {

@@ -9,19 +9,6 @@ impl AppState {
         self.provision.scheme_selected
     }
 
-    pub fn provision_open_scheme_picker(&mut self) -> bool {
-        if self.shell.workspace != Workspace::Devices || self.provision.target_disk.is_none() {
-            return false;
-        }
-        self.provision.scheme_selected = self
-            .provision
-            .scheme_selected
-            .min(ProvisionKind::ALL.len() - 1);
-        self.provision.scheme_picker_open = true;
-        self.provision.message = None;
-        true
-    }
-
     pub fn provision_close_scheme_picker(&mut self) {
         self.provision.scheme_picker_open = false;
     }

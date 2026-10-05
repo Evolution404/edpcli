@@ -16,12 +16,15 @@ use crate::provision::{
 };
 
 mod format_operation;
+mod format_progress;
 mod layout_projection;
 mod reinitialize;
-pub use format_operation::format_partition_after_restore_on_disk;
-pub use format_operation::format_partition_on_disk;
 pub use format_operation::{
     format_encrypted_partition_after_restore_on_disk, format_encrypted_partition_on_disk,
+};
+pub use format_operation::{
+    format_partition_after_restore_on_disk, format_partition_after_restore_on_disk_assessed,
+    format_partition_on_disk,
 };
 pub use layout_projection::project_restored_layout_readonly;
 pub use reinitialize::{
@@ -119,6 +122,13 @@ pub struct PostRestoreFormatResult {
     pub result: Result<(), String>,
 }
 
+/// The assessment comes from the actual post-write readback, not a frontend inference.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AssessedPostRestoreFormatResult {
+    pub format: PostRestoreFormatResult,
+    pub assessment: Option<PostRestoreAssessment>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EncryptedPostRestoreError {
     FileKey(ExistingFileKeyError),
@@ -178,6 +188,7 @@ impl EncryptedPartitionReinitializeRequest {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn format_partition_after_restore(
     dev: &mut dyn SectorDev,
     assessment: &PostRestoreAssessment,
@@ -186,6 +197,7 @@ pub(crate) fn format_partition_after_restore(
     volume_label: &str,
     volume_serial: u32,
     file_key: Option<&[u8; 16]>,
+    observer: &mut dyn FnMut(crate::application::progress::ProgressEvent),
 ) -> PostRestoreFormatResult {
     let result = (|| {
         if request.partition_index != partition.index {
@@ -212,6 +224,10 @@ pub(crate) fn format_partition_after_restore(
         {
             return Err("恢复后评估分区几何与格式化目标不一致".into());
         }
+        crate::application::progress::emit_isolated(
+            observer,
+            format_progress::stage(crate::application::progress::FormatStep::BuildImage),
+        );
         let plain_image =
             build_empty_partition_image(partition, request.filesystem, volume_label, volume_serial)
                 .map_err(|error| format!("格式化镜像生成失败: {error}"))?;
@@ -223,6 +239,10 @@ pub(crate) fn format_partition_after_restore(
             return Err("格式化镜像写入范围超出所选分区".into());
         }
         let image = if let Some(file_key) = file_key {
+            crate::application::progress::emit_isolated(
+                observer,
+                format_progress::stage(crate::application::progress::FormatStep::EncryptImage),
+            );
             plain_image.transformed(&EdpSm4Transform::new(*file_key))
         } else {
             plain_image
@@ -231,9 +251,18 @@ pub(crate) fn format_partition_after_restore(
             dev,
             partition.start_lba,
             &image,
-            &mut |_| {},
+            &mut |activity| {
+                crate::application::progress::emit_isolated(
+                    observer,
+                    format_progress::activity(activity),
+                );
+            },
         )
         .map_err(|error| error.msg)?;
+        crate::application::progress::emit_isolated(
+            observer,
+            format_progress::stage(crate::application::progress::FormatStep::VerifyFilesystem),
+        );
         let boot = read_sector(dev, partition.start_lba)?;
         let plain_boot = if let Some(file_key) = file_key {
             decrypt_mode2(&boot, file_key)?

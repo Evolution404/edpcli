@@ -79,6 +79,8 @@ pub struct BackupsState {
     pub(super) device_tree_selected: usize,
     pub(super) device_tree_scroll_x: usize,
     pub(super) device_tree_expanded: bool,
+    pub(super) layout_target: Option<(std::path::PathBuf, Option<String>)>,
+    pub(super) layout_regions: crate::tui::disk_region_list::DiskRegionListState,
     pub(super) pane_focus: crate::tui::pane::PaneFocus,
 }
 
@@ -97,6 +99,8 @@ impl Default for BackupsState {
             device_tree_selected: 0,
             device_tree_scroll_x: 0,
             device_tree_expanded: true,
+            layout_target: None,
+            layout_regions: Default::default(),
             pane_focus: crate::tui::pane::PaneFocus::backups(),
         }
     }
@@ -203,10 +207,6 @@ impl AppState {
         nodes
     }
 
-    pub fn backup_device_filter(&self) -> &BackupDeviceFilter {
-        &self.backups.device_filter
-    }
-
     pub fn backup_device_filter_active(&self) -> bool {
         !matches!(self.backups.device_filter, BackupDeviceFilter::All)
     }
@@ -289,7 +289,7 @@ impl AppState {
     pub fn backup_device_tree_count_width(&self) -> usize {
         self.backup_device_tree_nodes()
             .iter()
-            .map(|node| node.count.to_string().len())
+            .map(|node| node.count.to_string().len() + 2)
             .max()
             .unwrap_or(1)
             .max(3)

@@ -16,20 +16,38 @@ pub(super) fn commit_event(
         let work = WorkProgress::from_activity(activity);
         let step_span = ProgressSpan::for_index(current, total);
         let work_span = match activity.phase {
+            TransactionActivityPhase::SyncPreflight => step_span.subspan(0, 0),
             TransactionActivityPhase::Mirror => step_span.subspan(0, 1_000),
             TransactionActivityPhase::Write => step_span.subspan(1_000, 6_000),
+            TransactionActivityPhase::Sync => step_span.subspan(6_000, 6_000),
             TransactionActivityPhase::Readback => step_span.subspan(6_000, 10_000),
             TransactionActivityPhase::FormatWrite => step_span.subspan(0, 7_500),
             TransactionActivityPhase::FormatReadback => step_span.subspan(7_500, 10_000),
             TransactionActivityPhase::RollbackWrite
+            | TransactionActivityPhase::RollbackSync
             | TransactionActivityPhase::RollbackReadback => step_span.subspan(0, 0),
         };
         event.overall = work_span.interpolate(work.current, work.total);
-        event.work = Some(work);
-        event.log_policy = LogPolicy::SnapshotOnly;
+        if activity.total > 0 {
+            event.delivery = crate::application::progress::ProgressDelivery::WorkSnapshot;
+            event.work = Some(work);
+            event.log_policy = LogPolicy::SnapshotOnly;
+        } else {
+            event.detail = Some(
+                match activity.phase {
+                    TransactionActivityPhase::SyncPreflight => "写前缓存同步预检",
+                    TransactionActivityPhase::RollbackSync => "同步回滚缓存到介质",
+                    _ => "同步写入缓存到介质",
+                }
+                .into(),
+            );
+            event.log_policy = LogPolicy::AppendOnChange;
+        }
         if matches!(
             activity.phase,
-            TransactionActivityPhase::RollbackWrite | TransactionActivityPhase::RollbackReadback
+            TransactionActivityPhase::RollbackWrite
+                | TransactionActivityPhase::RollbackSync
+                | TransactionActivityPhase::RollbackReadback
         ) {
             event.severity = Severity::Warning;
         }

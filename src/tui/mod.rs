@@ -3,7 +3,10 @@
 //! Business work is delegated to `crate::application`; this module owns only terminal lifecycle,
 //! event dispatch and rendering.
 
+mod actions;
 pub mod animation;
+mod backup_layout;
+mod backup_metadata;
 pub mod clipboard;
 pub mod command;
 mod controller;
@@ -22,6 +25,8 @@ mod operation_progress_status;
 mod overview;
 pub mod pane;
 mod progress_transport;
+#[path = "provision/runtime_updates.rs"]
+mod provision_runtime_updates;
 pub mod render;
 mod result_partition_detail;
 pub mod result_workbench;
@@ -142,8 +147,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
     let mut keys = KeyMapper::new();
     let mut tasks = TaskHub::new();
     let backup_dir = crate::application::resolve_backup_dir(None);
-    tasks.request_device_scan(backup_dir.clone());
-    tasks.request_backup_scan(backup_dir.clone());
+    tasks.request_workspace_scan(backup_dir.clone());
     state.set_device_scan_pending(true);
     state.set_backup_scan_pending(true);
 
@@ -157,7 +161,16 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     redraw_requested = true;
                 }
             }
+            // Elapsed/wait status must advance even when decorative motion is off.
+            if motion_mode == animation::MotionMode::Off
+                && state.post_restore_format_running()
+                && now.duration_since(last_animation_tick) >= Duration::from_secs(1)
+            {
+                last_animation_tick = now;
+                redraw_requested = true;
+            }
 
+            tasks.retain_provision_context(&state);
             let updates = tasks.poll();
             redraw_requested |= updates.has_updates();
             apply_task_updates(&mut state, &mut tasks, updates, &backup_dir);
@@ -179,7 +192,10 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             if redraw_requested
                 && last_render_at.is_none_or(|last| now.duration_since(last) >= MIN_RENDER_INTERVAL)
             {
-                session.terminal.draw(|frame| render::draw(frame, &state))?;
+                session.terminal.draw(|frame| {
+                    state.set_viewport_size(frame.area().as_size());
+                    render::draw(frame, &state);
+                })?;
                 redraw_requested = false;
                 last_render_at = Some(now);
             }

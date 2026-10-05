@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::application::media_identity::MediaIdentityResumePin;
+use crate::application::progress::FormatStep;
 use crate::application::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use crate::application::Prompter;
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_TARGET};
@@ -18,14 +19,35 @@ pub fn format_partition_after_restore_on_disk(
     request: &PartitionFormatRequest,
     volume_label: &str,
 ) -> PostRestoreFormatResult {
+    format_partition_after_restore_on_disk_assessed(
+        runner,
+        disk,
+        prompt,
+        outcome,
+        request,
+        volume_label,
+    )
+    .format
+}
+
+pub fn format_partition_after_restore_on_disk_assessed(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    prompt: &mut dyn Prompter,
+    outcome: &MetadataRestoreOutcome,
+    request: &PartitionFormatRequest,
+    volume_label: &str,
+) -> AssessedPostRestoreFormatResult {
+    format_progress::emit(prompt, format_progress::stage(FormatStep::VerifyTarget));
     let volume_serial = crate::diskio::Clock::now_epoch(&crate::diskio::SystemClock) as u32;
+    let mut assessment = None;
     let result = (|| -> EdpCliResult<()> {
         let expected = outcome
             .format_target_pin
             .as_ref()
             .ok_or_else(|| failure("元数据恢复后未能固定目标介质身份，禁止格式化"))?;
         let mut dev = crate::application::device::open_readonly_usb_disk(runner, disk)?;
-        let format = format_partition_on_disk(
+        let format = format_partition_on_disk_with_key(
             runner,
             disk,
             &mut dev,
@@ -35,14 +57,19 @@ pub fn format_partition_after_restore_on_disk(
             request,
             volume_label,
             volume_serial,
+            None,
+            &mut assessment,
         );
         format.result.map_err(failure)
     })()
     .map_err(|error: EdpCliError| error.msg);
-    PostRestoreFormatResult {
-        partition_index: request.partition_index,
-        filesystem: request.filesystem,
-        result,
+    AssessedPostRestoreFormatResult {
+        format: PostRestoreFormatResult {
+            partition_index: request.partition_index,
+            filesystem: request.filesystem,
+            result,
+        },
+        assessment,
     }
 }
 
@@ -103,6 +130,7 @@ pub fn format_encrypted_partition_on_disk(
     volume_label: &str,
     volume_serial: u32,
 ) -> EncryptedPostRestoreFormatResult {
+    format_progress::emit(prompt, format_progress::stage(FormatStep::VerifyTarget));
     let result = match verified_original_file_key(dev, outcome, request.partition_index, password) {
         Ok((original_password, key)) => format_partition_on_disk_with_key(
             runner,
@@ -115,6 +143,7 @@ pub fn format_encrypted_partition_on_disk(
             volume_label,
             volume_serial,
             Some((original_password, &key)),
+            &mut None,
         )
         .result
         .map_err(EncryptedPostRestoreError::Operation),
@@ -136,6 +165,7 @@ pub fn format_encrypted_partition_after_restore_on_disk(
     password: Option<&[u8]>,
     volume_label: &str,
 ) -> EncryptedPostRestoreFormatResult {
+    format_progress::emit(prompt, format_progress::stage(FormatStep::VerifyTarget));
     let result = (|| -> EdpCliResult<Result<(), EncryptedPostRestoreError>> {
         let expected = outcome
             .format_target_pin
@@ -296,6 +326,7 @@ pub fn format_partition_on_disk(
         volume_label,
         volume_serial,
         None,
+        &mut None,
     )
 }
 
@@ -311,7 +342,9 @@ fn format_partition_on_disk_with_key(
     volume_label: &str,
     volume_serial: u32,
     original_key: Option<(&[u8], &[u8; 16])>,
+    assessment_sink: &mut Option<PostRestoreAssessment>,
 ) -> PostRestoreFormatResult {
+    format_progress::emit(prompt, format_progress::stage(FormatStep::VerifyTarget));
     let result = (|| -> EdpCliResult<()> {
         if !outcome.report.metadata_restored || !outcome.report.readback_verified {
             return Err(failure("元数据恢复尚未成功且读回验证，禁止后续格式化"));
@@ -390,6 +423,7 @@ fn format_partition_on_disk_with_key(
         )) {
             return Err(failure("已取消本次分区格式化"));
         }
+        format_progress::emit(prompt, format_progress::stage(FormatStep::LockAndReopen));
         let session = session.prepare_write().map_err(|error| {
             EdpCliError::new(EXIT_IO, format!("无法卸载/锁定 disk{disk}: {error}"))
         })?;
@@ -429,8 +463,10 @@ fn format_partition_on_disk_with_key(
             volume_label,
             volume_serial,
             original_key.map(|(_, key)| key),
+            &mut |event| prompt.operation_progress(event),
         );
         format.result.map_err(failure)?;
+        format_progress::emit(prompt, format_progress::stage(FormatStep::Reassess));
         let after = assess(dev).map_err(failure)?;
         if !after.partitions.iter().any(|candidate| {
             candidate.index == request.partition_index
@@ -440,6 +476,8 @@ fn format_partition_on_disk_with_key(
         }) {
             return Err(failure("格式化读回后重新评估未达到 Usable"));
         }
+        *assessment_sink = Some(after);
+        format_progress::emit(prompt, format_progress::completed());
         Ok(())
     })()
     .map_err(|error| error.msg);

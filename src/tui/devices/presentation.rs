@@ -1,4 +1,5 @@
 use super::*;
+use crate::common::fmt_sector_percentage as percentage;
 use crate::tui::state::DeviceInfoNodeKey;
 
 pub(super) fn device_detail_lines(
@@ -439,16 +440,4 @@ fn styled_field_line(
 
 fn format_bytes(bytes: u64) -> String {
     crate::common::fmt_capacity(bytes)
-}
-
-fn percentage(sectors: u64, total: u64) -> String {
-    if total == 0 {
-        return "0.00%".into();
-    }
-    let ratio = sectors as f64 * 100.0 / total as f64;
-    if ratio > 0.0 && ratio < 0.01 {
-        "<0.01%".into()
-    } else {
-        format!("{ratio:.2}%")
-    }
 }

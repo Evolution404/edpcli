@@ -433,6 +433,7 @@ pub(super) fn backup(
             BackupIntegrityStatus::Invalid
         },
         size_ok: healthy,
+        verification_error: None,
         content_sha256: Some("0123456789abcdef".repeat(4)),
         coverage: Some(coverage()),
         restore_preview: None,

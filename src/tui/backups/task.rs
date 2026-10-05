@@ -256,10 +256,12 @@ impl TaskHub {
                 }
 
                 let runner = SysRunner;
-                let expected = intent
-                    .expected_identity
-                    .as_ref()
-                    .ok_or_else(|| "错误: TUI 备份缺少 typed 介质身份 pin".to_string())?;
+                let expected = intent.expected_identity.as_ref().ok_or_else(|| {
+                    crate::application::error::OperationError::from(
+                        "TUI 备份缺少 typed 介质身份 pin",
+                    )
+                    .in_phase("备份")
+                })?;
                 let mut prompt = BackupPrompter {
                     tx: tx.clone(),
                     operation_id,
@@ -272,10 +274,15 @@ impl TaskHub {
                     expected,
                 )
                 .map(|_| ())
-                .map_err(|error| error.msg)
+                .map_err(crate::application::error::OperationError::from)
+                .map_err(|error| error.in_phase("备份"))
             }))
             .unwrap_or_else(|payload| {
-                Err(format!("备份后台任务异常终止: {}", panic_message(payload)))
+                Err(crate::application::error::OperationError::from(format!(
+                    "备份后台任务异常终止: {}",
+                    panic_message(payload)
+                ))
+                .in_phase("备份后台任务"))
             });
             let _ = tx.send(WorkerResult::Write {
                 operation_id,

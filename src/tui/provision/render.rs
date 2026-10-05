@@ -202,6 +202,11 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
                     kind: crate::tui::ui::MediaWriteConfirmationKind::Provision,
                     title: "制盘写入确认",
                     warning: "写入开始后不能撤销".into(),
+                    target: state
+                        .provision_target_disk()
+                        .map(|disk| state.confirmation_target(disk))
+                        .unwrap_or_else(|| "未选择设备".into()),
+                    detail_scroll: state.confirmation_offset(),
                     details,
                     confirmation: &provision.confirmation,
                     message: provision.message.as_ref(),

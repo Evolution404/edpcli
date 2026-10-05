@@ -22,11 +22,13 @@ pub(super) fn manifest_serial_quality(
     }
 }
 
-pub(super) fn manifest_transport(value: crate::platform::NativeTransport) -> ManifestTransport {
+pub(super) fn manifest_transport(
+    value: crate::domain::hardware::NativeTransport,
+) -> ManifestTransport {
     match value {
-        crate::platform::NativeTransport::Uas => ManifestTransport::Uas,
-        crate::platform::NativeTransport::Bot => ManifestTransport::Bot,
-        crate::platform::NativeTransport::Unknown => ManifestTransport::Unknown,
+        crate::domain::hardware::NativeTransport::Uas => ManifestTransport::Uas,
+        crate::domain::hardware::NativeTransport::Bot => ManifestTransport::Bot,
+        crate::domain::hardware::NativeTransport::Unknown => ManifestTransport::Unknown,
     }
 }
 
@@ -135,11 +137,13 @@ pub(super) fn canonical_serial_quality(
     }
 }
 
-pub(super) fn canonical_transport(value: ManifestTransport) -> crate::platform::NativeTransport {
+pub(super) fn canonical_transport(
+    value: ManifestTransport,
+) -> crate::domain::hardware::NativeTransport {
     match value {
-        ManifestTransport::Uas => crate::platform::NativeTransport::Uas,
-        ManifestTransport::Bot => crate::platform::NativeTransport::Bot,
-        ManifestTransport::Unknown => crate::platform::NativeTransport::Unknown,
+        ManifestTransport::Uas => crate::domain::hardware::NativeTransport::Uas,
+        ManifestTransport::Bot => crate::domain::hardware::NativeTransport::Bot,
+        ManifestTransport::Unknown => crate::domain::hardware::NativeTransport::Unknown,
     }
 }
 

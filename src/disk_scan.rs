@@ -8,7 +8,7 @@ use std::io;
 use std::path::Path;
 
 use crate::common::SECTOR;
-use crate::diskio::{self, find_backups};
+use crate::diskio;
 use crate::identify::identify;
 use crate::metainfo;
 use crate::protocol::semantic::SemanticContext;
@@ -231,7 +231,19 @@ pub fn scan_disks(
     backup_dir: &Path,
     read_disk: &dyn Fn(u32, u32) -> io::Result<Vec<u8>>,
 ) -> Vec<Row> {
+    scan_disks_with_catalog(runner, read_disk, || {
+        diskio::scan_backup_dir_checked(backup_dir)
+    })
+}
+
+pub(crate) fn scan_disks_with_catalog(
+    runner: &dyn CmdRunner,
+    read_disk: &dyn Fn(u32, u32) -> io::Result<Vec<u8>>,
+    load_catalog: impl FnOnce() -> Result<Vec<diskio::BackupEntry>, String>,
+) -> Vec<Row> {
     let mut rows = Vec::new();
+    let catalog = std::cell::OnceCell::new();
+    let mut load_catalog = Some(load_catalog);
     for d in sysinfo::list_external_disks(runner) {
         let mut row = Row {
             disk: d.n,
@@ -411,7 +423,12 @@ pub fn scan_disks(
                     }
                 }
 
-                let matches = find_backups(backup_dir, &identity);
+                let entries = catalog
+                    .get_or_init(|| load_catalog.take().expect("catalog loader called once")());
+                let entries = entries
+                    .as_ref()
+                    .map_err(|error| io::Error::other(error.clone()))?;
+                let matches = diskio::match_backup_entries(entries, &identity);
                 row.identity_pin = Some(crate::media_identity::MediaIdentityPin::new(
                     identity,
                     &protocol_image,
@@ -436,6 +453,42 @@ pub fn scan_disks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn refresh_loads_one_catalog_for_multiple_disks_and_none_if_denied() {
+        use crate::platform::test_support::MultiUsbRunner;
+        let mut mbr = vec![0; SECTOR];
+        mbr[510..].copy_from_slice(&[0x55, 0xaa]);
+        mbr[0x1be + 4] = 0x07;
+        mbr[0x1be + 8..0x1be + 12].copy_from_slice(&2048u32.to_le_bytes());
+        mbr[0x1be + 12..0x1be + 16].copy_from_slice(&30720u32.to_le_bytes());
+        let reads = |_: u32, lba: u32| {
+            Ok(if lba == 0 {
+                mbr.clone()
+            } else {
+                vec![0; SECTOR]
+            })
+        };
+        let loads = std::cell::Cell::new(0);
+        let rows = scan_disks_with_catalog(&MultiUsbRunner, &reads, || {
+            loads.set(loads.get() + 1);
+            Ok(Vec::new())
+        });
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows.iter().all(|row| row.probe_error.is_none()),
+            "{:?}",
+            rows.iter().map(|row| &row.probe_error).collect::<Vec<_>>()
+        );
+        assert_eq!(loads.get(), 1);
+        let denied =
+            |_: u32, _: u32| Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied"));
+        let rows = scan_disks_with_catalog(&MultiUsbRunner, &denied, || {
+            panic!("denied disks must not scan backups")
+        });
+        assert!(rows.iter().all(|row| row.denied));
+    }
 
     #[test]
     fn scan_partition_volume_label_reads_real_fat16_metadata() {

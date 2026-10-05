@@ -41,17 +41,6 @@ use restore_confirmation_render::draw_restore_write_confirmation;
 use restore_result_render::draw_post_restore_result;
 use wizard_result_render::draw_wizard_result;
 
-fn backup_health(backup: &crate::application::BackupWorkspaceItem) -> (&'static str, Style) {
-    if !backup.size_ok {
-        ("大小异常", danger())
-    } else {
-        match backup.integrity_status {
-            crate::application::BackupIntegrityStatus::Verified => ("EDPB ✓", success()),
-            crate::application::BackupIntegrityStatus::Invalid => ("EDPB ✗", danger()),
-        }
-    }
-}
-
 fn safe(value: &str) -> String {
     crate::ui::sanitize_terminal_text(value)
 }
@@ -145,49 +134,6 @@ fn input_value_window(value: &str, cursor: usize, width: usize, secret: bool) ->
         out.push('›');
     }
     out
-}
-
-fn hard_wrap_value(value: &str, width: usize) -> Vec<String> {
-    let value = safe(value);
-    let width = width.max(1);
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    let mut current_width = 0usize;
-
-    for ch in value.chars() {
-        let char_width = crate::ui::disp_width(&ch.to_string()).max(1);
-        if current_width > 0 && current_width + char_width > width {
-            lines.push(std::mem::take(&mut current));
-            current_width = 0;
-        }
-        current.push(ch);
-        current_width += char_width;
-    }
-
-    if !current.is_empty() || lines.is_empty() {
-        lines.push(current);
-    }
-    lines
-}
-
-fn wrapped_field_lines(
-    label: &'static str,
-    value: &str,
-    content_width: usize,
-) -> Vec<Line<'static>> {
-    let label_width = crate::ui::disp_width(label);
-    let value_width = content_width.saturating_sub(label_width).max(1);
-    hard_wrap_value(value, value_width)
-        .into_iter()
-        .enumerate()
-        .map(|(index, chunk)| {
-            if index == 0 {
-                Line::from(vec![Span::styled(label, muted()), Span::raw(chunk)])
-            } else {
-                Line::from(vec![Span::raw(" ".repeat(label_width)), Span::raw(chunk)])
-            }
-        })
-        .collect()
 }
 
 fn accent() -> Style {
@@ -334,6 +280,14 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
     } else {
         area
     };
+
+    if wizard.stage == WizardStage::Formatting {
+        if let Some(run) = wizard.format_run.as_ref() {
+            frame.render_widget(Clear, content_area);
+            draw_operation_progress(frame, content_area, run, state.animation_frame(), None);
+            return;
+        }
+    }
 
     if wizard.stage == WizardStage::Result {
         draw_wizard_result(frame, area, wizard);
@@ -758,6 +712,8 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                     kind: super::ui::MediaWriteConfirmationKind::Format,
                     title: "格式化写入确认",
                     warning: format!("确认后将直接开始向 {target} 写入"),
+                    target: target.clone(),
+                    detail_scroll: state.confirmation_offset(),
                     details: vec![
                         Line::from(vec![
                             Span::styled("目标  ", muted()),
@@ -785,6 +741,8 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                     kind: super::ui::MediaWriteConfirmationKind::EncryptedFormat,
                     title: "加密格式化写入确认",
                     warning: format!("确认后将直接开始向 {target} 写入"),
+                    target: target.clone(),
+                    detail_scroll: state.confirmation_offset(),
                     details: vec![
                         Line::from(vec![
                             Span::styled("目标  ", muted()),
@@ -813,6 +771,8 @@ fn draw_wizard(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState)
                     kind: super::ui::MediaWriteConfirmationKind::Reinitialize,
                     title: "加密分区重建写入确认",
                     warning: format!("确认后将直接开始向 {target} 写入"),
+                    target: target.clone(),
+                    detail_scroll: state.confirmation_offset(),
                     details: vec![
                         Line::from(vec![
                             Span::styled("目标  ", muted()),
@@ -852,21 +812,12 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
     let notice = state.notice_message();
     let status = super::status::dynamic_status(state);
     let operation_progress_running = state.provision().stage == ProvisionStage::Running
-        || state
-            .wizard()
-            .is_some_and(|wizard| wizard.stage == WizardStage::Running);
+        || state.wizard().is_some_and(|wizard| {
+            matches!(wizard.stage, WizardStage::Running | WizardStage::Formatting)
+        });
     let footer_height =
         u16::from(!operation_progress_running || notice.is_some() || status.is_some());
-    let constraints = vec![
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(1),
-        Constraint::Length(footer_height),
-    ];
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(area);
+    let chunks = crate::tui::backup_layout::shell_areas(area, footer_height);
 
     super::shell::header(frame, chunks[0], state, core_mode);
     super::shell::navigation(frame, chunks[1], state);
@@ -921,28 +872,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{hard_wrap_value, input_value_window, wrapped_field_lines};
+    use super::input_value_window;
     use crate::tui::table_layout::table_row_window;
-
-    #[test]
-    fn hard_wrap_breaks_unspaced_values_by_terminal_display_width() {
-        assert_eq!(
-            hard_wrap_value("abcdefghijkl", 5),
-            vec!["abcde", "fghij", "kl"]
-        );
-        assert_eq!(hard_wrap_value("江苏省电力", 6), vec!["江苏省", "电力"]);
-    }
-
-    #[test]
-    fn wrapped_field_keeps_the_first_value_chunk_on_the_label_line() {
-        let lines = wrapped_field_lines("文件  ", "abcdefghijkl", 10);
-        assert_eq!(lines.len(), 3);
-        assert_eq!(lines[0].spans.len(), 2);
-        assert_eq!(lines[0].spans[0].content.as_ref(), "文件  ");
-        assert_eq!(lines[0].spans[1].content.as_ref(), "abcd");
-        assert_eq!(lines[1].spans[1].content.as_ref(), "efgh");
-        assert_eq!(lines[2].spans[1].content.as_ref(), "ijkl");
-    }
 
     #[test]
     fn active_input_window_does_not_pad_selected_background_to_cell_width() {

@@ -5,7 +5,7 @@ impl AppState {
         use crate::tui::pane::PaneId;
         use crate::tui::table_layout::TableKind;
 
-        if self.shell.wizard.as_ref().is_some_and(|wizard| {
+        if self.restore.wizard.as_ref().is_some_and(|wizard| {
             wizard.stage == WizardStage::PostRestore
                 && wizard.post_restore_workbench.focused_pane() == PaneId::ResultPartitions
         }) {

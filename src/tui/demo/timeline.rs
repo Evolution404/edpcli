@@ -22,6 +22,9 @@ fn demo_progress(
     let mut event = ProgressEvent::new(phase, step, current, total);
     event.operation = operation;
     event.work = work.map(WorkProgress::from_activity);
+    if event.work.is_some() {
+        event.delivery = crate::application::progress::ProgressDelivery::WorkSnapshot;
+    }
     event.detail = Some(detail.into());
     event.severity = Severity::Info;
     event.log_policy = if event.work.is_some() {

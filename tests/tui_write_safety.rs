@@ -1,6 +1,11 @@
 #[test]
 fn write_safety_primitives_live_only_in_application_service() {
-    let service = include_str!("../src/application/write.rs");
+    let service = [
+        include_str!("../src/application/write.rs"),
+        include_str!("../src/application/write/backup.rs"),
+        include_str!("../src/application/write/restore.rs"),
+    ]
+    .concat();
     for required in [
         "guard_usb_disk",
         "create_metadata_backup",
@@ -150,7 +155,12 @@ fn critical_exit_contract_covers_ctrl_c_through_quit_intent() {
 
 #[test]
 fn shared_write_service_does_not_print_directly_into_tui_terminal() {
-    let service = include_str!("../src/application/write.rs");
+    let service = [
+        include_str!("../src/application/write.rs"),
+        include_str!("../src/application/write/backup.rs"),
+        include_str!("../src/application/write/restore.rs"),
+    ]
+    .concat();
     assert!(!service.contains("println!("));
     assert!(!service.contains("print!("));
     assert!(service.contains(".write_event("));

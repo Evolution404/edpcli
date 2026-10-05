@@ -22,6 +22,9 @@ import time
 from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from change_scope import documentation_suites
+
 
 def configure_console_encoding() -> None:
     for stream in (sys.stdout, sys.stderr):
@@ -134,22 +137,30 @@ def run_text(command: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def changed_paths() -> list[str]:
-    worktree = run_text(["git", "diff", "--name-only", "HEAD"])
-    if worktree.returncode == 0:
-        paths = [line.strip() for line in worktree.stdout.splitlines() if line.strip()]
-        if paths:
-            return paths
-
-    latest = run_text(["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"])
-    if latest.returncode == 0:
-        return [line.strip() for line in latest.stdout.splitlines() if line.strip()]
-    return []
+    """Include staged, unstaged and untracked files through one shared detector."""
+    paths: set[str] = set()
+    for command in (
+        ["git", "diff", "--name-only", "-z", "HEAD"],
+        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+    ):
+        result = run_text(command)
+        if result.returncode == 0:
+            paths.update(path for path in result.stdout.split("\0") if path)
+    if paths:
+        return sorted(paths)
+    latest = run_text(["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "HEAD"])
+    return sorted(path for path in latest.stdout.split("\0") if path) if latest.returncode == 0 else []
 
 
 def suites_for_paths(paths: Iterable[str]) -> set[str]:
     selected = set(CORE_FAST_SUITES)
     for raw in paths:
         path = raw.replace("\\", "/")
+        selected.update(documentation_suites(path))
+        if path.startswith(("tests/common/", "tests/support/")) or path in {
+            f"tests/{suite}.rs" for suite in ALL_SUITES
+        }:
+            return set(ALL_SUITES)
         direct = TEST_SOURCE_SUITES.get(path)
         if direct:
             selected.add(direct)
@@ -191,7 +202,7 @@ def suites_for_paths(paths: Iterable[str]) -> set[str]:
             "README.md",
         }:
             selected.add("repository_suite")
-        elif path.startswith("src/"):
+        elif path.startswith(("src/", "tests/")):
             return set(ALL_SUITES)
     return selected
 
@@ -378,6 +389,7 @@ def annotate_failure(summary: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--list-changed-paths", action="store_true", help="print the shared change detector result without compiling")
     parser.add_argument("--profile", choices=("fast", "full"), default="full")
     parser.add_argument("--suite", action="append", choices=ALL_SUITES)
     parser.add_argument(
@@ -409,6 +421,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     configure_console_encoding()
     args = parse_args()
+    if args.list_changed_paths:
+        print("\n".join(changed_paths()))
+        return 0
     if args.workers < 1 or args.workers > 8:
         raise SystemExit("--workers must be between 1 and 8")
     if args.test_threads < 1 or args.test_threads > 16:
@@ -441,6 +456,12 @@ def main() -> int:
         print(f"[fast] selected suites: {', '.join(suites)}")
 
     started = time.monotonic()
+    runner_checks = run_text([sys.executable, "scripts/tests/test_test_runner.py"])
+    if runner_checks.returncode:
+        print(runner_checks.stdout, end="")
+        print(runner_checks.stderr, end="", file=sys.stderr)
+        return runner_checks.returncode
+    print("[PASS] test-runner behavior checks", flush=True)
     try:
         artifacts = cargo_compile(suites, env)
     except RuntimeError as error:

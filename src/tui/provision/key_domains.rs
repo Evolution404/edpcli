@@ -5,6 +5,7 @@ impl AppState {
         use crate::provision::{KeyDomainRole, SourcePasswordKnowledge};
         use password_verification::{TargetPasswordMode, TargetPasswordModeState};
 
+        self.provision.session_id = next_form_session();
         self.provision.source_password_edit_dirty = false;
         self.provision.share_source_password_revision = 0;
         self.provision.encrypt_source_password_revision = 0;
@@ -19,8 +20,9 @@ impl AppState {
         self.provision.encrypt_source_verification = ProvisionPasswordVerificationState::Idle;
 
         let mode = kind.mode();
-        let password =
-            String::from_utf8_lossy(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD).into_owned();
+        let password = crate::domain::secret::SecretText::from(
+            crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT,
+        );
         let share_active = matches!(mode, Some(0 | 1 | 3));
         let encrypt_active = matches!(mode, Some(0..=2));
         let share_from_source =

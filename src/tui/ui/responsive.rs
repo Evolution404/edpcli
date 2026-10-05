@@ -33,12 +33,4 @@ impl ViewportClass {
             .saturating_sub(2)
             .max(1)
     }
-
-    pub const fn has_secondary(self) -> bool {
-        !matches!(self, Self::Compact)
-    }
-
-    pub const fn has_diagnostics(self) -> bool {
-        matches!(self, Self::UltraWide)
-    }
 }

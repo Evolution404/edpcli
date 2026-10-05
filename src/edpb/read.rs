@@ -3,25 +3,64 @@ use super::*;
 pub(super) fn read_exact_at(file: &mut File, offset: u64, len: usize) -> Result<Vec<u8>, String> {
     file.seek(SeekFrom::Start(offset))
         .map_err(|e| format!("EDPB seek failed: {e}"))?;
-    let mut out = vec![0u8; len];
+    let mut out = Vec::new();
+    out.try_reserve_exact(len)
+        .map_err(|error| format!("EDPB allocation failed: {error}"))?;
+    out.resize(len, 0);
     file.read_exact(&mut out)
         .map_err(|e| format!("EDPB read failed: {e}"))?;
     Ok(out)
 }
 
-pub fn verify_file(path: &Path) -> Result<VerifiedContainer, String> {
-    if path.extension().and_then(|v| v.to_str()) != Some(EXTENSION) {
-        return Err(format!("not an .{EXTENSION} backup: {}", path.display()));
+/// An immutable, bounded snapshot of validated artifacts and their manifest.
+/// All consumers use the bytes verified through one open file handle.
+#[derive(Debug)]
+pub struct VerifiedBackupReader {
+    verified: VerifiedContainer,
+    artifacts: std::collections::BTreeMap<String, Vec<u8>>,
+}
+
+impl VerifiedBackupReader {
+    pub fn open(path: &Path) -> Result<Self, String> {
+        if path.extension().and_then(|value| value.to_str()) != Some(EXTENSION) {
+            return Err(format!("not an .{EXTENSION} backup: {}", path.display()));
+        }
+        let mut file = File::open(path).map_err(|error| format!("open EDPB failed: {error}"))?;
+        verify_snapshot(&mut file)
     }
-    let mut file = File::open(path).map_err(|e| format!("open EDPB failed: {e}"))?;
-    let file_len = file
+
+    pub fn verified(&self) -> &VerifiedContainer {
+        &self.verified
+    }
+
+    pub fn read_artifact(&self, artifact_id: &str) -> Result<&[u8], String> {
+        self.artifacts
+            .get(artifact_id)
+            .map(Vec::as_slice)
+            .ok_or_else(|| format!("EDPB does not contain Artifact {artifact_id}"))
+    }
+
+    pub fn read_raw_protocol(&self) -> Result<&[u8], String> {
+        self.read_artifact(RAW_PROTOCOL_ARTIFACT_ID)
+    }
+}
+
+pub fn verify_file(path: &Path) -> Result<VerifiedContainer, String> {
+    Ok(VerifiedBackupReader::open(path)?.verified)
+}
+
+fn verify_snapshot(file: &mut File) -> Result<VerifiedBackupReader, String> {
+    let initial_metadata = file
         .metadata()
-        .map_err(|e| format!("read EDPB metadata failed: {e}"))?
-        .len();
+        .map_err(|error| format!("read EDPB metadata failed: {error}"))?;
+    let file_len = initial_metadata.len();
+    if file_len > super::limits::MAX_CONTAINER_BYTES {
+        return Err("EDPB container exceeds read budget".into());
+    }
     if file_len < (HEADER_SIZE + FOOTER_SIZE) as u64 {
         return Err("EDPB file too short".into());
     }
-    let header = read_exact_at(&mut file, 0, HEADER_SIZE)?;
+    let header = read_exact_at(file, 0, HEADER_SIZE)?;
     if header.get(..8) != Some(FILE_MAGIC.as_slice()) {
         return Err("EDPB magic mismatch".into());
     }
@@ -46,7 +85,7 @@ pub fn verify_file(path: &Path) -> Result<VerifiedContainer, String> {
     {
         return Err("EDPB footer offset or file length mismatch".into());
     }
-    let footer = read_exact_at(&mut file, footer_offset, FOOTER_SIZE)?;
+    let footer = read_exact_at(file, footer_offset, FOOTER_SIZE)?;
     if footer.get(..8) != Some(FOOTER_MAGIC.as_slice()) {
         return Err("EDPB footer magic mismatch".into());
     }
@@ -68,16 +107,23 @@ pub fn verify_file(path: &Path) -> Result<VerifiedContainer, String> {
     let manifest_end = manifest_offset
         .checked_add(manifest_len)
         .ok_or_else(|| "EDPB manifest range overflow".to_string())?;
-    if manifest_end != footer_offset {
+    if manifest_offset < HEADER_SIZE as u64 || manifest_end != footer_offset {
         return Err("EDPB manifest range is invalid".into());
     }
-    let manifest_bytes = read_exact_at(&mut file, manifest_offset, manifest_len as usize)?;
+    let manifest_size =
+        super::limits::bounded_len(manifest_len, super::limits::MAX_MANIFEST_BYTES, "manifest")?;
+    let manifest_bytes = read_exact_at(file, manifest_offset, manifest_size)?;
     if sha256_bytes(&manifest_bytes) != header_manifest_sha {
         return Err("EDPB manifest SHA-256 mismatch".into());
     }
     let manifest: Manifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|e| format!("parse EDPB manifest failed: {e}"))?;
+    if manifest.artifacts.len() > super::limits::MAX_ARTIFACTS {
+        return Err("EDPB artifact count exceeds read budget".into());
+    }
     validate_manifest_graph(&manifest)?;
+    let mut artifacts = std::collections::BTreeMap::new();
+    let mut payload_bytes = 0u64;
 
     let mut chunk_ranges = Vec::with_capacity(manifest.artifacts.len());
     for artifact in &manifest.artifacts {
@@ -88,7 +134,7 @@ pub fn verify_file(path: &Path) -> Result<VerifiedContainer, String> {
                 artifact.id, storage.codec
             ));
         }
-        if storage.data_offset != storage.frame_offset + CHUNK_HEADER_SIZE as u64 {
+        if storage.frame_offset.checked_add(CHUNK_HEADER_SIZE as u64) != Some(storage.data_offset) {
             return Err(format!("Artifact {} chunk offset mismatch", artifact.id));
         }
         let data_end = storage
@@ -99,7 +145,7 @@ pub fn verify_file(path: &Path) -> Result<VerifiedContainer, String> {
             return Err(format!("Artifact {} chunk out of bounds", artifact.id));
         }
         chunk_ranges.push((storage.frame_offset, data_end, artifact.id.as_str()));
-        let frame = read_exact_at(&mut file, storage.frame_offset, CHUNK_HEADER_SIZE)?;
+        let frame = read_exact_at(file, storage.frame_offset, CHUNK_HEADER_SIZE)?;
         if frame.get(..8) != Some(CHUNK_MAGIC.as_slice()) {
             return Err(format!("Artifact {} chunk magic mismatch", artifact.id));
         }
@@ -117,15 +163,21 @@ pub fn verify_file(path: &Path) -> Result<VerifiedContainer, String> {
         let frame_sha: [u8; 32] = frame[32..64]
             .try_into()
             .map_err(|_| format!("Artifact {} chunk hash truncated", artifact.id))?;
-        let data = read_exact_at(
-            &mut file,
-            storage.data_offset,
-            storage.stored_length as usize,
+        let length = super::limits::bounded_len(
+            storage.stored_length,
+            super::limits::MAX_ARTIFACT_BYTES,
+            "artifact",
         )?;
+        payload_bytes = payload_bytes
+            .checked_add(storage.stored_length)
+            .filter(|total| *total <= super::limits::MAX_PAYLOAD_BYTES)
+            .ok_or("EDPB total payload exceeds read budget")?;
+        let data = read_exact_at(file, storage.data_offset, length)?;
         let actual_sha = sha256_bytes(&data);
         if actual_sha != frame_sha || hex(&actual_sha) != storage.sha256 {
             return Err(format!("Artifact {} SHA-256 mismatch", artifact.id));
         }
+        artifacts.insert(artifact.id.clone(), data);
     }
 
     chunk_ranges.sort_by_key(|range| range.0);
@@ -140,37 +192,29 @@ pub fn verify_file(path: &Path) -> Result<VerifiedContainer, String> {
 
     file.seek(SeekFrom::Start(0))
         .map_err(|e| format!("EDPB full-file seek failed: {e}"))?;
-    let mut hasher = Sha256::new();
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        let n = file
-            .read(&mut buf)
-            .map_err(|e| format!("EDPB full-file read failed: {e}"))?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
+    let file_sha256 = crate::sha256::sha256_reader_hex(file, super::limits::MAX_CONTAINER_BYTES)
+        .map_err(|error| format!("EDPB full-file read failed: {error}"))?;
+    let after = file
+        .metadata()
+        .map_err(|error| format!("read EDPB metadata failed: {error}"))?;
+    if after.len() != initial_metadata.len()
+        || after.modified().ok() != initial_metadata.modified().ok()
+    {
+        return Err("EDPB changed while verifying".into());
     }
-    Ok(VerifiedContainer {
-        manifest,
-        file_sha256: hex(&hasher.finalize()),
+    Ok(VerifiedBackupReader {
+        verified: VerifiedContainer {
+            manifest,
+            file_sha256,
+        },
+        artifacts,
     })
 }
 
 pub fn read_artifact(path: &Path, artifact_id: &str) -> Result<Vec<u8>, String> {
-    let verified = verify_file(path)?;
-    let artifact = verified
-        .manifest
-        .artifacts
-        .iter()
-        .find(|artifact| artifact.id == artifact_id)
-        .ok_or_else(|| format!("EDPB does not contain Artifact {artifact_id}"))?;
-    let mut file = File::open(path).map_err(|e| format!("open EDPB failed: {e}"))?;
-    read_exact_at(
-        &mut file,
-        artifact.storage.data_offset,
-        artifact.storage.stored_length as usize,
-    )
+    Ok(VerifiedBackupReader::open(path)?
+        .read_artifact(artifact_id)?
+        .to_vec())
 }
 
 pub fn read_raw_protocol(path: &Path) -> Result<Vec<u8>, String> {

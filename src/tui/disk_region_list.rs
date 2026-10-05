@@ -4,7 +4,8 @@ mod render;
 mod state;
 
 pub(crate) use render::{
-    disk_region_list_lines, render_disk_region_list, render_disk_region_list_body,
+    disk_region_list_lines, region_row_height, render_disk_region_list,
+    render_disk_region_list_body,
 };
 pub(crate) use state::{DiskRegionListMode, DiskRegionListState};
 

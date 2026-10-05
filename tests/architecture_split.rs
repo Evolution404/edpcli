@@ -308,6 +308,29 @@ fn library_root_exposes_stable_interfaces_only() {
             "{module} is a maintained external integration surface"
         );
     }
+    for module in [
+        "backup_catalog",
+        "backup_metadata",
+        "common",
+        "crypto",
+        "disk_scan",
+        "filesystem",
+        "filesystem_capability",
+        "identify",
+        "inspect_target",
+        "metainfo",
+        "partition_transform",
+        "sectors",
+        "selectors",
+        "sha256",
+        "sysinfo",
+        "ui",
+    ] {
+        assert!(
+            source.contains(&format!("#[doc(hidden)]\npub mod {module};")),
+            "{module} is compatibility-public for integration/HIL consumers but must stay hidden from the documented stable API"
+        );
+    }
 }
 
 #[test]
@@ -320,8 +343,8 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/diskio/device.rs",
         "src/diskio/transaction.rs",
         "src/diskio/backup_config.rs",
-        "src/diskio/backup_catalog.rs",
-        "src/diskio/backup_create.rs",
+        "src/infrastructure/backup_store/catalog.rs",
+        "src/infrastructure/backup_store/create.rs",
         "src/tui/provision/state.rs",
         "src/tui/provision/execution_state.rs",
         "src/tui/provision/scheme_picker_state.rs",
@@ -357,6 +380,9 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/tui/operation_progress_render.rs",
         "src/tui/operation_progress_status.rs",
         "src/tui/progress_transport.rs",
+        "src/tui/task_progress.rs",
+        "src/tui/restore_followup_state.rs",
+        "src/tui/restore_completion_state.rs",
         "src/tui/runtime_updates.rs",
         "src/tui/resume.rs",
         "src/tui/runtime_input.rs",
@@ -1084,21 +1110,13 @@ fn protocol_semantic_does_not_depend_on_presentation_or_application_layers() {
 fn raw_write_flows_use_target_session_for_safety_transition() {
     exists("src/application/target_session.rs");
 
-    for path in [
-        "src/application/provision/commit.rs",
-        "src/application/write.rs",
-    ] {
-        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
-            .unwrap_or_else(|error| panic!("read {path}: {error}"));
-        assert!(
-            !source.contains("sysinfo::prepare_write"),
-            "{path} must enter write state through application::target_session"
-        );
-        assert!(
-            !source.contains("reopen_rdwr("),
-            "{path} must reopen raw devices through application::target_session"
-        );
-    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut sources = vec![
+        root.join("src/application/provision/commit.rs"),
+        root.join("src/application/write.rs"),
+    ];
+    sources.extend(rust_sources_under("src/application/write"));
+    assert_sources_exclude(sources, &["sysinfo::prepare_write", ".reopen_rdwr("]);
 }
 
 #[test]
@@ -1654,6 +1672,10 @@ fn app_state_owns_global_shell_state_through_shell_substate() {
     let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
     let shell = fs::read_to_string(root.join("src/tui/shell/state.rs")).expect("read shell state");
 
+    let restore = read_source("src/tui/restore/state.rs");
+    assert!(restore.contains("wizard: Option<WizardState>"));
+    assert!(!shell.contains("wizard: Option<WizardState>"));
+
     let app_state = state
         .split("pub struct AppState {")
         .nth(1)
@@ -1676,7 +1698,6 @@ fn app_state_owns_global_shell_state_through_shell_substate() {
         "search_query: String",
         "search_matches: Vec<usize>",
         "search_cursor: usize",
-        "wizard: Option<WizardState>",
         "pinned_disk: Option<u32>",
         "disk_layout_tail: crate::tui::disk_layout::TailExpansion",
         "disk_layout_selected: usize",
@@ -1695,7 +1716,7 @@ fn app_state_owns_global_shell_state_through_shell_substate() {
 }
 
 #[test]
-fn app_state_is_only_shell_plus_four_workspace_states() {
+fn app_state_is_only_shell_plus_five_workspace_states() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let state = fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state");
     let app_state = state
@@ -1712,6 +1733,7 @@ fn app_state_is_only_shell_plus_four_workspace_states() {
         fields,
         [
             "shell: ShellState,",
+            "restore: RestoreState,",
             "devices: DevicesState,",
             "inspect: InspectState,",
             "backups: BackupsState,",
@@ -1785,7 +1807,7 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
     let matcher = read_source("src/media_identity.rs");
     let edpb_writer = read_source("src/edpb/write.rs");
     let edpb_legacy = read_source("src/edpb/legacy.rs");
-    let backup_writer = read_source("src/diskio/backup_create.rs");
+    let backup_writer = read_source("src/infrastructure/backup_store/create.rs");
     let lineage = read_source("src/application/provision/identity_lineage.rs");
 
     let authorize = restore
@@ -1818,33 +1840,27 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
     assert!(lineage.contains("backup_dir.join(\".edpcli/identity-lineage/v1\")"));
     assert!(!lineage.contains("write_sector("));
 
-    for path in [
-        "src/tui/devices/render.rs",
-        "src/tui/backups/render.rs",
-        "src/tui/inspect/render.rs",
-    ] {
-        let renderer = read_source(path);
-        for forbidden in [
+    let mut frontend_features = rust_sources_under("src/tui/devices");
+    frontend_features.extend(rust_sources_under("src/tui/backups"));
+    frontend_features.extend(rust_sources_under("src/tui/inspect"));
+    assert_sources_exclude(
+        frontend_features,
+        &[
             "FileDev::open_",
             "verify_file(",
             "read_raw_protocol(",
             "find_backups(",
             "observe_media_identity_readonly(",
-        ] {
-            assert!(!renderer.contains(forbidden), "{path} contains {forbidden}");
-        }
-    }
+        ],
+    );
 
-    for path in [
-        "src/application/provision.rs",
-        "src/application/provision/prepare.rs",
-        "src/application/provision/commit.rs",
-        "src/provision/plain.rs",
-        "src/provision/reprovision/plan.rs",
-        "src/tui/provision/review.rs",
-    ] {
-        let text = read_source(path);
-        for forbidden in [
+    let mut provision_sources = rust_sources_under("src/application/provision");
+    provision_sources.push(root.join("src/application/provision.rs"));
+    provision_sources.extend(rust_sources_under("src/provision"));
+    provision_sources.extend(rust_sources_under("src/tui/provision"));
+    assert_sources_exclude(
+        provision_sources,
+        &[
             "RegionDisposition::Migrate",
             "migration_sources",
             "prepare_migrations",
@@ -1855,13 +1871,8 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
             "文件级 staging",
             "K6 Plain→EDP",
             "K6 EDP→Plain",
-        ] {
-            assert!(
-                !text.contains(forbidden),
-                "Provision file migration must stay removed: {path} contains {forbidden}"
-            );
-        }
-    }
+        ],
+    );
     for path in [
         "src/application/provision/migration.rs",
         "src/provision/migration.rs",
@@ -1898,7 +1909,7 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
 #[test]
 fn plain_scan_and_prepare_share_geometry_aware_filesystem_evidence() {
     let scan = read_source("src/disk_scan.rs");
-    let prepare = read_source("src/application/provision/prepare.rs");
+    let prepare = read_source("src/application/provision/prepare/source_profile.rs");
     let helper = "detect_boot_sector_with_geometry(";
 
     assert!(
@@ -2088,7 +2099,7 @@ fn restore_result_capacity_is_formatted_by_shared_result_projection() {
 #[test]
 fn post_restore_layout_projection_is_application_owned_and_nonfatal() {
     let projection = include_str!("../src/application/post_restore/layout_projection.rs");
-    let restore = include_str!("../src/application/write.rs");
+    let restore = include_str!("../src/application/write/restore.rs");
 
     assert!(projection.contains("parse_existing_provision"));
     assert!(projection.contains("DiskRegionKind::from_partition_role"));
@@ -2100,11 +2111,11 @@ fn post_restore_layout_projection_is_application_owned_and_nonfatal() {
     );
 
     let restore_tail = restore
-        .split("let layout = super::post_restore::project_restored_layout_readonly")
+        .split("let layout = crate::application::post_restore::project_restored_layout_readonly")
         .nth(1)
         .expect("restore flow must retain a typed layout projection result");
     let outcome_section = restore_tail
-        .split("Ok(super::post_restore::MetadataRestoreOutcome")
+        .split("Ok(crate::application::post_restore::MetadataRestoreOutcome")
         .nth(1)
         .expect("restore flow must still return MetadataRestoreOutcome");
     assert!(
@@ -2113,7 +2124,7 @@ fn post_restore_layout_projection_is_application_owned_and_nonfatal() {
     );
     assert!(
         !restore_tail
-            .split("Ok(super::post_restore::MetadataRestoreOutcome")
+            .split("Ok(crate::application::post_restore::MetadataRestoreOutcome")
             .next()
             .unwrap_or_default()
             .contains("?;"),

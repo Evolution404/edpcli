@@ -3,6 +3,8 @@
 //! The state layer never performs I/O. That makes navigation and cancellation semantics testable
 //! without a real terminal and keeps critical-operation policy independent from crossterm.
 
+#[path = "backups/panel_state.rs"]
+mod backup_panel_state;
 #[path = "backups/state.rs"]
 mod backups_state;
 #[path = "devices/state.rs"]
@@ -15,10 +17,18 @@ mod inspect_state;
 mod navigation;
 #[path = "navigation_state.rs"]
 mod navigation_state;
+#[path = "post_restore_progress_state.rs"]
+mod post_restore_progress_state;
 #[path = "provision/state.rs"]
 mod provision_state;
+#[path = "restore_completion_state.rs"]
+mod restore_completion_state;
+#[path = "restore_followup_state.rs"]
+mod restore_followup_state;
 #[path = "restore_result_state.rs"]
 mod restore_result_state;
+#[path = "restore/state.rs"]
+mod restore_state;
 #[path = "result_partition_table_state.rs"]
 mod result_partition_table_state;
 #[path = "shell/state.rs"]
@@ -31,92 +41,8 @@ pub use devices_state::*;
 pub use inspect_state::*;
 pub use navigation::*;
 pub use provision_state::*;
+pub use restore_state::*;
 pub use shell_state::*;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WriteKind {
-    Restore,
-    BackupCreate,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WizardStage {
-    Confirm,
-    Running,
-    PostRestore,
-    VolumeLabelInput,
-    PasswordInput,
-    EncryptedFormatConfirm,
-    FormatConfirm,
-    Formatting,
-    ReinitializePassword,
-    ReinitializePasswordConfirm,
-    ReinitializeConfirm,
-    Reinitializing,
-    Result,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PostRestoreLabelTarget {
-    PlainFormat,
-    EncryptedFormat,
-    Reinitialize,
-}
-
-pub type ExpectedIdentity = crate::application::media_identity::MediaIdentityResumePin;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WriteIntent {
-    pub kind: WriteKind,
-    pub disk: u32,
-    pub backup: Option<std::path::PathBuf>,
-    pub expected_identity: Option<ExpectedIdentity>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PostRestoreFormatIntent {
-    pub disk: u32,
-    pub outcome: crate::application::post_restore::MetadataRestoreOutcome,
-    pub request: crate::application::post_restore::PartitionFormatRequest,
-    pub volume_label: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct EncryptedPostRestoreFormatIntent {
-    pub disk: u32,
-    pub outcome: crate::application::post_restore::MetadataRestoreOutcome,
-    pub request: crate::application::post_restore::PartitionFormatRequest,
-    pub password: Option<crate::provision::SecretBytes>,
-    pub volume_label: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct PostRestoreReinitializeIntent {
-    pub disk: u32,
-    pub outcome: crate::application::post_restore::MetadataRestoreOutcome,
-    pub request: crate::application::post_restore::EncryptedPartitionReinitializeRequest,
-    pub filesystem: crate::filesystem::FilesystemKind,
-    pub volume_label: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct WizardState {
-    pub stage: WizardStage,
-    pub kind: WriteKind,
-    pub disk: u32,
-    pub backup: Option<std::path::PathBuf>,
-    pub expected_identity: Option<ExpectedIdentity>,
-    pub confirmation: String,
-    pub message: Option<crate::tui::ui::UiMessage>,
-    pub restore_outcome: Option<crate::application::post_restore::MetadataRestoreOutcome>,
-    pub post_restore_workbench: crate::tui::result_workbench::ResultWorkbenchState,
-    pub pending_format: Option<crate::application::post_restore::PartitionFormatRequest>,
-    pub volume_label_input: String,
-    pub volume_label_target: Option<PostRestoreLabelTarget>,
-    pub secret_input: crate::provision::SecretBytes,
-    pub secret_first: crate::provision::SecretBytes,
-    pub run: Option<crate::application::progress::OperationRunState>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Workspace {
@@ -159,6 +85,8 @@ pub enum NavCommand {
     Bottom,
     HalfPageDown,
     HalfPageUp,
+    PageUp,
+    PageDown,
     Search,
     NextMatch,
     PreviousMatch,
@@ -192,6 +120,7 @@ pub enum StateEffect {
 
 pub struct AppState {
     shell: ShellState,
+    restore: RestoreState,
     devices: DevicesState,
     inspect: InspectState,
     backups: BackupsState,
@@ -208,6 +137,7 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             shell: ShellState::default(),
+            restore: RestoreState::default(),
             devices: DevicesState::default(),
             inspect: InspectState::default(),
             backups: BackupsState::default(),
@@ -469,942 +399,6 @@ impl AppState {
         self.shell.notice_at = None;
     }
 
-    pub fn wizard(&self) -> Option<&WizardState> {
-        self.shell.wizard.as_ref()
-    }
-
-    pub fn begin_write_wizard(
-        &mut self,
-        kind: WriteKind,
-        disk: u32,
-        backup: Option<std::path::PathBuf>,
-    ) -> bool {
-        self.begin_write_wizard_for_identity(kind, disk, backup, None)
-    }
-
-    pub fn begin_write_wizard_for_identity(
-        &mut self,
-        kind: WriteKind,
-        disk: u32,
-        backup: Option<std::path::PathBuf>,
-        expected_identity: Option<ExpectedIdentity>,
-    ) -> bool {
-        if self.shell.critical_operation {
-            self.set_warning_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());
-            return false;
-        }
-        let stage = WizardStage::Confirm;
-        self.shell.input_mode = if kind == WriteKind::Restore {
-            InputMode::Confirm
-        } else {
-            InputMode::Normal
-        };
-        self.shell.wizard = Some(WizardState {
-            stage,
-            kind,
-            disk,
-            backup,
-            expected_identity,
-            confirmation: String::new(),
-            message: None,
-            restore_outcome: None,
-            post_restore_workbench: crate::tui::result_workbench::ResultWorkbenchState::default(),
-            pending_format: None,
-            volume_label_input: String::new(),
-            volume_label_target: None,
-            secret_input: crate::provision::SecretBytes::default(),
-            secret_first: crate::provision::SecretBytes::default(),
-            run: None,
-        });
-        true
-    }
-
-    pub fn confirm_backup_create(&mut self) -> Option<WriteIntent> {
-        let wizard = self.shell.wizard.as_mut()?;
-        if wizard.kind != WriteKind::BackupCreate || wizard.stage != WizardStage::Confirm {
-            return None;
-        }
-        let intent = WriteIntent {
-            kind: wizard.kind,
-            disk: wizard.disk,
-            backup: None,
-            expected_identity: wizard.expected_identity.clone(),
-        };
-        wizard.stage = WizardStage::Running;
-        wizard.message = Some(crate::tui::ui::UiMessage::progress(
-            "正在只读采集并创建元数据备份。",
-        ));
-        let mut run = crate::application::progress::OperationRunState::new(
-            crate::application::progress::OperationKind::Backup,
-            format!("disk{}", wizard.disk),
-        );
-        run.push(crate::application::progress::ProgressEvent::started(
-            crate::application::progress::OperationKind::Backup,
-            crate::application::progress::Phase::Backup,
-            crate::application::progress::Step::BackupCreate,
-            "正在只读采集设备元数据",
-        ));
-        wizard.run = Some(run);
-        self.shell.input_mode = InputMode::Normal;
-        self.shell.critical_operation = true;
-        Some(intent)
-    }
-
-    fn selected_post_restore_format(
-        wizard: &WizardState,
-    ) -> Option<crate::application::post_restore::PartitionFormatRequest> {
-        use crate::filesystem::FilesystemKind;
-
-        let outcome = wizard.restore_outcome.as_ref()?;
-        let selected = wizard.active_post_restore_partition_index()?;
-        let partition = outcome.assessment.partitions.get(selected)?;
-        let hint = partition.filesystem_hint.as_deref().unwrap_or_default();
-        let filesystem = if hint.eq_ignore_ascii_case("fat16") {
-            FilesystemKind::Fat16
-        } else if hint.eq_ignore_ascii_case("exfat") {
-            FilesystemKind::ExFat
-        } else if hint.eq_ignore_ascii_case("ntfs") || hint.eq_ignore_ascii_case("fat32") {
-            return None;
-        } else if partition.role.as_deref() == Some("boot") {
-            FilesystemKind::Fat16
-        } else {
-            FilesystemKind::first_party_default()
-        };
-        Some(crate::application::post_restore::PartitionFormatRequest {
-            partition_index: partition.index,
-            filesystem,
-        })
-    }
-
-    fn clear_post_restore_volume_label(wizard: &mut WizardState) {
-        wizard.volume_label_input.clear();
-        wizard.volume_label_target = None;
-    }
-
-    fn selected_post_restore_volume_label(wizard: &WizardState, partition_index: u32) -> String {
-        wizard
-            .restore_outcome
-            .as_ref()
-            .and_then(|outcome| {
-                outcome
-                    .partitions
-                    .iter()
-                    .find(|partition| partition.index == partition_index)
-            })
-            .and_then(|partition| partition.volume_label_hint.clone())
-            .unwrap_or_default()
-    }
-
-    fn begin_volume_label_input(
-        wizard: &mut WizardState,
-        target: PostRestoreLabelTarget,
-        request: crate::application::post_restore::PartitionFormatRequest,
-    ) {
-        wizard.volume_label_input =
-            Self::selected_post_restore_volume_label(wizard, request.partition_index);
-        wizard.volume_label_target = Some(target);
-        wizard.pending_format = Some(request);
-        wizard.confirmation.clear();
-        wizard.message = None;
-        wizard.stage = WizardStage::VolumeLabelInput;
-    }
-
-    pub fn begin_selected_post_restore_action(&mut self) {
-        use crate::application::post_restore::PostRestorePartitionState;
-
-        let Some(wizard) = self.shell.wizard.as_mut() else {
-            return;
-        };
-        if wizard.stage != WizardStage::PostRestore {
-            return;
-        }
-        let Some(outcome) = wizard.restore_outcome.as_ref() else {
-            return;
-        };
-        let Some(selected) = wizard.active_post_restore_partition_index() else {
-            wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                "当前激活区域不是可处理分区。",
-            ));
-            return;
-        };
-        let Some(partition) = outcome.assessment.partitions.get(selected) else {
-            return;
-        };
-        let state = partition.state;
-        let requires_original_key = partition.requires_original_key;
-
-        match state {
-            PostRestorePartitionState::NeedsFormat if !requires_original_key => {
-                let Some(request) = Self::selected_post_restore_format(wizard) else {
-                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                        "当前便携格式化器尚不支持该文件系统。",
-                    ));
-                    return;
-                };
-                Self::begin_volume_label_input(
-                    wizard,
-                    PostRestoreLabelTarget::PlainFormat,
-                    request,
-                );
-                self.shell.input_mode = InputMode::Insert;
-            }
-            PostRestorePartitionState::NeedsFormat => {
-                let Some(request) = Self::selected_post_restore_format(wizard) else {
-                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                        "当前便携格式化器尚不支持该文件系统。",
-                    ));
-                    return;
-                };
-                wizard.secret_input = crate::provision::SecretBytes::default();
-                Self::begin_volume_label_input(
-                    wizard,
-                    PostRestoreLabelTarget::EncryptedFormat,
-                    request,
-                );
-                wizard.message = Some(crate::tui::ui::UiMessage::success(
-                    "原密钥域已验证；可确认或修改恢复后的卷标。",
-                ));
-                self.shell.input_mode = InputMode::Insert;
-            }
-            PostRestorePartitionState::PasswordRequired => {
-                let Some(request) = Self::selected_post_restore_format(wizard) else {
-                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                        "当前便携格式化器尚不支持该文件系统。",
-                    ));
-                    return;
-                };
-                wizard.volume_label_input =
-                    Self::selected_post_restore_volume_label(wizard, request.partition_index);
-                wizard.volume_label_target = Some(PostRestoreLabelTarget::EncryptedFormat);
-                wizard.pending_format = Some(request);
-                wizard.secret_input = crate::provision::SecretBytes::default();
-                wizard.secret_first = crate::provision::SecretBytes::default();
-                wizard.message = None;
-                wizard.stage = WizardStage::PasswordInput;
-                self.shell.input_mode = InputMode::Insert;
-            }
-            PostRestorePartitionState::CryptoMetadataInvalid => {
-                let Some(request) = Self::selected_post_restore_format(wizard) else {
-                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                        "当前便携格式化器尚不支持该文件系统。",
-                    ));
-                    return;
-                };
-                wizard.volume_label_input =
-                    Self::selected_post_restore_volume_label(wizard, request.partition_index);
-                wizard.volume_label_target = Some(PostRestoreLabelTarget::Reinitialize);
-                wizard.pending_format = Some(request);
-                wizard.secret_input = crate::provision::SecretBytes::default();
-                wizard.secret_first = crate::provision::SecretBytes::default();
-                wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                    "将清空并重建该加密分区：旧 FileKey 与旧密码会失效。",
-                ));
-                wizard.stage = WizardStage::ReinitializePassword;
-                self.shell.input_mode = InputMode::Insert;
-            }
-            PostRestorePartitionState::Usable => {
-                let message = if partition.role.as_deref() == Some("compatibility_reserve") {
-                    "模式2兼容保留区不承载文件系统，无需格式化。"
-                } else {
-                    "该分区已经可用，不需要执行破坏性操作。"
-                };
-                wizard.message = Some(crate::tui::ui::UiMessage::info(message));
-            }
-            PostRestorePartitionState::Unsupported => {
-                wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                    "当前状态无法可靠处理，拒绝猜测执行。",
-                ));
-            }
-        }
-    }
-
-    fn secret_char_count(secret: &crate::provision::SecretBytes) -> usize {
-        secret
-            .as_bytes()
-            .iter()
-            .filter(|byte| (**byte & 0b1100_0000) != 0b1000_0000)
-            .count()
-    }
-
-    pub fn wizard_secret_len(&self) -> usize {
-        self.shell
-            .wizard
-            .as_ref()
-            .map_or(0, |wizard| Self::secret_char_count(&wizard.secret_input))
-    }
-
-    pub fn push_wizard_secret_char(&mut self, ch: char) {
-        let Some(wizard) = self.shell.wizard.as_mut() else {
-            return;
-        };
-        if !matches!(
-            wizard.stage,
-            WizardStage::PasswordInput
-                | WizardStage::ReinitializePassword
-                | WizardStage::ReinitializePasswordConfirm
-        ) || wizard.secret_input.as_bytes().len() >= 128
-        {
-            return;
-        }
-        let mut bytes = wizard.secret_input.as_bytes().to_vec();
-        let mut encoded = [0u8; 4];
-        bytes.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
-        wizard.secret_input = crate::provision::SecretBytes::new(&bytes);
-        bytes.fill(0);
-        encoded.fill(0);
-        wizard.message = None;
-    }
-
-    pub fn backspace_wizard_secret(&mut self) {
-        let Some(wizard) = self.shell.wizard.as_mut() else {
-            return;
-        };
-        if !matches!(
-            wizard.stage,
-            WizardStage::PasswordInput
-                | WizardStage::ReinitializePassword
-                | WizardStage::ReinitializePasswordConfirm
-        ) {
-            return;
-        }
-        let mut bytes = wizard.secret_input.as_bytes().to_vec();
-        if !bytes.is_empty() {
-            let mut cut = bytes.len() - 1;
-            while cut > 0 && (bytes[cut] & 0b1100_0000) == 0b1000_0000 {
-                cut -= 1;
-            }
-            bytes.truncate(cut);
-        }
-        wizard.secret_input = crate::provision::SecretBytes::new(&bytes);
-        bytes.fill(0);
-        wizard.message = None;
-    }
-
-    pub fn submit_wizard_secret(&mut self) {
-        let Some(wizard) = self.shell.wizard.as_mut() else {
-            return;
-        };
-        if wizard.secret_input.is_empty() {
-            wizard.message = Some(crate::tui::ui::UiMessage::warning("密码不能为空。"));
-            return;
-        }
-        match wizard.stage {
-            WizardStage::PasswordInput => {
-                wizard.confirmation.clear();
-                wizard.message = None;
-                wizard.stage = WizardStage::VolumeLabelInput;
-                self.shell.input_mode = InputMode::Insert;
-            }
-            WizardStage::ReinitializePassword => {
-                wizard.secret_first = wizard.secret_input.clone();
-                wizard.secret_input = crate::provision::SecretBytes::default();
-                wizard.message = None;
-                wizard.stage = WizardStage::ReinitializePasswordConfirm;
-                self.shell.input_mode = InputMode::Insert;
-            }
-            WizardStage::ReinitializePasswordConfirm => {
-                if wizard.secret_first != wizard.secret_input {
-                    wizard.secret_first = crate::provision::SecretBytes::default();
-                    wizard.secret_input = crate::provision::SecretBytes::default();
-                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                        "两次输入的新密码不一致，请重新输入。",
-                    ));
-                    wizard.stage = WizardStage::ReinitializePassword;
-                    self.shell.input_mode = InputMode::Insert;
-                    return;
-                }
-                wizard.confirmation.clear();
-                wizard.message = None;
-                wizard.stage = WizardStage::VolumeLabelInput;
-                self.shell.input_mode = InputMode::Insert;
-            }
-            _ => {}
-        }
-    }
-
-    pub fn push_wizard_volume_label_char(&mut self, ch: char) {
-        let Some(wizard) = self.shell.wizard.as_mut() else {
-            return;
-        };
-        if wizard.stage != WizardStage::VolumeLabelInput
-            || wizard.volume_label_input.len() >= 128
-            || ch.is_control()
-        {
-            return;
-        }
-        wizard.volume_label_input.push(ch);
-        wizard.message = None;
-    }
-
-    pub fn backspace_wizard_volume_label(&mut self) {
-        let Some(wizard) = self.shell.wizard.as_mut() else {
-            return;
-        };
-        if wizard.stage == WizardStage::VolumeLabelInput {
-            wizard.volume_label_input.pop();
-            wizard.message = None;
-        }
-    }
-
-    pub fn submit_wizard_volume_label(&mut self) {
-        let Some(wizard) = self.shell.wizard.as_mut() else {
-            return;
-        };
-        if wizard.stage != WizardStage::VolumeLabelInput {
-            return;
-        }
-        let Some(request) = wizard.pending_format.as_ref() else {
-            wizard.message = Some(crate::tui::ui::UiMessage::error("缺少恢复后格式化请求。"));
-            return;
-        };
-        if let Err(message) =
-            crate::filesystem::validate_volume_label(request.filesystem, &wizard.volume_label_input)
-        {
-            wizard.message = Some(crate::tui::ui::UiMessage::error(message));
-            return;
-        }
-        wizard.confirmation.clear();
-        wizard.message = None;
-        wizard.stage = match wizard.volume_label_target {
-            Some(PostRestoreLabelTarget::PlainFormat) => WizardStage::FormatConfirm,
-            Some(PostRestoreLabelTarget::EncryptedFormat) => WizardStage::EncryptedFormatConfirm,
-            Some(PostRestoreLabelTarget::Reinitialize) => WizardStage::ReinitializeConfirm,
-            None => {
-                wizard.message = Some(crate::tui::ui::UiMessage::error("缺少卷标输入目标。"));
-                return;
-            }
-        };
-        self.shell.input_mode = InputMode::Confirm;
-    }
-
-    pub fn cancel_post_restore_volume_label(&mut self) {
-        if let Some(wizard) = self.shell.wizard.as_mut() {
-            if wizard.stage == WizardStage::VolumeLabelInput {
-                wizard.stage = WizardStage::PostRestore;
-                wizard.confirmation.clear();
-                wizard.pending_format = None;
-                wizard.volume_label_input.clear();
-                wizard.volume_label_target = None;
-                wizard.secret_input = crate::provision::SecretBytes::default();
-                wizard.secret_first = crate::provision::SecretBytes::default();
-                wizard.message = None;
-                self.shell.input_mode = InputMode::Normal;
-            }
-        }
-    }
-
-    pub fn cancel_post_restore_secret_flow(&mut self) {
-        if let Some(wizard) = self.shell.wizard.as_mut() {
-            if matches!(
-                wizard.stage,
-                WizardStage::PasswordInput
-                    | WizardStage::EncryptedFormatConfirm
-                    | WizardStage::ReinitializePassword
-                    | WizardStage::ReinitializePasswordConfirm
-                    | WizardStage::ReinitializeConfirm
-            ) {
-                wizard.stage = WizardStage::PostRestore;
-                wizard.confirmation.clear();
-                wizard.pending_format = None;
-                wizard.volume_label_input.clear();
-                wizard.volume_label_target = None;
-                wizard.secret_input = crate::provision::SecretBytes::default();
-                wizard.secret_first = crate::provision::SecretBytes::default();
-                wizard.message = None;
-                self.shell.input_mode = InputMode::Normal;
-            }
-        }
-    }
-
-    pub fn submit_encrypted_format_confirmation(
-        &mut self,
-    ) -> Option<EncryptedPostRestoreFormatIntent> {
-        let wizard = self.shell.wizard.as_mut()?;
-        if wizard.stage != WizardStage::EncryptedFormatConfirm {
-            return None;
-        }
-        if wizard.confirmation != "YES" {
-            wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                "开始加密格式化写入前必须独立输入 YES。",
-            ));
-            return None;
-        }
-        let outcome = wizard.restore_outcome.clone()?;
-        let request = wizard.pending_format.clone()?;
-        let password = if wizard.secret_input.is_empty() {
-            None
-        } else {
-            Some(wizard.secret_input.clone())
-        };
-        let volume_label = wizard.volume_label_input.clone();
-        wizard.confirmation.clear();
-        wizard.secret_input = crate::provision::SecretBytes::default();
-        wizard.secret_first = crate::provision::SecretBytes::default();
-        wizard.stage = WizardStage::Formatting;
-        wizard.message = Some(crate::tui::ui::UiMessage::progress(
-            "正在使用原 FileKey 创建新的空加密文件系统。",
-        ));
-        self.shell.input_mode = InputMode::Normal;
-        self.shell.critical_operation = true;
-        Some(EncryptedPostRestoreFormatIntent {
-            disk: wizard.disk,
-            outcome,
-            request,
-            password,
-            volume_label,
-        })
-    }
-
-    pub fn submit_reinitialize_confirmation(&mut self) -> Option<PostRestoreReinitializeIntent> {
-        let wizard = self.shell.wizard.as_mut()?;
-        if wizard.stage != WizardStage::ReinitializeConfirm {
-            return None;
-        }
-        if wizard.confirmation != "YES" {
-            wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                "开始重建加密分区写入前必须独立输入 YES。",
-            ));
-            return None;
-        }
-        let outcome = wizard.restore_outcome.clone()?;
-        let format = wizard.pending_format.clone()?;
-        let request = crate::application::post_restore::EncryptedPartitionReinitializeRequest::new(
-            format.partition_index,
-            wizard.secret_first.as_bytes(),
-            wizard.secret_input.as_bytes(),
-        )
-        .ok()?;
-        let volume_label = wizard.volume_label_input.clone();
-        wizard.confirmation.clear();
-        wizard.secret_input = crate::provision::SecretBytes::default();
-        wizard.secret_first = crate::provision::SecretBytes::default();
-        wizard.stage = WizardStage::Reinitializing;
-        wizard.message = Some(crate::tui::ui::UiMessage::progress(
-            "正在生成新 FileKey、更新密钥记录并创建新的空加密文件系统。",
-        ));
-        self.shell.input_mode = InputMode::Normal;
-        self.shell.critical_operation = true;
-        Some(PostRestoreReinitializeIntent {
-            disk: wizard.disk,
-            outcome,
-            request,
-            filesystem: format.filesystem,
-            volume_label,
-        })
-    }
-
-    pub fn cancel_post_restore_format(&mut self) {
-        if let Some(wizard) = self.shell.wizard.as_mut() {
-            if wizard.stage == WizardStage::FormatConfirm {
-                wizard.stage = WizardStage::PostRestore;
-                wizard.confirmation.clear();
-                wizard.pending_format = None;
-                Self::clear_post_restore_volume_label(wizard);
-                wizard.message = None;
-                self.shell.input_mode = InputMode::Normal;
-            }
-        }
-    }
-
-    pub fn submit_post_restore_format_confirmation(&mut self) -> Option<PostRestoreFormatIntent> {
-        let wizard = self.shell.wizard.as_mut()?;
-        if wizard.stage != WizardStage::FormatConfirm {
-            return None;
-        }
-        if wizard.confirmation != "YES" {
-            wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                "开始格式化写入前必须再次精确输入 YES。",
-            ));
-            return None;
-        }
-        let outcome = wizard.restore_outcome.clone()?;
-        let request = wizard.pending_format.clone()?;
-        let volume_label = wizard.volume_label_input.clone();
-        wizard.stage = WizardStage::Formatting;
-        wizard.confirmation.clear();
-        wizard.message = Some(crate::tui::ui::UiMessage::progress(
-            "正在创建新的空文件系统；元数据恢复结果保持成功。",
-        ));
-        self.shell.input_mode = InputMode::Normal;
-        self.shell.critical_operation = true;
-        Some(PostRestoreFormatIntent {
-            disk: wizard.disk,
-            outcome,
-            request,
-            volume_label,
-        })
-    }
-
-    pub fn push_wizard_confirmation(&mut self, ch: char) {
-        if let Some(wizard) = self.shell.wizard.as_mut() {
-            let media_write_confirmation = match wizard.stage {
-                WizardStage::Confirm => wizard.kind == WriteKind::Restore,
-                WizardStage::FormatConfirm
-                | WizardStage::EncryptedFormatConfirm
-                | WizardStage::ReinitializeConfirm => true,
-                _ => false,
-            };
-            if media_write_confirmation && wizard.confirmation.len() < 16 {
-                wizard.confirmation.push(ch);
-                wizard.message = None;
-            }
-        }
-    }
-
-    pub fn backspace_wizard_confirmation(&mut self) {
-        if let Some(wizard) = self.shell.wizard.as_mut() {
-            let media_write_confirmation = match wizard.stage {
-                WizardStage::Confirm => wizard.kind == WriteKind::Restore,
-                WizardStage::FormatConfirm
-                | WizardStage::EncryptedFormatConfirm
-                | WizardStage::ReinitializeConfirm => true,
-                _ => false,
-            };
-            if media_write_confirmation {
-                wizard.confirmation.pop();
-                wizard.message = None;
-            }
-        }
-    }
-
-    pub fn clear_wizard_confirmation(&mut self) {
-        if let Some(wizard) = self.shell.wizard.as_mut() {
-            wizard.confirmation.clear();
-            wizard.message = None;
-        }
-    }
-
-    pub fn submit_wizard_confirmation(&mut self) -> Option<WriteIntent> {
-        let wizard = self.shell.wizard.as_mut()?;
-        if wizard.stage != WizardStage::Confirm || wizard.kind != WriteKind::Restore {
-            return None;
-        }
-        if wizard.confirmation != "YES" {
-            wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                "必须精确输入 YES 才会开始向目标设备写入",
-            ));
-            return None;
-        }
-        let intent = WriteIntent {
-            kind: wizard.kind,
-            disk: wizard.disk,
-            backup: wizard.backup.clone(),
-            expected_identity: wizard.expected_identity.clone(),
-        };
-        wizard.stage = WizardStage::Running;
-        wizard.message = Some(crate::tui::ui::UiMessage::progress(
-            "关键写盘阶段进行中，不可中断",
-        ));
-        let mut run = crate::application::progress::OperationRunState::new(
-            crate::application::progress::OperationKind::Restore,
-            format!("disk{}", wizard.disk),
-        );
-        run.push(crate::application::progress::ProgressEvent::started(
-            crate::application::progress::OperationKind::Restore,
-            crate::application::progress::Phase::Backup,
-            crate::application::progress::Step::RestoreVerification,
-            "正在校验备份并固定恢复目标",
-        ));
-        wizard.run = Some(run);
-        self.shell.input_mode = InputMode::Normal;
-        self.shell.critical_operation = true;
-        Some(intent)
-    }
-
-    pub fn set_write_progress(&mut self, event: crate::application::WriteEvent) {
-        if let Some(wizard) = self.shell.wizard.as_mut() {
-            if wizard.stage == WizardStage::Running {
-                if let Some(run) = wizard.run.as_mut() {
-                    let operation = match wizard.kind {
-                        WriteKind::BackupCreate => {
-                            crate::application::progress::OperationKind::Backup
-                        }
-                        WriteKind::Restore => crate::application::progress::OperationKind::Restore,
-                    };
-                    run.push(crate::application::progress::project_write_event(
-                        operation, &event,
-                    ));
-                }
-            }
-        }
-    }
-
-    pub fn finish_restore(
-        &mut self,
-        result: Result<crate::application::post_restore::MetadataRestoreOutcome, String>,
-    ) {
-        self.shell.critical_operation = false;
-        let mut initialize_workbench = false;
-        {
-            let Some(wizard) = self.shell.wizard.as_mut() else {
-                return;
-            };
-            match result {
-                Ok(outcome) => {
-                    wizard.stage = WizardStage::PostRestore;
-                    wizard.restore_outcome = Some(outcome);
-                    wizard.pending_format = None;
-                    Self::clear_post_restore_volume_label(wizard);
-                    wizard.message = Some(crate::tui::ui::UiMessage::success(
-                        "元数据恢复成功；文件系统状态已完成只读检查。",
-                    ));
-                    self.shell.input_mode = InputMode::Normal;
-                    initialize_workbench = true;
-                }
-                Err(message) => {
-                    wizard.stage = WizardStage::Result;
-                    if let Some(run) = wizard.run.as_mut() {
-                        let mut event = crate::application::progress::ProgressEvent::started(
-                            crate::application::progress::OperationKind::Restore,
-                            crate::application::progress::Phase::Transaction,
-                            crate::application::progress::Step::RestoreWrite,
-                            message.clone(),
-                        );
-                        event.severity = crate::application::progress::Severity::Error;
-                        event.log_policy = crate::application::progress::LogPolicy::Append;
-                        run.push(event);
-                    }
-                    wizard.message = Some(crate::tui::ui::UiMessage::error(message));
-                    self.shell.input_mode = InputMode::Normal;
-                }
-            }
-        }
-        if initialize_workbench {
-            self.initialize_post_restore_result_workbench();
-        }
-    }
-
-    pub fn abort_post_restore_format(&mut self, message: impl Into<String>) {
-        self.shell.critical_operation = false;
-        if let Some(wizard) = self.shell.wizard.as_mut() {
-            wizard.stage = WizardStage::PostRestore;
-            wizard.pending_format = None;
-            Self::clear_post_restore_volume_label(wizard);
-            wizard.message = Some(crate::tui::ui::UiMessage::error(message));
-            self.shell.input_mode = InputMode::Normal;
-        }
-    }
-
-    pub fn finish_post_restore_format(
-        &mut self,
-        result: crate::application::post_restore::PostRestoreFormatResult,
-    ) {
-        use crate::application::post_restore::PostRestorePartitionState;
-
-        self.shell.critical_operation = false;
-        let Some(wizard) = self.shell.wizard.as_mut() else {
-            return;
-        };
-        wizard.stage = WizardStage::PostRestore;
-        wizard.pending_format = None;
-        Self::clear_post_restore_volume_label(wizard);
-        match result.result {
-            Ok(()) => {
-                if let Some(outcome) = wizard.restore_outcome.as_mut() {
-                    if let Some(partition) = outcome
-                        .assessment
-                        .partitions
-                        .iter_mut()
-                        .find(|partition| partition.index == result.partition_index)
-                    {
-                        partition.state = PostRestorePartitionState::Usable;
-                        partition.detail = "格式化完成并通过读回重新评估".into();
-                    }
-                }
-                wizard.message = Some(crate::tui::ui::UiMessage::success(format!(
-                    "分区 {} 格式化完成并重新评估为可用。",
-                    result.partition_index
-                )));
-            }
-            Err(message) => {
-                wizard.message = Some(crate::tui::ui::UiMessage::error(format!(
-                    "分区 {} 格式化失败：{}；元数据恢复仍保持成功。",
-                    result.partition_index, message
-                )));
-            }
-        }
-        self.shell.input_mode = InputMode::Normal;
-    }
-
-    pub fn finish_post_restore_encrypted_format(
-        &mut self,
-        result: crate::application::post_restore::EncryptedPostRestoreFormatResult,
-    ) {
-        use crate::application::post_restore::{
-            EncryptedPostRestoreError, PostRestorePartitionState,
-        };
-        use crate::provision::ExistingFileKeyError;
-
-        self.shell.critical_operation = false;
-        let Some(wizard) = self.shell.wizard.as_mut() else {
-            return;
-        };
-        wizard.pending_format = None;
-        wizard.secret_input = crate::provision::SecretBytes::default();
-        wizard.secret_first = crate::provision::SecretBytes::default();
-
-        match result.result {
-            Ok(()) => {
-                if let Some(outcome) = wizard.restore_outcome.as_mut() {
-                    if let Some(partition) = outcome
-                        .assessment
-                        .partitions
-                        .iter_mut()
-                        .find(|partition| partition.index == result.partition_index)
-                    {
-                        partition.state = PostRestorePartitionState::Usable;
-                        partition.detail = "原 FileKey 格式化完成并通过读回重新评估".into();
-                    }
-                }
-                wizard.stage = WizardStage::PostRestore;
-                Self::clear_post_restore_volume_label(wizard);
-                wizard.message = Some(crate::tui::ui::UiMessage::success(format!(
-                    "分区 {} 已使用原密钥域格式化并重新评估为可用。",
-                    result.partition_index
-                )));
-                self.shell.input_mode = InputMode::Normal;
-            }
-            Err(EncryptedPostRestoreError::FileKey(
-                ExistingFileKeyError::PasswordRequired | ExistingFileKeyError::PasswordMismatch,
-            )) => {
-                if let Some(outcome) = wizard.restore_outcome.as_mut() {
-                    if let Some(partition) = outcome
-                        .assessment
-                        .partitions
-                        .iter_mut()
-                        .find(|partition| partition.index == result.partition_index)
-                    {
-                        partition.state = PostRestorePartitionState::PasswordRequired;
-                    }
-                }
-                wizard.pending_format =
-                    Some(crate::application::post_restore::PartitionFormatRequest {
-                        partition_index: result.partition_index,
-                        filesystem: result.filesystem,
-                    });
-                wizard.stage = WizardStage::PasswordInput;
-                wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                    "原密码验证失败，请重新输入原密码。",
-                ));
-                self.shell.input_mode = InputMode::Insert;
-            }
-            Err(EncryptedPostRestoreError::FileKey(
-                ExistingFileKeyError::UnsupportedEncryptMode
-                | ExistingFileKeyError::FileKeyCrcMismatch
-                | ExistingFileKeyError::MalformedKeyRecord,
-            )) => {
-                if let Some(outcome) = wizard.restore_outcome.as_mut() {
-                    if let Some(partition) = outcome
-                        .assessment
-                        .partitions
-                        .iter_mut()
-                        .find(|partition| partition.index == result.partition_index)
-                    {
-                        partition.state = PostRestorePartitionState::CryptoMetadataInvalid;
-                    }
-                }
-                wizard.stage = WizardStage::PostRestore;
-                wizard.message = Some(crate::tui::ui::UiMessage::error(
-                    "密钥记录无法可靠验证；已转为“加密元数据异常”，可选择重建加密分区。",
-                ));
-                self.shell.input_mode = InputMode::Normal;
-            }
-            Err(EncryptedPostRestoreError::Operation(message)) => {
-                wizard.stage = WizardStage::PostRestore;
-                Self::clear_post_restore_volume_label(wizard);
-                wizard.message = Some(crate::tui::ui::UiMessage::error(format!(
-                    "分区 {} 加密格式化失败：{}；元数据恢复仍保持成功。",
-                    result.partition_index, message
-                )));
-                self.shell.input_mode = InputMode::Normal;
-            }
-        }
-    }
-
-    pub fn abort_post_restore_encrypted_action(&mut self, message: impl Into<String>) {
-        self.shell.critical_operation = false;
-        if let Some(wizard) = self.shell.wizard.as_mut() {
-            wizard.stage = WizardStage::PostRestore;
-            wizard.pending_format = None;
-            Self::clear_post_restore_volume_label(wizard);
-            wizard.secret_input = crate::provision::SecretBytes::default();
-            wizard.secret_first = crate::provision::SecretBytes::default();
-            wizard.message = Some(crate::tui::ui::UiMessage::error(message));
-            self.shell.input_mode = InputMode::Normal;
-        }
-    }
-
-    pub fn finish_post_restore_reinitialize(
-        &mut self,
-        result: crate::application::post_restore::EncryptedPartitionReinitializeResult,
-    ) {
-        use crate::application::post_restore::PostRestorePartitionState;
-
-        self.shell.critical_operation = false;
-        let Some(wizard) = self.shell.wizard.as_mut() else {
-            return;
-        };
-        wizard.pending_format = None;
-        Self::clear_post_restore_volume_label(wizard);
-        wizard.secret_input = crate::provision::SecretBytes::default();
-        wizard.secret_first = crate::provision::SecretBytes::default();
-        wizard.stage = WizardStage::PostRestore;
-        self.shell.input_mode = InputMode::Normal;
-
-        match result.result {
-            Ok(()) => {
-                if let Some(outcome) = wizard.restore_outcome.as_mut() {
-                    if let Some(partition) = outcome
-                        .assessment
-                        .partitions
-                        .iter_mut()
-                        .find(|partition| partition.index == result.partition_index)
-                    {
-                        partition.state = PostRestorePartitionState::Usable;
-                        partition.detail = "新密钥域与新空文件系统已通过读回验证".into();
-                    }
-                }
-                wizard.message = Some(crate::tui::ui::UiMessage::success(format!(
-                    "分区 {} 已重建密钥域并重新评估为可用。",
-                    result.partition_index
-                )));
-            }
-            Err(message) => {
-                wizard.message = Some(crate::tui::ui::UiMessage::error(format!(
-                    "分区 {} 重建失败：{}；元数据恢复仍保持成功。",
-                    result.partition_index, message
-                )));
-            }
-        }
-    }
-
-    pub fn finish_write(&mut self, result: Result<(), String>) {
-        self.shell.critical_operation = false;
-        if let Some(wizard) = self.shell.wizard.as_mut() {
-            wizard.stage = WizardStage::Result;
-            if let Err(message) = result.as_ref() {
-                if let Some(run) = wizard.run.as_mut() {
-                    let mut event = crate::application::progress::ProgressEvent::started(
-                        crate::application::progress::OperationKind::Backup,
-                        crate::application::progress::Phase::Backup,
-                        crate::application::progress::Step::BackupCreate,
-                        message.clone(),
-                    );
-                    event.severity = crate::application::progress::Severity::Error;
-                    event.log_policy = crate::application::progress::LogPolicy::Append;
-                    run.push(event);
-                }
-            }
-            wizard.message = Some(match result {
-                Ok(()) if wizard.kind == WriteKind::BackupCreate => {
-                    crate::tui::ui::UiMessage::success("备份创建完成；备份列表已刷新")
-                }
-                Ok(()) => crate::tui::ui::UiMessage::success("操作完成，安全链全部通过"),
-                Err(message) => crate::tui::ui::UiMessage::error(message),
-            });
-        }
-    }
-
     pub fn devices(&self) -> &[crate::disk_scan::Row] {
         &self.devices.rows
     }
@@ -1528,11 +522,6 @@ impl AppState {
 
     pub fn visible_device_count(&self) -> usize {
         self.visible_device_indices().len()
-    }
-
-    pub fn device_at_visible(&self, position: usize) -> Option<&crate::disk_scan::Row> {
-        let index = self.device_source_index_at_visible(position)?;
-        self.devices.rows.get(index)
     }
 
     pub fn visible_backup_indices(&self) -> Vec<usize> {
@@ -1782,10 +771,10 @@ impl AppState {
                 self.close_backup_prune();
                 return StateEffect::None;
             }
-            if let Some(stage) = self.shell.wizard.as_ref().map(|wizard| wizard.stage) {
+            if let Some(stage) = self.restore.wizard.as_ref().map(|wizard| wizard.stage) {
                 match stage {
                     WizardStage::Confirm => {
-                        self.shell.wizard = None;
+                        self.restore.wizard = None;
                         self.shell.input_mode = InputMode::Normal;
                     }
                     WizardStage::FormatConfirm => self.cancel_post_restore_format(),
@@ -1796,7 +785,7 @@ impl AppState {
                     | WizardStage::ReinitializePasswordConfirm
                     | WizardStage::ReinitializeConfirm => self.cancel_post_restore_secret_flow(),
                     WizardStage::PostRestore | WizardStage::Result => {
-                        self.shell.wizard = None;
+                        self.restore.wizard = None;
                         self.shell.input_mode = InputMode::Normal;
                     }
                     WizardStage::Running
@@ -1916,6 +905,9 @@ impl AppState {
             return StateEffect::None;
         }
 
+        if self.navigate_backup_panel(command) {
+            return StateEffect::None;
+        }
         match command {
             NavCommand::NextWorkspace | NavCommand::PreviousWorkspace => {
                 self.switch_workspace(
@@ -2067,22 +1059,33 @@ impl AppState {
                         .bottom(content_len, viewport_height);
                 }
             }
-            NavCommand::HalfPageDown
+            NavCommand::HalfPageDown | NavCommand::PageDown
                 if self.shell.workspace == Workspace::Devices
                     && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesDetail =>
             {
                 let content_len = self.device_info_detail_line_count();
                 self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
                     .scroll_y
-                    .half_page_down(content_len, viewport_height);
+                    .page_down(
+                        content_len,
+                        if command == NavCommand::PageDown {
+                            viewport_height
+                        } else {
+                            (viewport_height / 2).max(1)
+                        },
+                    );
             }
-            NavCommand::HalfPageUp
+            NavCommand::HalfPageUp | NavCommand::PageUp
                 if self.shell.workspace == Workspace::Devices
                     && self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesDetail =>
             {
                 self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
                     .scroll_y
-                    .half_page_up(viewport_height);
+                    .page_up(if command == NavCommand::PageUp {
+                        viewport_height
+                    } else {
+                        (viewport_height / 2).max(1)
+                    });
             }
             NavCommand::Top => {
                 self.shell.selected = 0;
@@ -2096,9 +1099,13 @@ impl AppState {
                     self.reconcile_device_info_selection();
                 }
             }
-            NavCommand::HalfPageDown => {
+            NavCommand::HalfPageDown | NavCommand::PageDown => {
                 if self.shell.item_count > 0 {
-                    let delta = (viewport_height / 2).max(1);
+                    let delta = if matches!(command, NavCommand::PageDown | NavCommand::PageUp) {
+                        viewport_height.max(1)
+                    } else {
+                        (viewport_height / 2).max(1)
+                    };
                     self.shell.selected = self
                         .shell
                         .selected
@@ -2109,8 +1116,12 @@ impl AppState {
                     }
                 }
             }
-            NavCommand::HalfPageUp => {
-                let delta = (viewport_height / 2).max(1);
+            NavCommand::HalfPageUp | NavCommand::PageUp => {
+                let delta = if matches!(command, NavCommand::PageDown | NavCommand::PageUp) {
+                    viewport_height.max(1)
+                } else {
+                    (viewport_height / 2).max(1)
+                };
                 self.shell.selected = self.shell.selected.saturating_sub(delta);
                 if self.shell.workspace == Workspace::Devices {
                     self.reconcile_device_info_selection();
@@ -2124,7 +1135,10 @@ impl AppState {
                 self.shell.input_buffer.clear();
                 self.shell.input_mode = InputMode::Command;
             }
-            NavCommand::Help => self.shell.help_open = !self.shell.help_open,
+            NavCommand::Help => {
+                self.shell.help_open = !self.shell.help_open;
+                self.shell.help_scroll = 0;
+            }
             NavCommand::Refresh
             | NavCommand::BeginRestore
             | NavCommand::BeginBackupCreate

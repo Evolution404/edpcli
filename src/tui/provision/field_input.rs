@@ -149,8 +149,7 @@ impl AppState {
             ));
             return;
         }
-        if let Some(field) = self.provision_selected_field_mut() {
-            *field = candidate;
+        if self.provision_replace_selected_field(candidate) {
             self.provision.field_cursor = cursor + 1;
             self.provision_mark_capacity_edit(Some(id));
             self.provision_mark_source_password_unverified(Some(id));
@@ -165,11 +164,11 @@ impl AppState {
         if cursor == 0 {
             return;
         }
-        if let Some(field) = self.provision_selected_field_mut() {
+        if let Some(field) = self.provision_selected_field() {
             let mut chars = field.chars().collect::<Vec<_>>();
             if cursor <= chars.len() {
                 chars.remove(cursor - 1);
-                *field = chars.into_iter().collect();
+                self.provision_replace_selected_field(chars.into_iter().collect());
                 self.provision.field_cursor = cursor - 1;
                 self.provision_mark_capacity_edit(id);
                 self.provision_mark_source_password_unverified(id);
@@ -182,11 +181,11 @@ impl AppState {
     pub fn provision_delete_char(&mut self) {
         let cursor = self.provision_field_cursor();
         let id = self.provision_field_id(self.provision.field_selected);
-        if let Some(field) = self.provision_selected_field_mut() {
+        if let Some(field) = self.provision_selected_field() {
             let mut chars = field.chars().collect::<Vec<_>>();
             if cursor < chars.len() {
                 chars.remove(cursor);
-                *field = chars.into_iter().collect();
+                self.provision_replace_selected_field(chars.into_iter().collect());
                 self.provision_mark_capacity_edit(id);
                 self.provision_mark_source_password_unverified(id);
                 self.provision_mark_target_password_edited(id);

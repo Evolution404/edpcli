@@ -1,12 +1,18 @@
 use super::*;
 
+#[path = "capacity_render.rs"]
+mod capacity_render;
+#[path = "detail_render.rs"]
+mod detail_render;
+
 fn backup_table_values(
     backup: &crate::application::BackupWorkspaceItem,
     checked: bool,
     columns: &[crate::tui::table_layout::TableColumnSpec],
 ) -> Vec<(String, Style)> {
     use crate::tui::table_layout::ColumnId;
-    let (health, health_style) = backup_health(backup);
+    let health = backup.health();
+    let health_style = crate::tui::theme::current().backup_health(health);
     let identity = crate::application::identity::WorkspaceIdentity::from_backup(backup);
     let cells = identity.display_cells();
     columns
@@ -32,7 +38,7 @@ fn backup_table_values(
                     .map(|kind| crate::tui::theme::current().provision_kind(kind))
                     .unwrap_or_else(warning),
             ),
-            ColumnId::Health => (health.into(), health_style),
+            ColumnId::Health => (health.label().into(), health_style),
             _ => unreachable!("backup schema only contains backup and identity columns"),
         })
         .collect()
@@ -59,7 +65,7 @@ fn draw_backup_device_tree(frame: &mut Frame, area: ratatui::layout::Rect, state
     use crate::tui::pane::PaneId;
 
     let focused = state.backups_focused_pane() == PaneId::BackupDevices;
-    let block = crate::tui::ui::card("设备", focused);
+    let block = crate::tui::ui::card("备份设备", focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -104,8 +110,13 @@ fn draw_backup_device_tree(frame: &mut Frame, area: ratatui::layout::Rect, state
         if visible_width < info_width {
             info.push_str(&" ".repeat(info_width - visible_width));
         }
-        let count_text = format!("{count:>count_width$}");
+        let count_text = format!("{:>count_width$}", format!("[{count}]"));
 
+        let count_style = theme.apply_selection(
+            theme.table_cell(theme.accent().add_modifier(Modifier::BOLD), active, focused),
+            active,
+            focused,
+        );
         let base = if node.depth == 0 {
             secondary().add_modifier(Modifier::BOLD)
         } else {
@@ -120,7 +131,7 @@ fn draw_backup_device_tree(frame: &mut Frame, area: ratatui::layout::Rect, state
             Span::styled(marker, row_style),
             Span::styled(info, row_style),
             Span::styled(" ".repeat(gap_width), row_style),
-            Span::styled(count_text, row_style),
+            Span::styled(count_text, count_style),
         ]));
     }
 
@@ -169,27 +180,8 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
     use crate::tui::ui::ViewportClass;
     let focused = state.backups_focused_pane();
     let class = ViewportClass::for_width(area.width);
-    let (list_area, detail_area, coverage_area) = if class == ViewportClass::Compact {
-        match focused {
-            PaneId::BackupSummary => (None, Some(area), None),
-            PaneId::BackupCoverage => (None, None, Some(area)),
-            _ => (Some(area), None, None),
-        }
-    } else {
-        let parts = Layout::vertical([Constraint::Percentage(56), Constraint::Min(8)]).split(area);
-        if class == ViewportClass::Standard {
-            if focused == PaneId::BackupCoverage {
-                (Some(parts[0]), None, Some(parts[1]))
-            } else {
-                (Some(parts[0]), Some(parts[1]), None)
-            }
-        } else {
-            let bottom =
-                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .split(parts[1]);
-            (Some(parts[0]), Some(bottom[0]), Some(bottom[1]))
-        }
-    };
+    let (list_area, detail_area, coverage_area) =
+        crate::tui::backup_layout::pane_areas(area, focused);
     if let Some(list_area) = list_area {
         let visible_count = state.visible_backup_count();
         let total_count = state.backups().len();
@@ -383,312 +375,11 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
         }
     }
     if let Some(detail_area) = detail_area {
-        let detail = if let Some(backup) = state.selected_backup() {
-            let (health, health_style) = backup_health(backup);
-            let identity = crate::application::identity::WorkspaceIdentity::from_backup_against(
-                backup,
-                state.selected_device(),
-            );
-            let cells = identity.display_cells();
-            let content_width = detail_area.width.saturating_sub(2) as usize;
-            use crate::application::media_identity::MediaRelationship;
-            let (relation_label, relation_tone) =
-                match identity.canonical.as_ref().map(|value| value.relationship) {
-                    Some(MediaRelationship::SamePhysicalMedia) => {
-                        ("已确认 · 物理介质", crate::tui::ui::BadgeTone::Success)
-                    }
-                    Some(MediaRelationship::DifferentMedia) => {
-                        ("硬件冲突", crate::tui::ui::BadgeTone::Danger)
-                    }
-                    Some(
-                        MediaRelationship::SameEdpInstance
-                        | MediaRelationship::SameControlledLineage,
-                    ) => ("协议相关 · 物理未确认", crate::tui::ui::BadgeTone::Warning),
-                    Some(
-                        MediaRelationship::ProbableSameMedia
-                        | MediaRelationship::ModelOnlyMatch
-                        | MediaRelationship::Ambiguous,
-                    ) => (
-                        "可能相关 · 不可唯一确认",
-                        crate::tui::ui::BadgeTone::Warning,
-                    ),
-                    None => ("身份未验证", crate::tui::ui::BadgeTone::Neutral),
-                };
-            let mut lines = vec![
-                crate::tui::ui::status_badge(relation_label, relation_tone),
-                Line::from(vec![
-                    Span::styled("健康  ", muted()),
-                    Span::styled(health, health_style.add_modifier(Modifier::BOLD)),
-                ]),
-                Line::from(Span::styled(
-                    "不备份目录和用户文件；恢复仅用于结构与协议元数据。",
-                    warning(),
-                )),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("盘型  ", muted()),
-                    Span::styled(
-                        safe(&cells[6]),
-                        backup
-                            .provision_kind
-                            .map(|kind| crate::tui::theme::current().provision_kind_emphasis(kind))
-                            .unwrap_or_else(warning),
-                    ),
-                ]),
-                Line::from(format!("容量  {}", safe(&cells[0]))),
-                Line::from(format!("VID:PID  {}", safe(&cells[1]))),
-                Line::from(format!("型号  {}", safe(&cells[2]))),
-                Line::from(format!(
-                    "device_id  {}",
-                    safe(identity.device_id.as_deref().unwrap_or("—"))
-                )),
-                Line::from(format!("onlyid  {}", safe(&cells[3]))),
-                Line::from(format!("介质识别  {}", safe(identity.canonical_status()))),
-                Line::from(format!("姓名  {}", safe(&cells[4]))),
-            ];
-            if let Some(canonical) = &identity.canonical {
-                lines.extend(
-                    canonical
-                        .evidence_lines()
-                        .into_iter()
-                        .take(3)
-                        .map(|line| Line::from(safe(&line))),
-                );
-            }
-            lines.extend(wrapped_field_lines("部门  ", &cells[5], content_width));
-            lines.extend([
-                Line::from(format!("备份时间  {}", safe(&backup.display_time))),
-                Line::from(format!("备份编号  #{}", backup.index)),
-            ]);
-            if let Some(sha) = &backup.content_sha256 {
-                lines.push(Line::from(format!("SHA-256  {}", safe(sha))));
-            }
-            lines.extend(wrapped_field_lines(
-                "文件  ",
-                &backup.file_name,
-                content_width,
-            ));
-            lines.extend([
-                Line::from(""),
-                Line::from("EDPB 仅保存结构与协议元数据；不保存目录或用户文件。"),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "可用操作",
-                    secondary().add_modifier(Modifier::BOLD),
-                )),
-                Line::from(vec![
-                    Span::styled("i", accent()),
-                    Span::raw(" 检查      "),
-                    Span::styled("v", success()),
-                    Span::raw(" 校验"),
-                ]),
-                Line::from(vec![
-                    Span::styled("R", warning()),
-                    Span::raw(" 恢复      "),
-                    Span::styled("d", danger()),
-                    Span::raw(" 删除"),
-                ]),
-                Line::from(vec![
-                    Span::styled("b", accent()),
-                    Span::raw(" 新建备份   "),
-                    Span::styled("r", success()),
-                    Span::raw(" 刷新"),
-                ]),
-            ]);
-            Paragraph::new(lines)
-        } else {
-            Paragraph::new(vec![
-                Line::from(Span::styled(
-                    "备份信息",
-                    secondary().add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-                Line::from("选择一条备份后，这里会显示身份、健康状态和安全操作。"),
-            ])
-        }
-        .block(crate::tui::ui::card(
-            "备份信息",
-            focused == crate::tui::pane::PaneId::BackupSummary,
-        ))
-        .scroll((
-            state
-                .pane_viewport(crate::tui::pane::PaneId::BackupSummary)
-                .scroll_y
-                .offset
-                .min(u16::MAX as usize) as u16,
-            0,
-        ))
-        .wrap(Wrap { trim: false });
-        frame.render_widget(detail, detail_area);
+        detail_render::draw_backup_metadata(frame, detail_area, state);
     }
     if let Some(coverage_area) = coverage_area {
-        draw_backup_coverage(frame, coverage_area, state);
+        capacity_render::draw_backup_capacity(frame, coverage_area, state);
     }
-}
-
-fn draw_backup_coverage(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
-    use crate::application::backup_restore_preview::BackupRestoreRegionKind;
-    use crate::tui::disk_layout::{DiskCapacityMap, DiskCapacityMapProfile};
-
-    let mut lines = Vec::new();
-    match state.selected_backup() {
-        Some(backup) => match backup.restore_preview.as_ref() {
-            Some(preview) => {
-                lines.push(Line::from(Span::styled(
-                    "容量地图",
-                    secondary().add_modifier(Modifier::BOLD),
-                )));
-                match preview.layout.as_ref() {
-                    Some(layout) => {
-                        let map_width = area.width.saturating_sub(4) as usize;
-                        let profile = if map_width >= 36 {
-                            DiskCapacityMapProfile::Compact
-                        } else {
-                            DiskCapacityMapProfile::Mini
-                        };
-                        lines.extend(
-                            DiskCapacityMap::new(layout, profile)
-                                .with_marker(false)
-                                .lines(map_width),
-                        );
-                    }
-                    None => lines.push(Line::from(Span::styled(
-                        safe(preview.layout_error.as_deref().unwrap_or("容量布局不可用")),
-                        warning(),
-                    ))),
-                }
-
-                lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled(
-                    "区域恢复状态",
-                    secondary().add_modifier(Modifier::BOLD),
-                )));
-                for region in &preview.region_statuses {
-                    let (status, status_style) = match region.kind {
-                        BackupRestoreRegionKind::CompleteBytes => ("✓ 完整恢复", success()),
-                        BackupRestoreRegionKind::StructureOnly => ("✓ 结构恢复", accent()),
-                        BackupRestoreRegionKind::OutOfScope => ("— 不在备份范围", muted()),
-                        BackupRestoreRegionKind::PartialOrInvalid => ("⚠ 不完整", danger()),
-                    };
-                    let mut spans = vec![
-                        Span::styled(format!("{}  ", safe(&region.label)), Style::default()),
-                        Span::styled(status, status_style.add_modifier(Modifier::BOLD)),
-                    ];
-                    if let Some(detail) = region.detail.as_deref() {
-                        spans.push(Span::styled(format!(" · {}", safe(detail)), muted()));
-                    }
-                    lines.push(Line::from(spans));
-                }
-
-                lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled(
-                    "恢复能力",
-                    secondary().add_modifier(Modifier::BOLD),
-                )));
-                if let Some(contract) = preview.restore_contract.as_ref() {
-                    lines.push(Line::from(Span::styled(
-                        if contract.restores_partition_structure {
-                            "✓ 分区结构"
-                        } else {
-                            "— 分区结构 · 不在恢复合同"
-                        },
-                        if contract.restores_partition_structure {
-                            success()
-                        } else {
-                            muted()
-                        },
-                    )));
-                    if preview.is_plain {
-                        lines.push(Line::from(Span::styled("— EDP 协议 · 不适用", muted())));
-                        lines.push(Line::from(Span::styled("— LCE · 不适用", muted())));
-                    } else {
-                        lines.push(Line::from(Span::styled(
-                            if contract.restores_edp_protocol {
-                                "✓ EDP 协议元数据"
-                            } else {
-                                "— EDP 协议 · 不在恢复合同"
-                            },
-                            if contract.restores_edp_protocol {
-                                success()
-                            } else {
-                                muted()
-                            },
-                        )));
-                        let lce_restorable = preview.region_statuses.iter().any(|region| {
-                            region.label == "LCE"
-                                && region.kind == BackupRestoreRegionKind::CompleteBytes
-                        });
-                        lines.push(Line::from(Span::styled(
-                            if lce_restorable {
-                                "✓ LCE"
-                            } else {
-                                "⚠ LCE · 不完整或不可恢复"
-                            },
-                            if lce_restorable { success() } else { warning() },
-                        )));
-                    }
-                    lines.push(Line::from(Span::styled(
-                        if contract.restores_filesystem {
-                            "✓ 原文件系统状态"
-                        } else {
-                            "— 原文件系统状态 · 不包含"
-                        },
-                        if contract.restores_filesystem {
-                            success()
-                        } else {
-                            muted()
-                        },
-                    )));
-                    lines.push(Line::from(Span::styled(
-                        if contract.restores_user_data {
-                            "✓ 用户文件内容"
-                        } else {
-                            "— 目录树 / 用户文件内容 · 不包含"
-                        },
-                        if contract.restores_user_data {
-                            success()
-                        } else {
-                            muted()
-                        },
-                    )));
-                    if contract.post_restore_assessment_required {
-                        lines.push(Line::from(Span::styled(
-                            "⚠ 恢复后需要执行后置评估",
-                            warning(),
-                        )));
-                    }
-                } else {
-                    lines.push(Line::from(Span::styled(
-                        "恢复合同不可用；不能声明可恢复范围。",
-                        warning(),
-                    )));
-                }
-            }
-            None => lines.push(Line::from(Span::styled(
-                "恢复范围不可用；备份未提供可验证的恢复合同。",
-                warning(),
-            ))),
-        },
-        None => lines.push(Line::from("选择一条备份查看恢复后的容量布局和恢复能力。")),
-    }
-
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(crate::tui::ui::card(
-                "恢复范围",
-                state.backups_focused_pane() == crate::tui::pane::PaneId::BackupCoverage,
-            ))
-            .scroll((
-                state
-                    .pane_viewport(crate::tui::pane::PaneId::BackupCoverage)
-                    .scroll_y
-                    .offset
-                    .min(u16::MAX as usize) as u16,
-                0,
-            ))
-            .wrap(Wrap { trim: false }),
-        area,
-    );
 }
 
 fn draw_backup_status_modal(frame: &mut Frame, title: &str, lines: Vec<Line<'static>>) {

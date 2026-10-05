@@ -90,12 +90,30 @@ fn transaction_activity_reports_actual_mirror_write_and_readback_work() {
     let mut events = Vec::new();
     let mut dev = MemoryDev::default();
     execute_write_transaction_observed(&mut dev, &plan, &mut |event| events.push(event)).unwrap();
-    assert_eq!(events.len(), 6);
-    assert_eq!(events[0].phase, TransactionActivityPhase::Mirror);
-    assert_eq!(events[1].current, 2);
-    assert_eq!(events[2].phase, TransactionActivityPhase::Write);
-    assert_eq!(events[4].phase, TransactionActivityPhase::Readback);
-    assert!(events.iter().all(|event| event.total == 2));
+    assert_eq!(events[0].phase, TransactionActivityPhase::SyncPreflight);
+    assert_eq!(events[0].total, 0, "sync has no countable work");
+    for phase in [
+        TransactionActivityPhase::Mirror,
+        TransactionActivityPhase::Write,
+        TransactionActivityPhase::Readback,
+    ] {
+        let work: Vec<_> = events.iter().filter(|event| event.phase == phase).collect();
+        assert_eq!(
+            work.iter().map(|event| event.current).collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+        assert!(work.iter().all(|event| event.total == 2));
+    }
+    let write_end = events
+        .iter()
+        .position(|event| event.phase == TransactionActivityPhase::Write && event.current == 2)
+        .unwrap();
+    assert_eq!(events[write_end + 1].phase, TransactionActivityPhase::Sync);
+    assert_eq!(events[write_end + 1].total, 0);
+    assert_eq!(
+        events[write_end + 2].phase,
+        TransactionActivityPhase::Readback
+    );
 }
 
 #[test]
@@ -145,6 +163,12 @@ fn generic_transaction_rolls_back_exact_touched_set() {
     dev.fail_call = Some(2);
     let error = execute_write_transaction(&mut dev, &plan).unwrap_err();
     assert_eq!(error.code, EXIT_ROLLED_BACK, "{}", error.msg);
+    assert!(
+        error.msg.contains("injected provision failure"),
+        "{}",
+        error.msg
+    );
+    assert!(error.msg.contains("LBA20"), "{}", error.msg);
     assert_eq!(dev.sectors, before);
 }
 
@@ -233,5 +257,89 @@ fn official_writer_rolls_back_the_whole_plan() {
     dev.fail_call = Some(5);
     let error = atomic_write_official_provision_sectors(&mut dev, &p, 1024).unwrap_err();
     assert_eq!(error.code, EXIT_ROLLED_BACK, "{}", error.msg);
+    assert!(
+        error.msg.contains("injected provision failure"),
+        "{}",
+        error.msg
+    );
+    assert!(error.msg.contains("LBA2"), "{}", error.msg);
     assert_eq!(dev.sectors, before);
+}
+
+#[derive(Clone, Copy)]
+enum FailurePhase {
+    Sync,
+    Readback,
+    WriteAndRollback,
+}
+struct DiagnosticDev {
+    inner: MemoryDev,
+    phase: FailurePhase,
+    reads: usize,
+}
+impl SectorDev for DiagnosticDev {
+    fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+        self.reads += 1;
+        if matches!(self.phase, FailurePhase::Readback) && self.reads == 2 {
+            return Err(io::Error::other("injected readback failure"));
+        }
+        self.inner.read_sector(lba)
+    }
+    fn write_sector(&mut self, lba: u32, bytes: &[u8]) -> io::Result<()> {
+        if matches!(self.phase, FailurePhase::WriteAndRollback) {
+            self.inner.calls += 1;
+            return Err(io::Error::other(if self.inner.calls == 1 {
+                "original write failure"
+            } else {
+                "rollback write failure"
+            }));
+        }
+        self.inner.write_sector(lba, bytes)
+    }
+    fn sync(&mut self) -> io::Result<()> {
+        self.inner.syncs += 1;
+        if matches!(self.phase, FailurePhase::Sync) && self.inner.syncs == 2 {
+            return Err(io::Error::other("injected sync failure"));
+        }
+        Ok(())
+    }
+}
+#[test]
+fn transaction_diagnostics_retain_sync_readback_and_rollback_causes() {
+    let mut plan = WriteTransactionPlan::new(100);
+    plan.insert(10, vec![1; SECTOR], SectorWriteStage::Data, "data")
+        .unwrap();
+    for (phase, cause, stage) in [
+        (FailurePhase::Sync, "injected sync failure", "缓存同步"),
+        (
+            FailurePhase::Readback,
+            "injected readback failure",
+            "读回 LBA10",
+        ),
+        (
+            FailurePhase::WriteAndRollback,
+            "original write failure",
+            "写入 LBA10",
+        ),
+    ] {
+        let mut dev = DiagnosticDev {
+            inner: MemoryDev::default(),
+            phase,
+            reads: 0,
+        };
+        let error = execute_write_transaction(&mut dev, &plan).unwrap_err();
+        assert!(error.msg.contains(cause), "{}", error.msg);
+        assert!(error.msg.contains(stage), "{}", error.msg);
+        if matches!(phase, FailurePhase::WriteAndRollback) {
+            assert_eq!(error.code, edpcli::common::EXIT_INTERMEDIATE);
+            assert!(
+                error.msg.contains("rollback write failure"),
+                "{}",
+                error.msg
+            );
+        } else {
+            assert_eq!(error.code, EXIT_ROLLED_BACK);
+            assert_eq!(dev.inner.sectors[&10], vec![0; SECTOR]);
+        }
+    }
 }

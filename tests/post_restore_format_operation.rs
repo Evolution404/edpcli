@@ -7,6 +7,7 @@ use edpcli::application::post_restore::{
     assess_partitions_readonly, format_partition_on_disk, MetadataRestoreOutcome,
     MetadataRestoreReport, PartitionFormatRequest, PostRestorePartitionState,
 };
+use edpcli::application::progress::{FormatStep, OperationKind, ProgressEvent, Severity, Step};
 use edpcli::application::Prompter;
 use edpcli::common::SECTOR;
 use edpcli::diskio::SectorDev;
@@ -87,6 +88,138 @@ impl SectorDev for SparseFormatDev {
 }
 
 struct Confirm(bool);
+
+#[derive(Default)]
+struct ProgressPrompt {
+    events: Vec<ProgressEvent>,
+    panic_on_write: bool,
+}
+
+impl Prompter for ProgressPrompt {
+    fn prompt_line(&mut self, _message: &str) -> String {
+        String::new()
+    }
+    fn confirm_yes(&mut self, _message: &str) -> bool {
+        true
+    }
+    fn operation_progress(&mut self, event: ProgressEvent) {
+        if self.panic_on_write
+            && event.work.is_some_and(|work| work.current == 1)
+            && event.step == Step::PostRestoreFormat(FormatStep::Write)
+        {
+            self.panic_on_write = false;
+            panic!("injected progress sink failure");
+        }
+        self.events.push(event);
+    }
+}
+
+fn run_with_progress(
+    dev: &mut SparseFormatDev,
+    fail_after: Option<usize>,
+    panic_on_write: bool,
+) -> (
+    edpcli::application::post_restore::PostRestoreFormatResult,
+    MetadataRestoreOutcome,
+    Vec<ProgressEvent>,
+) {
+    let (runner, outcome) = fixture(dev);
+    dev.fail_write_once_after = fail_after;
+    let mut prompt = ProgressPrompt {
+        panic_on_write,
+        ..Default::default()
+    };
+    let result = format_partition_on_disk(
+        &runner,
+        6,
+        dev,
+        &mut prompt,
+        outcome.format_target_pin.as_ref().unwrap(),
+        &outcome,
+        &request(),
+        "恢复卷",
+        0x1234_5678,
+    );
+    (result, outcome, prompt.events)
+}
+
+#[test]
+fn format_progress_reports_actual_work_and_only_completes_after_reassessment() {
+    let mut dev = SparseFormatDev::new();
+    let (result, outcome, events) = run_with_progress(&mut dev, None, false);
+    assert!(result.result.is_ok(), "{:?}", result.result);
+    assert!(events
+        .iter()
+        .all(|event| event.operation == OperationKind::PostRestoreFormat));
+    for step in [FormatStep::Mirror, FormatStep::Write, FormatStep::Readback] {
+        let work: Vec<_> = events
+            .iter()
+            .filter(|event| event.step == Step::PostRestoreFormat(step))
+            .filter_map(|event| event.work)
+            .collect();
+        assert_eq!(work.first().unwrap().current, 0);
+        assert_eq!(work.last().unwrap().current, dev.writes.len() as u64);
+        assert!(work
+            .iter()
+            .all(|work| work.total == dev.writes.len() as u64));
+        assert!(work
+            .windows(2)
+            .all(|pair| pair[1].current == pair[0].current + 1));
+        assert!(work.last().unwrap().total < outcome.partitions[0].sector_count);
+    }
+    let sync = events
+        .iter()
+        .position(|event| event.step == Step::PostRestoreFormat(FormatStep::Sync))
+        .unwrap();
+    assert!(events[sync].work.is_none(), "sync is an indeterminate wait");
+    assert_eq!(events[sync - 1].work.unwrap().percent(), 100);
+    assert_eq!(
+        events[sync + 1].step,
+        Step::PostRestoreFormat(FormatStep::Readback)
+    );
+    assert_eq!(
+        events[events.len() - 2].step,
+        Step::PostRestoreFormat(FormatStep::Reassess)
+    );
+    assert_eq!(events.last().unwrap().step, Step::Completed);
+    assert!(events[..events.len() - 1]
+        .iter()
+        .all(|event| event.overall.basis_points() < 10_000));
+    assert_eq!(events.last().unwrap().overall.basis_points(), 10_000);
+}
+
+#[test]
+fn format_progress_keeps_rollback_visible_without_marking_success() {
+    let mut dev = SparseFormatDev::new();
+    let (result, outcome, events) = run_with_progress(&mut dev, Some(2), false);
+    assert!(result.result.is_err());
+    for step in [
+        FormatStep::RollbackWrite,
+        FormatStep::RollbackSync,
+        FormatStep::RollbackReadback,
+    ] {
+        assert!(events
+            .iter()
+            .any(|event| event.step == Step::PostRestoreFormat(step)
+                && event.severity == Severity::Warning));
+    }
+    assert!(events
+        .iter()
+        .all(|event| event.step != Step::Completed && event.overall.basis_points() < 10_000));
+    assert!(outcome.report.metadata_restored && outcome.report.readback_verified);
+    assert!(dev
+        .writes
+        .iter()
+        .all(|lba| dev.sectors[lba] == vec![0; SECTOR]));
+}
+
+#[test]
+fn post_restore_progress_sink_panic_does_not_interrupt_format() {
+    let mut dev = SparseFormatDev::new();
+    let (result, _, events) = run_with_progress(&mut dev, None, true);
+    assert!(result.result.is_ok());
+    assert_eq!(events.last().unwrap().step, Step::Completed);
+}
 
 impl Prompter for Confirm {
     fn prompt_line(&mut self, _message: &str) -> String {
@@ -546,11 +679,12 @@ fn original_password_format_preserves_key_records_and_verifies_encrypted_boot() 
         Err(EncryptedPostRestoreError::Operation(_))
     ));
     assert!(dev.writes.is_empty());
+    let mut progress_prompt = ProgressPrompt::default();
     let success = format_encrypted_partition_on_disk(
         &runner,
         6,
         &mut dev,
-        &mut Confirm(true),
+        &mut progress_prompt,
         outcome.format_target_pin.as_ref().unwrap(),
         &outcome,
         &request,
@@ -559,6 +693,14 @@ fn original_password_format_preserves_key_records_and_verifies_encrypted_boot() 
         0x1234_5678,
     );
     assert!(success.result.is_ok(), "{:?}", success.result);
+    assert!(progress_prompt
+        .events
+        .iter()
+        .any(|event| event.step == Step::PostRestoreFormat(FormatStep::EncryptImage)));
+    assert!(progress_prompt.events.iter().any(|event| event.step
+        == Step::PostRestoreFormat(FormatStep::Write)
+        && event.work.is_some()));
+    assert_eq!(progress_prompt.events.last().unwrap().step, Step::Completed);
     assert!(!dev.writes.is_empty());
     assert!(dev.writes.iter().all(|lba| {
         (target.start_lba..target.start_lba + target.sector_count).contains(&u64::from(*lba))

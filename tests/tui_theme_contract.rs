@@ -314,75 +314,45 @@ fn neutral_table_columns_brighten_without_becoming_accent_blue() {
 }
 
 #[test]
-fn inspect_field_table_uses_shared_continuous_row_selection_contract() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let field_table =
-        fs::read_to_string(root.join("src/tui/inspect/field_table_render.rs")).unwrap();
-    let status_style = fs::read_to_string(root.join("src/tui/inspect/render_helpers.rs")).unwrap();
-
-    assert!(
-        field_table.contains("crate::tui::ui::data_table(")
-            && field_table.contains("render_stateful_widget(table"),
-        "Inspect field rows must use the shared stateful data-table renderer so selection spans column spacing"
-    );
-    assert!(
-        !field_table.contains("apply_selection("),
-        "Inspect field rows must not paint selection cell-by-cell; that creates visible gaps"
-    );
-    assert!(
-        field_table.contains("if logical == 0"),
-        "field-status semantic color must be scoped to the Status column only"
-    );
-    assert!(
-        status_style.contains("InspectFieldStatus::Known")
-            && status_style.contains("current().table_text()"),
-        "Known must remain neutral table text instead of accent/blue"
-    );
-}
-
-#[test]
-fn new_selection_renderers_must_not_turn_active_rows_accent_blue() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui");
-    let mut files = Vec::new();
-    rust_files(&root, &mut files);
-
-    const LEGACY_DEVICE_TREE: &str =
-        "let style = region_style.unwrap_or_else(|| if active { accent() } else { secondary() });";
-
-    for path in files {
-        if path.file_name().and_then(|name| name.to_str()) == Some("theme.rs") {
-            continue;
-        }
-        let mut source = fs::read_to_string(&path).unwrap();
-        if path.ends_with("devices/tree_render.rs") {
-            let count = source.matches(LEGACY_DEVICE_TREE).count();
-            assert_eq!(
-                count, 1,
-                "historical device-tree exception changed; review it explicitly before updating the gate"
-            );
-            source = source.replacen(LEGACY_DEVICE_TREE, "", 1);
-        }
-
-        for needle in ["if active", "if selected"] {
-            for (offset, _) in source.match_indices(needle) {
-                let end = (offset + 260).min(source.len());
-                let window = &source[offset..end];
-                assert!(
-                    !window.contains("accent()"),
-                    "{} introduces accent/blue foreground in an active-selection branch; use selection_overlay/apply_selection + table_cell so selection is expressed by subtle background and brightness",
-                    path.strip_prefix(env!("CARGO_MANIFEST_DIR"))
-                        .unwrap_or(&path)
-                        .display()
-                );
+fn rendered_selection_preserves_neutral_and_semantic_cell_colors() {
+    use ratatui::widgets::{Cell, Table, TableState};
+    for theme in [
+        Theme::truecolor_dark(),
+        Theme::ansi256_dark(),
+        Theme::ansi16(),
+    ] {
+        for focused in [false, true] {
+            let styles = [
+                theme.table_text(),
+                theme.success(),
+                theme.warning(),
+                theme.danger(),
+            ]
+            .map(|base| theme.table_cell(base, true, focused));
+            let mut terminal = Terminal::new(TestBackend::new(40, 2)).unwrap();
+            let mut selected = TableState::default().with_selected(Some(0));
+            terminal
+                .draw(|frame| {
+                    let row = Row::new(
+                        styles
+                            .into_iter()
+                            .map(|style| Cell::from("value").style(style)),
+                    );
+                    let table = Table::new([row], [Constraint::Length(10); 4])
+                        .column_spacing(0)
+                        .row_highlight_style(theme.selection_overlay(focused));
+                    frame.render_stateful_widget(table, frame.area(), &mut selected);
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            for (index, style) in styles.iter().enumerate() {
+                let cell = &buffer[((index * 10) as u16, 0)];
+                assert_eq!(Some(cell.fg), style.fg);
+                assert_eq!(Some(cell.bg), theme.selection_overlay(focused).bg);
             }
+            assert_ne!(buffer[(0, 0)].fg, theme.palette().accent);
         }
     }
-
-    let backups = fs::read_to_string(root.join("backups/render.rs")).unwrap();
-    assert!(
-        backups.contains("theme.apply_selection(theme.table_cell("),
-        "backup device tree must share table-style selection semantics"
-    );
 }
 
 #[test]

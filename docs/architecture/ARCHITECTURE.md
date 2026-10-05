@@ -4,23 +4,24 @@
 
 ## 分层
 
-`CLI / TUI -> application/service -> domain + provision + protocol + backup -> platform + disk I/O`
+`CLI / TUI -> application -> domain + stable protocol/provision/filesystem facades -> infrastructure + platform`
 
-`lib.rs` 只公开被 CLI/TUI、集成测试及 HIL 示例直接使用的稳定业务边界；`backup_cli`、`build_info`、`elevate`、`plist` 等入口内部实现为 crate 内可见。
+当前仍是单个 crate，但已经按责任建立内部边界；旧公开模块先作为兼容门面保留，不一次性搬目录或破坏外部调用。
 
-- `src/cli*.rs`：CLI 参数解析与文本入口；公开命令目录统一由 `src/command_spec.rs` 描述，并供 help/completion 共用。
-- `src/tui/`：交互式前端；`controller` 统一解释生产与演示模式的 `TuiAction` 和当前控件角色，真实外部副作用由生产任务适配器执行，演示模式只能消费内存夹具；制盘、检查、备份、设备工作区不直接实现裸盘安全策略。
-- `src/application/`：CLI/TUI 共用应用服务；制盘按 `prepare/commit/export` 分离，`TargetSession` 统一写盘状态转换，`EvidenceSource` 统一物理盘/EDPB 只读证据入口；`post_restore` 分别处理只读评估、分区格式化和加密分区重建。
-- `src/media_identity.rs`、`src/partition_table.rs`、`src/disk_layout.rs`、`src/backup_coverage.rs`：UI-neutral 领域/读模型与纯算法；`application` 仅保留兼容 re-export 和 use-case 编排，`diskio`/`edpb`/`disk_scan` 不得反向依赖 application。
+- `src/cli*.rs`：CLI 参数解析与文本入口；公开命令目录统一由 `src/command_spec.rs` 描述，并供帮助与补全功能共用。
+- `src/tui/`：交互式前端。`AppState` 只保留 `shell` 与设备、检查、备份、制盘、恢复五个功能状态；`TaskHub` 负责刷新代次、单任务并发控制、关键写入任务与进度运输。帮助、页内动作提示和可用性描述通过 `ActionSpec` 与键位表共用语义；前端不实现裸盘安全策略。
+- `src/application/`：CLI/TUI 共用用例与安全会话。制盘按准备、提交、导出三个职责分离；写服务根模块保留共享事件与身份/安全校验，备份创建、恢复事务、恢复计划分别位于 `write/backup`、`write/restore`、`write/restore_plan`；`TargetSession` 统一写盘状态转换；`CatalogSnapshot` 让同一刷新批次复用一次备份目录只读快照；`OperationError` 在后台任务边界保留错误码与阶段，进入 UI 状态时才映射为展示文本；`ports` 汇总现有能力接口而不破坏稳定门面。
+- `src/domain/`：逐步收拢纯值类型和不变量，目前包含 `geometry`、`hardware`、`secret`；不得执行平台命令、文件生命周期或 TUI/CLI 逻辑。历史稳定路径继续通过原模块门面暴露。
+- `src/infrastructure/`：副作用实现。目前 `backup_store` 负责目录扫描、预算和容器创建适配，`process` 负责带统一截止时间与输出预算的子进程执行；应用层通过稳定接口使用这些实现。
+- `src/media_identity.rs`、`src/partition_table.rs`、`src/disk_layout.rs`、`src/backup_coverage.rs`：仍是与前端无关的稳定门面和读模型；迁移期间不得让 `diskio`、`edpb`、`disk_scan` 反向依赖应用层。
 - `src/media_identity_observer.rs`：只读身份观察服务，可读取协议镜像和硬件探测但没有任何写盘状态转换入口。
-- `src/provision/`：纯内存制盘领域模型与验证器；Plain 与官方 mode0～3 都通过统一 `ProvisionRequest` 进入应用层。
+- `src/provision/`：纯内存制盘领域模型与验证器；Plain 与官方 mode0～3 都通过统一 `ProvisionRequest` 进入应用层。准备阶段的来源画像和密钥域探测分别位于 `prepare/source_profile`、`prepare/key_probe`，提交阶段的分区格式化和纯验证分别位于 `commit/partition_format`、`commit/validation`；事务顺序保持不变。
 - `src/filesystem/`：统一文件系统驱动领域；FAT12/FAT16/FAT32/exFAT/NTFS 共享识别和元信息接口。FAT16/FAT32/exFAT 具备格式化与读回能力，FAT12/FAT16/FAT32/exFAT 具备只读文件级分析；NTFS 暂保留识别与元信息。
 - `src/protocol/`：LBA0～12、IIR、LCE 的类型化协议模型；`protocol::semantic` 提供跨业务语义，不包含 UI 字段名、颜色或渲染结构。
-- `src/diskio/`：块设备、写事务、备份配置、备份目录和备份创建按职责拆分。
-- `src/backup_*` / `src/edpb/`：元数据备份与自包含 EDPB 容器；容器模型、编解码、身份、写入、读取和校验按职责分离。
-- `src/platform/`：macOS/Linux/Windows 的设备、锁定、卸载和平台探测边界。
+- `src/diskio/` / `src/edpb/`：保留块设备、事务与容器底层门面；新的备份目录扫描与创建实现逐步收拢到 `infrastructure`，公开路径继续兼容。
+- `src/platform/`：macOS/Linux/Windows 的设备、锁定、卸载和平台探测边界；macOS/Linux 共用的 Unix 辅助逻辑位于 `platform/unix_support.rs`。
 - `src/tui/operation_progress_render.rs` 与 `operation_progress_status.rs`：备份、恢复、制盘共用的长操作进度页面；业务百分比和阶段计数来自应用事件，前端只渲染。
-- `src/disk_scan.rs` 只负责设备只读扫描；CLI 列表排版位于 `src/disk_scan_render.rs`。`src/text_width.rs` 提供无终端依赖的显示宽度与填充原语。
+- `src/disk_scan.rs` 只负责设备只读扫描；同一设备刷新复用备份目录快照做展示匹配，写入/删除授权仍重新验证。CLI 列表排版位于 `src/disk_scan_render.rs`。
 
 ## 读写边界
 
@@ -28,7 +29,7 @@
 
 CLI 与 TUI 的制盘能力共用同一 `ProvisionRequest::{Official, Plain}` 和 prepare/commit 服务。Plain 是普通 MBR 磁盘目标，不属于官方 mode 编号，也不得映射为 mode4。
 
-应用层通过 `WriteEvent`、`MetadataBackupReport`、`MetadataRestoreOutcome`、`PostRestoreAssessment`、制盘报告和检查工作区返回结构化结果；ANSI/CLI 文本渲染位于前端层。备份、恢复、制盘的长操作统一投影为 `OperationRunState`：`OverallProgress` 表示总体基点，`StageProgress` 表示逻辑步骤 `N/M`，`WorkProgress` 表示当前 sector/byte 工作量。高频快照在运输层合并，终端正常刷新上限约 20 Hz；警告、错误、回滚和阶段边界保持可见。TUI 后台任务只传递结构化结果，不直接向终端写输出；进入关键写入阶段后，退出请求延迟到安全收尾完成。
+应用层通过 `WriteEvent`、`MetadataBackupReport`、`MetadataRestoreOutcome`、`PostRestoreAssessment`、制盘报告和检查工作区返回结构化结果；后台破坏性写入与恢复任务使用 `OperationError` 保留错误码和阶段，UI 边界再转为可显示文本。备份、恢复、制盘的长操作统一投影为 `OperationRunState`：`OverallProgress` 表示总体基点，`StageProgress` 表示逻辑步骤 `N/M`，`WorkProgress` 表示当前扇区或字节工作量。高频普通进度和回滚工作快照在入队前合并，诊断、错误、边界和最终结果可靠交付；终端正常刷新上限约 20 Hz。进入关键写入阶段后，退出请求延迟到安全收尾完成。
 
 ## 协议与语义事实源
 
@@ -48,4 +49,4 @@ LBA0～12 的类型化解析器、配置类型轴和跨 LBA 语义位于 `src/pr
 
 ## 验证
 
-日常开发使用 `scripts/test-fast.sh`，默认总耗时预算 **45 秒**；合并、发布和大范围重构使用 `python3 scripts/test-full.py --profile full`，CI 总耗时预算 **120 秒**。运行器在存在 `sccache` 时自动启用编译缓存并关闭 Cargo 增量编译，缺少缓存程序时自动退回直接 `rustc`。`scripts/test-benchmark.py` 复用正式测试运行器统计最小值/中位数/最大值。Virtual-HIL 独立运行，不混入普通 `fast/full`。所有提交前执行 `cargo fmt --all` 与 `git diff --check`；协议相关修改还必须通过协议字段、真实样本和文档契约门禁。
+日常开发使用 `scripts/test-fast.sh`，默认总耗时预算 **45 秒**；合并、发布和大范围重构使用 `python3 scripts/test-full.py --profile full`，CI 总耗时预算 **120 秒**。`scripts/change_scope.py` 是本地与 CI 共用的变更分类事实源，已跟踪和未跟踪文件都参与路由，未知或公共测试基础设施变更保守选择完整非 HIL 套件。运行器在存在 `sccache` 时自动启用编译缓存并关闭 Cargo 增量编译，缺少缓存程序时自动退回直接 `rustc`。虚拟 HIL 独立运行，不混入普通 `fast/full`。所有提交前执行 `cargo fmt --all -- --check`、`cargo check --locked --all-targets` 与 `git diff --check`；协议相关修改还必须通过协议字段、真实样本和文档契约门禁。

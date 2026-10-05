@@ -89,6 +89,29 @@ pub fn fmt_capacity_sectors(sectors: u64) -> String {
     fmt_capacity(sectors.saturating_mul(SECTOR as u64))
 }
 
+/// Percentage of sectors, preserving visibility for nonzero tiny regions.
+pub(crate) fn fmt_sector_percentage(sectors: u64, total: u64) -> String {
+    if total == 0 {
+        return "0.00%".into();
+    }
+    let ratio = sectors as f64 * 100.0 / total as f64;
+    if ratio > 0.0 && ratio < 0.01 {
+        "<0.01%".into()
+    } else {
+        format!("{ratio:.2}%")
+    }
+}
+
+/// Lowercase hexadecimal without per-byte temporary String allocations.
+pub(crate) fn hex_lower(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        write!(&mut out, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    out
+}
+
 /// Python `format(n, ',')` 千分位等价。
 pub fn group_digits(n: u64) -> String {
     let s = n.to_string();
@@ -127,6 +150,20 @@ pub fn py_round_half_even(x: f64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sector_percentages_keep_small_regions_visible_and_handle_zero_total() {
+        for (sectors, total, label) in [
+            (1, 0, "0.00%"),
+            (0, 1000, "0.00%"),
+            (1, 100_000, "<0.01%"),
+            (1, 10_000, "0.01%"),
+            (1, 2, "50.00%"),
+            (u64::MAX, u64::MAX, "100.00%"),
+        ] {
+            assert_eq!(fmt_sector_percentage(sectors, total), label);
+        }
+    }
 
     #[test]
     fn capacity_display_follows_global_unit_system() {

@@ -42,7 +42,7 @@ impl fmt::Debug for SecretBytes {
 
 impl Drop for SecretBytes {
     fn drop(&mut self) {
-        self.0.fill(0);
+        crate::domain::secret::wipe(&mut self.0);
     }
 }
 

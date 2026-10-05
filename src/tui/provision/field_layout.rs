@@ -1,6 +1,21 @@
 use super::*;
 
 impl AppState {
+    pub(crate) fn provision_field_rows_for_width(
+        &self,
+        width: usize,
+    ) -> Vec<(ProvisionFieldSection, Vec<usize>)> {
+        let rows = self.provision_compact_field_rows_typed();
+        if width >= 68 {
+            return rows;
+        }
+        rows.into_iter()
+            .flat_map(|(section, indexes)| {
+                indexes.into_iter().map(move |index| (section, vec![index]))
+            })
+            .collect()
+    }
+
     pub(crate) fn provision_field_section_typed(
         &self,
         display_index: usize,

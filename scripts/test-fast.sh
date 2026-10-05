@@ -7,10 +7,7 @@ cd "$ROOT"
 cargo fmt --all -- --check
 git diff --check
 
-changed_paths=$(git diff --name-only HEAD)
-if [ -z "$changed_paths" ]; then
-    changed_paths=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null || true)
-fi
+changed_paths=$(python3 scripts/test-full.py --list-changed-paths)
 
 if printf '%s\n' "$changed_paths" | grep -Eq '(^|/)[^/]+\.rs$|^Cargo\.(toml|lock)$|^rust-toolchain(\.toml)?$|^\.cargo/'; then
     cargo clippy --all-targets --locked -- -D warnings

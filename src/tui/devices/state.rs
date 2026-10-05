@@ -327,7 +327,10 @@ impl AppState {
 
     pub fn selected_restore_backup_path(&self) -> Option<std::path::PathBuf> {
         match self.workspace() {
-            Workspace::Backups => self.selected_backup_path(),
+            Workspace::Backups => self
+                .selected_backup()
+                .filter(|backup| backup.is_restorable())
+                .map(|backup| backup.path.clone()),
             Workspace::Devices
                 if self.devices_focused_pane() == crate::tui::pane::PaneId::DevicesDetail
                     && matches!(
@@ -336,6 +339,7 @@ impl AppState {
                     ) =>
             {
                 self.selected_device_related_backup()
+                    .filter(|backup| backup.is_restorable())
                     .map(|backup| backup.path.clone())
             }
             _ => None,

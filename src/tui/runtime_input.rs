@@ -31,6 +31,49 @@ pub(super) fn handle_key(
     backup_dir: &Path,
     terminal_size: ratatui::layout::Size,
 ) -> KeyOutcome {
+    state.set_viewport_size(terminal_size);
+    if state.help_open() {
+        if let Some(action) = keys.map(state::InputMode::Normal, key) {
+            let effect = dispatch_tui_action(
+                state,
+                tasks,
+                action,
+                controller::active_widget_role(state),
+                backup_dir,
+                usize::from(terminal_size.height),
+                terminal_size.width,
+            );
+            if effect == StateEffect::ExitRequested {
+                return KeyOutcome::Exit;
+            }
+        }
+        return KeyOutcome::NextIteration;
+    }
+    if !state.help_open()
+        && (state.provision().stage == state::ProvisionStage::Confirm
+            || state.wizard().is_some_and(|wizard| {
+                matches!(
+                    wizard.stage,
+                    state::WizardStage::Confirm
+                        | state::WizardStage::FormatConfirm
+                        | state::WizardStage::EncryptedFormatConfirm
+                        | state::WizardStage::ReinitializeConfirm
+                )
+            }))
+    {
+        match key.code {
+            ct_event::KeyCode::PageUp => {
+                state.scroll_confirmation_details(true);
+                return KeyOutcome::NextIteration;
+            }
+            ct_event::KeyCode::PageDown => {
+                state.scroll_confirmation_details(false);
+                return KeyOutcome::NextIteration;
+            }
+            _ => {}
+        }
+    }
+
     if let Some(outcome) =
         inspect::handle_inspect_key(state, tasks, keys, key, backup_dir, terminal_size)
     {

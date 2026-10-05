@@ -761,12 +761,13 @@ fn verify_mandatory_backup_pin(
     pin: &MediaIdentityPin,
     source_metadata: &[u8],
 ) -> EdpCliResult<String> {
-    let verified = crate::edpb::verify_file(&report.path).map_err(|message| {
+    let reader = crate::edpb::VerifiedBackupReader::open(&report.path).map_err(|message| {
         err(
             EXIT_TARGET,
             format!("错误: 强制备份 EDPB 校验失败: {message}"),
         )
     })?;
+    let verified = reader.verified();
     let identity =
         crate::edpb::canonical_media_identity(&verified.manifest).map_err(|message| {
             err(
@@ -785,7 +786,7 @@ fn verify_mandatory_backup_pin(
     } else {
         "raw.plain.partition_table.0"
     };
-    let raw = crate::edpb::read_artifact(&report.path, artifact_id).map_err(|message| {
+    let raw = reader.read_artifact(artifact_id).map_err(|message| {
         err(
             EXIT_TARGET,
             format!("错误: 强制备份来源快照不可读: {message}"),
@@ -804,7 +805,7 @@ fn verify_mandatory_backup_pin(
             "错误: 强制备份元数据与制盘准备阶段快照不一致",
         ));
     }
-    Ok(verified.file_sha256)
+    Ok(verified.file_sha256.clone())
 }
 
 fn record_lineage_after_commit(
@@ -826,7 +827,7 @@ fn record_lineage_after_commit(
     getrandom::fill(&mut random).map_err(|error| {
         ProvisionWarning::HostLineagePersistenceFailed(format!("transaction id: {error}"))
     })?;
-    let transaction_id = random.iter().map(|byte| format!("{byte:02x}")).collect();
+    let transaction_id = crate::common::hex_lower(&random);
     let epoch_seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|error| {

@@ -646,13 +646,7 @@ fn safe(value: &str) -> String {
 }
 
 pub fn backup_health_text(backup: &crate::application::BackupWorkspaceItem) -> &'static str {
-    if !backup.size_ok {
-        "大小异常"
-    } else if backup.integrity_status == crate::application::BackupIntegrityStatus::Verified {
-        "EDPB ✓"
-    } else {
-        "EDPB ✗"
-    }
+    backup.health().label()
 }
 
 pub fn device_table_view(rows: &[crate::disk_scan::Row], generation: u64) -> TableViewData {
@@ -859,15 +853,6 @@ impl TableViewport {
             .collect()
     }
 
-    pub fn position_label(&self) -> String {
-        let max_scroll = self.total_width.saturating_sub(self.viewport_width);
-        format!(
-            "横向 {}/{}",
-            self.scroll_x.min(max_scroll) + usize::from(max_scroll > 0),
-            max_scroll.max(1)
-        )
-    }
-
     pub fn project<T: Clone>(&self, values: &[T]) -> Vec<T> {
         self.columns
             .iter()
@@ -901,10 +886,6 @@ impl AdaptiveTableLayout {
 
     pub fn specs(&self) -> &[AdaptiveColumnSpec] {
         &self.specs
-    }
-
-    pub fn scrollable_count(&self) -> usize {
-        self.specs.len()
     }
 
     pub(crate) fn natural_widths(

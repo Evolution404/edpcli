@@ -7,8 +7,10 @@
 pub mod backup;
 pub mod backup_coverage;
 pub mod backup_restore_preview;
+pub(crate) mod catalog_snapshot;
 pub mod device;
 pub mod disk_layout;
+pub mod error;
 pub mod evidence;
 pub(crate) mod filesystem_format;
 pub mod identity;
@@ -19,20 +21,21 @@ pub mod inspect_tree;
 pub mod media_identity;
 pub mod media_identity_observer;
 pub mod partition_table;
+pub mod ports;
 pub mod post_restore;
 pub mod progress;
 pub mod provision;
 pub mod provision_geometry;
 pub mod target_session;
 pub mod write;
-pub use crate::diskio::BackupIntegrityStatus;
+pub use crate::diskio::{BackupHealth, BackupIntegrityStatus};
 pub use backup::delete_backup_exact;
 use std::cell::RefCell;
 use std::io;
 use std::path::Path;
 pub use write::WriteEvent;
 
-use crate::disk_scan::{scan_disks, Row};
+use crate::disk_scan::Row;
 use crate::diskio::{self, raw_path, FileDev};
 use crate::sysinfo::{CmdRunner, ReadProbeCache};
 
@@ -64,6 +67,9 @@ pub trait Prompter {
 
     /// UI-neutral typed progress event. Frontends decide how to render or store it.
     fn write_event(&mut self, _event: WriteEvent) {}
+
+    /// Optional progress sink; operations isolate sink panics from device writes.
+    fn operation_progress(&mut self, _event: progress::ProgressEvent) {}
 }
 
 /// Build the device-dashboard model using the same read-only probing path for every frontend.
@@ -72,6 +78,26 @@ pub trait Prompter {
 /// additionally caches individual LBAs. No write preparation or write-capable reopen is reachable
 /// from this service.
 pub fn scan_device_dashboard(runner: &dyn CmdRunner, backup_dir: &Path) -> Vec<Row> {
+    scan_dashboard_catalog(runner, || diskio::scan_backup_dir_checked(backup_dir))
+}
+
+pub(crate) fn scan_dashboard_snapshot(
+    runner: &dyn CmdRunner,
+    snapshot: &catalog_snapshot::CatalogSnapshot,
+) -> Vec<Row> {
+    scan_dashboard_catalog(runner, || {
+        let catalog = snapshot.catalog();
+        if let Some(error) = catalog.scan_error() {
+            return Err(error.to_owned());
+        }
+        Ok(catalog.entries().to_vec())
+    })
+}
+
+fn scan_dashboard_catalog(
+    runner: &dyn CmdRunner,
+    load: impl FnOnce() -> Result<Vec<diskio::BackupEntry>, String>,
+) -> Vec<Row> {
     let devices = RefCell::new(diskio::ReadOnlyDiskPool::new(|disk| {
         FileDev::open_rdonly(&raw_path(disk))
     }));
@@ -79,7 +105,7 @@ pub fn scan_device_dashboard(runner: &dyn CmdRunner, backup_dir: &Path) -> Vec<R
         devices.borrow_mut().read_sector(disk, lba)
     };
     let probe = ReadProbeCache::new(runner);
-    scan_disks(&probe, backup_dir, &read_disk)
+    crate::disk_scan::scan_disks_with_catalog(&probe, &read_disk, load)
 }
 
 /// Decide whether a completed read-only device scan needs elevation for identity metadata.
@@ -111,6 +137,7 @@ pub struct BackupWorkspaceItem {
     pub provision_kind: Option<crate::provision::DiskProvisionKind>,
     pub integrity_status: BackupIntegrityStatus,
     pub size_ok: bool,
+    pub verification_error: Option<String>,
     pub content_sha256: Option<String>,
     pub coverage: Option<backup_coverage::BackupCoverage>,
     pub restore_preview: Option<backup_restore_preview::BackupRestorePreview>,
@@ -133,10 +160,48 @@ pub fn backup_dir_argv_suffix(env_val: Option<String>) -> Vec<String> {
     crate::diskio::backup_dir_argv_suffix(env_val)
 }
 
+impl BackupWorkspaceItem {
+    pub fn health(&self) -> BackupHealth {
+        self.integrity_status
+            .health(self.size_ok, self.verification_error.is_some())
+    }
+    pub fn is_restorable(&self) -> bool {
+        self.health().is_healthy()
+    }
+}
+
 /// Build the backup-workspace rows from the exact same global numbering used by CLI restore,
 /// verify and delete. No frontend invents its own index.
 pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {
     let selector = load_backup_selector(root);
+    workspace_from_selector(&selector)
+}
+
+pub(crate) fn scan_backup_workspace_checked(
+    root: &Path,
+) -> Result<Vec<BackupWorkspaceItem>, String> {
+    let selector = load_backup_selector(root);
+    if let Some(error) = selector.catalog().scan_error() {
+        return Err(error.to_string());
+    }
+    Ok(workspace_from_selector(&selector))
+}
+
+pub(crate) fn workspace_from_snapshot(
+    snapshot: &catalog_snapshot::CatalogSnapshot,
+) -> Result<Vec<BackupWorkspaceItem>, String> {
+    let catalog = snapshot.catalog();
+    if let Some(error) = catalog.scan_error() {
+        return Err(error.to_owned());
+    }
+    Ok(workspace_from_selector(
+        &crate::selectors::BackupSelector::from_catalog(catalog.clone()),
+    ))
+}
+
+fn workspace_from_selector(
+    selector: &crate::selectors::BackupSelector,
+) -> Vec<BackupWorkspaceItem> {
     selector
         .numbered_with_indices()
         .into_iter()
@@ -167,12 +232,15 @@ pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {
                 provision_kind: entry.provision_kind,
                 integrity_status: entry.integrity_status,
                 size_ok: entry.size_ok,
+                verification_error: entry.verification_error.clone(),
                 content_sha256: entry.content_sha256.clone(),
                 coverage: entry.coverage.clone(),
-                restore_preview: entry
-                    .manifest
-                    .as_ref()
-                    .map(backup_restore_preview::BackupRestorePreview::from_manifest),
+                restore_preview: entry.restore_preview.clone().or_else(|| {
+                    entry
+                        .manifest
+                        .as_ref()
+                        .map(backup_restore_preview::BackupRestorePreview::from_manifest)
+                }),
             }
         })
         .collect()
@@ -211,8 +279,12 @@ pub fn verify_backup_exact(root: &Path, path: &Path) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "EDPB 校验失败: {}（容器结构、Manifest 或 Artifact 完整性异常）",
-            canonical_path.display()
+            "EDPB 校验失败: {}: {}",
+            canonical_path.display(),
+            entry
+                .verification_error
+                .as_deref()
+                .unwrap_or("容器结构、Manifest 或 Artifact 完整性异常")
         ))
     }
 }
