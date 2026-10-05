@@ -12,9 +12,7 @@ use crate::diskio::{self, find_backups};
 use crate::identify::identify;
 use crate::metainfo;
 use crate::protocol::semantic::SemanticContext;
-use crate::provision::{
-    DiskProvisionKind, ExistingPartition, ExistingProvisionProfile, PartitionRole,
-};
+use crate::provision::{DiskProvisionKind, ExistingPartition, ExistingProvisionProfile};
 use crate::sectors::{parse_lba12, EdpfPartition};
 use crate::sysinfo::{self, CmdRunner};
 
@@ -146,13 +144,14 @@ impl Row {
             {
                 return None;
             }
-            let role = crate::provision::official_partition_role(mode, index, partition_type);
+            let semantics =
+                crate::provision::official_partition_semantics(mode, index, partition_type).ok()?;
             partitions.push(ExistingPartition {
-                role,
+                role: semantics.role,
                 partition_type,
                 start_lba: part.start_lba,
                 sector_count: part.size_bytes / SECTOR as u64,
-                physically_encrypted: matches!(role, PartitionRole::Share | PartitionRole::Encrypt),
+                physically_encrypted: semantics.physically_encrypted(),
                 filesystem: None,
             });
         }

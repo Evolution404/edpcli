@@ -360,6 +360,7 @@ fn compatibility_reserve_partition(partition: &ManifestPartition) -> Option<Post
 
 fn edp_crypto_state(
     record: crate::provision::ExistingPartitionRecord,
+    physically_encrypted: bool,
     boot: &[u8],
     sector_count: u64,
     password: Option<&[u8]>,
@@ -369,7 +370,7 @@ fn edp_crypto_state(
     } else {
         "默认密码"
     };
-    if record.lba12.need_encrypt == 0 {
+    if !physically_encrypted {
         let detected = crate::filesystem::detect_boot_sector(sector_count, boot)
             .ok()
             .flatten();
@@ -377,15 +378,25 @@ fn edp_crypto_state(
             (
                 PostRestorePartitionState::Usable,
                 Some(filesystem),
-                "明文文件系统 boot sector 通过严格校验".into(),
+                "模式语义=物理明文；文件系统 boot sector 通过严格校验".into(),
             )
         } else {
             (
                 PostRestorePartitionState::NeedsFormat,
                 None,
-                "明文分区没有可验证文件系统".into(),
+                format!(
+                    "模式语义=物理明文；NeedEncrypt={} 仅是协议/密钥域字段；当前没有可验证文件系统",
+                    record.lba12.need_encrypt
+                ),
             )
         };
+    }
+    if record.lba12.need_encrypt == 0 {
+        return (
+            PostRestorePartitionState::CryptoMetadataInvalid,
+            None,
+            "模式语义要求物理密文，但协议 NeedEncrypt=0".into(),
+        );
     }
 
     match record.verified_file_key(Some(
@@ -588,7 +599,7 @@ fn assess_partitions_impl(
                     sector_count: partition.sector_count,
                     filesystem_hint: manifest.and_then(|value| value.filesystem_hint.clone()),
                     detected_filesystem: None,
-                    requires_original_key: record.lba12.need_encrypt != 0,
+                    requires_original_key: partition.physically_encrypted,
                     state: PostRestorePartitionState::Unsupported,
                     detail: error,
                 });
@@ -599,8 +610,13 @@ fn assess_partitions_impl(
         let password = selected_password
             .filter(|(selected, _)| *selected == partition_index)
             .map(|(_, password)| password);
-        let (state, detected_filesystem, detail) =
-            edp_crypto_state(record, &boot, partition.sector_count, password);
+        let (state, detected_filesystem, detail) = edp_crypto_state(
+            record,
+            partition.physically_encrypted,
+            &boot,
+            partition.sector_count,
+            password,
+        );
         assessment.partitions.push(PostRestorePartition {
             index: manifest.map_or((index + 1) as u32, |value| value.index),
             role: manifest.and_then(|value| value.role.clone()),
@@ -608,7 +624,7 @@ fn assess_partitions_impl(
             sector_count: partition.sector_count,
             filesystem_hint: manifest.and_then(|value| value.filesystem_hint.clone()),
             detected_filesystem,
-            requires_original_key: record.lba12.need_encrypt != 0,
+            requires_original_key: partition.physically_encrypted,
             state,
             detail,
         });

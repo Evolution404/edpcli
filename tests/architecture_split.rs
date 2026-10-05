@@ -1916,6 +1916,47 @@ fn plain_scan_and_prepare_share_geometry_aware_filesystem_evidence() {
 }
 
 #[test]
+fn protocol_key_flags_and_physical_partition_crypto_have_one_semantics_owner() {
+    let semantics = read_source("src/provision/partition_semantics.rs");
+    assert!(semantics.contains("NeedEncrypt is an on-disk protocol/key-domain flag"));
+    assert!(semantics.contains("BootShareCombined"));
+    assert!(semantics.contains("PhysicalPartitionEncryption::Plaintext"));
+    assert!(semantics.contains("PhysicalPartitionEncryption::Sm4Sector"));
+
+    let layout = read_source("src/provision/layout.rs");
+    assert!(layout.contains("physical_partition_encryption_semantics("));
+    let parsing = read_source("src/provision/reprovision/parsing.rs");
+    assert!(parsing.contains("official_partition_semantics(mode, index, partition_type)"));
+    assert!(parsing.contains("validate_protocol_need_encrypt(record.lba12.need_encrypt)"));
+    let scan = read_source("src/disk_scan.rs");
+    assert!(scan.contains("official_partition_semantics(mode, index, partition_type)"));
+
+    let inspect = read_source("src/inspect_target.rs");
+    let physical_state = inspect
+        .split("pub fn partition_physical_state(")
+        .nth(1)
+        .and_then(|body| body.split("pub fn decode_non_protocol_with_boot(").next())
+        .expect("Inspect physical-state boundary");
+    assert!(physical_state.contains("semantics.physical_encryption"));
+    assert!(!physical_state.contains("if partition.need_encrypt == 0"));
+
+    let restore = read_source("src/application/post_restore.rs");
+    assert!(!restore.contains("requires_original_key: record.lba12.need_encrypt"));
+    assert!(restore.contains("requires_original_key: partition.physically_encrypted"));
+    let format = read_source("src/application/post_restore/format_operation.rs");
+    assert!(format.contains("KeyCheck::Plain if current.physically_encrypted"));
+
+    let filesystem = read_source("src/filesystem/analysis/mod.rs");
+    assert!(!filesystem.contains("if p.need_encrypt != 0"));
+    assert!(filesystem.contains("Protocol NeedEncrypt is deliberately not consulted here"));
+
+    let generate = read_source("src/provision/generate.rs");
+    let validate = read_source("src/provision/validate.rs");
+    assert!(generate.contains("protocol_need_encrypt_semantics(partition.partition_type)"));
+    assert!(validate.contains("protocol_need_encrypt_semantics(partition_type)"));
+}
+
+#[test]
 fn passive_capacity_display_uses_one_global_unit_system() {
     for path in [
         "src/disk_scan_render.rs",

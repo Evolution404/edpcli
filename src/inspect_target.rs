@@ -12,7 +12,11 @@ use crate::common::{METADATA_LAST_LBA, SECTOR};
 use crate::crypto::a6b0_full_offset;
 use crate::filesystem::FilesystemKind;
 use crate::partition_transform::decrypt_mode2;
-use crate::provision::{default_file_key, default_file_key_checked, DefaultFileKeyError};
+use crate::protocol::edpf::EdpPartitionType;
+use crate::provision::{
+    default_file_key, default_file_key_checked, official_partition_semantics, DefaultFileKeyError,
+    OfficialPartitionSemantics, PhysicalPartitionEncryption,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SectorRegion {
@@ -75,6 +79,7 @@ impl SectorRegion {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PhysicalDataState {
     PlaintextFilesystem { filesystem: FilesystemKind },
+    PlaintextUnrecognized { reason: String },
     EncryptedMode2 { filesystem: FilesystemKind },
     Unknown { reason: String },
 }
@@ -84,6 +89,9 @@ impl PhysicalDataState {
         match self {
             Self::PlaintextFilesystem { filesystem } => {
                 format!("物理明文文件系统 ({})", filesystem.label())
+            }
+            Self::PlaintextUnrecognized { reason } => {
+                format!("物理明文（文件系统未确认：{reason}）")
             }
             Self::EncryptedMode2 { filesystem } => {
                 format!("SM4 mode2 密文（解密后为 {}）", filesystem.label())
@@ -95,9 +103,12 @@ impl PhysicalDataState {
     pub fn decode_strategy(&self) -> String {
         match self {
             Self::PlaintextFilesystem { filesystem } => format!(
-                "raw 已通过严格 {} boot-sector 校验；不执行 SM4，decode=raw",
+                "协议语义要求物理明文；raw 已通过严格 {} boot-sector 校验；不执行 SM4，decode=raw",
                 filesystem.label()
             ),
+            Self::PlaintextUnrecognized { reason } => {
+                format!("协议语义要求物理明文；不执行 SM4，decode=raw；文件系统证据异常：{reason}")
+            }
             Self::EncryptedMode2 { filesystem } => format!(
                 "FileKeyCRC 验证通过后执行 SM4-ECB；分区起始扇区解密后通过严格 {} boot-sector 校验",
                 filesystem.label()
@@ -111,7 +122,7 @@ impl PhysicalDataState {
             Self::PlaintextFilesystem { filesystem } | Self::EncryptedMode2 { filesystem } => {
                 Some(*filesystem)
             }
-            Self::Unknown { .. } => None,
+            Self::PlaintextUnrecognized { .. } | Self::Unknown { .. } => None,
         }
     }
 }
@@ -189,6 +200,11 @@ impl InspectDiskContext {
         partition_table: Option<crate::partition_table::PartitionTableSnapshot>,
         partition_table_issue: Option<String>,
     ) -> Self {
+        let provision_kind = provision_kind.or_else(|| {
+            device_id.as_deref().and_then(|did| {
+                crate::provision::DiskProvisionKind::from_metadata(&protocol_image, did)
+            })
+        });
         let mut partitions = Vec::new();
         let mut lce = None;
         let mut context_issues = Vec::new();
@@ -233,6 +249,21 @@ impl InspectDiskContext {
     pub fn has_edp_protocol(&self) -> bool {
         self.provision_kind
             .is_some_and(|kind| kind != crate::provision::DiskProvisionKind::Plain)
+    }
+
+    pub fn partition_semantics(
+        &self,
+        partition: &PartitionGeometry,
+    ) -> Result<OfficialPartitionSemantics, String> {
+        let mode = self
+            .provision_kind
+            .and_then(|kind| kind.official_mode())
+            .ok_or_else(|| "EDP 盘型尚未确认，不能推导物理加密语义".to_string())?;
+        let partition_type = EdpPartitionType::from_raw(partition.partition_type)
+            .ok_or_else(|| format!("未知 EDP 分区类型 {}", partition.partition_type))?;
+        let semantics = official_partition_semantics(mode, partition.index, partition_type)?;
+        semantics.validate_protocol_need_encrypt(partition.need_encrypt)?;
+        Ok(semantics)
     }
 
     pub fn validate_lba(&self, lba: u64) -> Result<(), String> {
@@ -411,35 +442,57 @@ impl InspectDiskContext {
         partition: &PartitionGeometry,
         raw_boot: &[u8],
     ) -> PhysicalDataState {
-        if let Some(filesystem) = detect_filesystem_boot(partition, raw_boot) {
-            return PhysicalDataState::PlaintextFilesystem { filesystem };
+        let semantics = match self.partition_semantics(partition) {
+            Ok(semantics) => semantics,
+            Err(reason) => return PhysicalDataState::Unknown { reason },
+        };
+        let raw_filesystem = detect_filesystem_boot(partition, raw_boot);
+
+        if semantics.physical_encryption == PhysicalPartitionEncryption::Plaintext {
+            return if let Some(filesystem) = raw_filesystem {
+                PhysicalDataState::PlaintextFilesystem { filesystem }
+            } else {
+                PhysicalDataState::PlaintextUnrecognized {
+                    reason: format!(
+                        "{} slot{} type{} 必须保持物理明文；NeedEncrypt={} 仅是协议/密钥域字段，raw boot-sector 未通过严格文件系统校验",
+                        semantics.role.label(),
+                        semantics.index,
+                        semantics.partition_type.raw(),
+                        partition.need_encrypt,
+                    ),
+                }
+            };
         }
 
-        if partition.need_encrypt == 0 {
+        if let Some(filesystem) = raw_filesystem {
             return PhysicalDataState::Unknown {
-                reason: "raw 未通过严格文件系统 boot-sector 校验；need_encrypt=0 也不能证明当前物理数据可直接作为明文".into(),
+                reason: format!(
+                    "{} slot{} type{} 按模式语义应为物理密文，但 raw 直接出现 {} 明文文件系统",
+                    semantics.role.label(),
+                    semantics.index,
+                    semantics.partition_type.raw(),
+                    filesystem.label(),
+                ),
             };
         }
         if partition.encrypt_mode != 2 {
             return PhysicalDataState::Unknown {
                 reason: format!(
-                    "raw 未通过严格文件系统 boot-sector 校验，且 encrypt_mode={} 没有已验证解码器",
+                    "模式语义要求物理密文，但 encrypt_mode={} 没有已验证解码器",
                     partition.encrypt_mode
                 ),
             };
         }
         let Some(did) = self.device_id.as_deref() else {
             return PhysicalDataState::Unknown {
-                reason:
-                    "raw 未通过严格文件系统 boot-sector 校验，且缺少 device_id，无法验证 FileKey"
-                        .into(),
+                reason: "模式语义要求物理密文，但缺少 device_id，无法验证 FileKey".into(),
             };
         };
         let key = match default_file_key(&self.protocol_image, did, partition.index) {
             Ok(key) => key,
             Err(error) => {
                 return PhysicalDataState::Unknown {
-                    reason: format!("raw 未识别为明文文件系统；FileKey 校验失败: {error}"),
+                    reason: format!("模式语义要求物理密文；FileKey 校验失败: {error}"),
                 };
             }
         };
@@ -456,7 +509,7 @@ impl InspectDiskContext {
         } else {
             PhysicalDataState::Unknown {
                 reason:
-                    "raw 与 FileKeyCRC 验证后的 SM4 mode2 结果均未通过严格文件系统 boot-sector 校验"
+                    "模式语义要求物理密文，但 FileKeyCRC 验证后的 SM4 mode2 结果未通过严格文件系统 boot-sector 校验"
                         .into(),
             }
         }
@@ -538,11 +591,18 @@ impl InspectDiskContext {
                 PhysicalDataState::PlaintextFilesystem { filesystem } => Ok((
                     raw.to_vec(),
                     format!(
-                        "分区[{}] type{}：物理盘面已为有效 {} 明文文件系统，未执行 SM4；MBR直接暴露={}",
+                        "分区[{}] type{}：模式语义=物理明文，{} 校验通过；未执行 SM4，decode=raw；MBR直接暴露={}",
                         partition.index,
                         partition.partition_type,
                         filesystem.label(),
                         self.partition_mbr_exposure(partition)
+                    ),
+                )),
+                PhysicalDataState::PlaintextUnrecognized { reason } => Ok((
+                    raw.to_vec(),
+                    format!(
+                        "分区[{}] type{}：模式语义=物理明文；未执行 SM4，decode=raw；{reason}",
+                        partition.index, partition.partition_type
                     ),
                 )),
                 PhysicalDataState::EncryptedMode2 { filesystem } => {

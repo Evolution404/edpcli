@@ -233,10 +233,6 @@ fn edpf_entry_with_flags(
     entry
 }
 
-fn need_encrypt(partition_type: u32) -> u32 {
-    u32::from(partition_type != 1)
-}
-
 fn need_disturb(index: usize) -> u32 {
     u32::from(index < 2)
 }
@@ -305,8 +301,8 @@ fn build_official_lba7(
             (compat.start_lba, compat.size_bytes)
         };
         let base = index * 0x40;
-        let encrypted = need_encrypt(partition.partition_type.raw()) != 0;
-        let material = if encrypted {
+        let keyed = super::protocol_need_encrypt_semantics(partition.partition_type);
+        let material = if keyed {
             plan.partition_lba7_material[index]
                 .unwrap_or(plan.lba7_key_material)
                 .packed16()
@@ -318,7 +314,7 @@ fn build_official_lba7(
             count,
             partition.partition_type.raw(),
             need_disturb(index),
-            u32::from(encrypted),
+            u32::from(keyed),
             start,
             size_bytes,
             &material,
@@ -346,8 +342,8 @@ fn build_official_lba12(
     let mut plain = [0u8; SECTOR];
     for (index, partition) in logical.iter().enumerate() {
         let base = index * 0x60;
-        let encrypted = need_encrypt(partition.partition_type.raw()) != 0;
-        let material = if encrypted {
+        let keyed = super::protocol_need_encrypt_semantics(partition.partition_type);
+        let material = if keyed {
             plan.partition_lba12_material[index]
                 .unwrap_or(plan.lba12_key_material)
                 .packed24()
@@ -359,11 +355,11 @@ fn build_official_lba12(
             count,
             partition.partition_type.raw(),
             need_disturb(index),
-            u32::from(encrypted),
+            u32::from(keyed),
             partition.start_sector,
             partition.size_bytes,
             &material,
-            if encrypted {
+            if keyed {
                 plan.partition_lba12_material[index]
                     .unwrap_or(plan.lba12_key_material)
                     .encrypt_mode

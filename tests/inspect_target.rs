@@ -201,7 +201,7 @@ fn plaintext_type1_with_real_fat12_shape_decodes_without_transform() {
 }
 
 #[test]
-fn need_encrypt_one_type2_with_valid_raw_exfat_stays_plaintext() {
+fn mode0_type2_raw_plaintext_does_not_override_canonical_physical_encryption() {
     let context = InspectDiskContext::new(
         LEXAR_PROTOCOL.to_vec(),
         Some(LEXAR_DEVICE_ID.into()),
@@ -216,16 +216,14 @@ fn need_encrypt_one_type2_with_valid_raw_exfat_stays_plaintext() {
 
     let raw = valid_exfat_boot(partition.start_sector, partition.sector_count);
     let state = context.partition_physical_state(partition, &raw);
-    assert!(matches!(
-        state,
-        PhysicalDataState::PlaintextFilesystem { .. }
-    ));
-    let (decoded, method) = context
+    let PhysicalDataState::Unknown { reason } = state else {
+        panic!("mode0 share must remain physically encrypted by canonical semantics");
+    };
+    assert!(reason.contains("应为物理密文"), "{reason}");
+    let error = context
         .decode_non_protocol(partition.start_sector, &raw)
-        .unwrap();
-    assert_eq!(decoded.as_slice(), raw.as_slice());
-    assert!(method.contains("物理盘面已为有效 exFAT 明文文件系统"));
-    assert!(!method.contains("SM4-ECB"));
+        .unwrap_err();
+    assert!(error.contains("应为物理密文"), "{error}");
 }
 
 #[test]

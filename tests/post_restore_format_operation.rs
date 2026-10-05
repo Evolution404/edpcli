@@ -339,19 +339,22 @@ fn encrypted_edp_partition_cannot_enter_plaintext_format() {
     assert!(dev.writes.is_empty());
 }
 
-fn encrypted_mode0_fixture() -> (
+fn official_edp_fixture(
+    mode: edpcli::provision::OfficialPartitionMode,
+) -> (
     common::FakeRunner,
     SparseFormatDev,
     MetadataRestoreOutcome,
     Vec<u8>,
 ) {
     use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
+    use edpcli::protocol::edpf::EdpPartitionType;
     use edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry;
     use edpcli::provision::{
         generate_official_image, parse_existing_provision, wrap_file_key,
-        wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialPartitionMode, OfficialPartitionSizes,
-        OfficialProvisionPlan, OnlyId, ProvisionEntropy, ProvisionMetadata, ProvisionProfile,
-        ProvisionSpec, TargetIdentity,
+        wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialPartitionSizes, OfficialProvisionPlan,
+        OnlyId, ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
+        TargetIdentity,
     };
 
     const TEST_TOTAL: u64 = 16_777_216;
@@ -377,26 +380,33 @@ fn encrypted_mode0_fixture() -> (
     .unwrap();
     let spec = ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1()).unwrap();
     let compat = locate_lba7_compatibility_extent_from_geometry(1024, 255, 63, 512).unwrap();
-    let plan = OfficialProvisionPlan::new(
-        OfficialPartitionMode::DefaultThreePartition,
+    let mut plan = OfficialProvisionPlan::new(
+        mode,
         OfficialPartitionSizes::new(32, 64, 128),
         compat,
         wrap_legacy_lba7_file_key(b"0000aaaa", [1; 8]),
         wrap_file_key(b"0000aaaa", [2; 16], FileKeyWrapMode::Sm4),
     )
-    .unwrap()
-    .with_partition_key_material(
-        1,
-        wrap_legacy_lba7_file_key(b"SharePass1!", [0x31; 8]),
-        wrap_file_key(b"SharePass1!", [0x41; 16], FileKeyWrapMode::Sm4),
-    )
-    .unwrap()
-    .with_partition_key_material(
-        2,
-        wrap_legacy_lba7_file_key(b"EncryptPass1!", [0x51; 8]),
-        wrap_file_key(b"EncryptPass1!", [0x61; 16], FileKeyWrapMode::Sm4),
-    )
     .unwrap();
+    for (index, partition_type) in mode.partition_types().iter().copied().enumerate() {
+        plan = match partition_type {
+            EdpPartitionType::Boot => plan,
+            EdpPartitionType::Share => plan
+                .with_partition_key_material(
+                    index,
+                    wrap_legacy_lba7_file_key(b"SharePass1!", [0x31; 8]),
+                    wrap_file_key(b"SharePass1!", [0x41; 16], FileKeyWrapMode::Sm4),
+                )
+                .unwrap(),
+            EdpPartitionType::Encrypt => plan
+                .with_partition_key_material(
+                    index,
+                    wrap_legacy_lba7_file_key(b"EncryptPass1!", [0x51; 8]),
+                    wrap_file_key(b"EncryptPass1!", [0x61; 16], FileKeyWrapMode::Sm4),
+                )
+                .unwrap(),
+        };
+    }
     let image = generate_official_image(&spec, &ProvisionEntropy::new([0x5a; 252]), &plan).unwrap();
     let protocol = image.as_bytes().to_vec();
     let parsed = parse_existing_provision(&image, &device_id, TEST_TOTAL)
@@ -453,6 +463,15 @@ fn encrypted_mode0_fixture() -> (
         ),
     };
     (runner, dev, outcome, protocol)
+}
+
+fn encrypted_mode0_fixture() -> (
+    common::FakeRunner,
+    SparseFormatDev,
+    MetadataRestoreOutcome,
+    Vec<u8>,
+) {
+    official_edp_fixture(edpcli::provision::OfficialPartitionMode::DefaultThreePartition)
 }
 
 #[test]
@@ -596,6 +615,60 @@ fn edp_plaintext_partition_uses_the_same_authorized_format_path() {
             &protocol[lba * SECTOR..(lba + 1) * SECTOR]
         );
     }
+}
+
+#[test]
+fn mode1_combined_restore_formats_plaintext_despite_need_encrypt_one() {
+    use edpcli::provision::{parse_existing_provision, OfficialPartitionMode, ProvisionImage};
+
+    let (runner, mut dev, outcome, protocol) =
+        official_edp_fixture(OfficialPartitionMode::BootShareCombined);
+    let target = &outcome.partitions[0];
+    let image = ProvisionImage::from_bytes(protocol.clone()).unwrap();
+    let parsed = parse_existing_provision(&image, &outcome.device_id, outcome.total_sectors)
+        .unwrap()
+        .unwrap();
+    assert_eq!(parsed.records[0].lba12.need_encrypt, 1);
+    assert!(!parsed.profile.partitions[0].physically_encrypted);
+    assert_eq!(
+        outcome.assessment.partitions[0].state,
+        PostRestorePartitionState::NeedsFormat
+    );
+    assert!(!outcome.assessment.partitions[0].requires_original_key);
+
+    let result = format_partition_on_disk(
+        &runner,
+        6,
+        &mut dev,
+        &mut Confirm(true),
+        outcome.format_target_pin.as_ref().unwrap(),
+        &outcome,
+        &PartitionFormatRequest {
+            partition_index: target.index,
+            filesystem: FilesystemKind::ExFat,
+        },
+        "二合一",
+        0x6ac3_074a,
+    );
+    assert!(result.result.is_ok(), "{:?}", result.result);
+
+    let raw_boot = dev.sectors.get(&(target.start_lba as u32)).unwrap();
+    assert_eq!(&raw_boot[3..11], b"EXFAT   ");
+    let detected = edpcli::filesystem::detect_boot_sector(target.sector_count, raw_boot)
+        .unwrap()
+        .expect("mode1 combined must be directly mountable plaintext");
+    assert_eq!(detected, FilesystemKind::ExFat);
+
+    let after = assess_partitions_readonly(
+        &mut dev,
+        "edp",
+        &outcome.device_id,
+        outcome.total_sectors,
+        &outcome.partitions,
+    )
+    .unwrap();
+    assert_eq!(after.partitions[0].state, PostRestorePartitionState::Usable);
+    assert!(!after.partitions[0].requires_original_key);
 }
 
 #[test]

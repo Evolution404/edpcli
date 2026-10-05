@@ -98,10 +98,9 @@ fn valid_exfat_boot(partition_start: u64, sector_count: u64) -> [u8; SECTOR] {
 }
 
 fn captured_partition_edpb() -> Option<(TmpDir, PathBuf, u64)> {
-    let data = load_disk_image("aigo")?;
-    let device_id = "disk&ven_aigo&prod_u335&rev_pmap";
+    let (data, device_id) = mode1_fixture_image("aigo")?;
     let total_sectors = 245_760_000u64;
-    let partition = parse_partition_geometry(&data, device_id, total_sectors)
+    let partition = parse_partition_geometry(&data, &device_id, total_sectors)
         .ok()?
         .into_iter()
         .find(|partition| partition.partition_type == 2)?;
@@ -126,7 +125,7 @@ fn captured_partition_edpb() -> Option<(TmpDir, PathBuf, u64)> {
             disk_number: Some(4),
             vid: "3535".into(),
             pid: "6300".into(),
-            device_id: device_id.into(),
+            device_id: device_id.clone(),
             onlyid: Some("1987718388".into()),
             total_sectors: Some(total_sectors),
             logical_sector_size: SECTOR as u32,

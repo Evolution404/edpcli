@@ -242,9 +242,19 @@ pub fn sector_meta_text(
             partition.sector_count,
         ));
         out.push_str(&format!(
-            "加密配置: NeedEncrypt={} EncryptMode={}\n",
+            "协议密钥字段: NeedEncrypt={} EncryptMode={}\n",
             partition.need_encrypt, partition.encrypt_mode
         ));
+        match context.partition_semantics(partition) {
+            Ok(semantics) => out.push_str(&format!(
+                "物理加密语义: mode{} slot{} {} · {}\n",
+                semantics.mode as u8,
+                semantics.index,
+                semantics.role.label(),
+                semantics.physical_encryption.label(),
+            )),
+            Err(error) => out.push_str(&format!("物理加密语义: 未确认（{error}）\n")),
+        }
         out.push_str(&format!(
             "MBR 直接暴露: {}\n",
             context.partition_mbr_exposure(partition)

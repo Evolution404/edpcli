@@ -203,28 +203,16 @@ pub fn parse_existing_provision(
     }
     let mut partitions = Vec::with_capacity(count);
     for (index, record) in records.iter().enumerate() {
-        let role = match (mode, index) {
-            (OfficialPartitionMode::WholeDiskEncrypted, 0) => PartitionRole::CompatibilityReserve,
-            (OfficialPartitionMode::BootShareCombined, 0) => PartitionRole::BootShareCombined,
-            (_, 0) => PartitionRole::Boot,
-            (OfficialPartitionMode::IntranetExtranetDualPartition, 1) => PartitionRole::Share,
-            (OfficialPartitionMode::DefaultThreePartition, 1) => PartitionRole::Share,
-            _ => PartitionRole::Encrypt,
-        };
         let partition_type = EdpPartitionType::from_raw(record.lba12.partition_type)
             .ok_or("unknown EDPF partition type")?;
-        let physically_encrypted = match role {
-            PartitionRole::Boot
-            | PartitionRole::BootShareCombined
-            | PartitionRole::CompatibilityReserve => false,
-            PartitionRole::Share | PartitionRole::Encrypt => true,
-        };
+        let semantics = super::super::official_partition_semantics(mode, index, partition_type)?;
+        semantics.validate_protocol_need_encrypt(record.lba12.need_encrypt)?;
         partitions.push(ExistingPartition {
-            role,
+            role: semantics.role,
             partition_type,
             start_lba: record.lba12.start_sector,
             sector_count: record.lba12.partition_size / SECTOR as u64,
-            physically_encrypted,
+            physically_encrypted: semantics.physically_encrypted(),
             filesystem: None,
         });
     }

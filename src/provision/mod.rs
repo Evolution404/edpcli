@@ -11,6 +11,7 @@ mod keys;
 mod layout;
 mod lce;
 mod partition_format;
+mod partition_semantics;
 mod plain;
 mod profile;
 mod region_mapping;
@@ -44,6 +45,10 @@ pub use layout::{
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
 pub use partition_format::{build_official_partition_filesystem, PartitionFilesystemImage};
+pub use partition_semantics::{
+    official_partition_semantics, physical_partition_encryption_semantics,
+    protocol_need_encrypt_semantics, OfficialPartitionSemantics, PhysicalPartitionEncryption,
+};
 pub use plain::{
     build_plain_provision_write_plan, max_plain_sector_count, plain_gaps,
     validate_plain_partitions, PlainCleanupExtent, PlainGap, PlainPartitionSpec,

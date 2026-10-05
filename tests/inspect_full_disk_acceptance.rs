@@ -75,6 +75,34 @@ fn workspace(context: &InspectDiskContext) -> AdvancedInspectWorkspace {
 }
 
 #[test]
+fn mode1_combined_decode_is_identity_even_when_need_encrypt_is_one() {
+    let spec = official_spec();
+    let entropy = ProvisionEntropy::new([0x5a; 252]);
+    let plan = official_plan(OfficialPartitionMode::BootShareCombined);
+    let image = generate_official_image(&spec, &entropy, &plan).unwrap();
+    let context = InspectDiskContext::new(
+        image.as_bytes().to_vec(),
+        Some(spec.target().device_id().to_string()),
+        spec.target().total_sectors(),
+    );
+    let combined = &context.partitions[0];
+    assert_eq!(combined.partition_type, 2);
+    assert_eq!(combined.need_encrypt, 1);
+    let semantics = context.partition_semantics(combined).unwrap();
+    assert_eq!(semantics.role.label(), "启动/交换区");
+    assert!(!semantics.physically_encrypted());
+
+    let raw = [0xA5u8; SECTOR];
+    let (decoded, method) = context
+        .decode_non_protocol(combined.start_sector, &raw)
+        .unwrap();
+    assert_eq!(decoded, raw);
+    assert!(method.contains("模式语义=物理明文"), "{method}");
+    assert!(method.contains("decode=raw"), "{method}");
+    assert!(!method.contains("SM4-ECB"), "{method}");
+}
+
+#[test]
 fn all_four_official_modes_keep_lce_and_logical_partitions_in_one_full_disk_topology() {
     let spec = official_spec();
     let entropy = ProvisionEntropy::new([0x5a; 252]);

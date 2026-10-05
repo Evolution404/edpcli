@@ -303,17 +303,7 @@ pub const fn official_partition_role(
     index: usize,
     partition_type: EdpPartitionType,
 ) -> PartitionRole {
-    match (mode, index, partition_type) {
-        (OfficialPartitionMode::WholeDiskEncrypted, 0, EdpPartitionType::Boot) => {
-            PartitionRole::CompatibilityReserve
-        }
-        (OfficialPartitionMode::BootShareCombined, 0, EdpPartitionType::Share) => {
-            PartitionRole::BootShareCombined
-        }
-        (_, _, EdpPartitionType::Boot) => PartitionRole::Boot,
-        (_, _, EdpPartitionType::Share) => PartitionRole::Share,
-        (_, _, EdpPartitionType::Encrypt) => PartitionRole::Encrypt,
-    }
+    super::partition_semantics::official_partition_role_semantics(mode, index, partition_type)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -331,15 +321,8 @@ pub const fn physical_partition_encryption(
     index: usize,
     partition_type: EdpPartitionType,
 ) -> bool {
-    match partition_type {
-        EdpPartitionType::Boot => false,
-        EdpPartitionType::Share
-            if matches!(mode, OfficialPartitionMode::BootShareCombined) && index == 0 =>
-        {
-            false
-        }
-        EdpPartitionType::Share | EdpPartitionType::Encrypt => true,
-    }
+    super::partition_semantics::physical_partition_encryption_semantics(mode, index, partition_type)
+        .is_encrypted()
 }
 
 pub fn official_format_targets(

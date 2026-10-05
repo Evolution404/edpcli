@@ -254,15 +254,16 @@ pub(super) fn verify_current_target(
                 }
             }
             KeyCheck::Existing(key) => {
-                if record.lba12.need_encrypt == 0
+                if !current.physically_encrypted
+                    || record.lba12.need_encrypt == 0
                     || record.lba12.encrypt_mode != FileKeyWrapMode::Sm4.raw()
                     || crate::crypto::crc32_bare(key) != record.lba12.file_key_crc
                 {
                     return Err(failure("当前密钥域与已验证原 FileKey 不一致"));
                 }
             }
-            KeyCheck::Plain if record.lba12.need_encrypt != 0 => {
-                return Err(failure("加密分区禁止明文格式化"));
+            KeyCheck::Plain if current.physically_encrypted => {
+                return Err(failure("物理加密分区禁止明文格式化"));
             }
             KeyCheck::Plain => {}
         }

@@ -575,8 +575,8 @@ fn expected_need_disturb(index: usize) -> u32 {
     u32::from(index < 2)
 }
 
-fn expected_need_encrypt(partition_type: u32) -> u32 {
-    u32::from(partition_type != 1)
+fn expected_need_encrypt(partition_type: crate::protocol::edpf::EdpPartitionType) -> u32 {
+    u32::from(super::protocol_need_encrypt_semantics(partition_type))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -600,7 +600,7 @@ fn validate_official_entry(
         && read_u32(raw, base + 0x08) == count
         && read_u32(raw, base + 0x0c) == ptype
         && read_u32(raw, base + 0x10) == expected_need_disturb(index)
-        && read_u32(raw, base + 0x14) == expected_need_encrypt(ptype)
+        && read_u32(raw, base + 0x14) == expected_need_encrypt(partition.partition_type)
         && read_u64(raw, base + 0x18) == expected_start
         && read_u64(raw, base + 0x20) == SECTOR as u64
         && read_u64(raw, base + 0x28) == expected_size;
@@ -618,7 +618,7 @@ fn validate_official_entry(
                 "official LBA12 entry{index} compatibility key is not zero"
             ));
         }
-        let expected_mode = if expected_need_encrypt(ptype) != 0 {
+        let expected_mode = if expected_need_encrypt(partition.partition_type) != 0 {
             encrypt_mode
         } else {
             0
@@ -650,8 +650,8 @@ fn validate_official_lba7(
                 plan.lba7_compatibility_extent.size_bytes,
             )
         };
-        let encrypted = expected_need_encrypt(partition.partition_type.raw()) != 0;
-        let material = if encrypted {
+        let keyed = expected_need_encrypt(partition.partition_type) != 0;
+        let material = if keyed {
             plan.partition_lba7_material[index]
                 .unwrap_or(plan.lba7_key_material)
                 .packed16()
@@ -691,8 +691,8 @@ fn validate_official_lba12(
     let plain = a6b0_full(raw, &crc.to_le_bytes(), 0);
     let count = u32::try_from(logical.len()).map_err(|_| "partition count overflow")?;
     for (index, partition) in logical.iter().enumerate() {
-        let encrypted = expected_need_encrypt(partition.partition_type.raw()) != 0;
-        let material = if encrypted {
+        let keyed = expected_need_encrypt(partition.partition_type) != 0;
+        let material = if keyed {
             plan.partition_lba12_material[index]
                 .unwrap_or(plan.lba12_key_material)
                 .packed24()
@@ -709,7 +709,7 @@ fn validate_official_lba12(
             partition.start_sector,
             partition.size_bytes,
             &material,
-            if encrypted {
+            if keyed {
                 plan.partition_lba12_material[index]
                     .unwrap_or(plan.lba12_key_material)
                     .encrypt_mode

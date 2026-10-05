@@ -217,8 +217,10 @@ fn empty_analysis(p: &PartitionGeometry) -> PartitionAnalysis {
 mod exfat;
 mod fat;
 
-/// Filesystem parsers only see relative, read-only sectors. A future decrypted
-/// reader must authenticate its key and preserve decoded evidence separately.
+/// Filesystem parsers only see relative, read-only *plaintext* sectors.
+/// Physical encryption is resolved before entering this domain; callers must supply
+/// an identity reader for plaintext regions or a verified decrypting reader for encrypted
+/// regions. Protocol NeedEncrypt is deliberately not consulted here.
 pub trait PartitionReader {
     fn read_sector(&mut self, relative_lba: u64) -> std::io::Result<Vec<u8>>;
 }
@@ -228,11 +230,6 @@ pub fn analyze_partition(
     reader: &mut dyn PartitionReader,
 ) -> PartitionAnalysis {
     let mut report = empty_analysis(p);
-    if p.need_encrypt != 0 {
-        report.status = AnalysisStatus::Locked;
-        report.reason = "encrypted partition; no verified decrypted reader is available".into();
-        return report;
-    }
     if p.sector_size != 512 || p.partition_size != p.sector_count.saturating_mul(512) {
         report.status = AnalysisStatus::ParseFailed;
         report.reason = "invalid partition geometry".into();
