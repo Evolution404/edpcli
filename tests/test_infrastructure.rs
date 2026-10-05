@@ -240,6 +240,9 @@ fn virtual_disk_hil_is_path_filtered_and_has_periodic_full_coverage() {
     assert!(hil.contains("workflow_dispatch:"));
     assert!(hil.contains("schedule:"));
     assert!(hil.contains("cron:"));
+    assert!(hil.contains("runs-on: macos-15"));
+    assert!(hil.contains("bash scripts/ci/macos-virtual-disk-hil.sh"));
+    assert!(hil.contains("bash scripts/ci/macos-plain-virtual-disk-hil.sh"));
 }
 
 #[test]
