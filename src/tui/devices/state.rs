@@ -112,15 +112,15 @@ impl AppState {
             };
             let mut parts = vec![status.to_string()];
             if row.n_baks > 0 {
-                parts.push(format!("●{}", row.n_baks));
+                parts.push(format!("● {}", row.n_baks));
             }
             if row.n_possible_baks > 0 {
-                parts.push(format!("▲{}", row.n_possible_baks));
+                parts.push(format!("▲ {}", row.n_possible_baks));
             }
             if row.n_baks == 0 && row.n_possible_baks == 0 {
                 parts.push("暂无备份".into());
             }
-            parts.join(" · ")
+            parts.join(" ")
         }
 
         let expanded = |key| self.devices.info_expanded.contains(&key);

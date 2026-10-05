@@ -1606,9 +1606,17 @@ fn device_status_backup_table_omits_zero_counts_and_selects_restore_source() {
         state.selected_restore_backup_path(),
         Some("backup-1.edpb".into())
     );
+    let status_value = state
+        .device_info_tree_rows()
+        .into_iter()
+        .find(|node| node.key == DeviceInfoNodeKey::Status)
+        .and_then(|node| node.value)
+        .expect("status summary");
+    assert_eq!(status_value, "正常 ● 2");
+    assert!(!status_value.contains('·'));
+    assert!(!status_value.contains("▲ 0"));
+
     let text = render_text(&state, 180, 46);
-    assert!(text.contains("●2份确认"), "{text}");
-    assert!(!text.contains("▲0份疑似"), "{text}");
     for heading in [
         "关系", "时间", "容量", "部门", "姓名", "型号", "盘型", "VID:PID",
     ] {
@@ -1631,6 +1639,27 @@ fn device_status_backup_table_omits_zero_counts_and_selects_restore_source() {
         state.selected_restore_backup_path(),
         Some("backup-2.edpb".into())
     );
+}
+
+#[test]
+fn device_status_backup_summary_uses_compact_symbol_count_format() {
+    use edpcli::tui::state::DeviceInfoNodeKey;
+
+    let mut row = edp_device_with_layout();
+    row.n_baks = 47;
+    row.n_possible_baks = 2;
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    let value = state
+        .device_info_tree_rows()
+        .into_iter()
+        .find(|node| node.key == DeviceInfoNodeKey::Status)
+        .and_then(|node| node.value)
+        .expect("status summary");
+
+    assert_eq!(value, "正常 ● 47 ▲ 2");
+    assert!(!value.contains('·'));
 }
 
 #[test]
