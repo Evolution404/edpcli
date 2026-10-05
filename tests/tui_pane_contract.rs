@@ -1539,22 +1539,35 @@ fn device_workbench_panes_are_list_tree_detail() {
 }
 
 #[test]
-fn device_tree_selection_is_semantic_and_detail_has_independent_scroll() {
+fn device_capacity_detail_jk_selects_regions_without_mutating_tree() {
     let mut state = AppState::new();
-    state.replace_devices(vec![device()]);
+    state.replace_devices(vec![edp_device_with_layout()]);
     state.focus_devices_pane(PaneId::DevicesTree);
     assert_eq!(
         state.device_info_selected_key(),
         edpcli::tui::state::DeviceInfoNodeKey::Capacity
     );
-    let selected = state.device_info_selected_key();
+    let selected_tree = state.device_info_selected_key();
+    let first = state
+        .device_capacity_selection()
+        .expect("first capacity region");
+
     state.device_info_focus_detail();
-    state.navigate(NavCommand::Down, 2);
-    assert_eq!(state.device_info_selected_key(), selected);
+    state.navigate(NavCommand::Down, 20);
+
+    let second = state
+        .device_capacity_selection()
+        .expect("second capacity region");
+    assert_ne!(second, first);
+    assert_eq!(state.device_info_selected_key(), selected_tree);
     assert_eq!(
         state.pane_viewport(PaneId::DevicesDetail).scroll_y.offset,
-        1
+        0,
+        "capacity j/k must select rows instead of scrolling the detail paragraph"
     );
+
+    state.navigate(NavCommand::Up, 20);
+    assert_eq!(state.device_capacity_selection(), Some(first));
 }
 
 #[test]
@@ -1779,7 +1792,8 @@ fn device_capacity_map_stays_visible_and_tracks_selected_region() {
     let compact_capacity = capacity_text.replace(' ', "");
     assert!(compact_capacity.contains("全盘容量地图"), "{capacity_text}");
     assert!(capacity_text.contains('▄') && capacity_text.contains('▀'));
-    assert!(!capacity_text.contains('▲'));
+    assert!(capacity_text.contains('▲'));
+    assert!(compact_capacity.contains("当前区域EDP主协议区"));
     let presentation_source = include_str!("../src/tui/devices/presentation.rs");
     assert!(!presentation_source.contains("尾部区域可直接"));
     assert!(!presentation_source.contains("极小区域使用最小可视宽度"));

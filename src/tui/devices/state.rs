@@ -33,6 +33,8 @@ pub struct DevicesState {
     pub(super) info_selected: DeviceInfoNodeKey,
     pub(super) info_expanded: BTreeSet<DeviceInfoNodeKey>,
     pub(super) related_backup_selected: usize,
+    pub(super) layout_target: Option<u32>,
+    pub(super) layout_regions: crate::tui::disk_region_list::DiskRegionListState,
 }
 
 impl Default for DevicesState {
@@ -47,6 +49,8 @@ impl Default for DevicesState {
             info_selected: DeviceInfoNodeKey::Capacity,
             info_expanded,
             related_backup_selected: 0,
+            layout_target: None,
+            layout_regions: Default::default(),
         }
     }
 }
@@ -265,6 +269,146 @@ impl AppState {
         self.pane_viewport_mut(crate::tui::pane::PaneId::DevicesDetail)
             .scroll_y
             .top();
+    }
+
+    fn device_capacity_model(&self) -> Option<crate::tui::disk_layout::DiskLayoutModel> {
+        self.selected_device()?.canonical_layout().ok()
+    }
+
+    fn device_capacity_target(&self) -> Option<u32> {
+        self.selected_device().map(|row| row.disk)
+    }
+
+    pub(crate) fn device_capacity_region_state(
+        &self,
+    ) -> crate::tui::disk_region_list::DiskRegionListState {
+        let mut regions = if self.devices.layout_target == self.device_capacity_target() {
+            self.devices.layout_regions.clone()
+        } else {
+            crate::tui::disk_region_list::DiskRegionListState::default()
+        };
+        if let Some(model) = self.device_capacity_model() {
+            if regions.selected_index(&model).is_none() {
+                regions.reconcile(&model, 1);
+            }
+        } else {
+            regions.clear_selection();
+        }
+        regions
+    }
+
+    pub fn device_capacity_selection(
+        &self,
+    ) -> Option<crate::tui::disk_layout::DiskCapacitySelection> {
+        self.device_capacity_region_state().selection()
+    }
+
+    fn device_capacity_visible_rows(&self) -> usize {
+        let size = self.shell.viewport_size;
+        if size.width == 0 || size.height == 0 {
+            return 8;
+        }
+        let body = crate::tui::backup_layout::shell_areas(
+            ratatui::layout::Rect::new(0, 0, size.width, size.height),
+            1,
+        )[2];
+        let class = crate::tui::ui::ViewportClass::for_width(body.width);
+        let detail = if class == crate::tui::ui::ViewportClass::Compact {
+            body
+        } else {
+            let list_height = crate::tui::workspace_layout::device_list_height(
+                body.height,
+                self.visible_device_count(),
+            );
+            let workbench_height = body.height.saturating_sub(list_height);
+            let tree_percent = match class {
+                crate::tui::ui::ViewportClass::Standard => 40,
+                crate::tui::ui::ViewportClass::Wide | crate::tui::ui::ViewportClass::UltraWide => {
+                    30
+                }
+                crate::tui::ui::ViewportClass::Compact => unreachable!(),
+            };
+            ratatui::layout::Rect::new(
+                body.x + body.width.saturating_mul(tree_percent) / 100,
+                body.y + list_height,
+                body.width.saturating_mul(100 - tree_percent) / 100,
+                workbench_height,
+            )
+        };
+        let inner = crate::tui::ui::card("", true).inner(detail);
+        let map_height = if inner.height >= 16 { 8 } else { 2 };
+        let list = ratatui::layout::Layout::vertical([
+            ratatui::layout::Constraint::Length(map_height),
+            ratatui::layout::Constraint::Min(0),
+            ratatui::layout::Constraint::Length(3),
+        ])
+        .split(inner)[1];
+        (usize::from(list.height.saturating_sub(1))
+            / crate::tui::disk_region_list::region_row_height(list.width))
+        .max(1)
+    }
+
+    pub(crate) fn navigate_device_capacity_regions(&mut self, command: NavCommand) -> bool {
+        if self.workspace() != Workspace::Devices
+            || self.devices_focused_pane() != crate::tui::pane::PaneId::DevicesDetail
+            || self.device_info_selected_key() != DeviceInfoNodeKey::Capacity
+            || !matches!(
+                command,
+                NavCommand::Up
+                    | NavCommand::Down
+                    | NavCommand::Top
+                    | NavCommand::Bottom
+                    | NavCommand::HalfPageUp
+                    | NavCommand::HalfPageDown
+                    | NavCommand::PageUp
+                    | NavCommand::PageDown
+            )
+        {
+            return false;
+        }
+        let Some(model) = self.device_capacity_model() else {
+            return true;
+        };
+        let visible = self.device_capacity_visible_rows();
+        let mut regions = self.device_capacity_region_state();
+        match command {
+            NavCommand::Top => {
+                regions.select_index(&model, 0, visible);
+            }
+            NavCommand::Bottom => {
+                regions.select_index(
+                    &model,
+                    model
+                        .collapsed_tail_model()
+                        .segments
+                        .len()
+                        .saturating_sub(1),
+                    visible,
+                );
+            }
+            _ => {
+                let count = if matches!(command, NavCommand::HalfPageUp | NavCommand::HalfPageDown)
+                {
+                    (visible / 2).max(1) as isize
+                } else if matches!(command, NavCommand::PageUp | NavCommand::PageDown) {
+                    visible as isize
+                } else {
+                    1
+                };
+                let delta = if matches!(
+                    command,
+                    NavCommand::Up | NavCommand::HalfPageUp | NavCommand::PageUp
+                ) {
+                    -count
+                } else {
+                    count
+                };
+                regions.move_selection(&model, delta, visible);
+            }
+        }
+        self.devices.layout_regions = regions;
+        self.devices.layout_target = self.device_capacity_target();
+        true
     }
 
     pub fn device_related_backups(

@@ -18,6 +18,10 @@ pub(super) fn draw_device_detail(frame: &mut Frame, area: ratatui::layout::Rect,
         .find(|node| node.key == key)
         .map(|node| node.label)
         .unwrap_or_else(|| "设备详情".into());
+    if key == crate::tui::state::DeviceInfoNodeKey::Capacity {
+        draw_capacity_detail(frame, area, state, row, title.as_str(), focused);
+        return;
+    }
     if matches!(
         key,
         crate::tui::state::DeviceInfoNodeKey::Status
@@ -37,6 +41,96 @@ pub(super) fn draw_device_detail(frame: &mut Frame, area: ratatui::layout::Rect,
             .wrap(Wrap { trim: false }),
         area,
     );
+}
+
+fn draw_capacity_detail(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    state: &AppState,
+    row: &crate::disk_scan::Row,
+    title: &str,
+    focused: bool,
+) {
+    use crate::tui::disk_layout::{DiskCapacityMap, DiskCapacityMapProfile, TailExpansion};
+    use crate::tui::disk_region_list::{render_disk_region_list_body, DiskRegionListMode};
+
+    let block = crate::tui::ui::card(title, focused);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let Ok(model) = row.canonical_layout() else {
+        frame.render_widget(Paragraph::new("无法建立可靠容量布局。"), inner);
+        return;
+    };
+    let regions = state.device_capacity_region_state();
+    let selection = regions.selection();
+    let profile = if inner.height >= 16 {
+        DiskCapacityMapProfile::Full
+    } else {
+        DiskCapacityMapProfile::Mini
+    };
+    let map = DiskCapacityMap::new(&model, profile)
+        .with_tail(TailExpansion::Collapsed)
+        .with_selection(selection.clone())
+        .with_marker(true);
+    let map_height = if inner.height >= 16 { 8 } else { 2 };
+    let chunks = Layout::vertical([
+        Constraint::Length(map_height),
+        Constraint::Min(0),
+        Constraint::Length(3),
+    ])
+    .split(inner);
+    let mut map_lines = vec![Line::from(Span::styled(
+        "全盘容量地图",
+        crate::tui::theme::current()
+            .secondary_accent()
+            .add_modifier(Modifier::BOLD),
+    ))];
+    map_lines.extend(map.lines(usize::from(inner.width)));
+    frame.render_widget(Paragraph::new(map_lines), chunks[0]);
+    render_disk_region_list_body(
+        frame,
+        chunks[1],
+        &model,
+        &regions,
+        DiskRegionListMode::Interactive { focused },
+    );
+
+    let selected = model
+        .collapsed_tail_model()
+        .segments
+        .into_iter()
+        .find(|segment| {
+            selection.as_ref().is_some_and(|selection| {
+                segment.start_lba == selection.start_lba
+                    && segment.end_exclusive().ok() == Some(selection.end_exclusive)
+                    && segment.kind == selection.kind
+            })
+        });
+    let lines = if let Some(segment) = selected {
+        vec![
+            Line::from(vec![
+                Span::styled("当前区域  ", muted()),
+                Span::styled(
+                    safe(&segment.label),
+                    crate::tui::theme::current()
+                        .disk_region(segment.kind)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(format!(
+                "LBA {} · {} sector",
+                segment.closed_range(),
+                segment.sector_count
+            )),
+            Line::from(Span::styled(
+                "j/k 选择区域 · gg/G 首尾区域 · Ctrl-w h 返回结构树",
+                muted(),
+            )),
+        ]
+    } else {
+        vec![Line::from(Span::styled("j/k 选择区域", muted()))]
+    };
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), chunks[2]);
 }
 
 fn draw_status_backup_detail(

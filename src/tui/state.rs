@@ -893,6 +893,9 @@ impl AppState {
             return StateEffect::None;
         }
 
+        if self.navigate_device_capacity_regions(command) {
+            return StateEffect::None;
+        }
         if self.navigate_backup_panel(command) {
             return StateEffect::None;
         }
