@@ -539,6 +539,7 @@ fn table_scroll_gate_covers_every_interactive_renderer() {
     ];
 
     for (name, source, bounded) in renderers {
+        let source = source.replace("\r\n", "\n");
         assert!(
             source.contains("layout_with_active("),
             "{name}: missing shared viewport layout"
