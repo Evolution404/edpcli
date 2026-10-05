@@ -47,7 +47,7 @@
 - 16 个隐藏兼容模块只有在对应集成测试或 HIL 已迁移后才可逐项改为 crate 内部可见；这属于兼容性演进，不再阻塞当前架构收口。
 - 剩余源码结构断言继续保留协议金样、事务顺序、安全状态转换和单一职责等必要约束；遇到文件迁移时优先改为行为测试或目录级门禁，不为降低统计数字机械删除。
 - `prepare.rs`、TUI 状态与任务运行时后续只在出现新的明确职责边界时继续拆分，不为降低行数机械拆文件。
-- 实际 macOS 虚拟 HIL 脚本需要创建并挂载临时虚拟磁盘，当前工具安全层阻止直接执行；`ci-virtual-disk` 测试代码已通过静态编译检查，正式 HIL 继续由仓库 CI 执行。
+- 本机工具安全层阻止直接执行虚拟磁盘脚本，但 GitHub `Virtual Disk HIL` 已在提交 `b2d295c` 上完成正式验证：macOS arm64、Linux arm64/x86_64、Windows arm64/x86_64 五个作业全部通过。
 
 ## 本轮最终验证
 
@@ -55,8 +55,9 @@
 - `cargo check --locked --all-targets`：通过。
 - Linux `x86_64-unknown-linux-gnu` 与 Windows `x86_64-pc-windows-gnu` 的 `cargo check --locked --all-targets`：均通过。
 - `cargo check --locked --features ci-virtual-disk --tests`：通过，虚拟 HIL 测试代码能够编译；实际虚拟磁盘执行被当前工具安全层阻止。
+- 首次远端 Windows x86_64 CI 额外暴露两处可移植性问题：API 架构门禁依赖 LF 换行，以及 Windows 专属进程输出分支触发 `clippy::needless_return`。前者已改为 `lines()` 相邻行判断并通过 CRLF 模拟；后者已改为表达式返回，并通过 `cargo clippy --locked --all-targets --target x86_64-pc-windows-gnu -- -D warnings`。
 - `cargo doc --locked --no-deps`：通过且无 rustdoc 警告；根索引中稳定接口 12/12 可见、兼容接口 16/16 隐藏。
 - `git diff --check`：通过。
-- `python3 scripts/test-full.py --profile full --max-seconds 600`：最终通过；8 个非 HIL 套件、库、主程序和文档测试全部成功，0 失败，总耗时 42.78 秒。
+- `python3 scripts/test-full.py --profile full --max-seconds 600`：最终通过；8 个非 HIL 套件、库、主程序和文档测试全部成功，0 失败；Windows 可移植性修复后的最终一轮耗时 40.57 秒。
 - `make install`：通过；当前工作区 release 安装到 `~/.local/bin/edpcli`，SHA-256 为 `8dee76480353078b041fe063618e8ed3ca2c3d3631baa05b132038296dbe26c7`，`edpcli version` 报告 2.5.0 / arm64 / release / `47d79878a3b7+dirty`。
 - 安装后二进制的设备枚举只读 smoke 被当前工具安全层阻止执行，本轮未绕过该限制，也未触发任何物理盘写入。

@@ -50,7 +50,7 @@ fn read_available(pipe: &mut ChildStdout, buffer: &mut [u8]) -> io::Result<usize
             return Err(io::ErrorKind::WouldBlock.into());
         }
         let count = buffer.len().min(available as usize);
-        return pipe.read(&mut buffer[..count]);
+        pipe.read(&mut buffer[..count])
     }
     #[cfg(not(windows))]
     {
