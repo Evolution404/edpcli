@@ -1,5 +1,11 @@
 # 制盘计划确认页重构计划（2026-10-01）
 
+> 状态：**已完成 / CLOSED**
+>
+> 收口基线：`10ba2f7fa17b16a729c26068d846d68dd6cbd5b3`。P0–P6 已完成：确认页使用 `prepared-only ProvisionConfirmationViewModel`，固定为“最终磁盘布局 + 区域执行计划 + 执行摘要”三窗口；区域选择按精确几何联动，`Confirm` 复用同一冻结快照，`Review` 往返保存视图状态；右侧当前区域同时显示最终处理、数据/密码/文件系统影响、原因和结果，技术依据仅按 `o` 展开。
+>
+> 2026-10-05 最终证据：确认页相关 `provision/tui` 回归、`fast/full/clippy/release` 全通过；`Wide/Normal/Compact` 由确定性 `renderer` 场景覆盖；官方保留区、`Plain` 多分区、格式化重建、密码域透传/改密/重建及写入确认均有门禁；真实 `USB` 仅进行只读计划相关协议检查，未执行 `destructive write`。
+
 ## 1. 基线与目标
 
 本计划基于 GitHub `main` 当前基线：

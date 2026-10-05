@@ -1,5 +1,13 @@
 # TUI 交互、结果表格与长任务界面统一治理计划（2026-09-30）
 
+> 状态：**已完成 / CLOSED**
+>
+> 收口基线：`10ba2f7fa17b16a729c26068d846d68dd6cbd5b3`。G0–G6 已落地；`Inspect J`、全屏 `Hex`、`Result` 共享表格交互、输入优先级、全局居中 `Modal`、`OperationProgress`、`Help/Shortcut` 门禁均已有回归覆盖。
+>
+> 2026-10-05 最终证据：本机 `fast/full/clippy/release` 全通过，`make install` 成功且安装产物 `SHA-256` 与 `release binary` 一致；`TUI demo` 16/16、`keymap` 31/31、`Result Workbench` 4/4、`Inspect/Hex/Jump` 31/31；真实 `disk4` 只读 `info` 与 LBA0–12 `inspect meta` 成功。`Virtual Disk HIL` 在 `macOS arm64`、`Linux arm64/x86_64`、`Windows arm64/x86_64` 全部通过；最新 `Rust CI`（含 `Windows x86_64 full/clippy/release`）全部成功。
+>
+> 原计划中的“`PTY/TUI` 人工验收”不作为可重复 `CI` 证据：当前自动化执行环境不提供完整终端模拟器的光标应答能力，因此最终门禁采用生产 `renderer` 的 `Ratatui TestBackend`、确定性 `demo` 场景和真实 `keymap/controller` 测试；真实 `USB` 只执行只读检查，未做破坏性写盘。
+
 ## 1. 背景与目标
 
 本轮集中收口用户在 2026-09-30 实机审核中指出的全部未完成问题。目标不是继续按页面补丁，而是建立可复用的 TUI 交互契约，使“同一种 UI 元件在所有页面具有相同操作语义”。
