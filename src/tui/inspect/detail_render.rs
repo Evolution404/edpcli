@@ -162,11 +162,12 @@ pub(super) fn draw_inspect_object_panes(
 ) {
     if let Some(overview_area) = overview_area {
         let overview_lines = summary_lines(state, workspace, advanced, selected_row);
+        let visible_rows = usize::from(overview_area.height.saturating_sub(2)).max(1);
         let overview_scroll = state
             .pane_viewport(crate::tui::pane::PaneId::InspectOverview)
             .scroll_y
             .offset
-            .min(overview_lines.len().saturating_sub(1));
+            .min(overview_lines.len().saturating_sub(visible_rows));
         frame.render_widget(
             Paragraph::new(overview_lines)
                 .block(crate::tui::ui::card(
@@ -200,7 +201,6 @@ pub(super) fn draw_inspect_object_panes(
             item,
             detail_area,
             detail_focus,
-            detail_offset,
         );
     } else {
         super::evidence_table_render::draw_technical_evidence_table(

@@ -155,6 +155,37 @@ pub struct PaneViewport {
     pub selected: Option<usize>,
 }
 
+impl PaneViewport {
+    pub fn move_selection(&mut self, delta: isize, content_len: usize, visible_len: usize) {
+        if content_len == 0 {
+            self.selected = None;
+            self.scroll_y.top();
+            return;
+        }
+        let current = self.selected.unwrap_or(0).min(content_len - 1);
+        let next = if delta < 0 {
+            current.saturating_sub(delta.unsigned_abs())
+        } else {
+            current.saturating_add(delta as usize).min(content_len - 1)
+        };
+        self.selected = Some(next);
+        self.scroll_y.offset =
+            crate::tui::table_layout::row_window(next, content_len, visible_len).start;
+    }
+
+    pub fn select_top(&mut self, content_len: usize) {
+        self.selected = (content_len > 0).then_some(0);
+        self.scroll_y.top();
+    }
+
+    pub fn select_bottom(&mut self, content_len: usize, visible_len: usize) {
+        let selected = content_len.saturating_sub(1);
+        self.selected = (content_len > 0).then_some(selected);
+        self.scroll_y.offset =
+            crate::tui::table_layout::row_window(selected, content_len, visible_len).start;
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaneFocus {
     focused: PaneId,
@@ -273,5 +304,53 @@ impl PaneFocus {
         if let Some(next) = next {
             self.focus(next);
         }
+    }
+}
+
+#[cfg(test)]
+mod vertical_selection_tests {
+    use super::PaneViewport;
+
+    #[test]
+    fn underfilled_viewport_never_scrolls() {
+        let mut viewport = PaneViewport::default();
+        for _ in 0..8 {
+            viewport.move_selection(1, 4, 8);
+        }
+        assert_eq!((viewport.selected, viewport.scroll_y.offset), (Some(3), 0));
+        for _ in 0..8 {
+            viewport.move_selection(-1, 4, 8);
+        }
+        assert_eq!((viewport.selected, viewport.scroll_y.offset), (Some(0), 0));
+    }
+
+    #[test]
+    fn selection_uses_the_shared_centered_row_window() {
+        let mut viewport = PaneViewport::default();
+        for expected in 1..5 {
+            viewport.move_selection(1, 10, 4);
+            assert_eq!(viewport.selected, Some(expected));
+            assert_eq!(
+                viewport.scroll_y.offset,
+                crate::tui::table_layout::row_window(expected, 10, 4).start
+            );
+        }
+        viewport.move_selection(-1, 10, 4);
+        assert_eq!(viewport.selected, Some(3));
+        assert_eq!(
+            viewport.scroll_y.offset,
+            crate::tui::table_layout::row_window(3, 10, 4).start
+        );
+    }
+
+    #[test]
+    fn top_and_bottom_bounds_do_not_drift() {
+        let mut viewport = PaneViewport::default();
+        viewport.select_bottom(10, 4);
+        viewport.move_selection(1, 10, 4);
+        assert_eq!((viewport.selected, viewport.scroll_y.offset), (Some(9), 6));
+        viewport.select_top(10);
+        viewport.move_selection(-1, 10, 4);
+        assert_eq!((viewport.selected, viewport.scroll_y.offset), (Some(0), 0));
     }
 }

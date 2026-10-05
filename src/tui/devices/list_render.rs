@@ -93,7 +93,11 @@ pub(super) fn draw_device_list(frame: &mut Frame, area: ratatui::layout::Rect, s
         interaction.viewport_offset(),
         Some(interaction.active_column()),
     );
-    let window = visible_window(state.selected(), visible_count, list_area.height);
+    let window = crate::tui::table_layout::table_row_window(
+        state.selected(),
+        visible_count,
+        list_area.height,
+    );
     let window_start = window.start;
     let window_len = window.len();
     let rows = window

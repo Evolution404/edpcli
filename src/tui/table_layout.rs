@@ -18,6 +18,23 @@ pub enum TableKind {
     ResultPartitions,
 }
 
+pub fn row_window(selected: usize, total: usize, capacity: usize) -> std::ops::Range<usize> {
+    let capacity = capacity.max(1);
+    let selected = selected.min(total.saturating_sub(1));
+    let start = selected
+        .saturating_sub(capacity / 2)
+        .min(total.saturating_sub(capacity));
+    start..(start + capacity).min(total)
+}
+
+pub fn table_row_window(selected: usize, total: usize, area_height: u16) -> std::ops::Range<usize> {
+    row_window(
+        selected,
+        total,
+        usize::from(area_height.saturating_sub(3)).max(1),
+    )
+}
+
 impl TableKind {
     /// Exhaustive registry used by the table-scroll gate. Adding a new table kind requires
     /// updating this registry and the exhaustive index below, otherwise compilation fails.

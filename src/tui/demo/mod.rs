@@ -258,7 +258,20 @@ pub(super) fn run_interactive(scene: &str) -> i32 {
         let size = session.terminal.size().ok();
         let width = size.map_or(120, |size| size.width);
         let height = size.map_or(24, |size| size.height);
-        let viewport = usize::from(height.saturating_sub(8)).max(1);
+        let viewport = if let Some(advanced) = state.advanced_inspect() {
+            state
+                .advanced_inspect_focused_pane()
+                .map(|pane| {
+                    crate::tui::inspect_layout::InspectBrowserLayout::from_terminal_size(
+                        ratatui::layout::Size::new(width, height),
+                        advanced.panel,
+                    )
+                    .visible_rows(pane)
+                })
+                .unwrap_or(1)
+        } else {
+            usize::from(height.saturating_sub(8)).max(1)
+        };
         let outcome = super::controller::dispatch_action(
             &mut state,
             action,

@@ -89,37 +89,13 @@ pub(super) fn draw_advanced_inspect(
     let selected_index = advanced.tree_selected.min(rows.len().saturating_sub(1));
     let selected_row = rows.get(selected_index);
     let disk_layout = workspace.disk_layout.as_ref();
-    let browser = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
-        .split(area);
-    draw_inspect_breadcrumb(frame, browser[0], state);
-
-    let content = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(1)])
-        .split(browser[1]);
-    let compact_layout_area = content[0];
-    let content_area = content[1];
-    let class = crate::tui::ui::ViewportClass::for_width(content_area.width);
-    let (tree_area, overview_area, detail_area) = if class == crate::tui::ui::ViewportClass::Compact
-    {
-        match advanced.panel {
-            AdvancedInspectPanel::Tree => (Some(content_area), None, None),
-            AdvancedInspectPanel::Overview => (None, Some(content_area), None),
-            AdvancedInspectPanel::Detail => (None, None, Some(content_area)),
-        }
-    } else {
-        let upper = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(29), Constraint::Percentage(71)])
-            .split(content_area);
-        let right = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
-            .split(upper[1]);
-        (Some(upper[0]), Some(right[0]), Some(right[1]))
-    };
+    let layout =
+        crate::tui::inspect_layout::InspectBrowserLayout::from_content_area(area, advanced.panel);
+    draw_inspect_breadcrumb(frame, layout.breadcrumb_area, state);
+    let compact_layout_area = layout.compact_layout_area;
+    let tree_area = layout.tree_area;
+    let overview_area = layout.overview_area;
+    let detail_area = layout.detail_area;
 
     if let Some(layout) = disk_layout {
         layout.render_mini(

@@ -35,7 +35,8 @@ pub(super) fn draw_inspect_tree_pane(
     tree_focus: bool,
     scroll_x: usize,
 ) {
-    let visible = visible_window(selected_index, rows.len(), tree_area.height);
+    let visible =
+        crate::tui::table_layout::table_row_window(selected_index, rows.len(), tree_area.height);
     let tree_lines = visible.map(|index| {
         let row = &rows[index];
         let indent = "  ".repeat(row.depth);

@@ -310,7 +310,11 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             );
             let pane_focused =
                 state.backups_focused_pane() == crate::tui::pane::PaneId::BackupsList;
-            let window = visible_window(state.selected(), visible_count, table_area.height);
+            let window = crate::tui::table_layout::table_row_window(
+                state.selected(),
+                visible_count,
+                table_area.height,
+            );
             let window_start = window.start;
             let window_len = window.len();
             let rows = window

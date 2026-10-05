@@ -1,8 +1,8 @@
 use edpcli::tui::table_layout::{
     display_width, identity_column_specs, layout_for, render_table_scrollbars, table_column_schema,
-    table_position_label, table_scrollbar_visibility, truncate_cell, AdaptiveColumnSpec,
-    AdaptiveTableLayout, ColumnId, SortDirection, TableInteractionState, TableKind, TableViewport,
-    TruncatePolicy,
+    table_position_label, table_row_window, table_scrollbar_visibility, truncate_cell,
+    AdaptiveColumnSpec, AdaptiveTableLayout, ColumnId, SortDirection, TableInteractionState,
+    TableKind, TableViewport, TruncatePolicy,
 };
 
 #[test]
@@ -575,6 +575,58 @@ fn table_scroll_gate_covers_every_interactive_renderer() {
             );
         }
     }
+}
+
+#[test]
+fn shared_vertical_row_window_matches_all_table_renderers() {
+    assert_eq!(table_row_window(0, 4, 10), 0..4);
+    assert_eq!(table_row_window(3, 4, 10), 0..4);
+    assert_eq!(table_row_window(0, 20, 8), 0..5);
+    assert_eq!(table_row_window(2, 20, 8), 0..5);
+    assert_eq!(table_row_window(3, 20, 8), 1..6);
+    assert_eq!(table_row_window(19, 20, 8), 15..20);
+
+    for (name, source) in [
+        ("devices", include_str!("../src/tui/devices/list_render.rs")),
+        ("backups", include_str!("../src/tui/backups/render.rs")),
+        (
+            "inspect-tree",
+            include_str!("../src/tui/inspect/tree_render.rs"),
+        ),
+        (
+            "inspect-fields",
+            include_str!("../src/tui/inspect/field_table_render.rs"),
+        ),
+    ] {
+        assert!(
+            source.contains("table_row_window("),
+            "{name}: vertical paging must use the shared row-window policy"
+        );
+    }
+
+    let inspect = include_str!("../src/tui/inspect/field_table_render.rs");
+    assert!(
+        !inspect.contains("detail_offset"),
+        "Inspect fields must not maintain a renderer-local vertical offset"
+    );
+}
+
+#[test]
+fn inspect_vertical_viewport_gate_uses_real_pane_height_and_renderer_clamps() {
+    let controller = include_str!("../src/tui/controller.rs");
+    assert!(controller.contains("TuiAction::MoveUp => move_inspect(state, -1, viewport_height)"));
+    assert!(controller.contains("TuiAction::MoveDown => move_inspect(state, 1, viewport_height)"));
+    assert!(!controller.contains("TuiAction::MoveDown => move_inspect(state, 1, 1)"));
+
+    let runtime = include_str!("../src/tui/runtime_input/inspect.rs");
+    assert!(runtime.contains("InspectBrowserLayout::from_terminal_size"));
+    assert!(runtime.contains(".visible_rows(pane)"));
+
+    let detail = include_str!("../src/tui/inspect/detail_render.rs");
+    assert!(detail.contains("overview_lines.len().saturating_sub(visible_rows)"));
+
+    let evidence = include_str!("../src/tui/inspect/evidence_table_render.rs");
+    assert!(evidence.contains("rows.len().saturating_sub(visible)"));
 }
 
 #[test]

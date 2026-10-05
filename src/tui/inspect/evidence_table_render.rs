@@ -328,8 +328,8 @@ pub(super) fn draw_technical_evidence_table(
     offset: usize,
 ) {
     let rows = evidence_rows(workspace, selected_row, item);
-    let visible = area.height.saturating_sub(3).max(1) as usize;
-    let start = offset.min(rows.len().saturating_sub(1));
+    let visible = usize::from(area.height.saturating_sub(3)).max(1);
+    let start = offset.min(rows.len().saturating_sub(visible));
     let end = start.saturating_add(visible).min(rows.len());
     let theme = crate::tui::theme::current();
 

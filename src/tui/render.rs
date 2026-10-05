@@ -244,14 +244,6 @@ fn device_status(row: &crate::disk_scan::Row) -> String {
     }
 }
 
-fn visible_window(selected: usize, total: usize, area_height: u16) -> std::ops::Range<usize> {
-    let capacity = usize::from(area_height.saturating_sub(3)).max(1);
-    let start = selected
-        .saturating_sub(capacity / 2)
-        .min(total.saturating_sub(capacity));
-    start..(start + capacity).min(total)
-}
-
 fn draw_command_palette(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let commands = [
         "devices  切到设备",
@@ -929,7 +921,8 @@ pub fn draw(frame: &mut Frame, state: &AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{hard_wrap_value, input_value_window, visible_window, wrapped_field_lines};
+    use super::{hard_wrap_value, input_value_window, wrapped_field_lines};
+    use crate::tui::table_layout::table_row_window;
 
     #[test]
     fn hard_wrap_breaks_unspaced_values_by_terminal_display_width() {
@@ -967,7 +960,7 @@ mod tests {
 
     #[test]
     fn large_tables_only_build_the_rows_visible_in_the_viewport() {
-        let window = visible_window(50_000, 100_000, 24);
+        let window = table_row_window(50_000, 100_000, 24);
         assert!(window.contains(&50_000));
         assert_eq!(window.len(), 21);
     }

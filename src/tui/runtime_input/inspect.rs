@@ -199,7 +199,18 @@ pub(super) fn handle_inspect_key(
                     return Some(KeyOutcome::NextIteration);
                 };
                 let size = terminal_size;
-                let viewport_height = size.height.saturating_sub(9) as usize;
+                let viewport_height = state
+                    .advanced_inspect()
+                    .and_then(|advanced| {
+                        state.advanced_inspect_focused_pane().map(|pane| {
+                            crate::tui::inspect_layout::InspectBrowserLayout::from_terminal_size(
+                                size,
+                                advanced.panel,
+                            )
+                            .visible_rows(pane)
+                        })
+                    })
+                    .unwrap_or_else(|| usize::from(size.height.saturating_sub(9)).max(1));
                 match dispatch_tui_action(
                     state,
                     tasks,

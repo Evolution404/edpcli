@@ -8,7 +8,6 @@ pub(super) fn draw_inspect_field_table(
     item: &AdvancedInspectItem,
     detail_area: ratatui::layout::Rect,
     detail_focus: bool,
-    detail_offset: usize,
 ) {
     use crate::tui::table_layout::{
         display_width, render_table_scrollbars, table_heading, table_position_label, visible_cell,
@@ -33,9 +32,16 @@ pub(super) fn draw_inspect_field_table(
         interaction.viewport_offset(),
         None,
     );
-    let visible_rows = detail_area.height.saturating_sub(3).max(1) as usize;
-    let row_start = detail_offset.min(values.len().saturating_sub(1));
-    let row_end = row_start.saturating_add(visible_rows).min(values.len());
+    let window = crate::tui::table_layout::table_row_window(
+        state
+            .pane_viewport(crate::tui::pane::PaneId::InspectDetail)
+            .selected
+            .unwrap_or(0),
+        values.len(),
+        detail_area.height,
+    );
+    let row_start = window.start;
+    let row_end = window.end;
     let selected = state
         .pane_viewport(crate::tui::pane::PaneId::InspectDetail)
         .selected

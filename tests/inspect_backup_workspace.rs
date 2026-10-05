@@ -181,7 +181,7 @@ fn backup_inspect_renders_manifest_technical_evidence_outside_backup_main_page()
     assert!(initial.contains("Manifest.A"), "{initial}");
 
     state.advanced_inspect_focus_pane(PaneId::InspectDetail);
-    state.advanced_inspect_focused_bottom();
+    state.advanced_inspect_focused_bottom(23);
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
     let bottom = terminal
         .backend()

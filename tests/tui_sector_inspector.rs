@@ -555,7 +555,7 @@ fn inspect_hex_is_fullscreen_and_escape_restores_origin() {
 }
 
 #[test]
-fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
+fn detail_field_table_keeps_selected_row_inside_shared_vertical_window() {
     use edpcli::tui::pane::PaneId;
 
     let mut entry = item(0, true);
@@ -586,10 +586,7 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
     select_protocol_lba0(&mut state);
     state.advanced_inspect_set_view_mode(InspectViewMode::Browser);
     state.advanced_inspect_focus_pane(PaneId::InspectDetail);
-    state
-        .pane_viewport_mut(PaneId::InspectDetail)
-        .scroll_y
-        .offset = 20;
+    state.pane_viewport_mut(PaneId::InspectDetail).selected = Some(20);
 
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
@@ -602,10 +599,17 @@ fn detail_field_table_has_vertical_row_viewport_and_row_column_position() {
         .collect::<String>()
         .replace(' ', "");
 
-    assert!(text.contains("行21"), "{text}");
     assert!(text.contains("/30"), "{text}");
     assert!(text.contains("列"), "{text}");
+    assert!(
+        text.contains("Field19"),
+        "selected row must not be pinned to the first visible row: {text}"
+    );
     assert!(text.contains("Field20"), "{text}");
+    assert!(
+        text.contains("Field21"),
+        "selected row must remain surrounded while the viewport has room: {text}"
+    );
     let detail = text
         .split("技术证据·字段")
         .nth(1)

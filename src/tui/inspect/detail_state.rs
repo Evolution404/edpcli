@@ -319,15 +319,14 @@ impl AppState {
         } else if pane == crate::tui::pane::PaneId::InspectDetail
             && !self.advanced_inspect_detail_rows().is_empty()
         {
-            let viewport = self.pane_viewport_mut(pane);
-            viewport.selected = Some(0);
-            viewport.scroll_y.top();
+            let content_len = self.advanced_inspect_detail_rows().len();
+            self.pane_viewport_mut(pane).select_top(content_len);
         } else if let Some(state) = self.inspect.advanced.as_mut() {
             state.pane_focus.viewport_mut(pane).scroll_y.top();
         }
     }
 
-    pub fn advanced_inspect_focused_bottom(&mut self) {
+    pub fn advanced_inspect_focused_bottom(&mut self, visible_len: usize) {
         let Some(pane) = self.advanced_inspect_focused_pane() else {
             return;
         };
@@ -339,9 +338,8 @@ impl AppState {
         if pane == crate::tui::pane::PaneId::InspectDetail
             && !self.advanced_inspect_detail_rows().is_empty()
         {
-            let viewport = self.pane_viewport_mut(pane);
-            viewport.selected = Some(content_len.saturating_sub(1));
-            viewport.scroll_y.bottom(content_len, 1);
+            self.pane_viewport_mut(pane)
+                .select_bottom(content_len, visible_len);
             return;
         }
         if let Some(state) = self.inspect.advanced.as_mut() {
@@ -349,7 +347,7 @@ impl AppState {
                 .pane_focus
                 .viewport_mut(pane)
                 .scroll_y
-                .bottom(content_len, 1);
+                .bottom(content_len, visible_len);
         }
     }
 
@@ -369,19 +367,8 @@ impl AppState {
         if pane == crate::tui::pane::PaneId::InspectDetail {
             let rows = self.advanced_inspect_detail_rows();
             if !rows.is_empty() {
-                let viewport = self.pane_viewport_mut(pane);
-                let current = viewport.selected.unwrap_or(0).min(rows.len() - 1);
-                let next = if delta < 0 {
-                    current.saturating_sub(delta.unsigned_abs())
-                } else {
-                    current.saturating_add(delta as usize).min(rows.len() - 1)
-                };
-                viewport.selected = Some(next);
-                if next < viewport.scroll_y.offset {
-                    viewport.scroll_y.offset = next;
-                } else if next >= viewport.scroll_y.offset.saturating_add(visible_len.max(1)) {
-                    viewport.scroll_y.offset = next + 1 - visible_len.max(1);
-                }
+                self.pane_viewport_mut(pane)
+                    .move_selection(delta, rows.len(), visible_len);
                 return;
             }
         }

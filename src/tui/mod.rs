@@ -14,6 +14,8 @@ mod dispatch;
 pub mod event;
 pub mod execution;
 mod help_overlay;
+#[path = "inspect/layout.rs"]
+mod inspect_layout;
 pub mod keymap;
 mod operation_progress_status;
 mod overview;

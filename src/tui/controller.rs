@@ -162,8 +162,8 @@ fn dispatch_inspect(
             }
             ActionOutcome::handled()
         }
-        TuiAction::MoveUp => move_inspect(state, -1, 1),
-        TuiAction::MoveDown => move_inspect(state, 1, 1),
+        TuiAction::MoveUp => move_inspect(state, -1, viewport_height),
+        TuiAction::MoveDown => move_inspect(state, 1, viewport_height),
         TuiAction::MoveLeft if role == WidgetRole::Tree => {
             state.advanced_inspect_collapse_or_parent();
             ActionOutcome::handled()
@@ -185,7 +185,7 @@ fn dispatch_inspect(
             ActionOutcome::handled()
         }
         TuiAction::Bottom => {
-            state.advanced_inspect_focused_bottom();
+            state.advanced_inspect_focused_bottom(viewport_height);
             ActionOutcome::handled()
         }
         TuiAction::Open => {
@@ -226,10 +226,22 @@ fn dispatch_inspect(
             state.advanced_inspect_spatial_focus(0, 1);
             ActionOutcome::handled()
         }
-        TuiAction::HalfPageUp => move_inspect(state, -((viewport_height / 2).max(1) as isize), 1),
-        TuiAction::HalfPageDown => move_inspect(state, (viewport_height / 2).max(1) as isize, 1),
-        TuiAction::PageUp => move_inspect(state, -(viewport_height.max(1) as isize), 1),
-        TuiAction::PageDown => move_inspect(state, viewport_height.max(1) as isize, 1),
+        TuiAction::HalfPageUp => move_inspect(
+            state,
+            -((viewport_height / 2).max(1) as isize),
+            viewport_height,
+        ),
+        TuiAction::HalfPageDown => move_inspect(
+            state,
+            (viewport_height / 2).max(1) as isize,
+            viewport_height,
+        ),
+        TuiAction::PageUp => {
+            move_inspect(state, -(viewport_height.max(1) as isize), viewport_height)
+        }
+        TuiAction::PageDown => {
+            move_inspect(state, viewport_height.max(1) as isize, viewport_height)
+        }
         TuiAction::Back => ActionOutcome::effect(state.navigate(NavCommand::Escape, 1)),
         TuiAction::Help => ActionOutcome::effect(state.navigate(NavCommand::Help, 1)),
         _ => return None,
