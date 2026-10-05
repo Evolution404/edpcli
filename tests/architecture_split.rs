@@ -283,6 +283,7 @@ fn provision_stage_writes_are_centralized_in_transitions() {
 fn library_root_exposes_stable_interfaces_only() {
     let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
         .expect("read library root");
+    let source_lines = source.lines().collect::<Vec<_>>();
     for module in ["backup_cli", "build_info", "elevate", "plist"] {
         assert!(
             source.contains(&format!("pub(crate) mod {module};")),
@@ -326,8 +327,11 @@ fn library_root_exposes_stable_interfaces_only() {
         "sysinfo",
         "ui",
     ] {
+        let declaration = format!("pub mod {module};");
         assert!(
-            source.contains(&format!("#[doc(hidden)]\npub mod {module};")),
+            source_lines
+                .windows(2)
+                .any(|pair| pair[0] == "#[doc(hidden)]" && pair[1] == declaration),
             "{module} is compatibility-public for integration/HIL consumers but must stay hidden from the documented stable API"
         );
     }
