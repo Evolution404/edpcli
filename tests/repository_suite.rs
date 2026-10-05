@@ -8,6 +8,8 @@ mod dev_format_hook;
 mod documentation_layout;
 #[path = "media_identity.rs"]
 mod media_identity;
+#[path = "physical_hil_contract.rs"]
+mod physical_hil_contract;
 #[path = "provision_capability_parity.rs"]
 mod provision_capability_parity;
 #[path = "test_infrastructure.rs"]

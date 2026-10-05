@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Evolution404/edpcli/audit/hil/physical_result.schema.json",
+  "title": "edpcli physical HIL result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "scenario_id",
+    "platform",
+    "arch",
+    "commit",
+    "started_at",
+    "finished_at",
+    "status",
+    "device",
+    "assertions",
+    "evidence"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "scenario_id": { "type": "string", "minLength": 1 },
+    "platform": { "enum": ["macos", "windows", "linux"] },
+    "arch": { "enum": ["arm64", "x86_64"] },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["pass", "fail", "blocked"] },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vid", "pid", "total_sectors", "logical_sector_size"],
+      "properties": {
+        "vid": { "type": ["integer", "null"], "minimum": 0, "maximum": 65535 },
+        "pid": { "type": ["integer", "null"], "minimum": 0, "maximum": 65535 },
+        "serial_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "total_sectors": { "type": "integer", "minimum": 1 },
+        "logical_sector_size": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status", "detail"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["pass", "fail", "blocked"] },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "reference", "sha256"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1 },
+          "reference": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "notes": { "type": "string" }
+  }
+}
