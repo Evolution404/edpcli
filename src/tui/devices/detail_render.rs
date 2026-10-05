@@ -76,7 +76,7 @@ fn draw_capacity_detail(
     let chunks = Layout::vertical([
         Constraint::Length(map_height),
         Constraint::Min(0),
-        Constraint::Length(3),
+        Constraint::Length(1),
     ])
     .split(inner);
     let mut map_lines = vec![Line::from(Span::styled(
@@ -95,42 +95,13 @@ fn draw_capacity_detail(
         DiskRegionListMode::Interactive { focused },
     );
 
-    let selected = model
-        .collapsed_tail_model()
-        .segments
-        .into_iter()
-        .find(|segment| {
-            selection.as_ref().is_some_and(|selection| {
-                segment.start_lba == selection.start_lba
-                    && segment.end_exclusive().ok() == Some(selection.end_exclusive)
-                    && segment.kind == selection.kind
-            })
-        });
-    let lines = if let Some(segment) = selected {
-        vec![
-            Line::from(vec![
-                Span::styled("当前区域  ", muted()),
-                Span::styled(
-                    safe(&segment.label),
-                    crate::tui::theme::current()
-                        .disk_region(segment.kind)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]),
-            Line::from(format!(
-                "LBA {} · {} sector",
-                segment.closed_range(),
-                segment.sector_count
-            )),
-            Line::from(Span::styled(
-                "j/k 选择区域 · gg/G 首尾区域 · Ctrl-w h 返回结构树",
-                muted(),
-            )),
-        ]
-    } else {
-        vec![Line::from(Span::styled("j/k 选择区域", muted()))]
-    };
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), chunks[2]);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "j/k 选择区域 · gg/G 首尾区域 · Ctrl-w h 返回结构树",
+            muted(),
+        ))),
+        chunks[2],
+    );
 }
 
 fn draw_status_backup_detail(

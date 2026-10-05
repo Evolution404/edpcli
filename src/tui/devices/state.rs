@@ -340,7 +340,7 @@ impl AppState {
         let list = ratatui::layout::Layout::vertical([
             ratatui::layout::Constraint::Length(map_height),
             ratatui::layout::Constraint::Min(0),
-            ratatui::layout::Constraint::Length(3),
+            ratatui::layout::Constraint::Length(1),
         ])
         .split(inner)[1];
         (usize::from(list.height.saturating_sub(1))

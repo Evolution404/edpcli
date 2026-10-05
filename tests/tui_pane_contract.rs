@@ -1793,7 +1793,7 @@ fn device_capacity_map_stays_visible_and_tracks_selected_region() {
     assert!(compact_capacity.contains("全盘容量地图"), "{capacity_text}");
     assert!(capacity_text.contains('▄') && capacity_text.contains('▀'));
     assert!(capacity_text.contains('▲'));
-    assert!(compact_capacity.contains("当前区域EDP主协议区"));
+    assert!(!compact_capacity.contains("当前区域EDP主协议区"));
     let presentation_source = include_str!("../src/tui/devices/presentation.rs");
     assert!(!presentation_source.contains("尾部区域可直接"));
     assert!(!presentation_source.contains("极小区域使用最小可视宽度"));
