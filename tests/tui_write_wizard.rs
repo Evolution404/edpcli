@@ -225,6 +225,43 @@ fn post_restore_disk_layout_free_region_clears_partition_action_target() {
 }
 
 #[test]
+fn restore_post_processing_accepts_fat32_from_shared_filesystem_capability() {
+    let mut outcome = plain_needs_format_outcome();
+    outcome.partitions[0].filesystem_hint = Some("fat32".into());
+    outcome.assessment.partitions[0].filesystem_hint = Some("fat32".into());
+
+    let mut state = AppState::new();
+    begin_post_restore(&mut state, outcome);
+    state.begin_selected_post_restore_action();
+
+    let wizard = state.wizard().unwrap();
+    assert_eq!(wizard.stage, WizardStage::VolumeLabelInput);
+    assert_eq!(
+        wizard.pending_format.as_ref().unwrap().filesystem,
+        FilesystemKind::Fat32
+    );
+}
+
+#[test]
+fn restore_post_processing_rejects_ntfs_through_shared_filesystem_capability() {
+    let mut outcome = plain_needs_format_outcome();
+    outcome.partitions[0].filesystem_hint = Some("ntfs".into());
+    outcome.assessment.partitions[0].filesystem_hint = Some("ntfs".into());
+
+    let mut state = AppState::new();
+    begin_post_restore(&mut state, outcome);
+    state.begin_selected_post_restore_action();
+
+    let wizard = state.wizard().unwrap();
+    assert_eq!(wizard.stage, WizardStage::PostRestore);
+    assert!(wizard
+        .message
+        .as_deref()
+        .unwrap_or_default()
+        .contains("FAT16/FAT32/exFAT"));
+}
+
+#[test]
 fn restore_post_processing_requires_a_second_yes_before_plain_format() {
     let mut state = AppState::new();
     state.begin_write_wizard(WriteKind::Restore, 4, Some("plain.edpb".into()));

@@ -9,7 +9,10 @@ use std::path::PathBuf;
 use crate::common::SECTOR;
 use crate::diskio::SectorDev;
 use crate::edpb::ManifestPartition;
-use crate::filesystem::{build_empty_filesystem, FilesystemKind, SparseFilesystemImage};
+use crate::filesystem::{
+    build_empty_filesystem, validate_writable_filesystem, FilesystemError, FilesystemKind,
+    SparseFilesystemImage,
+};
 use crate::partition_transform::{decrypt_mode2, EdpSm4Transform};
 use crate::provision::{
     parse_existing_provision, ExistingFileKeyError, FileKeyWrapMode, ProvisionImage, SecretBytes,
@@ -110,9 +113,61 @@ impl PostRestoreAssessment {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PostRestoreFormatBlock {
+    UnknownFilesystemHint(String),
+    Filesystem(FilesystemError),
+}
+
+impl std::fmt::Display for PostRestoreFormatBlock {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownFilesystemHint(hint) => {
+                write!(formatter, "备份中的文件系统提示无法识别：{hint}")
+            }
+            Self::Filesystem(error) => std::fmt::Display::fmt(error, formatter),
+        }
+    }
+}
+
+impl std::error::Error for PostRestoreFormatBlock {}
+
+impl PostRestorePartition {
+    pub fn preferred_format_filesystem(&self) -> Result<FilesystemKind, PostRestoreFormatBlock> {
+        let hint = self
+            .filesystem_hint
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default();
+        let filesystem = if hint.is_empty() {
+            if self.role.as_deref() == Some("boot") {
+                FilesystemKind::Fat16
+            } else {
+                FilesystemKind::first_party_default()
+            }
+        } else {
+            FilesystemKind::from_config_token(hint)
+                .ok_or_else(|| PostRestoreFormatBlock::UnknownFilesystemHint(hint.to_string()))?
+        };
+        validate_writable_filesystem(filesystem).map_err(PostRestoreFormatBlock::Filesystem)?;
+        Ok(filesystem)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PartitionFormatRequest {
     pub partition_index: u32,
     pub filesystem: FilesystemKind,
+}
+
+impl PartitionFormatRequest {
+    pub fn for_post_restore_partition(
+        partition: &PostRestorePartition,
+    ) -> Result<Self, PostRestoreFormatBlock> {
+        Ok(Self {
+            partition_index: partition.index,
+            filesystem: partition.preferred_format_filesystem()?,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -664,6 +719,40 @@ fn assess_partitions_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn post_restore_format_capability_uses_shared_writable_filesystem_policy() {
+        let base = PostRestorePartition {
+            index: 1,
+            role: Some("plain".into()),
+            start_lba: 2_048,
+            sector_count: 1_000_000,
+            filesystem_hint: Some("fat32".into()),
+            detected_filesystem: None,
+            requires_original_key: false,
+            state: PostRestorePartitionState::NeedsFormat,
+            detail: String::new(),
+        };
+        assert_eq!(
+            PartitionFormatRequest::for_post_restore_partition(&base).unwrap(),
+            PartitionFormatRequest {
+                partition_index: 1,
+                filesystem: FilesystemKind::Fat32,
+            }
+        );
+
+        let mut ntfs = base.clone();
+        ntfs.filesystem_hint = Some("ntfs".into());
+        let error = PartitionFormatRequest::for_post_restore_partition(&ntfs).unwrap_err();
+        assert!(matches!(
+            error,
+            PostRestoreFormatBlock::Filesystem(FilesystemError {
+                kind: crate::filesystem::FilesystemErrorKind::FormatUnsupported,
+                filesystem: Some(FilesystemKind::Ntfs),
+                ..
+            })
+        ));
+    }
 
     #[test]
     fn mode2_compatibility_reserve_never_enters_filesystem_format_flow() {

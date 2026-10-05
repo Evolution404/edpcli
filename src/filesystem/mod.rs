@@ -11,6 +11,7 @@ mod io;
 mod kind;
 mod metadata;
 mod ntfs;
+mod policy;
 pub mod registry;
 
 pub use driver::{DetectionConfidence, DetectionResult, FilesystemCapabilities, FilesystemDriver};
@@ -31,6 +32,10 @@ pub use io::{BootSectorReader, FilesystemReader};
 pub use kind::FilesystemKind;
 pub use metadata::FilesystemMetadata;
 pub use ntfs::{NtfsDriver, NTFS_DRIVER};
+pub use policy::{
+    is_writable_filesystem, shift_writable_filesystem, validate_writable_filesystem,
+    WRITABLE_FILESYSTEMS,
+};
 pub use registry::{
     default_registry, detect_boot_sector, detect_boot_sector_with_geometry, DetectedFilesystem,
     DriverRegistry,

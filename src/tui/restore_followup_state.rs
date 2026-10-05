@@ -2,32 +2,6 @@
 use super::*;
 
 impl AppState {
-    fn selected_post_restore_format(
-        wizard: &WizardState,
-    ) -> Option<crate::application::post_restore::PartitionFormatRequest> {
-        use crate::filesystem::FilesystemKind;
-
-        let outcome = wizard.restore_outcome.as_ref()?;
-        let selected = wizard.active_post_restore_partition_index()?;
-        let partition = outcome.assessment.partitions.get(selected)?;
-        let hint = partition.filesystem_hint.as_deref().unwrap_or_default();
-        let filesystem = if hint.eq_ignore_ascii_case("fat16") {
-            FilesystemKind::Fat16
-        } else if hint.eq_ignore_ascii_case("exfat") {
-            FilesystemKind::ExFat
-        } else if hint.eq_ignore_ascii_case("ntfs") || hint.eq_ignore_ascii_case("fat32") {
-            return None;
-        } else if partition.role.as_deref() == Some("boot") {
-            FilesystemKind::Fat16
-        } else {
-            FilesystemKind::first_party_default()
-        };
-        Some(crate::application::post_restore::PartitionFormatRequest {
-            partition_index: partition.index,
-            filesystem,
-        })
-    }
-
     pub(super) fn clear_post_restore_volume_label(wizard: &mut WizardState) {
         wizard.volume_label_input.clear();
         wizard.volume_label_target = None;
@@ -84,15 +58,30 @@ impl AppState {
         };
         let state = partition.state;
         let requires_original_key = partition.requires_original_key;
+        let format_request = if matches!(
+            state,
+            PostRestorePartitionState::NeedsFormat
+                | PostRestorePartitionState::PasswordRequired
+                | PostRestorePartitionState::CryptoMetadataInvalid
+        ) {
+            match crate::application::post_restore::PartitionFormatRequest::for_post_restore_partition(
+                partition,
+            ) {
+                Ok(request) => Some(request),
+                Err(error) => {
+                    wizard.message = Some(crate::tui::ui::UiMessage::warning(error.to_string()));
+                    return;
+                }
+            }
+        } else {
+            None
+        };
 
         match state {
             PostRestorePartitionState::NeedsFormat if !requires_original_key => {
-                let Some(request) = Self::selected_post_restore_format(wizard) else {
-                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                        "当前便携格式化器尚不支持该文件系统。",
-                    ));
-                    return;
-                };
+                let request = format_request
+                    .clone()
+                    .expect("format-capable state has request");
                 Self::begin_volume_label_input(
                     wizard,
                     PostRestoreLabelTarget::PlainFormat,
@@ -101,12 +90,9 @@ impl AppState {
                 self.shell.input_mode = InputMode::Insert;
             }
             PostRestorePartitionState::NeedsFormat => {
-                let Some(request) = Self::selected_post_restore_format(wizard) else {
-                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                        "当前便携格式化器尚不支持该文件系统。",
-                    ));
-                    return;
-                };
+                let request = format_request
+                    .clone()
+                    .expect("format-capable state has request");
                 wizard.secret_input = crate::provision::SecretBytes::default();
                 Self::begin_volume_label_input(
                     wizard,
@@ -119,12 +105,9 @@ impl AppState {
                 self.shell.input_mode = InputMode::Insert;
             }
             PostRestorePartitionState::PasswordRequired => {
-                let Some(request) = Self::selected_post_restore_format(wizard) else {
-                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                        "当前便携格式化器尚不支持该文件系统。",
-                    ));
-                    return;
-                };
+                let request = format_request
+                    .clone()
+                    .expect("format-capable state has request");
                 wizard.volume_label_input =
                     Self::selected_post_restore_volume_label(wizard, request.partition_index);
                 wizard.volume_label_target = Some(PostRestoreLabelTarget::EncryptedFormat);
@@ -136,12 +119,9 @@ impl AppState {
                 self.shell.input_mode = InputMode::Insert;
             }
             PostRestorePartitionState::CryptoMetadataInvalid => {
-                let Some(request) = Self::selected_post_restore_format(wizard) else {
-                    wizard.message = Some(crate::tui::ui::UiMessage::warning(
-                        "当前便携格式化器尚不支持该文件系统。",
-                    ));
-                    return;
-                };
+                let request = format_request
+                    .clone()
+                    .expect("format-capable state has request");
                 wizard.volume_label_input =
                     Self::selected_post_restore_volume_label(wizard, request.partition_index);
                 wizard.volume_label_target = Some(PostRestoreLabelTarget::Reinitialize);
