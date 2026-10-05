@@ -12,8 +12,44 @@ pub(super) fn handle_backup_batch_key(
         use state::BackupBatchDeleteStage;
         match stage {
             BackupBatchDeleteStage::Planning => {
-                if keys.map(state::InputMode::Normal, key) == Some(keymap::TuiAction::Back) {
-                    state.set_progress_notice("批量删除计划正在后台生成，请等待完成。");
+                if let Some(action) = keys.map(state::InputMode::Normal, key) {
+                    if state.help_open() {
+                        match action {
+                            keymap::TuiAction::Back => {
+                                let _ = state.navigate(NavCommand::Escape, 1);
+                            }
+                            keymap::TuiAction::Help => {
+                                let _ = state.navigate(NavCommand::Help, 1);
+                            }
+                            keymap::TuiAction::Quit => {
+                                if matches!(
+                                    state.navigate(NavCommand::Quit, 1),
+                                    StateEffect::ExitRequested
+                                ) {
+                                    return Some(KeyOutcome::Exit);
+                                }
+                            }
+                            _ => {}
+                        }
+                        return Some(KeyOutcome::NextIteration);
+                    }
+                    match action {
+                        keymap::TuiAction::Back => {
+                            state.set_progress_notice("批量删除计划正在后台生成，请等待完成。");
+                        }
+                        keymap::TuiAction::Help => {
+                            let _ = state.navigate(NavCommand::Help, 1);
+                        }
+                        keymap::TuiAction::Quit => {
+                            if matches!(
+                                state.navigate(NavCommand::Quit, 1),
+                                StateEffect::ExitRequested
+                            ) {
+                                return Some(KeyOutcome::Exit);
+                            }
+                        }
+                        _ => {}
+                    }
                 }
                 return Some(KeyOutcome::NextIteration);
             }

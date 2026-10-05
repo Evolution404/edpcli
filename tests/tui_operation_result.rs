@@ -342,11 +342,11 @@ fn restore_post_result_uses_shared_workbench_and_typed_layout() {
         !input.contains("TuiAction::Open => state.toggle_wizard_detail()"),
         "post-restore must not keep the invisible legacy detail toggle"
     );
-    let help_overlay = include_str!("../src/tui/help_overlay.rs");
+    let help_context = include_str!("../src/tui/help_context.rs");
     assert!(!RESTORE_RESULT_HELP.is_empty());
     assert!(!PROVISION_RESULT_HELP.is_empty());
-    assert!(help_overlay.contains("\"恢复结果\", RESTORE_RESULT_HELP"));
-    assert!(help_overlay.contains("\"制盘结果\", PROVISION_RESULT_HELP"));
+    assert!(help_context.contains("\"恢复结果\", RESTORE_RESULT_HELP"));
+    assert!(help_context.contains("\"制盘结果\", PROVISION_RESULT_HELP"));
     assert!(
         verification.contains("result_verification_navigation_hint"),
         "restore verification pane must use the shared truthful navigation hint"

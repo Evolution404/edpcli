@@ -100,7 +100,7 @@ fn draw_provision_status_modal(frame: &mut Frame, title: &str, lines: Vec<Line<'
 
 fn draw_provision_planning_modal(frame: &mut Frame, state: &AppState) {
     let modal = crate::tui::ui::centered_modal_rect(frame.area(), 36, 7);
-    crate::tui::ui::render_modal(frame, modal, "", |frame, inner| {
+    crate::tui::ui::render_modal(frame, modal, "制盘计划 · 生成中", |frame, inner| {
         frame.render_widget(
             Paragraph::new(vec![
                 Line::from(""),

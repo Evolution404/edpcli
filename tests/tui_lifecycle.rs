@@ -279,6 +279,42 @@ fn two_top_level_tabs_and_nested_provision_render_at_all_terminal_sizes() {
 }
 
 #[test]
+fn background_planning_help_hides_inactive_workspace_and_table_controls() {
+    let mut state = AppState::new();
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    assert!(state.begin_backup_prune());
+    assert_eq!(state.backup_prune_start_plan(), Ok(3));
+    let _ = state.navigate(NavCommand::Help, 20);
+
+    let mut terminal = Terminal::new(TestBackend::new(120, 36)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+
+    assert!(text.contains("快捷键·备份清理计划生成中"), "{text}");
+    assert!(text.contains("后台处理中"), "{text}");
+    assert!(text.contains("当前不可返回；显示处理进度"), "{text}");
+    assert!(text.contains("q/Ctrl-C退出"), "{text}");
+    for stale in [
+        "选择备份",
+        "上一列/下一列",
+        "横向滚动视口",
+        "复制单元格/整行",
+    ] {
+        assert!(
+            !text.contains(stale),
+            "busy help must not expose inactive controls {stale}: {text}"
+        );
+    }
+}
+
+#[test]
 fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     let mut state = AppState::new();
     state.replace_devices(vec![usb_device()]);

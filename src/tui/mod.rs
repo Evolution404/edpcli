@@ -13,6 +13,7 @@ mod disk_region_list;
 mod dispatch;
 pub mod event;
 pub mod execution;
+mod help_context;
 mod help_overlay;
 #[path = "inspect/layout.rs"]
 mod inspect_layout;

@@ -122,11 +122,13 @@ impl AppState {
     pub(super) fn provision_transition_begin_exporting(&mut self) {
         self.provision.stage = ProvisionStage::Exporting;
         self.shell.input_mode = InputMode::Normal;
+        self.shell.critical_operation = true;
     }
 
     pub(crate) fn provision_transition_return_to_review(&mut self) {
         self.provision.stage = ProvisionStage::Review;
         self.shell.input_mode = InputMode::Normal;
+        self.shell.critical_operation = false;
         self.provision_restore_review_snapshot();
     }
 

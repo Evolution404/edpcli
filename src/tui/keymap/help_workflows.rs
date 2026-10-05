@@ -150,6 +150,42 @@ pub const RESTORE_RESULT_HELP: &[HelpBinding] = &[
     },
 ];
 
+pub const BUSY_GLOBAL_HELP: &[HelpBinding] = &[
+    HelpBinding {
+        keys: "Esc",
+        label: "当前不可返回；显示处理进度",
+        action: TuiAction::Back,
+    },
+    HelpBinding {
+        keys: "q / Ctrl-C",
+        label: "退出",
+        action: TuiAction::Quit,
+    },
+    HelpBinding {
+        keys: "?",
+        label: "打开 / 关闭帮助",
+        action: TuiAction::Help,
+    },
+];
+
+pub const GUARD_GLOBAL_HELP: &[HelpBinding] = &[
+    HelpBinding {
+        keys: "Esc",
+        label: "当前安全阶段不可返回",
+        action: TuiAction::Back,
+    },
+    HelpBinding {
+        keys: "q / Ctrl-C",
+        label: "请求退出；在安全结束点处理",
+        action: TuiAction::Quit,
+    },
+    HelpBinding {
+        keys: "?",
+        label: "打开 / 关闭帮助",
+        action: TuiAction::Help,
+    },
+];
+
 pub const PICKER_HELP: &[HelpBinding] = &[
     HelpBinding {
         keys: "j/k · ↑/↓",

@@ -144,6 +144,7 @@ fn soft_size_budget_warns_before_existing_hard_limits() {
         ("src/tui/keymap/help.rs", 320),
         ("src/tui/keymap/help_workflows.rs", 240),
         ("src/tui/help_overlay.rs", 150),
+        ("src/tui/help_context.rs", 180),
         ("src/tui/status.rs", 140),
         ("src/tui/overview.rs", 180),
         ("src/tui/ui/modal.rs", 100),
@@ -1391,6 +1392,8 @@ fn help_and_status_information_architecture_has_single_owners() {
     let workflow_help_registry = fs::read_to_string(root.join("src/tui/keymap/help_workflows.rs"))
         .expect("read workflow help registry");
     let help = fs::read_to_string(root.join("src/tui/help_overlay.rs")).expect("read help overlay");
+    let help_context = fs::read_to_string(root.join("src/tui/help_context.rs"))
+        .expect("read help context resolver");
     let status = fs::read_to_string(root.join("src/tui/status.rs")).expect("read status model");
     let shell = fs::read_to_string(root.join("src/tui/shell/mod.rs")).expect("read shell");
     let controller =
@@ -1413,8 +1416,12 @@ fn help_and_status_information_architecture_has_single_owners() {
     assert!(help_registry.contains("pub const GLOBAL_HELP"));
     assert!(!help_registry.contains("pub const NORMAL_HELP"));
     assert!(!workflow_help_registry.contains("pub const NORMAL_HELP"));
-    assert!(help.contains("PICKER_HELP"));
+    assert!(help.contains("help_context::resolve"));
     assert!(help.contains("TABLE_HELP"));
+    assert!(!help.contains("PICKER_HELP"));
+    assert!(help_context.contains("PICKER_HELP"));
+    assert!(help_context.contains("RESTORE_RESULT_HELP"));
+    assert!(help_context.contains("PROVISION_RESULT_HELP"));
     assert!(status.contains("pub(super) fn dynamic_status"));
     assert!(shell.contains("\"? 帮助\""));
     assert!(shell.contains("pub fn message_bar"));

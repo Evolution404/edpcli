@@ -258,6 +258,81 @@ fn provision_waiting_states_are_overlays_not_full_pages() {
 }
 
 #[test]
+fn background_planning_and_exporting_keep_help_quit_and_safety_contracts_truthful() {
+    let provision_input = include_str!("../src/tui/runtime_input/provision.rs");
+    let batch_input = include_str!("../src/tui/runtime_input/backup_batch.rs");
+    let prune_input = include_str!("../src/tui/runtime_input/backup_prune.rs");
+    let transitions = include_str!("../src/tui/provision/transitions.rs");
+    let help_context = include_str!("../src/tui/help_context.rs");
+    let provision_render = include_str!("../src/tui/provision/render.rs");
+
+    for stage in [
+        "ProvisionStage::Planning =>",
+        "ProvisionStage::Exporting =>",
+    ] {
+        let section = provision_input
+            .split(stage)
+            .nth(1)
+            .unwrap_or_else(|| panic!("missing {stage} input branch"));
+        assert!(
+            section.contains("TuiAction::Help | TuiAction::Quit"),
+            "{stage} must preserve global help and quit"
+        );
+        assert!(section.contains("dispatch_tui_action("));
+    }
+    for source in [batch_input, prune_input] {
+        assert!(source.contains("keymap::TuiAction::Help"));
+        assert!(source.contains("state.navigate(NavCommand::Help"));
+        assert!(source.contains("keymap::TuiAction::Quit"));
+        assert!(source.contains("state.navigate(NavCommand::Quit"));
+    }
+
+    let exporting = transitions
+        .split("fn provision_transition_begin_exporting")
+        .nth(1)
+        .expect("export transition")
+        .split("fn provision_transition_return_to_review")
+        .next()
+        .expect("export transition boundary");
+    assert!(exporting.contains("self.shell.critical_operation = true"));
+
+    let review = transitions
+        .split("fn provision_transition_return_to_review")
+        .nth(1)
+        .expect("return-to-review transition");
+    assert!(review.contains("self.shell.critical_operation = false"));
+
+    assert!(help_context.contains("include_table: !critical"));
+    assert!(help_context.contains("&& !busy"));
+    assert!(provision_render.contains("制盘计划 · 生成中"));
+}
+
+#[test]
+fn background_operation_modals_block_underlay_input_and_help_can_close() {
+    let provision = include_str!("../src/tui/runtime_input/provision.rs");
+    let batch = include_str!("../src/tui/runtime_input/backup_batch.rs");
+    let prune = include_str!("../src/tui/runtime_input/backup_prune.rs");
+
+    assert!(provision.contains("if state.help_open()"));
+    assert!(provision.contains(
+        "ProvisionStage::Planning | ProvisionStage::Exporting | ProvisionStage::Running"
+    ));
+    let running = provision
+        .split("ProvisionStage::Running =>")
+        .nth(1)
+        .expect("running input branch")
+        .split("ProvisionStage::Result =>")
+        .next()
+        .expect("running input boundary");
+    assert!(running.contains("TuiAction::Help | TuiAction::Quit | TuiAction::Back"));
+
+    for source in [batch, prune] {
+        assert!(source.contains("if state.help_open()"));
+        assert!(source.contains("state.navigate(NavCommand::Escape, 1)"));
+    }
+}
+
+#[test]
 fn progress_transport_coalesces_snapshots_and_limits_render_rate() {
     let task = include_str!("../src/tui/task.rs");
     let transport = include_str!("../src/tui/progress_transport.rs");

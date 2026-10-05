@@ -247,19 +247,6 @@ pub const GLOBAL_HELP: &[HelpBinding] = &[
     },
 ];
 
-pub const GUARD_GLOBAL_HELP: &[HelpBinding] = &[
-    HelpBinding {
-        keys: "q / Ctrl-C",
-        label: "请求退出；在安全结束点处理",
-        action: TuiAction::Quit,
-    },
-    HelpBinding {
-        keys: "?",
-        label: "打开 / 关闭帮助",
-        action: TuiAction::Help,
-    },
-];
-
 pub const TABLE_HELP: &[HelpBinding] = &[
     HelpBinding {
         keys: "h / l",

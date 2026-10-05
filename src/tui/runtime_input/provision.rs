@@ -17,8 +17,30 @@ pub(super) fn handle_provision_key(
             return Some(KeyOutcome::NextIteration);
         };
         let viewport_height = terminal_size.height.saturating_sub(9) as usize;
+        let stage = state.provision().stage;
 
-        if matches!(
+        if state.help_open() {
+            if matches!(action, TuiAction::Back | TuiAction::Help | TuiAction::Quit) {
+                match dispatch_tui_action(
+                    state,
+                    tasks,
+                    action,
+                    role,
+                    backup_dir,
+                    viewport_height,
+                    terminal_size.width,
+                ) {
+                    StateEffect::ExitRequested => return Some(KeyOutcome::Exit),
+                    StateEffect::ExitDeferred | StateEffect::None => {}
+                }
+            }
+            return Some(KeyOutcome::NextIteration);
+        }
+
+        if !matches!(
+            stage,
+            ProvisionStage::Planning | ProvisionStage::Exporting | ProvisionStage::Running
+        ) && matches!(
             action,
             TuiAction::Refresh
                 | TuiAction::Help
@@ -39,7 +61,7 @@ pub(super) fn handle_provision_key(
                 | TuiAction::FocusPrevious
         ) {
             if matches!(action, TuiAction::FocusNext | TuiAction::FocusPrevious)
-                && state.provision().stage == ProvisionStage::Form
+                && stage == ProvisionStage::Form
                 && state.input_mode() == state::InputMode::Insert
                 && state.provision_end_insert()
             {
@@ -60,7 +82,7 @@ pub(super) fn handle_provision_key(
             return Some(KeyOutcome::NextIteration);
         }
 
-        match state.provision().stage {
+        match stage {
             ProvisionStage::Form if state.input_mode() == state::InputMode::Insert => {
                 match action {
                     TuiAction::Text(ch) => state.provision_push_char(ch),
@@ -91,11 +113,26 @@ pub(super) fn handle_provision_key(
                     StateEffect::ExitDeferred | StateEffect::None => {}
                 }
             }
-            ProvisionStage::Planning => {
-                if action == TuiAction::Back {
+            ProvisionStage::Planning => match action {
+                TuiAction::Back => {
                     state.set_progress_notice("制盘计划正在后台生成，请等待完成。");
                 }
-            }
+                TuiAction::Help | TuiAction::Quit => {
+                    match dispatch_tui_action(
+                        state,
+                        tasks,
+                        action,
+                        role,
+                        backup_dir,
+                        viewport_height,
+                        terminal_size.width,
+                    ) {
+                        StateEffect::ExitRequested => return Some(KeyOutcome::Exit),
+                        StateEffect::ExitDeferred | StateEffect::None => {}
+                    }
+                }
+                _ => {}
+            },
             ProvisionStage::Review => {
                 match dispatch_tui_action(
                     state,
@@ -123,11 +160,26 @@ pub(super) fn handle_provision_key(
                 TuiAction::Back => state.provision_cancel_export(),
                 _ => {}
             },
-            ProvisionStage::Exporting => {
-                if action == TuiAction::Back {
+            ProvisionStage::Exporting => match action {
+                TuiAction::Back => {
                     state.set_progress_notice("镜像正在后台导出，请等待完成。");
                 }
-            }
+                TuiAction::Help | TuiAction::Quit => {
+                    match dispatch_tui_action(
+                        state,
+                        tasks,
+                        action,
+                        role,
+                        backup_dir,
+                        viewport_height,
+                        terminal_size.width,
+                    ) {
+                        StateEffect::ExitRequested => return Some(KeyOutcome::Exit),
+                        StateEffect::ExitDeferred | StateEffect::None => {}
+                    }
+                }
+                _ => {}
+            },
             ProvisionStage::Confirm => match action {
                 TuiAction::Text(ch) => state.provision_push_confirmation(ch),
                 TuiAction::Backspace => state.provision_backspace_confirmation(),
@@ -173,17 +225,19 @@ pub(super) fn handle_provision_key(
                 if log_navigation {
                     return Some(KeyOutcome::NextIteration);
                 }
-                match dispatch_tui_action(
-                    state,
-                    tasks,
-                    action,
-                    role,
-                    backup_dir,
-                    viewport_height,
-                    terminal_size.width,
-                ) {
-                    StateEffect::ExitRequested => return Some(KeyOutcome::Exit),
-                    StateEffect::ExitDeferred | StateEffect::None => {}
+                if matches!(action, TuiAction::Help | TuiAction::Quit | TuiAction::Back) {
+                    match dispatch_tui_action(
+                        state,
+                        tasks,
+                        action,
+                        role,
+                        backup_dir,
+                        viewport_height,
+                        terminal_size.width,
+                    ) {
+                        StateEffect::ExitRequested => return Some(KeyOutcome::Exit),
+                        StateEffect::ExitDeferred | StateEffect::None => {}
+                    }
                 }
             }
             ProvisionStage::Result => {
