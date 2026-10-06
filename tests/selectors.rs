@@ -109,7 +109,7 @@ fn copied_backups() -> Option<(TmpDir, Vec<String>)> {
             &tmp.0.join(&name),
             &edpcli::edpb::CoreCapture {
                 snapshot_id: name.clone(),
-                created_epoch: 1_789_000_000,
+                created_epoch: common::named_test_capture_epoch(std::path::Path::new(&name)),
                 disk_number: Some(meta.disk),
                 vid: meta.vid,
                 pid: meta.pid,

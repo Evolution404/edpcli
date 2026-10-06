@@ -320,6 +320,7 @@ mod tests {
 
     fn entry(name: &str, onlyid: &str) -> BackupEntry {
         BackupEntry {
+            created_epoch: None,
             display_cached: false,
             meta: Some(BackupMeta {
                 disk: 6,

@@ -383,3 +383,17 @@ pub fn edp_inspect_context(total_sectors: u64) -> edpcli::inspect::InspectDiskCo
     });
     context
 }
+
+/// Simulated capture epochs for named chronological test scenarios (never production authority).
+pub fn named_test_capture_epoch(path: &std::path::Path) -> i64 {
+    let stem = path.file_stem().unwrap().to_str().unwrap();
+    let stamp = stem
+        .get(stem.len().saturating_sub(15)..)
+        .unwrap_or_default();
+    let format =
+        time::format_description::parse_borrowed::<2>("[year][month][day]_[hour][minute][second]")
+            .unwrap();
+    time::PrimitiveDateTime::parse(stamp, &format)
+        .map(|time| time.assume_utc().unix_timestamp())
+        .unwrap_or(1_789_603_200)
+}

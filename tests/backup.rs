@@ -18,7 +18,8 @@ use edpcli::edpb::{
     MetadataCapture, Region, RestorePolicy, SemanticStatus,
 };
 use edpcli::infrastructure::backup_store::catalog::{
-    prune_candidates, scan_backup_dir, BackupEntry, BackupIntegrityStatus, BackupMeta, DiskFacts,
+    prune_candidates, scan_backup_dir_checked, BackupEntry, BackupIntegrityStatus, BackupMeta,
+    DiskFacts,
 };
 use edpcli::infrastructure::backup_store::create::{create_metadata_backup, find_backups};
 use edpcli::ports::Clock;
@@ -99,7 +100,7 @@ fn write_backup(dir: &std::path::Path, name: &str, data: &[u8]) -> std::path::Pa
     );
     let capture = CoreCapture {
         snapshot_id: format!("test-{name}"),
-        created_epoch: 1_789_000_000,
+        created_epoch: named_test_capture_epoch(&p),
         disk_number: Some(meta.disk),
         vid: meta.vid.clone(),
         pid: meta.pid.clone(),
@@ -227,13 +228,13 @@ fn find_backups_lba4_final_filter() {
         &lexar,
     );
     let current = current_identity(&netac, "disk&ven_netac&prod_onlydisk");
-    let found = find_backups(&tmp.0, &current);
+    let found = find_backups(&tmp.0, &current).unwrap();
     assert_eq!(found.confirmed, vec![real.clone()]);
     assert!(found.possible.is_empty());
 
     // 空目录 → 空
     let empty = TmpDir::new("find_empty");
-    let empty_matches = find_backups(&empty.0, &current);
+    let empty_matches = find_backups(&empty.0, &current).unwrap();
     assert!(empty_matches.confirmed.is_empty());
     assert!(empty_matches.possible.is_empty());
     let _ = real_bin;
@@ -263,7 +264,7 @@ fn backup_written_as_single_edpb_with_internal_hashes_and_onlyid() {
     assert!(!std::path::PathBuf::from(format!("{}.sha256", path.display())).exists());
     // 备份可被 typed affinity 找回
     let current = current_identity(&data, "disk&ven_netac&prod_onlydisk");
-    let found = find_backups(&tmp.0, &current);
+    let found = find_backups(&tmp.0, &current).unwrap();
     assert_eq!(found.confirmed, vec![path]);
     assert!(found.possible.is_empty());
 }
@@ -322,7 +323,7 @@ fn find_backups_ignores_matching_non_bin_files() {
     )
     .unwrap();
     let current = current_identity(&data, "disk&ven_netac&prod_onlydisk");
-    let found = find_backups(&tmp.0, &current);
+    let found = find_backups(&tmp.0, &current).unwrap();
     assert_eq!(found.confirmed, vec![bin]);
     assert!(found.possible.is_empty());
 }
@@ -345,7 +346,7 @@ fn find_backups_prefers_device_id_tier_before_generic_fallback() {
     );
 
     let current = current_identity(&data, "disk&ven_netac&prod_onlydisk");
-    let found = find_backups(&tmp.0, &current);
+    let found = find_backups(&tmp.0, &current).unwrap();
     assert_eq!(found.confirmed, vec![exact]);
     assert!(found.possible.is_empty());
 }
@@ -399,7 +400,8 @@ fn creating_new_backup_does_not_rename_existing_history() {
     assert!(legacy_sha256.exists(), "创建新备份不应修改历史 .sha256");
     assert!(new_path.exists());
     assert_ne!(new_path, legacy);
-    assert!(scan_backup_dir(&tmp.0)
+    assert!(scan_backup_dir_checked(&tmp.0)
+        .unwrap()
         .iter()
         .all(|entry| entry.path != legacy));
 }
@@ -496,7 +498,7 @@ fn plain_v3_metadata_without_protocol_core_is_healthy_and_keeps_plain_kind() {
         "Plain v3 metadata intentionally has no fixed LBA0-12 protocol artifact"
     );
 
-    let entries = scan_backup_dir(&tmp.0);
+    let entries = scan_backup_dir_checked(&tmp.0).unwrap();
     let entry = entries
         .iter()
         .find(|entry| entry.path == path)
@@ -559,7 +561,7 @@ fn scan_backup_dir_reports_edpb_integrity_and_ignores_legacy_bin() {
     )
     .unwrap();
 
-    let entries = scan_backup_dir(&tmp.0);
+    let entries = scan_backup_dir_checked(&tmp.0).unwrap();
     assert_eq!(entries.len(), 3, "旧 .bin 必须被正式运行时完全忽略");
     assert!(entries.iter().all(|entry| entry.path != legacy));
     let by_path = |path: &std::path::Path| entries.iter().find(|entry| entry.path == path).unwrap();
@@ -594,7 +596,7 @@ fn scan_backup_dir_rejects_raw_7168_bytes_disguised_as_edpb() {
     );
     fs::write(&path, &legacy).unwrap();
 
-    let entries = scan_backup_dir(&tmp.0);
+    let entries = scan_backup_dir_checked(&tmp.0).unwrap();
     let entry = entries.iter().find(|entry| entry.path == path).unwrap();
     assert_eq!(legacy.len(), METADATA_IMAGE_LEN + SECTOR);
     assert_eq!(entry.integrity_status, BackupIntegrityStatus::Invalid);
@@ -616,7 +618,7 @@ fn legacy_bin_is_not_a_runtime_backup_even_with_valid_sidecar() {
     )
     .unwrap();
 
-    assert!(scan_backup_dir(&tmp.0).is_empty());
+    assert!(scan_backup_dir_checked(&tmp.0).unwrap().is_empty());
     assert_eq!(backup_verify(&tmp.0, None), 0);
     assert_eq!(
         backup_verify(&tmp.0, Some(legacy.file_name().unwrap().to_str().unwrap())),
@@ -635,7 +637,7 @@ fn scan_is_read_only_and_infers_missing_onlyid_in_memory() {
     );
     let sidecar = std::path::PathBuf::from(format!("{}.sha256", legacy.display()));
 
-    let entries = scan_backup_dir(&tmp.0);
+    let entries = scan_backup_dir_checked(&tmp.0).unwrap();
     assert_eq!(entries.len(), 1);
     assert!(legacy.exists(), "扫描不应重命名 .edpb");
     assert!(!sidecar.exists(), "EDPB 不应创建外部 .sha256 sidecar");
@@ -663,7 +665,7 @@ fn scan_prefers_lba4_identity_over_filename_onlyid() {
         &original,
     );
 
-    let entries = scan_backup_dir(&tmp.0);
+    let entries = scan_backup_dir_checked(&tmp.0).unwrap();
     let entry = entries
         .iter()
         .find(|entry| entry.path == path)
@@ -697,6 +699,7 @@ fn grouped_identity(onlyid: &str) -> MediaIdentitySnapshot {
 
 fn fake_entry(name: &str, onlyid: &str, mtime: i64) -> BackupEntry {
     BackupEntry {
+        created_epoch: Some(mtime),
         display_cached: false,
         meta: Some(BackupMeta {
             disk: 6,
@@ -756,8 +759,8 @@ fn prune_policy_keeps_latest_backups_and_last_backup() {
 }
 
 #[test]
-fn prune_uses_backup_name_time_before_filesystem_mtime() {
-    let entries = vec![
+fn prune_uses_verified_capture_time_before_filesystem_mtime() {
+    let mut entries = vec![
         fake_entry(
             "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyidA_20260910_120000.edpb",
             "A",
@@ -775,6 +778,9 @@ fn prune_uses_backup_name_time_before_filesystem_mtime() {
         ),
     ];
 
+    for (index, entry) in entries.iter_mut().enumerate() {
+        entry.created_epoch = Some(index as i64 + 1);
+    }
     let candidates = prune_candidates(&entries, 2);
     assert_eq!(candidates.len(), 1);
     assert!(
@@ -1092,4 +1098,45 @@ fn batch_delete_plan_pins_each_path_and_sha_before_execution() {
     assert!(!first.exists());
     assert!(!second.exists());
     assert!(keep.exists(), "批量删除仍必须保留同盘至少一份备份");
+}
+
+#[test]
+fn catalog_time_is_independent_of_filename_and_observation_mtime() {
+    let mut newer = fake_entry("old-looking_19990101_000000.edpb", "A", 1);
+    let mut older = fake_entry("future-looking_20990101_000000.edpb", "A", 9_999_999);
+    newer.created_epoch = Some(200);
+    older.created_epoch = Some(100);
+    assert!(
+        edpcli::infrastructure::backup_store::catalog::cmp_backup_newest_first(&newer, &older)
+            .is_lt()
+    );
+    newer.path = std::path::PathBuf::from("renamed.edpb");
+    newer.mtime = 0;
+    assert!(
+        edpcli::infrastructure::backup_store::catalog::cmp_backup_newest_first(&newer, &older)
+            .is_lt()
+    );
+    let original_display =
+        edpcli::infrastructure::backup_store::catalog::backup_display_time(&newer);
+    newer.mtime = i64::MAX;
+    assert_eq!(
+        original_display,
+        edpcli::infrastructure::backup_store::catalog::backup_display_time(&newer)
+    );
+    older.created_epoch = None;
+    assert!(
+        edpcli::infrastructure::backup_store::catalog::backup_display_time(&older)
+            .contains("时间未知")
+    );
+}
+#[test]
+fn catalog_lookup_propagates_unreadable_directory_errors() {
+    let tmp = TmpDir::new("catalog_error");
+    let file = tmp.0.join("file");
+    fs::write(&file, b"not a directory").unwrap();
+    assert!(find_backups(&file, &grouped_identity("A")).is_err());
+    assert!(find_backups(&tmp.0.join("absent"), &grouped_identity("A"))
+        .unwrap()
+        .confirmed
+        .is_empty());
 }

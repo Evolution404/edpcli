@@ -20,7 +20,7 @@ use crate::selectors::DeviceSelector;
 
 enum BackupSummary<'a> {
     File(&'a std::path::Path),
-    Device(&'a [std::path::PathBuf]),
+    Device(&'a crate::infrastructure::backup_store::create::BackupMatches),
 }
 
 fn print_summary(source: &str, summary: &metainfo::MetaInfoSummary, backups: BackupSummary<'_>) {
@@ -35,7 +35,8 @@ fn print_summary(source: &str, summary: &metainfo::MetaInfoSummary, backups: Bac
                 path.display()
             );
         }
-        BackupSummary::Device(paths) => {
+        BackupSummary::Device(matches) => {
+            let paths = &matches.confirmed;
             println!(
                 "  {}  {}",
                 crate::ui::dim(&crate::ui::pad_to("匹配备份", 18)),
@@ -45,8 +46,8 @@ fn print_summary(source: &str, summary: &metainfo::MetaInfoSummary, backups: Bac
                 println!(
                     "  {}  {}",
                     crate::ui::dim(&crate::ui::pad_to("最新备份", 18)),
-                    crate::infrastructure::backup_store::catalog::backup_display_time(
-                        latest,
+                    crate::infrastructure::backup_store::catalog::display_capture_time(
+                        matches.latest_created_epoch,
                         crate::infrastructure::backup_store::create::mtime_epoch(latest)
                     )
                 );
@@ -274,12 +275,17 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
         };
     let backup_dir =
         crate::infrastructure::backup_store::config::resolve_backup_dir(opts.backup_dir.as_deref());
-    let backup_matches = find_backups(&backup_dir, &identity);
-    let backups = backup_matches.confirmed;
+    let backup_matches = match find_backups(&backup_dir, &identity) {
+        Ok(matches) => matches,
+        Err(error) => {
+            eprintln!("{error}");
+            return EXIT_BACKUP;
+        }
+    };
     print_summary(
         &format!("物理盘 disk{n} ({path})"),
         &summary,
-        BackupSummary::Device(&backups),
+        BackupSummary::Device(&backup_matches),
     );
     let identity_view =
         crate::application::identity::CanonicalIdentityProjection::from_snapshot(&identity);

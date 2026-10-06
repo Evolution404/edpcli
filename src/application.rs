@@ -237,8 +237,7 @@ fn workspace_from_selector(
                     .unwrap_or("<无效文件名>")
                     .to_string(),
                 display_time: crate::infrastructure::backup_store::catalog::backup_display_time(
-                    &entry.path,
-                    entry.mtime,
+                    entry,
                 ),
                 size_bytes: entry
                     .meta

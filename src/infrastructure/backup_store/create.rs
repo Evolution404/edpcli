@@ -1,4 +1,4 @@
-use super::catalog::{lba4_label_id_from, scan_backup_dir, BackupEntry, DiskFacts};
+use super::catalog::{lba4_label_id_from, scan_backup_dir_checked, BackupEntry, DiskFacts};
 use crate::common::{EdpCliError, EdpCliResult, EXIT_BACKUP, EXIT_IO, SECTOR};
 use crate::ports::Clock;
 use std::io;
@@ -168,6 +168,7 @@ pub fn mtime_epoch(path: &Path) -> i64 {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BackupMatches {
     pub confirmed: Vec<PathBuf>,
+    pub latest_created_epoch: Option<i64>,
     pub possible: Vec<PathBuf>,
 }
 
@@ -178,8 +179,11 @@ pub struct BackupMatches {
 pub fn find_backups(
     bak_dir: &Path,
     current: &crate::media_identity::MediaIdentitySnapshot,
-) -> BackupMatches {
-    match_backup_entries(&scan_backup_dir(bak_dir), current)
+) -> Result<BackupMatches, String> {
+    Ok(match_backup_entries(
+        &scan_backup_dir_checked(bak_dir)?,
+        current,
+    ))
 }
 
 /// Read-side matching against one refresh snapshot; never authorizes a write.
@@ -196,7 +200,12 @@ pub(crate) fn match_backup_entries(
         };
         let identity_match = match_media_identity(current, identity, None);
         match BackupAffinityPolicy::classify(&identity_match) {
-            BackupAffinity::Confirmed => matches.confirmed.push(entry.path.clone()),
+            BackupAffinity::Confirmed => {
+                if matches.confirmed.is_empty() {
+                    matches.latest_created_epoch = entry.created_epoch;
+                }
+                matches.confirmed.push(entry.path.clone());
+            }
             BackupAffinity::Possible => matches.possible.push(entry.path.clone()),
             BackupAffinity::Unrelated => {}
         }

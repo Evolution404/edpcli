@@ -16,7 +16,7 @@ use edpcli::provision::DiskProvisionKind;
 fn write_edpb(path: &std::path::Path, data: &[u8], snapshot_id: &str) {
     let capture = CoreCapture {
         snapshot_id: snapshot_id.into(),
-        created_epoch: 1_789_000_000,
+        created_epoch: named_test_capture_epoch(path),
         disk_number: Some(6),
         vid: "0dd8".into(),
         pid: "2005".into(),
@@ -184,6 +184,7 @@ fn v3_raw_serial_can_form_strong_group_without_persisted_serial_digest() {
     let mut second = first.clone();
 
     let make_entry = |path: &str, snapshot: MediaIdentitySnapshot| BackupEntry {
+        created_epoch: None,
         display_cached: false,
         meta: Some(BackupMeta {
             disk: 5,
@@ -258,7 +259,7 @@ fn scanned_verified_backup_exposes_canonical_identity_projection() {
 }
 
 #[test]
-fn catalog_order_prefers_backup_name_time_over_filesystem_mtime() {
+fn catalog_order_prefers_verified_capture_time_over_filesystem_mtime() {
     let Some((_tmp, catalog)) = copied_catalog() else {
         return;
     };

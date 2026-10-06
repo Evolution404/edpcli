@@ -51,10 +51,7 @@ pub fn restore_flow_typed(
             for (index, entry) in &choices {
                 ctx.prompt.write_event(WriteEvent::RestoreMatchRow {
                     index: *index,
-                    time: crate::infrastructure::backup_store::catalog::backup_display_time(
-                        &entry.path,
-                        entry.mtime,
-                    ),
+                    time: crate::infrastructure::backup_store::catalog::backup_display_time(entry),
                     file_name: entry
                         .path
                         .file_name()

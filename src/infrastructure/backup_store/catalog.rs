@@ -93,37 +93,27 @@ pub fn backup_name_time_key(path: &Path) -> Option<u64> {
     digits.parse().ok()
 }
 
-pub fn backup_name_time_human(path: &Path) -> Option<String> {
-    let name = path.file_name()?.to_str()?;
-    let pos = ts_suffix_pos(name)?;
-    let end = name.len().checked_sub(5)?;
-    let stamp = name.get(pos + 1..end)?;
-    if stamp.len() != 15 {
-        return None;
-    }
-    Some(format!(
-        "{}-{}-{} {}:{}",
-        &stamp[0..4],
-        &stamp[4..6],
-        &stamp[6..8],
-        &stamp[9..11],
-        &stamp[11..13]
-    ))
-}
-
-/// `sort_by` 可直接使用的“最新备份优先”比较器。
-/// 两边都有文件名时间时完全忽略 mtime；无法解析旧命名时才退回 mtime。
+/// Verified capture time is authoritative; observation mtime is only an unknown-time fallback.
 pub fn cmp_backup_newest_first(a: &BackupEntry, b: &BackupEntry) -> Ordering {
-    match (backup_name_time_key(&a.path), backup_name_time_key(&b.path)) {
+    match (a.created_epoch, b.created_epoch) {
         (Some(at), Some(bt)) => bt.cmp(&at).then_with(|| a.path.cmp(&b.path)),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)),
     }
 }
-
-pub fn backup_display_time(path: &Path, mtime: i64) -> String {
-    backup_name_time_human(path).unwrap_or_else(|| SystemClock.fmt_human(mtime))
+pub fn backup_display_time(entry: &BackupEntry) -> String {
+    display_capture_time(entry.created_epoch, entry.mtime)
+}
+pub(crate) fn display_capture_time(created_epoch: Option<i64>, observed_mtime: i64) -> String {
+    created_epoch
+        .map(|epoch| SystemClock.fmt_human(epoch))
+        .unwrap_or_else(|| {
+            format!(
+                "时间未知（文件观察 {}）",
+                SystemClock.fmt_human(observed_mtime)
+            )
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,6 +172,8 @@ impl BackupIntegrityStatus {
 pub struct BackupEntry {
     /// Display-only cache provenance; never a write or delete grant.
     pub display_cached: bool,
+    /// Authenticated manifest snapshot.created_epoch; independent of filenames/mtime.
+    pub created_epoch: Option<i64>,
     pub meta: Option<BackupMeta>,
     pub path: PathBuf,
     pub mtime: i64,
@@ -211,20 +203,10 @@ impl BackupEntry {
 
 /// 扫描备份目录并给出跨盘管理所需的完整元数据。
 ///
-/// 扫描必须是只读操作：身份以容器内容为权威，文件名仅用于时间展示和排序。
+/// 扫描必须是只读操作：身份以容器内容为权威，文件名仅为显示标签，采集时间以容器为准。
 /// 历史文件无需改名即可正确归组；正式运行时仅扫描 `.edpb`。
 const MAX_CATALOG_ENTRIES: usize = 4096;
 const MAX_CATALOG_WEIGHT: usize = 64 * 1024 * 1024;
-
-pub fn scan_backup_dir(dir: &Path) -> Vec<BackupEntry> {
-    match scan_backup_dir_checked(dir) {
-        Ok(entries) => entries,
-        Err(error) => {
-            eprintln!("{error}");
-            Vec::new()
-        }
-    }
-}
 
 /// Reject an incomplete catalog rather than renumbering a silently truncated one.
 pub fn scan_backup_dir_checked(dir: &Path) -> Result<Vec<BackupEntry>, String> {
@@ -236,8 +218,10 @@ fn scan_backup_dir_with_budget(
     max_entries: usize,
     max_weight: usize,
 ) -> Result<Vec<BackupEntry>, String> {
-    if !dir.exists() {
-        return Ok(Vec::new());
+    match fs::metadata(dir) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("备份目录不可读取 {}: {error}", dir.display())),
     }
     let read_dir = fs::read_dir(dir)
         .map_err(|error| format!("备份目录不可读取 {}: {error}", dir.display()))?;
@@ -372,6 +356,7 @@ pub(super) fn scan_backup_file_impl(
     Some((
         BackupEntry {
             display_cached: false,
+            created_epoch: verified.map(|v| v.manifest.snapshot.created_epoch),
             meta,
             path: path.to_path_buf(),
             mtime: mtime_epoch(path),
@@ -395,7 +380,7 @@ pub(super) fn scan_backup_file_impl(
 /// Shell completion 专用的轻量备份索引。
 ///
 /// 这里只判断普通 `.edpb` 文件并按文件名时间排序；绝不读取备份内容、
-/// 计算内容摘要或解析 LBA。完整健康状态仍由 `scan_backup_dir` 负责。
+/// 计算内容摘要或解析 LBA。完整健康状态仍由 `scan_backup_dir_checked` 负责。
 pub fn scan_backup_names(dir: &Path) -> Vec<PathBuf> {
     let Ok(read_dir) = fs::read_dir(dir) else {
         return Vec::new();
@@ -448,7 +433,7 @@ pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {
 /// still a tool-owned backup and must be displayed normally. Such an entry receives a unique
 /// singleton key here; this does not grant prune or destructive-write authority.
 pub fn backup_list_group_key(entry: &BackupEntry) -> Option<String> {
-    if let Some(key) = backup_group_key(entry) {
+    if let Some(key) = backup_group_key(entry).filter(|_| entry.created_epoch.is_some()) {
         return Some(format!("identity:{key}"));
     }
     (entry.integrity_status == BackupIntegrityStatus::Verified
@@ -458,13 +443,13 @@ pub fn backup_list_group_key(entry: &BackupEntry) -> Option<String> {
 }
 
 /// backup prune 的纯策略层：
-/// - 每个 canonical identity 组按备份文件名时间新→旧保留 keep 份；
-/// - 仅旧命名无法解析时间时才回退文件系统 mtime；
+/// - 每个 canonical identity 组按验证后的采集时间新→旧保留 keep 份；
+/// - 未验证时间显示为未知，仅用观察 mtime 排列无效条目；
 /// - 无论 keep 是否为 0，每组至少保留最新 1 份，防止清到零份。
 pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
     let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
     for entry in entries {
-        if let Some(key) = backup_group_key(entry) {
+        if let Some(key) = backup_group_key(entry).filter(|_| entry.created_epoch.is_some()) {
             groups.entry(key).or_default().push(entry);
         }
     }

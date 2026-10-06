@@ -138,7 +138,7 @@ fn write_test_edpb_with_serial(
     );
     let capture = CoreCapture {
         snapshot_id: path.file_name().unwrap().to_string_lossy().into_owned(),
-        created_epoch: 1_789_603_200,
+        created_epoch: named_test_capture_epoch(path),
         disk_number: Some(26),
         vid: vid.into(),
         pid: pid.into(),

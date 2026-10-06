@@ -98,10 +98,7 @@ fn print_global_numbered_backup_entries(
         else {
             continue;
         };
-        let time = crate::infrastructure::backup_store::catalog::backup_display_time(
-            &entry.path,
-            entry.mtime,
-        );
+        let time = crate::infrastructure::backup_store::catalog::backup_display_time(entry);
         println!(
             "  [{}] {}   {}   {}",
             crate::ui::pad_left(&index.to_string(), width),
@@ -388,10 +385,7 @@ pub fn backup_delete(
             .and_then(|n| n.to_str())
             .unwrap_or("<无效文件名>");
         let idx = numbered_index.get(path).copied().unwrap_or(0);
-        let time = crate::infrastructure::backup_store::catalog::backup_display_time(
-            &entry.path,
-            entry.mtime,
-        );
+        let time = crate::infrastructure::backup_store::catalog::backup_display_time(entry);
         println!(
             "  [{}] {}   {}   {}",
             idx,
