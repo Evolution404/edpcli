@@ -1,0 +1,2 @@
+GPT: first read rejects >8MiB before array I/O; changed second read reaches array I/O after allocating >8MiB. Error: read metadata LBA2 failed: bounded audit: stop before oversized array I/O
+Pin: current raw-only identity passes in-memory pin check, but generated resume pin is rejected: invalid identity pin digest

@@ -1,0 +1,6 @@
+writer accepted 1025 artifacts; reader rejected: EDPB artifact count exceeds read budget
+audited restore planner admitted that partial user-data extent into its in-memory write transaction; no device opened or written
+metadata-only writer and verifier accepted restorable ordinary_file_payload at LBA2048, completeness=partial
+writer accepted >4MiB manifest; reader rejected: EDPB manifest exceeds read budget
+backup mode under current umask: 644
+Unix check-then-rename overwrites concurrently inserted immutable record (primitive repro)
