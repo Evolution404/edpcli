@@ -21,13 +21,6 @@ use parse_support::{
 // ══════════════════════════════════════════════════════════════════
 // 2. 参数解析(手写, 零依赖)
 // ══════════════════════════════════════════════════════════════════
-#[derive(Default)]
-pub struct DiskOpts {
-    pub disk: Option<u32>,
-    pub size: Option<f64>,
-    pub backup_dir: Option<String>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InspectMode {
     Raw,

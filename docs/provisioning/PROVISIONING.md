@@ -97,7 +97,7 @@ Plain 不是 mode4。官方编号只有 mode0、mode1、mode2、mode3；Plain �
 | exFAT | 支持 | 支持 | 支持 | 支持 | 支持 |
 | NTFS | 支持 | 支持 | 不支持 | 不支持 | 不支持 |
 
-当前真实格式化和重建统一开放 FAT16/FAT32/exFAT；`filesystem::WRITABLE_FILESYSTEMS` 是 Provision、恢复后格式化、CLI/TUI 共用的可写格式真相源；`PROVISION_FILESYSTEMS` 仅保留兼容别名。FAT12 只补齐只读文件级分析，不作为制盘格式；NTFS 暂保持识别和元信息读取。只读分析能力不代表 Provision 会搬运用户文件。
+当前真实格式化和重建统一开放 FAT16/FAT32/exFAT；`filesystem::WRITABLE_FILESYSTEMS` 是 Provision、恢复后格式化、CLI/TUI 共用的可写格式真相源；校验和切换直接使用 `filesystem::validate_writable_filesystem` 与 `filesystem::shift_writable_filesystem`。FAT12 只补齐只读文件级分析，不作为制盘格式；NTFS 暂保持识别和元信息读取。只读分析能力不代表 Provision 会搬运用户文件。
 
 ### 4.3 Plain
 

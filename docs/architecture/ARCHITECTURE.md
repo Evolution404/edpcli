@@ -12,9 +12,9 @@
 - `src/tui/`：交互式前端。`AppState` 只保留 `shell` 与设备、检查、备份、制盘、恢复五个功能状态；`TaskHub` 负责刷新代次、单任务并发控制、关键写入任务与进度运输。帮助、页内动作提示和可用性描述通过 `ActionSpec` 与键位表共用语义；前端不实现裸盘安全策略。
 - `src/application/`：CLI/TUI 共用用例与安全会话。制盘按准备、提交、导出三个职责分离；写服务根模块保留共享事件与身份/安全校验，备份创建、恢复事务、恢复计划分别位于 `write/backup`、`write/restore`、`write/restore_plan`；`TargetSession` 统一写盘状态转换；`CatalogSnapshot` 让同一刷新批次复用一次备份目录只读快照；`OperationError` 在后台任务边界保留错误码与阶段，进入 UI 状态时才映射为展示文本。
 - `src/ports.rs`：中性 CmdRunner、SectorDev、Clock、CommandOutcome 与只读 ReadControl 定义；能力接口从 `ports` 导入。
-- `src/domain/`：逐步收拢纯值类型和不变量，目前包含 `geometry`、`hardware`、`secret`；不得执行平台命令、文件生命周期或 TUI/CLI 逻辑。历史稳定路径继续通过原模块门面暴露。
+- `src/domain/`：逐步收拢纯值类型和不变量，目前包含 `geometry`、`hardware`、`secret`；不得执行平台命令、文件生命周期或 TUI/CLI 逻辑。对外能力通过领域门面暴露；门面承担当前模块边界，不保留开发期无调用别名。
 - `src/infrastructure/`：副作用实现。`backup_store::{catalog,display_catalog,create,config}` 负责目录校验、展示缓存、容器创建适配和备份路径配置，`clock` 实现时钟，`process` 负责带统一截止时间与输出预算的子进程执行；应用层直接使用各实现的归属路径。
-- `src/media_identity.rs`、`src/partition_table.rs`、`src/disk_layout.rs`、`src/backup_coverage.rs`：仍是与前端无关的稳定门面和读模型；迁移期间不得让 `diskio`、`edpb`、`disk_scan` 反向依赖应用层。
+- `src/media_identity.rs`、`src/partition_table.rs`、`src/disk_layout.rs`、`src/backup_coverage.rs`：仍是与前端无关的稳定门面和读模型；不得让 `diskio`、`edpb`、`disk_scan` 反向依赖应用层。
 - `src/media_identity_observer.rs`：只读身份观察服务，可读取协议镜像和硬件探测但没有任何写盘状态转换入口。
 - `src/provision/`：纯内存制盘领域模型与验证器；Plain 与官方 mode0～3 都通过统一 `ProvisionRequest` 进入应用层。准备阶段的来源画像和密钥域探测分别位于 `prepare/source_profile`、`prepare/key_probe`，提交阶段的分区格式化和纯验证分别位于 `commit/partition_format`、`commit/validation`；事务顺序保持不变。
 - `src/filesystem/`：统一文件系统驱动领域；FAT12/FAT16/FAT32/exFAT/NTFS 共享识别和元信息接口。FAT16/FAT32/exFAT 具备格式化与读回能力，FAT12/FAT16/FAT32/exFAT 具备只读文件级分析；NTFS 暂保留识别与元信息。
@@ -28,7 +28,7 @@
 
 只读路径使用只读设备句柄；`list/info/inspect/backup create` 不进入写盘准备流程。真实写盘必须经 `TargetSession<ReadOnly> -> TargetSession<PreparedWrite> -> TargetSession<WriteLocked>` 显式状态转换，并保持系统盘保护、USB 整盘确认、卸载/锁卷、重新打开后的身份复核、同步/读回、失败回滚。实际几何来自平台观察，未知或非 512B 逻辑块、非整除容量及超出 u32 地址范围禁止写入，卸载前/重开后复核几何；WriteLocked 独占借用设备并持有平台 guard。真实制盘提交只接受来源绑定的 BackedUpPreparedProvision，并在提交前重新验证备份；恢复后的格式化和密钥域重建是恢复事务之外的独立授权操作。
 
-恢复核心接收包含确认事实、目标 pin 与预期备份摘要的 RestoreMetadataRequest；兼容选择/确认入口调用同一核心，提交前重新核验。进度观察失败不影响事务收尾，文案留在前端。
+恢复核心接收包含确认事实、目标 pin 与预期备份摘要的 RestoreMetadataRequest；前端选择/确认入口调用同一核心，提交前重新核验。进度观察失败不影响事务收尾，文案留在前端。
 
 CLI 与 TUI 的制盘能力共用同一 `ProvisionRequest::{Official, Plain}` 和 prepare/commit 服务。Plain 是普通 MBR 磁盘目标，不属于官方 mode 编号，也不得映射为 mode4。
 
@@ -50,6 +50,10 @@ LBA0～12 的类型化解析器、配置类型轴和跨 LBA 语义位于 `src/pr
 
 进程执行返回类型化完成状态、耗时与有界双流输出，共享 8MiB 累计输出预算，stderr 最多保留 64KiB。Unix 自有进程组与 Windows kill-on-close Job 负责受控子进程树收尾；超时即使在管道关闭或被后代继承后也继续生效。
 
+密码交互通过 `Prompter::prompt_secret` 的显式实现进入秘密缓冲区，不提供普通文本输入回退。CLI 终端隐藏输入，TUI 编辑器擦除删除、取消和销毁时的秘密分配；后台提示器仅消费请求中的秘密，拒绝临时输入。
+
+`infrastructure::atomic_file` 统一私有候选文件、同步与发布。备份禁止覆盖，镜像替换保留旧结果直到发布成功；检查导出使用独立运行目录和最后发布的完成标记。具体权限、解析预算、可恢复工件授权与采集时间顺序见 [备份规范](../backup/EDPB_FORMAT.md)。
+
 ## 制盘架构
 
 官方 mode0～3 与 Plain 都是正式产品能力。CLI/TUI 共用只读准备和真实提交服务，可确定性导出的目标共用镜像导出路径。应用层先生成不可变计划，再由提交阶段执行安全写入，领域层不直接打开设备、执行平台命令或提权。已有盘通过区域处理策略选择原样保留、验证保留、密钥重新包装、重建或丢弃。Provision 不读取、暂存或搬运用户文件；语义或几何无法原地兼容的目标区域必须明确重建。备份恢复仍是独立的元数据恢复链，不恢复文件数据。
@@ -58,7 +62,7 @@ LBA0～12 的类型化解析器、配置类型轴和跨 LBA 语义位于 `src/pr
 
 日常开发使用 `scripts/test-fast.sh`，fast runner 默认耗时回归阈值 **60 秒**（`EDPCLI_FAST_MAX_SECONDS`）；合并、发布和大范围重构使用 `python3 scripts/test-full.py --profile full`，CI 主平台 full runner 阈值为 **180 秒**（`EDPCLI_TEST_MAX_SECONDS`）。这些性能阈值在运行结束后判定超预算；fast 的格式、Clippy 与 table-scroll 前置检查不在 runner 的性能计时区间内。独立强制 watchdog 默认 900 秒：fast 包括前置检查，full 包括编译、测试与 doctest；编译另有 600 秒、doctest 另有 180 秒期限，测试二进制各有独立超时。总期限可用 EDPCLI_GATE_DEADLINE_SECS / full 的 --deadline-seconds 调整，超时返回 124 并打印阶段原因。
 
-`scripts/change_scope.py` 是本地与 CI 共用的变更分类事实源，已跟踪和未跟踪文件都参与路由，未知或公共测试基础设施变更保守选择完整非 HIL 套件。运行器在存在 `sccache` 时自动启用编译缓存并关闭 Cargo 增量编译，缺少缓存程序时自动退回直接 `rustc`。虚拟 HIL 独立运行，不混入普通 `fast/full`。所有提交前执行 `cargo fmt --all -- --check`、`cargo check --locked --all-targets` 与 `git diff --check`；协议相关修改还必须通过协议字段、真实样本和文档契约门禁。
+`scripts/change_scope.py` 是本地与 CI 共用的变更分类事实源，已跟踪和未跟踪文件都参与路由，未知或公共测试基础设施变更保守选择完整非 HIL 套件。运行器在存在 `sccache` 时自动启用编译缓存并关闭 Cargo 增量编译，缺少缓存程序时自动退回直接 `rustc`。虚拟 HIL 独立运行，不混入普通 `fast/full`。所有提交前显式执行 `cargo fmt --all` 并通过日常门禁，门禁包含格式与 `git diff --check`；协议相关修改还必须通过协议字段、真实样本和文档契约门禁。
 
 官方制盘的协议事务先提交，随后逐分区格式化；首个格式化失败后，剩余所选分区标记为未执行。格式化错误保留退出码、阶段及本次事务触及范围的介质状态：已回滚仅表示失败分区回到该次格式化前状态，不表示之前已提交的协议或分区已撤销。回滚失败或写后状态未知均要求停止后续写入和重新检查设备。恢复后格式化/密钥域重建发生这两类失败时，TUI 清除原格式化 pin 并阻止沿用旧评估继续写入；元数据恢复的已完成事实继续保留。CLI 恢复后任一格式化/重建失败即结束后续操作并返回失败码。
 

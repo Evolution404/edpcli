@@ -6,15 +6,15 @@
 //!   `edpcli info [备份.edpb] [--disk N]`          查看设备/备份详情
 //!   `edpcli backup restore [备份] [--disk N]`    还原
 //!
-//! 历史备份可通过 edpcli backup restore 还原。
+//! 恢复入口只接受当前 v3 清单的 EDPB 元数据备份。
 
 use std::io::{self, IsTerminal};
 
 pub use crate::backup_cli::{backup_delete, backup_list, backup_prune, backup_verify};
 use crate::cli_args::print_help;
 pub use crate::cli_args::{
-    parse_args, print_usage, BackupAction, DiskOpts, InfoOpts, InspectOpts, Parsed,
-    ProvisionAction, ProvisionNewOpts,
+    parse_args, print_usage, BackupAction, InfoOpts, InspectOpts, Parsed, ProvisionAction,
+    ProvisionNewOpts,
 };
 use crate::common::*;
 use crate::completion;

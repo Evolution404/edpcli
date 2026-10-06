@@ -60,18 +60,19 @@ use crate::ports::CmdRunner;
 /// Frontend interaction boundary shared by CLI selectors and write services.
 pub trait Prompter {
     fn prompt_line(&mut self, msg: &str) -> String;
-    fn prompt_secret(&mut self, msg: &str) -> crate::provision::SecretBytes {
-        let mut input = self.prompt_line(msg).into_bytes();
-        while input
-            .last()
-            .is_some_and(|byte| matches!(byte, b'\r' | b'\n'))
-        {
-            input.pop();
-        }
-        let secret = crate::provision::SecretBytes::new(&input);
-        input.fill(0);
-        secret
-    }
+    /// Read through a secret-aware channel; never delegate to ordinary line input.
+    /// Noninteractive implementations must return an empty secret to cancel input.
+    ///
+    /// A frontend must explicitly implement secret handling:
+    /// ```compile_fail,E0046
+    /// use edpcli::application::Prompter;
+    /// struct TextOnly;
+    /// impl Prompter for TextOnly {
+    ///     fn prompt_line(&mut self, _: &str) -> String { String::new() }
+    ///     fn confirm_yes(&mut self, _: &str) -> bool { false }
+    /// }
+    /// ```
+    fn prompt_secret(&mut self, msg: &str) -> crate::provision::SecretBytes;
     fn confirm_yes(&mut self, msg: &str) -> bool;
     fn confirm_write_yes(&mut self, msg: &str) -> bool {
         self.confirm_yes(msg)

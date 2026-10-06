@@ -300,7 +300,8 @@ fn plain_filesystem_image(
     partition: &PlainPartitionSpec,
     volume_serial: u32,
 ) -> Result<SparseFilesystemImage, String> {
-    super::validate_provision_filesystem(partition.filesystem)?;
+    crate::filesystem::validate_writable_filesystem(partition.filesystem)
+        .map_err(|error| error.to_string())?;
     build_empty_filesystem(
         partition.filesystem,
         partition.start_lba,

@@ -1,15 +1,16 @@
-use edpcli::application::filesystem::FilesystemKind;
+use edpcli::application::filesystem::{
+    shift_writable_filesystem, validate_writable_filesystem, FilesystemKind, WRITABLE_FILESYSTEMS,
+};
 use edpcli::protocol::{
     edpf::EdpPartitionType, lba7_compat::locate_lba7_compatibility_extent_from_geometry,
 };
 use edpcli::provision::{
     build_official_partition_layout, generate_official_image, official_mbr_partition_type,
-    shift_provision_filesystem, validate_provision_filesystem, visible_mbr_partition_type,
-    wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, Lba8Identity,
-    OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
+    visible_mbr_partition_type, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
+    Lba8Identity, OfficialPartitionFilesystems, OfficialPartitionMode, OfficialPartitionSizes,
     OfficialProvisionPlan, OfficialProvisionValidator, OnlyId, ProvisionEntropy, ProvisionImage,
     ProvisionMetadata, ProvisionProfile, ProvisionSpec, TargetIdentity, DEFAULT_MODE0_BOOT_SECTORS,
-    OFFICIAL_PARTITION_START_SECTOR, PROVISION_FILESYSTEMS, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 use edpcli::{
     platform::{HardwareProbe, InquiryInfo, NativeTransport},
@@ -27,33 +28,33 @@ fn types(mode: OfficialPartitionMode) -> Vec<u32> {
 #[test]
 fn provision_filesystem_policy_is_single_source_for_three_writable_formats() {
     assert_eq!(
-        PROVISION_FILESYSTEMS,
+        WRITABLE_FILESYSTEMS,
         [
             FilesystemKind::Fat16,
             FilesystemKind::Fat32,
             FilesystemKind::ExFat,
         ]
     );
-    for filesystem in PROVISION_FILESYSTEMS {
-        validate_provision_filesystem(filesystem).unwrap();
+    for filesystem in WRITABLE_FILESYSTEMS {
+        validate_writable_filesystem(filesystem).unwrap();
     }
     for filesystem in [FilesystemKind::Fat12, FilesystemKind::Ntfs] {
-        assert!(validate_provision_filesystem(filesystem).is_err());
+        assert!(validate_writable_filesystem(filesystem).is_err());
     }
     assert_eq!(
-        shift_provision_filesystem(FilesystemKind::Fat16, false),
+        shift_writable_filesystem(FilesystemKind::Fat16, false),
         FilesystemKind::Fat32
     );
     assert_eq!(
-        shift_provision_filesystem(FilesystemKind::Fat32, false),
+        shift_writable_filesystem(FilesystemKind::Fat32, false),
         FilesystemKind::ExFat
     );
     assert_eq!(
-        shift_provision_filesystem(FilesystemKind::ExFat, false),
+        shift_writable_filesystem(FilesystemKind::ExFat, false),
         FilesystemKind::Fat16
     );
     assert_eq!(
-        shift_provision_filesystem(FilesystemKind::Fat16, true),
+        shift_writable_filesystem(FilesystemKind::Fat16, true),
         FilesystemKind::ExFat
     );
 }

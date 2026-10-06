@@ -23,6 +23,11 @@ impl Prompter for Progress {
     fn prompt_line(&mut self, _: &str) -> String {
         String::new()
     }
+    fn prompt_secret(&mut self, _msg: &str) -> edpcli::provision::SecretBytes {
+        // HIL secrets are supplied separately before the operation starts.
+        edpcli::provision::SecretBytes::default()
+    }
+
     fn confirm_yes(&mut self, _: &str) -> bool {
         true
     }

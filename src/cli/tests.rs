@@ -2,11 +2,34 @@ use super::*;
 use crate::protocol::sectors::EdpfPartition;
 
 #[test]
+fn yes_flag_preserves_the_secret_input_channel() {
+    struct SecretOnly;
+    impl Prompter for SecretOnly {
+        fn prompt_line(&mut self, _: &str) -> String {
+            panic!("secret must never pass through ordinary input");
+        }
+        fn prompt_secret(&mut self, message: &str) -> crate::provision::SecretBytes {
+            assert_eq!(message, "password");
+            crate::provision::SecretBytes::new(b"test-secret")
+        }
+        fn confirm_yes(&mut self, _: &str) -> bool {
+            false
+        }
+    }
+    let mut prompt = AlwaysYes(SecretOnly);
+    assert_eq!(prompt.prompt_secret("password").as_bytes(), b"test-secret");
+}
+
+#[test]
 fn yes_flag_does_not_bypass_independent_key_domain_confirmation() {
     struct Reject;
     impl Prompter for Reject {
         fn prompt_line(&mut self, _message: &str) -> String {
             String::new()
+        }
+
+        fn prompt_secret(&mut self, _msg: &str) -> crate::provision::SecretBytes {
+            panic!("unexpected secret prompt")
         }
 
         fn confirm_yes(&mut self, _message: &str) -> bool {

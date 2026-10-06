@@ -208,14 +208,12 @@ edpcli completion fish | source
 通过 GitHub/API 等不会执行本地 hook 的提交路径，仓库 `AGENTS.md` 仍要求在每次提交前
 显式执行 `cargo fmt --all`。
 
-常用门禁：
+日常验证与大范围重构门禁：
 
 ```bash
-cargo fmt --all -- --check
-cargo test --all-targets --locked
-cargo clippy --all-targets --locked -- -D warnings
+./scripts/test-fast.sh
+# 合并、发布前，以及大范围重构后
+python3 scripts/test-full.py --profile full
 ```
 
-CI 继续保留 `cargo fmt --all -- --check` 作为最终兜底，并在 macOS、Linux、Windows 的 arm64 / x86_64 六个目标上执行测试、clippy 和构建；
-Linux/Windows 另有 arm64 / x86_64 virtual-disk HIL。正式 Release 同时发布六个原生包，
-macOS 额外发布 Universal 包。
+每次提交前显式执行 `cargo fmt --all`，CI 保留 `cargo fmt --all -- --check` 兜底。日常 CI 在 macOS arm64、Linux x86_64、Windows x86_64 三个主平台执行完整非 HIL 测试、Clippy 和发布配置检查；macOS x86_64、Linux arm64、Windows arm64 三个次平台执行全目标编译与发布配置检查。虚拟磁盘 HIL 单独覆盖 Linux/Windows 两种架构及 macOS arm64。正式发布另有六架构完整门禁，生成六个原生包和 macOS Universal 包，详见 [发布规范](docs/user/RELEASE.md)。

@@ -4,7 +4,6 @@
 //! Hardware discovery belongs to the application/platform layers; builders consume only
 //! immutable, already-resolved inputs from this domain.
 
-mod filesystem_policy;
 mod generate;
 mod key_domain;
 mod keys;
@@ -24,10 +23,6 @@ pub use crate::filesystem_capability::{
     EXFAT_MAX_VALIDATED_CLUSTERS, EXFAT_MAX_VALIDATED_CLUSTER_SHIFT,
 };
 pub use crate::partition_transform::{decrypt_mode2, EdpSm4Transform};
-pub use filesystem_policy::{
-    is_provision_filesystem_supported, shift_provision_filesystem, validate_provision_filesystem,
-    PROVISION_FILESYSTEMS,
-};
 pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
 pub use key_domain::{
     KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, PassthroughBasis, PasswordDisposition,

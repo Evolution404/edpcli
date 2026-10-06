@@ -1,6 +1,6 @@
 # edpcli 文档索引
 
-本目录只保留**当前有效、可作为实现事实源**的文档。阶段计划、交接稿、实时进度稿和已完成审计不再长期保留；历史过程由 Git 提交记录承担。
+本目录只保留**当前有效、可作为实现事实源**的文档。阶段计划、交接稿和已完成审计归入 `audit/` 的历史证据目录；Git 提交记录保存变更过程。
 
 ## 用户与发布
 
@@ -12,9 +12,11 @@
 - [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md)：当前模块边界、只读/写入安全边界、CLI/TUI/应用层/平台层关系。
 - [`ui/TUI.md`](ui/TUI.md)：当前 TUI 工作区、键位、长操作进度、表格与安全交互规范。
 
+- [`architecture/PHYSICAL_HIL_GOVERNANCE.md`](architecture/PHYSICAL_HIL_GOVERNANCE.md)：当前实体盘验收场景和证据要求；实体盘验收与虚拟磁盘门禁分开。
+
 ## 备份
 
-- [`backup/EDPB_FORMAT_V1.md`](backup/EDPB_FORMAT_V1.md)：EDPB v1 容器与 `Artifact`/`Region` 规范。
+- [`backup/EDPB_FORMAT.md`](backup/EDPB_FORMAT.md)：外层容器 1.0、当前 v3 清单与 `Artifact`/`Region` 恢复契约。
 
 ## EDP 协议
 
@@ -29,7 +31,7 @@
 
 ## 证据目录
 
-协议机器账本、金标测试夹具、静态/虚拟/物理证据位于 [`../audit/protocol/`](../audit/protocol/)。`audit/` 是证据层，不是第二套产品文档。
+协议机器账本、金标测试夹具、静态/虚拟/物理证据位于 [`../audit/protocol/`](../audit/protocol/)。`audit/` 是证据层，不是第二套产品文档。已完成治理计划见 [`../audit/project/history/`](../audit/project/history/)；技术债实施记录见 [`../audit/project/`](../audit/project/)。
 
 ## 文档规则
 

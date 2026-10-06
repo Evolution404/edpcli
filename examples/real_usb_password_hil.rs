@@ -138,6 +138,11 @@ mod macos {
             String::new()
         }
 
+        fn prompt_secret(&mut self, _msg: &str) -> edpcli::provision::SecretBytes {
+            // HIL secrets are supplied separately before the operation starts.
+            edpcli::provision::SecretBytes::default()
+        }
+
         fn confirm_yes(&mut self, _msg: &str) -> bool {
             true
         }

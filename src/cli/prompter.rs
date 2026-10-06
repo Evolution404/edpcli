@@ -122,7 +122,7 @@ impl Prompter for StdPrompter {
     }
 }
 
-/// --yes: 一切确认自动通过。
+/// --yes: 普通写入确认自动通过；恢复后格式化与密钥域重建仍独立确认。
 pub struct AlwaysYes<P: Prompter>(pub P);
 
 impl<P: Prompter> Prompter for AlwaysYes<P> {

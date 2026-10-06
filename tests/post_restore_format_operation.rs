@@ -110,6 +110,10 @@ impl Prompter for ProgressPrompt {
     fn prompt_line(&mut self, _message: &str) -> String {
         String::new()
     }
+    fn prompt_secret(&mut self, _msg: &str) -> edpcli::provision::SecretBytes {
+        panic!("unexpected secret prompt")
+    }
+
     fn confirm_yes(&mut self, _message: &str) -> bool {
         true
     }
@@ -280,6 +284,10 @@ fn post_restore_progress_sink_panic_does_not_interrupt_format() {
 impl Prompter for Confirm {
     fn prompt_line(&mut self, _message: &str) -> String {
         String::new()
+    }
+
+    fn prompt_secret(&mut self, _msg: &str) -> edpcli::provision::SecretBytes {
+        panic!("unexpected secret prompt")
     }
 
     fn confirm_yes(&mut self, _message: &str) -> bool {

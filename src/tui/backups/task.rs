@@ -243,6 +243,11 @@ impl TaskHub {
                         String::new()
                     }
 
+                    fn prompt_secret(&mut self, _msg: &str) -> crate::provision::SecretBytes {
+                        // Secrets arrive through the prepared UI intent; workers cannot prompt.
+                        crate::provision::SecretBytes::default()
+                    }
+
                     fn confirm_yes(&mut self, _msg: &str) -> bool {
                         true
                     }

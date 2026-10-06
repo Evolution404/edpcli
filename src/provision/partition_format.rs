@@ -30,7 +30,7 @@ pub fn build_official_partition_filesystem(
     let format = target
         .filesystem
         .ok_or("compatibility reserve is not a filesystem")?;
-    super::validate_provision_filesystem(format)?;
+    crate::filesystem::validate_writable_filesystem(format).map_err(|error| error.to_string())?;
     build_official_partition_filesystem_with_format(
         plan,
         target,

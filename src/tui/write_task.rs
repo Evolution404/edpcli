@@ -8,6 +8,11 @@ impl crate::application::Prompter for FormatPrompter {
     fn prompt_line(&mut self, _msg: &str) -> String {
         String::new()
     }
+    fn prompt_secret(&mut self, _msg: &str) -> crate::provision::SecretBytes {
+        // Secrets arrive through the prepared UI intent; workers cannot prompt.
+        crate::provision::SecretBytes::default()
+    }
+
     fn confirm_yes(&mut self, _msg: &str) -> bool {
         true
     }
@@ -36,6 +41,11 @@ impl TaskHub {
                 impl crate::application::write::Prompter for ConfirmedPrompter {
                     fn prompt_line(&mut self, _msg: &str) -> String {
                         String::new()
+                    }
+
+                    fn prompt_secret(&mut self, _msg: &str) -> crate::provision::SecretBytes {
+                        // Secrets arrive through the prepared UI intent; workers cannot prompt.
+                        crate::provision::SecretBytes::default()
                     }
 
                     fn confirm_yes(&mut self, _msg: &str) -> bool {
@@ -199,6 +209,11 @@ impl TaskHub {
             impl crate::application::Prompter for ConfirmedPrompter {
                 fn prompt_line(&mut self, _msg: &str) -> String {
                     String::new()
+                }
+
+                fn prompt_secret(&mut self, _msg: &str) -> crate::provision::SecretBytes {
+                    // Secrets arrive through the prepared UI intent; workers cannot prompt.
+                    crate::provision::SecretBytes::default()
                 }
 
                 fn confirm_yes(&mut self, _msg: &str) -> bool {

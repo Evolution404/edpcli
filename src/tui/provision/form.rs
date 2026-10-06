@@ -238,7 +238,7 @@ pub(super) fn shift_supported_fs(
     value: crate::filesystem::FilesystemKind,
     reverse: bool,
 ) -> crate::filesystem::FilesystemKind {
-    crate::provision::shift_provision_filesystem(value, reverse)
+    crate::filesystem::shift_writable_filesystem(value, reverse)
 }
 
 impl Default for ProvisionForm {

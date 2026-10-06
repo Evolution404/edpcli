@@ -6,8 +6,9 @@ const REQUIRED_DOCS: &[&str] = &[
     "docs/user/USAGE.md",
     "docs/user/RELEASE.md",
     "docs/architecture/ARCHITECTURE.md",
+    "docs/architecture/PHYSICAL_HIL_GOVERNANCE.md",
     "docs/ui/TUI.md",
-    "docs/backup/EDPB_FORMAT_V1.md",
+    "docs/backup/EDPB_FORMAT.md",
     "docs/protocol/README.md",
     "docs/protocol/EDP_LBA0_12_FIELD_GUIDE.md",
     "docs/protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md",
@@ -54,6 +55,10 @@ fn obsolete_parallel_plans_and_handoffs_do_not_reappear() {
         "docs/provisioning/TUI_TRUECOLOR_VIM_MIGRATION_AUDIT_2026-09-25.md",
         "docs/ui/DEVICE_WORKBENCH_PLAN_2026-09-28.md",
         "docs/validation/INSPECT_HIL_2026-09-23.md",
+        "docs/backup/EDPB_FORMAT_V1.md",
+        "docs/architecture/PROVISION_BACKUP_GOVERNANCE_2026-10-01.md",
+        "docs/ui/TUI_INTERACTION_GOVERNANCE_2026-09-30.md",
+        "docs/ui/PROVISION_CONFIRMATION_REDESIGN_2026-10-01.md",
     ] {
         assert!(
             !Path::new(obsolete).exists(),
@@ -117,7 +122,7 @@ fn canonical_documents_stay_bounded_and_do_not_become_history_logs() {
     for (path, limit) in [
         ("docs/architecture/ARCHITECTURE.md", 500usize),
         ("docs/provisioning/PROVISIONING.md", 1_200),
-        ("docs/backup/EDPB_FORMAT_V1.md", 500),
+        ("docs/backup/EDPB_FORMAT.md", 500),
         ("docs/ui/TUI.md", 500),
     ] {
         let lines = fs::read_to_string(path)
@@ -137,7 +142,14 @@ fn canonical_documents_stay_bounded_and_do_not_become_history_logs() {
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or_default();
-        for marker in ["_PLAN_", "_AUDIT_", "HANDOFF_", "LIVE_STATUS"] {
+        for marker in [
+            "_PLAN_",
+            "_AUDIT_",
+            "HANDOFF_",
+            "LIVE_STATUS",
+            "_GOVERNANCE_20",
+            "_REDESIGN_20",
+        ] {
             assert!(
                 !name.contains(marker),
                 "completed process document must not live in docs/: {}",

@@ -292,6 +292,23 @@ impl edpcli::cli::Prompter for ScriptPrompter {
         self.idx += 1;
         s
     }
+    fn prompt_secret(&mut self, _msg: &str) -> edpcli::provision::SecretBytes {
+        let input = self
+            .inputs
+            .get_mut(self.idx)
+            .map(std::mem::take)
+            .unwrap_or_default();
+        self.idx += 1;
+        let mut secret = edpcli::provision::SecretBytes::from_owned(input.into_bytes());
+        while secret
+            .as_bytes()
+            .last()
+            .is_some_and(|byte| matches!(byte, b'\r' | b'\n'))
+        {
+            secret.truncate(secret.as_bytes().len() - 1);
+        }
+        secret
+    }
     fn confirm_yes(&mut self, _msg: &str) -> bool {
         self.prompt_line("").trim() == "YES"
     }

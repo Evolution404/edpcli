@@ -27,6 +27,10 @@ impl Prompter for Prompt {
         self.answers.remove(0)
     }
 
+    fn prompt_secret(&mut self, _msg: &str) -> edpcli::provision::SecretBytes {
+        panic!("unexpected secret prompt")
+    }
+
     fn confirm_yes(&mut self, _msg: &str) -> bool {
         false
     }

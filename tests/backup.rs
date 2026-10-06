@@ -904,6 +904,10 @@ impl edpcli::cli::Prompter for ReplaceBeforeConfirm {
         String::new()
     }
 
+    fn prompt_secret(&mut self, _msg: &str) -> edpcli::provision::SecretBytes {
+        panic!("unexpected secret prompt")
+    }
+
     fn confirm_yes(&mut self, _msg: &str) -> bool {
         fs::write(&self.path, &self.replacement).unwrap();
         true

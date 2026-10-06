@@ -2,7 +2,7 @@
 
 审计基线：[2026-10-06 全仓库技术债与优化空间审计](20261006-comprehensive-technical-debt-audit.md)。它合并此前剩余 F1～F8，并补充 F9～F22、覆盖范围、删除/保护界线及验收顺序。
 
-22 项确认问题的实施与验证见 [全面修复记录](20261006-comprehensive-fixes.md)。
+22 项确认问题的实施与验证见 [全面修复记录](20261006-comprehensive-fixes.md)。后续代码与文档清理见 [本轮治理记录](20261006-code-documentation-governance.md)，已完成计划的原文见 [历史归档](history/README.md)。
 
 当前审计证据位于 [evidence/](evidence/)；[范围清单](evidence/20261006-scope-inventory.tsv) 固定基线提交的文件名、大小及 SHA-256，用于区分“当时被审计的内容”和后续代码。复现程序是基线缺陷的证明，修复后其中成功/失败断言应相应变化，不属于常规生产测试入口。
 
@@ -15,7 +15,7 @@
 | [S1～S4 实施](20261006-architecture-s1-s4-implementation.md) | 已实施架构收敛 |
 | [开发兼容清理](20261006-development-compatibility-cleanup.md) | 历史 API/包装清理结果 |
 | [EDPB v3 清理与迁移](20261006-edpb-v3-only-migration.md) | 旧 reader 移除及本地转换/归档结果 |
-| [剩余 8 项审计](20261006-remaining-technical-debt-audit.md) | 当前 F1～F8 的详细初次证据；待办以全仓库报告为准 |
+| [剩余 8 项审计](20261006-remaining-technical-debt-audit.md) | F1～F8 的详细初次证据；修复结果见全面修复记录 |
 | [2026-10-05 架构优化进度](20261005-architecture-optimization-progress.md) | 当时实施进度 |
 | [2026-10-05 桌面 TUI 审计](20261005-desktop-tui-engineering-audit.md) | 当时 TUI 审计 |
 | [2026-10-05 桌面 TUI 完成记录](20261005-desktop-tui-engineering-completion.md) | 对应实现结果 |

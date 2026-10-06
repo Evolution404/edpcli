@@ -493,21 +493,21 @@ edpcli completion fish | source
 
 ## 13. 发布与开发门禁
 
-本地：
+日常开发使用范围感知门禁，大范围重构及合并、发布前使用完整门禁：
 
 ```bash
-cargo fmt --all -- --check
-cargo test --all-targets --locked
-cargo clippy --all-targets --locked -- -D warnings
+./scripts/test-fast.sh
+python3 scripts/test-full.py --profile full
 ```
 
-GitHub Actions 在 macOS/Linux/Windows 的 arm64、x86_64 六个目标执行完整测试、clippy
-和发布构建；Linux/Windows 另有四套虚拟磁盘硬件在环。发布时生成七个包，并验证
-SHA-256、SBOM、清单。版本和标签必须严格一致，详细流程见
-[`RELEASE.md`](RELEASE.md)。
+提交前执行 `cargo fmt --all`，CI 使用 `cargo fmt --all -- --check` 兜底。日常 GitHub Actions 的三个主平台（macOS arm64、Linux x86_64、Windows x86_64）执行完整非 HIL 测试、Clippy 与发布配置检查；三个次平台（macOS x86_64、Linux arm64、Windows arm64）执行全目标编译与发布配置检查。独立虚拟磁盘门禁覆盖 Linux/Windows 两种架构和 macOS arm64，实体盘验收需另行执行。
+
+正式发布执行六架构完整门禁，生成七个包并验证 SHA-256、SBOM 和清单。版本、标签与同一提交的门禁结果必须一致，详细流程见 [`RELEASE.md`](RELEASE.md)。
 
 ### 制盘密码输入
 
 `provision plan/image/write --prompt-passwords` 在提权后读取四个密码，顺序为共享区来源、共享区目标、加密区来源、加密区目标。来源密码可以留空，目标密码不能为空。交互终端隐藏输入；标准输入按四行读取，每行最多 512 字节。此选项与四个命令行密码选项互斥。
 
 优先使用此输入方式，避免密码进入 shell 历史和操作系统进程参数。应用内密码编辑、取消和销毁会擦除已分配的秘密缓冲区；命令行显式传入的密码仍可能保留在操作系统提供的参数中。
+
+前端 `Prompter` 必须显式实现密码输入，不允许默认转交普通文本输入。非交互后台任务从已确认请求接收密码，不能临时打开普通输入通道；无法安全读取时返回空秘密并由调用流程处理取消或缺失密码。
