@@ -2,40 +2,23 @@ use super::*;
 
 pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String> {
     validate_manifest_identity(manifest)?;
-    match manifest.schema.as_str() {
-        "edpb.manifest.v3" => {
-            if manifest.backup_purpose != Some(BackupPurpose::MetadataOnly) {
-                return Err("EDPB manifest v3 must declare metadata_only backup purpose".into());
-            }
-            let contract = manifest
-                .restore_contract
-                .as_ref()
-                .ok_or_else(|| "EDPB manifest v3 missing restore contract".to_string())?;
-            if !contract.restores_partition_structure
-                || contract.restores_filesystem
-                || contract.restores_user_data
-                || !contract.post_restore_assessment_required
-            {
-                return Err(
-                    "EDPB manifest v3 restore contract violates metadata-only semantics".into(),
-                );
-            }
-            let plain = manifest.snapshot.device_state.eq_ignore_ascii_case("plain");
-            if contract.restores_edp_protocol == plain {
-                return Err(
-                    "EDPB manifest v3 EDP restore contract conflicts with device state".into(),
-                );
-            }
-        }
-        "edpb.manifest.v1" | "edpb.manifest.v2"
-            if manifest.backup_purpose.is_some()
-                || manifest.restore_contract.is_some()
-                || !manifest.partitions.is_empty() =>
-        {
-            return Err("historical EDPB manifest must not masquerade as v3".into());
-        }
-        "edpb.manifest.v1" | "edpb.manifest.v2" => {}
-        _ => {}
+    if manifest.backup_purpose != Some(BackupPurpose::MetadataOnly) {
+        return Err("EDPB manifest v3 must declare metadata_only backup purpose".into());
+    }
+    let contract = manifest
+        .restore_contract
+        .as_ref()
+        .ok_or_else(|| "EDPB manifest v3 missing restore contract".to_string())?;
+    if !contract.restores_partition_structure
+        || contract.restores_filesystem
+        || contract.restores_user_data
+        || !contract.post_restore_assessment_required
+    {
+        return Err("EDPB manifest v3 restore contract violates metadata-only semantics".into());
+    }
+    let plain = manifest.snapshot.device_state.eq_ignore_ascii_case("plain");
+    if contract.restores_edp_protocol == plain {
+        return Err("EDPB manifest v3 EDP restore contract conflicts with device state".into());
     }
     if manifest.container_version.major != FORMAT_MAJOR {
         return Err(format!(
@@ -43,8 +26,7 @@ pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String>
             manifest.container_version.major
         ));
     }
-    let plain_metadata_v3 = manifest.schema == "edpb.manifest.v3"
-        && manifest.snapshot.device_state.eq_ignore_ascii_case("plain")
+    let plain_metadata = manifest.snapshot.device_state.eq_ignore_ascii_case("plain")
         && manifest.snapshot.capture_level == CaptureLevel::Metadata;
     let mut partition_indexes = BTreeSet::new();
     for partition in &manifest.partitions {
@@ -72,7 +54,7 @@ pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String>
             ));
         }
     }
-    if plain_metadata_v3 {
+    if plain_metadata {
         if manifest.partitions.is_empty() {
             return Err("EDPB Plain metadata backup contains no typed partition entries".into());
         }
@@ -146,7 +128,7 @@ pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String>
         }
     }
 
-    if !plain_metadata_v3 {
+    if !plain_metadata {
         let protocol_region = manifest
             .regions
             .iter()
@@ -178,7 +160,7 @@ pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String>
             }
         }
     }
-    if !plain_metadata_v3 {
+    if !plain_metadata {
         let raw_protocol = manifest
             .artifacts
             .iter()

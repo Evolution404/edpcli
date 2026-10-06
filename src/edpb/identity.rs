@@ -52,7 +52,6 @@ pub fn manifest_identity_from_snapshot(
             vid: snapshot.hardware.vid,
             pid: snapshot.hardware.pid,
             serial: snapshot.hardware.serial.clone(),
-            serial_sha256: None,
             serial_quality: manifest_serial_quality(snapshot.hardware.serial_quality),
             vendor: snapshot.hardware.vendor.clone(),
             product: snapshot.hardware.product.clone(),
@@ -84,7 +83,6 @@ pub(super) fn inferred_manifest_identity(capture: &CoreCapture<'_>) -> ManifestI
             vid: parse_hex_u16(&capture.vid),
             pid: parse_hex_u16(&capture.pid),
             serial: None,
-            serial_sha256: None,
             serial_quality: ManifestSerialQuality::Missing,
             vendor: None,
             product: None,
@@ -205,85 +203,39 @@ fn validate_typed_identity_projection(
 }
 
 pub(super) fn validate_manifest_identity(manifest: &Manifest) -> Result<(), String> {
-    match manifest.schema.as_str() {
-        "edpb.manifest.v1" => {
-            if manifest.identity.is_some() {
-                return Err("EDPB manifest v1 must not carry typed identity".into());
-            }
-            legacy_hardware_serial_digest(manifest)?;
-            Ok(())
-        }
-        "edpb.manifest.v2" => {
-            let identity = manifest
-                .identity
-                .as_ref()
-                .ok_or_else(|| "EDPB manifest v2 missing typed identity".to_string())?;
-            if identity.hardware.serial.is_some() {
-                return Err("EDPB manifest v2 must not carry a raw USB serial".into());
-            }
-            match identity.hardware.serial_quality {
-                ManifestSerialQuality::Missing => {
-                    if identity.hardware.serial_sha256.is_some() {
-                        return Err(
-                            "EDPB typed identity marks serial missing but stores a digest".into(),
-                        );
-                    }
-                }
-                ManifestSerialQuality::Usable | ManifestSerialQuality::Suspicious => {
-                    let digest = identity.hardware.serial_sha256.as_deref().ok_or_else(|| {
-                        "EDPB typed identity serial quality requires a digest".to_string()
-                    })?;
-                    if !valid_sha256_hex(digest) {
-                        return Err("EDPB typed hardware serial digest is malformed".into());
-                    }
-                }
-            }
-            if let Some(legacy_digest) = legacy_hardware_serial_digest(manifest)? {
-                if identity
-                    .hardware
-                    .serial_sha256
-                    .as_deref()
-                    .map(str::to_ascii_lowercase)
-                    .as_deref()
-                    != Some(legacy_digest.as_str())
-                {
-                    return Err(
-                        "EDPB typed identity conflicts with legacy hardware serial evidence".into(),
-                    );
-                }
-            }
-            validate_typed_identity_projection(manifest, identity)
-        }
-        "edpb.manifest.v3" => {
-            let identity = manifest
-                .identity
-                .as_ref()
-                .ok_or_else(|| "EDPB manifest v3 missing typed identity".to_string())?;
-            if identity.hardware.serial_sha256.is_some() {
-                return Err("EDPB manifest v3 must not carry serial_sha256".into());
-            }
-            if legacy_hardware_serial_digest(manifest)?.is_some() {
-                return Err("EDPB manifest v3 must not carry legacy serial digest notes".into());
-            }
-            match identity.hardware.serial_quality {
-                ManifestSerialQuality::Missing => {
-                    if identity.hardware.serial.is_some() {
-                        return Err(
-                            "EDPB v3 marks USB serial missing but stores a raw value".into()
-                        );
-                    }
-                }
-                ManifestSerialQuality::Usable | ManifestSerialQuality::Suspicious => {
-                    let serial = identity.hardware.serial.as_deref().ok_or_else(|| {
-                        "EDPB v3 serial quality requires a raw USB serial".to_string()
-                    })?;
-                    if serial.is_empty() {
-                        return Err("EDPB v3 raw USB serial must not be empty".into());
-                    }
-                }
-            }
-            validate_typed_identity_projection(manifest, identity)
-        }
-        other => Err(format!("unsupported EDPB manifest schema: {other}")),
+    if manifest.schema != "edpb.manifest.v3" {
+        return Err(format!(
+            "unsupported EDPB manifest schema: {}",
+            manifest.schema
+        ));
     }
+    let identity = manifest
+        .identity
+        .as_ref()
+        .ok_or_else(|| "EDPB manifest v3 missing typed identity".to_string())?;
+    if manifest
+        .provenance
+        .notes
+        .iter()
+        .any(|note| note.starts_with("hardware_serial_sha256="))
+    {
+        return Err("EDPB manifest v3 must not carry serial digest notes".into());
+    }
+    match identity.hardware.serial_quality {
+        ManifestSerialQuality::Missing => {
+            if identity.hardware.serial.is_some() {
+                return Err("EDPB v3 marks USB serial missing but stores a raw value".into());
+            }
+        }
+        ManifestSerialQuality::Usable | ManifestSerialQuality::Suspicious => {
+            let serial =
+                identity.hardware.serial.as_deref().ok_or_else(|| {
+                    "EDPB v3 serial quality requires a raw USB serial".to_string()
+                })?;
+            if serial.is_empty() {
+                return Err("EDPB v3 raw USB serial must not be empty".into());
+            }
+        }
+    }
+    validate_typed_identity_projection(manifest, identity)
 }

@@ -144,7 +144,8 @@ mod tests {
                     row.index = index;
                     row.path = format!("bench-{index}.edpb").into();
                     if let Some(identity) = row.identity.as_mut() {
-                        identity.hardware.serial_sha256 = Some(format!("{index:064x}"));
+                        identity.hardware.serial = Some(format!("BENCH-SERIAL-{index}"));
+                        identity.hardware.serial_sha256 = None;
                     }
                     row
                 })

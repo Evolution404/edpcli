@@ -563,7 +563,6 @@ fn edpb_container_is_split_by_protocol_responsibility() {
         "src/edpb/write.rs",
         "src/edpb/read.rs",
         "src/edpb/validate.rs",
-        "src/edpb/legacy.rs",
     ] {
         exists(path);
     }
@@ -1492,7 +1491,6 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
     let observer = read_source("src/media_identity_observer.rs");
     let matcher = read_source("src/media_identity.rs");
     let edpb_writer = read_source("src/edpb/write.rs");
-    let edpb_legacy = read_source("src/edpb/legacy.rs");
     let backup_writer = read_source("src/infrastructure/backup_store/create.rs");
     let lineage = read_source("src/application/provision/identity_lineage.rs");
 
@@ -1511,7 +1509,7 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
 
     assert!(!edpb_writer.contains("hardware_serial_sha256="));
     assert!(!backup_writer.contains("hardware_serial_sha256="));
-    assert!(edpb_legacy.contains("fn legacy_hardware_serial_digest("));
+    assert!(!root.join("src/edpb/legacy.rs").exists());
     assert!(edpb_writer.contains("edpb.manifest.v3"));
     assert!(!edpb_writer.contains("write_legacy_"));
 

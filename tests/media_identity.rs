@@ -309,6 +309,24 @@ fn restore_authorization_requires_usable_serial_even_for_same_edp_instance() {
 }
 
 #[test]
+fn matching_digest_only_evidence_cannot_authorize_restore() {
+    let mut source = snapshot(
+        hardware(Some("SERIAL-001"), 0x1234, 0x5678, 1_000_000),
+        Some("edp"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    source.hardware.serial = None;
+    assert!(source.hardware.serial_sha256.is_some());
+    let matched = match_media_identity(&source, &source, None);
+    assert_ne!(matched.relationship, MediaRelationship::SamePhysicalMedia);
+    assert_eq!(
+        authorize(&source, &source),
+        RestoreAuthorizationDecision::Reject(RestoreRejection::WeakHardwareBinding)
+    );
+}
+
+#[test]
 fn restore_authorization_keeps_physical_and_protocol_identity_separate() {
     let source = snapshot(
         hardware(Some("SERIAL-001"), 0x1234, 0x5678, 1_000_000),
@@ -557,7 +575,7 @@ fn formatted_plain_layout_overrides_stale_valid_edp_protocol_for_readonly_identi
     let runner = StaleEdpRunner;
     let original = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/backup/disk26_245760000_vid3535_pid6300_disk&ven_aigo&prod_u335&rev_pmap_onlyid1987718388_mode1_20260916_233626.bin"
+        "/tests/fixtures/protocol/mode1/aigo_u335_20260916_lba0_12.bin"
     ))
     .to_vec();
     assert_eq!(original.len(), 13 * 512);

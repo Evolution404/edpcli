@@ -13,7 +13,6 @@ use sha2::{Digest, Sha256};
 
 mod codec;
 mod identity;
-mod legacy;
 mod limits;
 pub(crate) use limits::MAX_CONTAINER_BYTES;
 mod model;
@@ -25,7 +24,6 @@ pub use crate::sha256::{sha256_hex, sha256_reader_hex};
 use codec::*;
 pub use identity::{canonical_media_identity, manifest_identity_from_snapshot};
 use identity::{inferred_manifest_identity, validate_manifest_identity};
-use legacy::{legacy_hardware_serial_digest, valid_sha256_hex};
 pub use model::*;
 use model::{CHUNK_MAGIC, FILE_MAGIC, FOOTER_MAGIC};
 pub use read::{read_artifact, read_raw_protocol, verify_file, VerifiedBackupReader};

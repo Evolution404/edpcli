@@ -41,8 +41,8 @@ fn identity(
         hardware: HardwareIdentityEvidence {
             vid: Some(0x0dd8),
             pid: Some(0x2005),
-            serial: None,
-            serial_sha256: serial.map(str::to_string),
+            serial: serial.map(str::to_string),
+            serial_sha256: None,
             serial_quality: if serial.is_some() {
                 SerialQuality::Usable
             } else {
@@ -220,9 +220,9 @@ fn v3_raw_serial_can_form_strong_group_without_persisted_serial_digest() {
     legacy_digest.hardware.serial_sha256 = Some(edpcli::edpb::sha256_hex(b"RAW-SERIAL-123"));
     let legacy = make_entry("legacy.edpb", legacy_digest);
     assert_eq!(
-        backup_group_key(&a),
         backup_group_key(&legacy),
-        "v3 raw serial and legacy serial digest must converge when geometry is identical"
+        None,
+        "a digest-only Plain snapshot must not form a strong backup group"
     );
 
     let mut different_capacity = second.clone();
@@ -315,10 +315,10 @@ fn ownership_uses_lba8_cached_during_catalog_scan() {
 }
 #[test]
 fn september_10_netac_backup_with_conflicting_edpf_tables_is_unknown_to_edp_detector() {
-    let mode0 = std::fs::read(concat!(
+    let mode0 = edpb::read_raw_protocol(std::path::Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/backup/disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid949028302_20260910_172420.bin"
-    ))
+        "/backup/disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid949028302_20260910_172420.edpb"
+    )))
     .expect("recorded backup image");
     assert_eq!(
         edpcli::provision::DiskProvisionKind::from_metadata(&mode0, "disk&ven_netac&prod_onlydisk"),

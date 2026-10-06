@@ -112,27 +112,27 @@ fn write_test_edpb(
     total_sectors: u64,
     state: &str,
 ) {
-    write_test_edpb_with_notes(
+    write_test_edpb_with_serial(
         path,
         data,
         device_id,
         vid,
         pid,
         total_sectors,
-        (state, Vec::new()),
+        (state, None),
     );
 }
 
-fn write_test_edpb_with_notes(
+fn write_test_edpb_with_serial(
     path: &std::path::Path,
     data: &[u8],
     device_id: &str,
     vid: &str,
     pid: &str,
     total_sectors: u64,
-    state_and_notes: (&str, Vec<String>),
+    state_and_serial: (&str, Option<&str>),
 ) {
-    let (state, notes) = state_and_notes;
+    let (state, serial) = state_and_serial;
     let onlyid = edpcli::infrastructure::backup_store::catalog::lba4_label_id_from(
         &data[4 * SECTOR..5 * SECTOR],
     );
@@ -150,19 +150,38 @@ fn write_test_edpb_with_notes(
         device_state: state.into(),
         lba0_12: data,
     };
-    if notes.is_empty() {
-        edpb::write_core_backup(path, &capture).unwrap();
+    if let Some(serial) = serial {
+        use edpcli::application::media_identity::{
+            DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation,
+            MediaIdentitySnapshot, ProtocolIdentityEvidence, SerialQuality,
+        };
+        let plain = state.eq_ignore_ascii_case("plain");
+        let identity = MediaIdentitySnapshot {
+            hardware: HardwareIdentityEvidence {
+                vid: u16::from_str_radix(vid, 16).ok(),
+                pid: u16::from_str_radix(pid, 16).ok(),
+                serial: Some(serial.into()),
+                serial_quality: SerialQuality::Usable,
+                total_sectors: Some(total_sectors),
+                logical_sector_size: Some(SECTOR as u32),
+                ..HardwareIdentityEvidence::default()
+            },
+            protocol: ProtocolIdentityEvidence {
+                device_id: (!plain).then(|| device_id.into()),
+                onlyid: (!plain).then(|| capture.onlyid.clone()).flatten(),
+                provision_kind: plain.then_some(edpcli::provision::DiskProvisionKind::Plain),
+                lba4_identity_digest: None,
+            },
+            derived: DerivedProtocolEvidence {
+                device_id_candidates: vec![device_id.into()],
+                legacy_derived_candidate: plain.then(|| device_id.into()),
+            },
+            observation: IdentityObservation::default(),
+        };
+        edpb::write_core_backup_with_identity(path, &capture, &identity).unwrap();
     } else {
-        // Free-text identity evidence is valid only as a historical manifest-v1 fixture.
-        crate::historical_edpb::v1_core_with_notes(path, &capture, &notes).unwrap();
+        edpb::write_core_backup(path, &capture).unwrap();
     }
-}
-
-fn hardware_serial_note(serial: &str) -> String {
-    format!(
-        "hardware_serial_sha256={}",
-        edpcli::edpb::sha256_hex(serial.trim().as_bytes())
-    )
 }
 
 struct SerialRunner {
@@ -227,14 +246,14 @@ fn plain_metadata(mut image: Vec<u8>) -> Vec<u8> {
 }
 
 fn write_netac_edpb(path: &std::path::Path, data: &[u8], state: &str) {
-    write_test_edpb_with_notes(
+    write_test_edpb_with_serial(
         path,
         data,
         "disk&ven_netac&prod_onlydisk",
         "0dd8",
         "2005",
         122_880_000,
-        (state, vec![hardware_serial_note("NETAC-HIL-SERIAL-001")]),
+        (state, Some("NETAC-HIL-SERIAL-001")),
     );
 }
 
@@ -442,14 +461,14 @@ fn restore_clone_with_same_edp_identity_but_different_usb_serial_is_rejected_bef
     };
     let tmp = TmpDir::new("restore_edp_clone_serial_conflict");
     let backup = tmp.0.join("same-protocol-clone.edpb");
-    write_test_edpb_with_notes(
+    write_test_edpb_with_serial(
         &backup,
         &original,
         "disk&ven_netac&prod_onlydisk",
         "0dd8",
         "2005",
         122_880_000,
-        ("edp", vec![hardware_serial_note("SOURCE-USB-SERIAL-001")]),
+        ("edp", Some("SOURCE-USB-SERIAL-001")),
     );
     let runner = netac_serial_runner(6, "CLONED-USB-SERIAL-002");
     let mut prompt = ScriptPrompter::yes();
@@ -482,14 +501,14 @@ fn restore_numeric_selector_cannot_bypass_serial_authorization() {
     };
     let tmp = TmpDir::new("restore_numeric_clone_conflict");
     let backup = tmp.0.join("clone.edpb");
-    write_test_edpb_with_notes(
+    write_test_edpb_with_serial(
         &backup,
         &original,
         "disk&ven_netac&prod_onlydisk",
         "0dd8",
         "2005",
         122_880_000,
-        ("edp", vec![hardware_serial_note("SOURCE-USB-SERIAL-001")]),
+        ("edp", Some("SOURCE-USB-SERIAL-001")),
     );
     let runner = netac_serial_runner(6, "CLONED-USB-SERIAL-002");
     let mut prompt = ScriptPrompter::yes();
@@ -504,6 +523,44 @@ fn restore_numeric_selector_cannot_bypass_serial_authorization() {
     assert_eq!(error.code, EXIT_BACKUP);
     assert!(error.msg.contains("UsableSerialMismatch"), "{}", error.msg);
     assert_eq!(dev.writes, 0);
+}
+
+#[test]
+fn retired_edpb_schema_is_rejected_before_any_device_write() {
+    let Some(original) = load_disk_image("netac") else {
+        return;
+    };
+    let tmp = TmpDir::new("restore_retired_edpb");
+    let runner = netac_serial_runner(6, "NETAC-RAW-SERIAL-001");
+    for schema in ["edpb.manifest.v1", "edpb.manifest.v2"] {
+        let backup = tmp.0.join(format!("{schema}.edpb"));
+        write_test_edpb_with_serial(
+            &backup,
+            &original,
+            "disk&ven_netac&prod_onlydisk",
+            "0dd8",
+            "2005",
+            122_880_000,
+            ("edp", Some("NETAC-RAW-SERIAL-001")),
+        );
+        super::edpb_manifest::mutate(&backup, |manifest| manifest["schema"] = schema.into());
+        let mut prompt = ScriptPrompter::yes();
+        let mut dev = SwapOnReopenDev::new(original.clone(), original.clone());
+        let error = restore_flow_typed(
+            Some(backup.to_string_lossy().into_owned()),
+            6,
+            &mut ctx(&runner, &mut prompt, &tmp.0),
+            &mut dev,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, EXIT_BACKUP, "{}", error.msg);
+        assert!(
+            error.msg.contains("unsupported EDPB manifest schema"),
+            "{}",
+            error.msg
+        );
+        assert_eq!(dev.writes, 0);
+    }
 }
 
 #[test]
@@ -544,14 +601,14 @@ fn restore_geometry_conflict_rejected_before_write() {
     };
     let tmp = TmpDir::new("restore_geometry_conflict");
     let backup = tmp.0.join("wrong-geometry.edpb");
-    write_test_edpb_with_notes(
+    write_test_edpb_with_serial(
         &backup,
         &original,
         "disk&ven_netac&prod_onlydisk",
         "0dd8",
         "2005",
         122_880_001,
-        ("edp", vec![hardware_serial_note("NETAC-HIL-SERIAL-001")]),
+        ("edp", Some("NETAC-HIL-SERIAL-001")),
     );
     let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
     let mut prompt = ScriptPrompter::yes();
@@ -604,14 +661,14 @@ fn restore_same_protocol_clone_swapped_after_reopen_has_zero_writes() {
     };
     let tmp = TmpDir::new("restore_same_protocol_reopen_clone");
     let backup = tmp.0.join("source.edpb");
-    write_test_edpb_with_notes(
+    write_test_edpb_with_serial(
         &backup,
         &original,
         "disk&ven_netac&prod_onlydisk",
         "0dd8",
         "2005",
         122_880_000,
-        ("edp", vec![hardware_serial_note("SOURCE-USB-SERIAL-001")]),
+        ("edp", Some("SOURCE-USB-SERIAL-001")),
     );
     let reopened = Arc::new(AtomicBool::new(false));
     let runner = ReopenSerialRunner {
@@ -634,74 +691,6 @@ fn restore_same_protocol_clone_swapped_after_reopen_has_zero_writes() {
     assert_eq!(error.code, EXIT_BACKUP, "{}", error.msg);
     assert!(error.msg.contains("UsableSerialMismatch"), "{}", error.msg);
     assert_eq!(dev.inner.writes, 0);
-}
-
-#[test]
-fn restore_v1_and_v2_canonical_identity_share_hard_conflict_authorization() {
-    let Some(original) = load_disk_image("netac") else {
-        return;
-    };
-    let tmp = TmpDir::new("restore_v1_v2_authorization");
-    let v1 = tmp.0.join("historical-v1.edpb");
-    let v2 = tmp.0.join("typed-v2.edpb");
-    write_test_edpb_with_notes(
-        &v1,
-        &original,
-        "disk&ven_netac&prod_onlydisk",
-        "0dd8",
-        "2005",
-        122_880_000,
-        ("edp", vec![hardware_serial_note("SOURCE-USB-SERIAL-001")]),
-    );
-    let source_runner = netac_serial_runner(6, "SOURCE-USB-SERIAL-001");
-    let identity =
-        edpcli::application::media_identity_observer::media_identity_from_protocol_image(
-            &source_runner,
-            6,
-            &original,
-        )
-        .unwrap();
-    let capture = CoreCapture {
-        snapshot_id: "typed-v2".into(),
-        created_epoch: 1_789_603_200,
-        disk_number: Some(6),
-        vid: "0dd8".into(),
-        pid: "2005".into(),
-        device_id: "disk&ven_netac&prod_onlydisk".into(),
-        onlyid: edpcli::infrastructure::backup_store::catalog::lba4_label_id_from(
-            &original[4 * SECTOR..5 * SECTOR],
-        ),
-        total_sectors: Some(122_880_000),
-        logical_sector_size: SECTOR as u32,
-        edpcli_version: env!("CARGO_PKG_VERSION").into(),
-        device_state: "edp".into(),
-        lba0_12: &original,
-    };
-    crate::historical_edpb::v2_core_with_identity(&v2, &capture, &identity).unwrap();
-    assert_eq!(
-        edpb::verify_file(&v1).unwrap().manifest.schema,
-        "edpb.manifest.v1"
-    );
-    assert_eq!(
-        edpb::verify_file(&v2).unwrap().manifest.schema,
-        "edpb.manifest.v2"
-    );
-
-    let target_runner = netac_serial_runner(6, "CLONED-USB-SERIAL-002");
-    for path in [v1, v2] {
-        let mut prompt = ScriptPrompter::yes();
-        let mut dev = SwapOnReopenDev::new(original.clone(), original.clone());
-        let error = restore_flow_typed(
-            Some(path.to_string_lossy().into_owned()),
-            6,
-            &mut ctx(&target_runner, &mut prompt, &tmp.0),
-            &mut dev,
-        )
-        .unwrap_err();
-        assert_eq!(error.code, EXIT_BACKUP, "{}", error.msg);
-        assert!(error.msg.contains("UsableSerialMismatch"), "{}", error.msg);
-        assert_eq!(dev.writes, 0);
-    }
 }
 
 #[test]
@@ -892,14 +881,14 @@ fn restore_allows_plain_lba4_zero_only_with_matching_hardware_binding() {
     let runner = netac_serial_runner(26, serial);
     let tmp = TmpDir::new("restore_plain_matching_hardware");
     let bakfile = tmp.0.join("serial-bound.edpb");
-    write_test_edpb_with_notes(
+    write_test_edpb_with_serial(
         &bakfile,
         &original,
         "disk&ven_netac&prod_onlydisk",
         "0dd8",
         "2005",
         122_880_000,
-        ("edp", vec![hardware_serial_note(serial)]),
+        ("edp", Some(serial)),
     );
 
     let current = plain_metadata(original.clone());
@@ -938,14 +927,14 @@ fn restore_plain_lba4_zero_rejects_wrong_hardware_serial() {
     };
     let tmp = TmpDir::new("restore_plain_wrong_hardware");
     let bakfile = tmp.0.join("serial-bound.edpb");
-    write_test_edpb_with_notes(
+    write_test_edpb_with_serial(
         &bakfile,
         &original,
         "disk&ven_netac&prod_onlydisk",
         "0dd8",
         "2005",
         122_880_000,
-        ("edp", vec![hardware_serial_note("NETAC-HIL-SERIAL-001")]),
+        ("edp", Some("NETAC-HIL-SERIAL-001")),
     );
 
     let current = plain_metadata(original);

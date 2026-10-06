@@ -109,6 +109,7 @@ fn canonical_identity_projection_distinguishes_confirmed_possible_and_conflict()
     let identity = |raw_serial: Option<&str>| {
         let mut snapshot = MediaIdentitySnapshot::default();
         let serial = serial_digest_evidence(raw_serial);
+        snapshot.hardware.serial = raw_serial.map(str::to_string);
         snapshot.hardware.serial_sha256 = serial.sha256;
         snapshot.hardware.serial_quality = serial.quality;
         snapshot.hardware.vid = Some(0x1234);

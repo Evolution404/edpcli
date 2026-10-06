@@ -20,7 +20,6 @@ pub(super) const FOOTER_MAGIC: &[u8; 8] = b"EDPBFTR\n";
 pub enum CaptureLevel {
     Core,
     Metadata,
-    LegacyMigrated,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,13 +132,12 @@ pub enum ManifestProvisionKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManifestHardwareIdentity {
     pub vid: Option<u16>,
     pub pid: Option<u16>,
     #[serde(default)]
     pub serial: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub serial_sha256: Option<String>,
     pub serial_quality: ManifestSerialQuality,
     pub vendor: Option<String>,
     pub product: Option<String>,

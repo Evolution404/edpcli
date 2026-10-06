@@ -29,7 +29,7 @@ pub struct HardwareIdentityEvidence {
     /// Generic snapshot serialization (including elevation argv/lineage) must never carry it.
     #[serde(skip_serializing, skip_deserializing, default)]
     pub serial: Option<String>,
-    /// Legacy/runtime digest used for v1/v2 compatibility and non-secret resume pins.
+    /// Runtime digest used by non-secret identity pins and elevation resume payloads.
     pub serial_sha256: Option<String>,
     pub serial_quality: SerialQuality,
     pub vendor: Option<String>,
@@ -89,7 +89,7 @@ pub struct ProtocolIdentityEvidence {
 pub struct DerivedProtocolEvidence {
     /// Hardware-derived EDP device_id candidates. These are not observed protocol identity.
     pub device_id_candidates: Vec<String>,
-    /// v1 Plain backups historically stored a derived candidate in the legacy device_id slot.
+    /// Plain manifests classify their device_id projection as a derived candidate.
     pub legacy_derived_candidate: Option<String>,
 }
 
@@ -125,9 +125,6 @@ impl MediaIdentitySnapshot {
                     "serial:{}:{geometry}",
                     crate::sha256::sha256_hex(serial.as_bytes())
                 ));
-            }
-            if let Some(serial) = self.hardware.serial_sha256.as_deref() {
-                return Some(format!("serial:{serial}:{geometry}"));
             }
         }
         match (
@@ -430,8 +427,6 @@ pub enum RestoreAuthorizationDecision {
 enum UsableSerialComparison {
     RawMatch,
     RawMismatch,
-    LegacyDigestMatch,
-    LegacyDigestMismatch,
     Missing,
 }
 
@@ -447,13 +442,6 @@ fn compare_usable_serials(
             UsableSerialComparison::RawMatch
         } else {
             UsableSerialComparison::RawMismatch
-        };
-    }
-    if let (Some(left), Some(right)) = (a.serial_sha256.as_deref(), b.serial_sha256.as_deref()) {
-        return if left == right {
-            UsableSerialComparison::LegacyDigestMatch
-        } else {
-            UsableSerialComparison::LegacyDigestMismatch
         };
     }
     UsableSerialComparison::Missing
@@ -529,10 +517,8 @@ impl RestoreAuthorizationPolicy {
         {
             return Reject(RestoreRejection::WeakHardwareBinding);
         }
-        if !matches!(
-            serial_comparison,
-            UsableSerialComparison::RawMatch | UsableSerialComparison::LegacyDigestMatch
-        ) || identity_match.relationship != MediaRelationship::SamePhysicalMedia
+        if !matches!(serial_comparison, UsableSerialComparison::RawMatch)
+            || identity_match.relationship != MediaRelationship::SamePhysicalMedia
         {
             return Reject(RestoreRejection::InsufficientPhysicalEvidence);
         }
@@ -652,20 +638,11 @@ pub fn match_media_identity(
     let mut conflicts = Vec::new();
 
     let serial_comparison = compare_usable_serials(&a.hardware, &b.hardware);
-    let serial_match = matches!(
-        serial_comparison,
-        UsableSerialComparison::RawMatch | UsableSerialComparison::LegacyDigestMatch
-    );
-    let serial_mismatch = matches!(
-        serial_comparison,
-        UsableSerialComparison::RawMismatch | UsableSerialComparison::LegacyDigestMismatch
-    );
+    let serial_match = matches!(serial_comparison, UsableSerialComparison::RawMatch);
+    let serial_mismatch = matches!(serial_comparison, UsableSerialComparison::RawMismatch);
 
     if serial_mismatch {
-        let explanation = match serial_comparison {
-            UsableSerialComparison::RawMismatch => "usable raw USB serials differ",
-            _ => "usable legacy USB serial digests differ",
-        };
+        let explanation = "usable raw USB serials differ";
         push_evidence(
             &mut evidence,
             IdentityEvidenceKind::UsbSerialDigest,
@@ -679,10 +656,7 @@ pub fn match_media_identity(
             explanation: explanation.into(),
         });
     } else if serial_match {
-        let explanation = match serial_comparison {
-            UsableSerialComparison::RawMatch => "usable raw USB serials match",
-            _ => "usable legacy USB serial digests match",
-        };
+        let explanation = "usable raw USB serials match";
         push_evidence(
             &mut evidence,
             IdentityEvidenceKind::UsbSerialDigest,

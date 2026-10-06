@@ -32,6 +32,7 @@ fn pin(row: &Row) -> MediaIdentityPin {
         hardware: HardwareIdentityEvidence {
             vid: u16::from_str_radix(&row.vid, 16).ok(),
             pid: u16::from_str_radix(&row.pid, 16).ok(),
+            serial: row.serial.clone(),
             serial_sha256: serial.sha256,
             serial_quality: serial.quality,
             vendor: Some("DEMO".into()),
@@ -410,6 +411,7 @@ pub(super) fn backup(
         .snapshot
         .clone();
     if !physical_confirmed {
+        identity.hardware.serial = None;
         identity.hardware.serial_sha256 = None;
         identity.hardware.serial_quality = SerialQuality::Missing;
     }

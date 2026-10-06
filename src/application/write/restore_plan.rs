@@ -177,19 +177,18 @@ pub(super) fn build_metadata_restore_plan(
                 })?;
         }
     }
-    let plain_v3 = verified.manifest.schema == "edpb.manifest.v3"
-        && verified
-            .manifest
-            .snapshot
-            .device_state
-            .eq_ignore_ascii_case("plain");
+    let plain = verified
+        .manifest
+        .snapshot
+        .device_state
+        .eq_ignore_ascii_case("plain");
     let target_has_valid_edp = target_protocol.len() == METADATA_IMAGE_LEN
         && target_device_id
             .and_then(|device_id| {
                 crate::provision::DiskProvisionKind::from_metadata(target_protocol, device_id)
             })
             .is_some();
-    if plain_v3 && target_has_valid_edp {
+    if plain && target_has_valid_edp {
         for lba in 1..=METADATA_LAST_LBA {
             if lba == 3 || transaction.writes().contains_key(&lba) {
                 continue;

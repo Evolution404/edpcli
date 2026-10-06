@@ -431,7 +431,7 @@ pub fn scan_backup_names(dir: &Path) -> Vec<PathBuf> {
 /// Prefer usable USB serial evidence, but never trust a serial in isolation: some controllers
 /// clone the same USB serial across physically different capacities. Strong grouping therefore also
 /// requires matching VID:PID + exact total_sectors + logical_sector_size. v3 carries the reviewed
-/// raw serial; v1/v2 retain the historical digest. Without either, require an observed EDP
+/// raw serial. Without a usable raw serial, require an observed EDP
 /// device_id + onlyid pair plus the same hardware geometry. Model/capacity-only evidence and
 /// filename-derived metadata never form an automatic deletion group.
 pub fn backup_group_key(entry: &BackupEntry) -> Option<String> {

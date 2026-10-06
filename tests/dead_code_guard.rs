@@ -25,9 +25,7 @@ fn removed_dead_and_legacy_write_helpers_do_not_return() {
     let reprovision = source("src/provision/reprovision.rs");
     assert!(!reprovision.contains("fn force_change_password_from_sectors("));
 
-    for path in ["src/edpb/write.rs", "src/edpb/legacy.rs"] {
-        assert!(!source(path).contains("fn write_legacy_migrated_backup("));
-    }
+    assert!(!source("src/edpb/write.rs").contains("fn write_legacy_migrated_backup("));
     assert!(
         !Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("examples/migrate_legacy_backups.rs")
@@ -37,12 +35,13 @@ fn removed_dead_and_legacy_write_helpers_do_not_return() {
 }
 
 #[test]
-fn migrated_edpb_read_semantics_remain_supported() {
-    let edpb = source("src/edpb/model.rs");
-    assert!(
-        edpb.contains("LegacyMigrated"),
-        "already-migrated EDPB manifests must remain deserializable"
-    );
+fn removed_edpb_history_adapters_do_not_return() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    assert!(!root.join("src/edpb/legacy.rs").exists());
+    assert!(!root.join("tests/support/historical_edpb.rs").exists());
+    assert!(!source("src/edpb/model.rs").contains("LegacyMigrated"));
+    assert!(!source("src/edpb/identity/canonical.rs").contains("legacy_hardware_serial_digest"));
+    assert!(!source("src/media_identity.rs").contains("LegacyDigestMatch"));
 }
 
 #[test]
@@ -63,12 +62,10 @@ fn development_compatibility_shims_and_fixture_writers_do_not_return() {
             "obsolete module returned: {removed}"
         );
     }
-    for path in ["src/edpb/write.rs", "src/edpb/legacy.rs"] {
-        assert!(
-            !source(path).contains("fn write_legacy_"),
-            "historical fixture writer returned to production: {path}"
-        );
-    }
+    assert!(
+        !source("src/edpb/write.rs").contains("fn write_legacy_"),
+        "historical fixture writer returned to production"
+    );
     assert!(!source("src/infrastructure/backup_store/catalog.rs").contains("fn parse_backup_name("));
     assert!(!source("src/infrastructure/backup_store/create.rs").contains("fn create_backup("));
     assert!(!source("src/diskio/device.rs").contains("fn read_lba("));

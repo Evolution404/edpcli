@@ -1,4 +1,3 @@
-use crate::historical_edpb::{v1_core_with_notes, v2_core_with_identity};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -51,13 +50,13 @@ fn capture<'a>(data: &'a [u8]) -> CoreCapture<'a> {
     }
 }
 
-fn typed_identity(quality: SerialQuality, digest: Option<&str>) -> MediaIdentitySnapshot {
+fn typed_identity(quality: SerialQuality, serial: Option<&str>) -> MediaIdentitySnapshot {
     MediaIdentitySnapshot {
         hardware: HardwareIdentityEvidence {
             vid: Some(0x0dd8),
             pid: Some(0x2005),
-            serial: None,
-            serial_sha256: digest.map(str::to_string),
+            serial: serial.map(str::to_string),
+            serial_sha256: None,
             serial_quality: quality,
             vendor: Some("Netac".into()),
             product: Some("OnlyDisk".into()),
@@ -150,8 +149,7 @@ fn chapter_18_b1_v3_persists_raw_serial_and_never_persists_new_serial_digest() {
     let tmp = TempDir::new("edpb_manifest_v3_raw_serial");
     let path = tmp.0.join("sample.edpb");
     let data = vec![0xA6; 13 * 512];
-    let mut identity = typed_identity(SerialQuality::Usable, Some(&"ab".repeat(32)));
-    identity.hardware.serial = Some("NETAC-RAW-SERIAL-001".into());
+    let identity = typed_identity(SerialQuality::Usable, Some("NETAC-RAW-SERIAL-001"));
 
     write_core_backup_with_identity(&path, &capture(&data), &identity).unwrap();
     let verified = verify_file(&path).unwrap();
@@ -172,6 +170,79 @@ fn chapter_18_b1_v3_persists_raw_serial_and_never_persists_new_serial_digest() {
         Some("NETAC-RAW-SERIAL-001")
     );
     assert_eq!(canonical.hardware.serial_sha256, None);
+}
+
+#[test]
+fn current_manifest_preserves_each_serial_quality_without_digest_fallback() {
+    let tmp = TempDir::new("edpb_v3_serial_quality");
+    let data = vec![0xA6; 13 * 512];
+    for (quality, serial) in [
+        (SerialQuality::Usable, Some("NETAC-RAW-SERIAL-001")),
+        (SerialQuality::Suspicious, Some("000000")),
+        (SerialQuality::Missing, None),
+    ] {
+        let path = tmp.0.join(format!("{quality:?}.edpb"));
+        let identity = typed_identity(quality, serial);
+        write_core_backup_with_identity(&path, &capture(&data), &identity).unwrap();
+        let canonical = canonical_media_identity(&verify_file(&path).unwrap().manifest).unwrap();
+        assert_eq!(canonical.hardware.serial_quality, quality);
+        assert_eq!(canonical.hardware.serial.as_deref(), serial);
+        assert_eq!(canonical.hardware.serial_sha256, None);
+    }
+}
+
+#[test]
+fn authenticated_containers_reject_retired_manifest_schemas_and_capture_level() {
+    let tmp = TempDir::new("edpb_retired_schema");
+    let path = tmp.0.join("sample.edpb");
+    let data = vec![0xA6; 13 * 512];
+    for schema in ["edpb.manifest.v1", "edpb.manifest.v2"] {
+        let path = tmp.0.join(format!("{schema}.edpb"));
+        write_core_backup(&path, &capture(&data)).unwrap();
+        super::edpb_manifest::mutate(&path, |manifest| manifest["schema"] = schema.into());
+        let error = verify_file(&path).unwrap_err();
+        assert!(
+            error.contains("unsupported EDPB manifest schema"),
+            "{error}"
+        );
+        assert!(read_raw_protocol(&path).is_err());
+    }
+    write_core_backup(&path, &capture(&data)).unwrap();
+    super::edpb_manifest::mutate(&path, |manifest| {
+        manifest["snapshot"]["capture_level"] = "legacy_migrated".into();
+    });
+    let error = verify_file(&path).unwrap_err();
+    assert!(
+        error.contains("unknown variant `legacy_migrated`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn current_manifest_rejects_old_serial_digest_field_and_authority_note() {
+    let tmp = TempDir::new("edpb_retired_serial_digest");
+    let path = tmp.0.join("sample.edpb");
+    let data = vec![0xA6; 13 * 512];
+    write_core_backup(&path, &capture(&data)).unwrap();
+    super::edpb_manifest::mutate(&path, |manifest| {
+        manifest["identity"]["hardware"]["serial_sha256"] = "ab".repeat(32).into();
+    });
+    let error = verify_file(&path).unwrap_err();
+    assert!(error.contains("unknown field `serial_sha256`"), "{error}");
+
+    let path = tmp.0.join("digest-note.edpb");
+    write_core_backup(&path, &capture(&data)).unwrap();
+    super::edpb_manifest::mutate(&path, |manifest| {
+        manifest["provenance"]["notes"]
+            .as_array_mut()
+            .unwrap()
+            .push(format!("hardware_serial_sha256={}", "ab".repeat(32)).into());
+    });
+    let error = verify_file(&path).unwrap_err();
+    assert!(
+        error.contains("must not carry serial digest notes"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -200,132 +271,6 @@ fn new_plain_manifest_never_promotes_legacy_candidate_to_observed_device_id() {
         json["identity"]["derived"]["legacy_derived_candidate"],
         "disk&ven_netac&prod_onlydisk"
     );
-}
-
-#[test]
-fn v1_encrypted_and_mode1_backups_remain_readable() {
-    let tmp = TempDir::new("edpb_v1_edp");
-    let data = vec![0x39; 13 * 512];
-
-    for state in ["encrypted", "mode1"] {
-        let path = tmp.0.join(format!("{state}.edpb"));
-        let mut legacy = capture(&data);
-        legacy.device_state = state.into();
-        v1_core_with_notes(&path, &legacy, &[]).unwrap();
-
-        let before = fs::read(&path).unwrap();
-        let verified = verify_file(&path).unwrap();
-        assert_eq!(verified.manifest.schema, "edpb.manifest.v1");
-        let identity = canonical_media_identity(&verified.manifest).unwrap();
-        assert_eq!(
-            identity.protocol.device_id.as_deref(),
-            Some("disk&ven_netac&prod_onlydisk")
-        );
-        assert_eq!(identity.protocol.onlyid.as_deref(), Some("1402259934"));
-        assert_eq!(
-            fs::read(&path).unwrap(),
-            before,
-            "reading a historical EDPB must never rewrite it"
-        );
-    }
-}
-
-#[test]
-fn v1_plain_device_id_is_legacy_derived_candidate_not_observed_protocol_id() {
-    let tmp = TempDir::new("edpb_v1_plain");
-    let path = tmp.0.join("plain.edpb");
-    let data = vec![0u8; 13 * 512];
-    let mut legacy = capture(&data);
-    legacy.device_state = "plain".into();
-    legacy.onlyid = None;
-    v1_core_with_notes(&path, &legacy, &[]).unwrap();
-
-    let verified = verify_file(&path).unwrap();
-    let identity = canonical_media_identity(&verified.manifest).unwrap();
-    assert_eq!(identity.protocol.device_id, None);
-    assert_eq!(identity.protocol.onlyid, None);
-    assert_eq!(
-        identity.protocol.provision_kind,
-        Some(DiskProvisionKind::Plain)
-    );
-    assert_eq!(
-        identity.derived.legacy_derived_candidate.as_deref(),
-        Some("disk&ven_netac&prod_onlydisk")
-    );
-}
-
-#[test]
-fn v1_hardware_serial_note_is_legacy_fallback_only() {
-    let tmp = TempDir::new("edpb_v1_serial");
-    let path = tmp.0.join("legacy.edpb");
-    let data = vec![0x42; 13 * 512];
-    let digest = "ab".repeat(32);
-    let note = format!("hardware_serial_sha256={digest}");
-    v1_core_with_notes(&path, &capture(&data), &[note]).unwrap();
-
-    let verified = verify_file(&path).unwrap();
-    let identity = canonical_media_identity(&verified.manifest).unwrap();
-    assert_eq!(identity.hardware.serial_quality, SerialQuality::Usable);
-    assert_eq!(
-        identity.hardware.serial_sha256.as_deref(),
-        Some(digest.as_str())
-    );
-}
-
-#[test]
-fn v2_round_trips_missing_suspicious_and_usable_serial_evidence() {
-    let tmp = TempDir::new("edpb_v2_serial_quality");
-    let data = vec![0x51; 13 * 512];
-    let cases = [
-        (SerialQuality::Missing, None),
-        (SerialQuality::Suspicious, Some("cd".repeat(32))),
-        (SerialQuality::Usable, Some("ef".repeat(32))),
-    ];
-
-    for (index, (quality, digest)) in cases.into_iter().enumerate() {
-        let path = tmp.0.join(format!("{index}.edpb"));
-        let identity = typed_identity(quality, digest.as_deref());
-        v2_core_with_identity(&path, &capture(&data), &identity).unwrap();
-        let verified = verify_file(&path).unwrap();
-        assert_eq!(verified.manifest.schema, "edpb.manifest.v2");
-        let decoded = canonical_media_identity(&verified.manifest).unwrap();
-        assert_eq!(decoded.hardware.serial_quality, quality);
-        assert_eq!(decoded.hardware.serial, None);
-        assert_eq!(decoded.hardware.serial_sha256, digest);
-        assert!(
-            verified
-                .manifest
-                .provenance
-                .notes
-                .iter()
-                .all(|note| !note.starts_with("hardware_serial_sha256=")),
-            "v2 writer must not persist serial identity in free-text notes"
-        );
-    }
-}
-
-#[test]
-fn typed_and_legacy_serial_conflict_is_invalid_fail_closed() {
-    let tmp = TempDir::new("edpb_typed_legacy_conflict");
-    let path = tmp.0.join("sample.edpb");
-    let data = vec![0x61; 13 * 512];
-    let identity = typed_identity(SerialQuality::Usable, Some(&"11".repeat(32)));
-    v2_core_with_identity(&path, &capture(&data), &identity).unwrap();
-
-    let mut verified = verify_file(&path).unwrap();
-    verified
-        .manifest
-        .provenance
-        .notes
-        .push(format!("hardware_serial_sha256={}", "22".repeat(32)));
-    let error = canonical_media_identity(&verified.manifest).unwrap_err();
-    assert!(error.contains("conflicts"), "{error}");
-}
-
-#[test]
-fn legacy_migrated_capture_level_remains_deserializable() {
-    let level: CaptureLevel = serde_json::from_str("\"legacy_migrated\"").unwrap();
-    assert_eq!(level, CaptureLevel::LegacyMigrated);
 }
 
 #[test]
