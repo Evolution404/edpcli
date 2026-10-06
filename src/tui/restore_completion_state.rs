@@ -2,6 +2,21 @@
 use super::*;
 
 impl AppState {
+    fn quarantine_post_restore(wizard: &mut WizardState) {
+        if let Some(outcome) = wizard.restore_outcome.as_mut() {
+            outcome.format_target_pin = None;
+            for partition in &mut outcome.assessment.partitions {
+                partition.state =
+                    crate::application::post_restore::PostRestorePartitionState::Unsupported;
+                partition.detail = "介质状态未安全确认；已停止后续写入，请重新检查设备。".into();
+            }
+            outcome
+                .assessment
+                .issues
+                .push("写入或回滚后介质状态未确认，原格式化授权已失效。".into());
+        }
+    }
+
     pub fn finish_restore(
         &mut self,
         result: Result<crate::application::post_restore::MetadataRestoreOutcome, String>,
@@ -90,6 +105,15 @@ impl AppState {
         let Some(wizard) = self.restore.wizard.as_mut() else {
             return;
         };
+        if result
+            .result
+            .as_ref()
+            .err()
+            .and_then(|error| error.media_state())
+            .is_some_and(|state| state.requires_reinspection())
+        {
+            Self::quarantine_post_restore(wizard);
+        }
         Self::record_post_restore_format_result(
             wizard,
             result.result.as_ref().err().map(ToString::to_string),
@@ -139,6 +163,10 @@ impl AppState {
         let Some(wizard) = self.restore.wizard.as_mut() else {
             return;
         };
+        if matches!(result.result.as_ref(), Err(EncryptedPostRestoreError::Operation(error)) if error.media_state().is_some_and(|state| state.requires_reinspection()))
+        {
+            Self::quarantine_post_restore(wizard);
+        }
         Self::record_post_restore_format_result(
             wizard,
             result.result.as_ref().err().map(|error| match error {
@@ -252,6 +280,15 @@ impl AppState {
         let Some(wizard) = self.restore.wizard.as_mut() else {
             return;
         };
+        if result
+            .result
+            .as_ref()
+            .err()
+            .and_then(|error| error.media_state)
+            .is_some_and(|state| state.requires_reinspection())
+        {
+            Self::quarantine_post_restore(wizard);
+        }
         wizard.pending_format = None;
         Self::clear_post_restore_volume_label(wizard);
         wizard.secret_input = crate::provision::SecretBytes::default();

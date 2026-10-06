@@ -326,7 +326,7 @@ fn plain_identity_recheck_accepts_whole_disk_ntfs_with_nonzero_lba4_code() {
         fn check_output(&self, cmd: &[&str], _timeout: Duration) -> io::Result<String> {
             if cmd == ["diskutil", "info", "-plist", "disk4"] {
                 return Ok(
-                    "<plist version=\"1.0\"><dict><key>IOKitSize</key><integer>15502147584</integer><key>Size</key><integer>15502147584</integer><key>TotalSize</key><integer>15502143488</integer></dict></plist>"
+                    "<plist version=\"1.0\"><dict><key>IOKitSize</key><integer>15502147584</integer><key>Size</key><integer>15502147584</integer><key>DeviceBlockSize</key><integer>512</integer><key>TotalSize</key><integer>15502143488</integer></dict></plist>"
                         .into(),
                 );
             }

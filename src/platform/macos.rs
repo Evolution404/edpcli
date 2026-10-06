@@ -6,7 +6,7 @@ use std::path::Path;
 use super::{ExtDisk, HardwareProbe, InquiryInfo, NativeTransport, PlatformKind};
 use crate::common::SECTOR;
 use crate::plist;
-use crate::sysinfo::CmdRunner;
+use crate::ports::CmdRunner;
 
 const DISKUTIL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const IOREG_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
@@ -323,6 +323,24 @@ pub(super) fn disk_total_sectors(runner: &dyn CmdRunner, disk: u32) -> Option<u6
     Some(bytes / SECTOR as u64)
 }
 
+pub(super) fn device_geometry(
+    runner: &dyn CmdRunner,
+    disk: u32,
+) -> Option<super::ObservedDeviceGeometry> {
+    let info = disk_info(runner, disk)?;
+    let block = |key| {
+        info.get(key)
+            .and_then(|value| value.as_int())
+            .and_then(|value| u32::try_from(value).ok())
+            .filter(|value| *value > 0)
+    };
+    Some(super::ObservedDeviceGeometry {
+        capacity_bytes: physical_disk_size_bytes(&info)?,
+        logical_sector_bytes: block("DeviceBlockSize"),
+        physical_sector_bytes: block("PhysicalBlockSize"),
+    })
+}
+
 pub(super) fn usb_vid_pid(runner: &dyn CmdRunner, disk: u32) -> (String, String) {
     // 原生探测必须通过 CmdRunner 注入边界进入，不能在 fallback 层重新直接访问 IOKit。
     // 这样 FakeRunner/ReadProbeCache 才能完全隔离真实机器上恰好插入的 USB 设备。
@@ -425,7 +443,7 @@ pub(super) fn ci_prepare_virtual_write(path: &str) -> io::Result<WriteGuard> {
         ));
     }
 
-    let runner = crate::sysinfo::SysRunner;
+    let runner = super::NativeCommandRunner;
     let info = disk_info(&runner, disk).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::PermissionDenied,

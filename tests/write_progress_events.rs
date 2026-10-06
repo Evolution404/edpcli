@@ -237,3 +237,80 @@ fn backup_create_and_restore_event_sequence() {
         restore_prompt.events
     );
 }
+
+#[test]
+#[cfg(target_os = "macos")]
+fn structured_restore_checks_authorization_and_digest_and_isolates_observer_failure() {
+    use crate::common::*;
+    use edpcli::application::media_identity::{MediaIdentityPin, MediaIdentityResumePin};
+    use edpcli::application::media_identity_observer::observe_media_identity_readonly;
+    use edpcli::application::write::{
+        backup_create_flow, restore_metadata_on_device, Ctx, RestoreMetadataRequest,
+    };
+    use edpcli::diskio::FileDev;
+    let (image, _) = mode1_fixture_image("netac").expect("tracked fixture");
+    let runner = SerialRunner {
+        inner: netac_runner(6),
+    };
+    let tmp = TmpDir::new("structured_restore");
+    let image_path = tmp.0.join("disk.img");
+    std::fs::write(&image_path, &image).unwrap();
+    let mut dev = FileDev::open_rdwr(
+        image_path.to_str().unwrap(),
+        std::time::Duration::from_secs(1),
+    )
+    .unwrap();
+    let mut prompt = EventRecorderPrompter::default();
+    let backup = backup_create_flow(
+        6,
+        &mut Ctx {
+            runner: &runner,
+            clock: &FixedClock,
+            prompt: &mut prompt,
+            backup_dir: tmp.0.clone(),
+        },
+        &mut dev,
+    )
+    .unwrap();
+    let observed = observe_media_identity_readonly(&runner, 6, &mut dev).unwrap();
+    let mut request = RestoreMetadataRequest {
+        disk: 6,
+        backup_path: backup.path.clone(),
+        confirmed: false,
+        expected_target: MediaIdentityResumePin::from_pin(&MediaIdentityPin::new(
+            observed.snapshot,
+            &observed.protocol_image,
+        )),
+        expected_backup_sha256: edpcli::edpb::VerifiedBackupReader::open(&backup.path)
+            .unwrap()
+            .verified()
+            .file_sha256
+            .clone(),
+    };
+    let before = std::fs::read(&image_path).unwrap();
+    assert_eq!(
+        restore_metadata_on_device(&runner, &request, &mut dev, &mut |_| panic!(
+            "no event before confirmation"
+        ))
+        .unwrap_err()
+        .code,
+        130
+    );
+    assert_eq!(std::fs::read(&image_path).unwrap(), before);
+    request.confirmed = true;
+    let expected_digest = request.expected_backup_sha256.clone();
+    request.expected_backup_sha256 = "changed-after-confirmation".into();
+    assert_eq!(
+        restore_metadata_on_device(&runner, &request, &mut dev, &mut |_| {})
+            .unwrap_err()
+            .code,
+        5
+    );
+    assert_eq!(std::fs::read(&image_path).unwrap(), before);
+    request.expected_backup_sha256 = expected_digest;
+    let outcome = restore_metadata_on_device(&runner, &request, &mut dev, &mut |_| {
+        panic!("observer failed")
+    })
+    .unwrap();
+    assert!(outcome.report.metadata_restored && outcome.report.readback_verified);
+}

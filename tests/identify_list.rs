@@ -73,7 +73,7 @@ fn scan_and_print_all_row_kinds() {
     );
     m.insert(
         "diskutil info -plist disk7".to_string(),
-        "<plist version=\"1.0\"><dict><key>WholeDisk</key><true/><key>Internal</key><false/><key>BusProtocol</key><string>Thunderbolt</string><key>TotalSize</key><integer>500107862016</integer></dict></plist>".to_string(),
+        "<plist version=\"1.0\"><dict><key>WholeDisk</key><true/><key>Internal</key><false/><key>BusProtocol</key><string>Thunderbolt</string><key>DeviceBlockSize</key><integer>512</integer><key>TotalSize</key><integer>500107862016</integer></dict></plist>".to_string(),
     );
     // disk6 = netac cems 盘; disk4 = 假 vendor → 非cems
     m.insert(

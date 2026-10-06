@@ -134,6 +134,7 @@ fn restore_preview() -> BackupRestorePreview {
 fn state() -> AppState {
     let mut state = AppState::new();
     state.replace_backups(vec![BackupWorkspaceItem {
+        display_cached: false,
         index: 1,
         path: "fixture.edpb".into(),
         file_name: "fixture.edpb".into(),

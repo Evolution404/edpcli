@@ -133,23 +133,74 @@ impl AppState {
 
     pub fn provision_finish_write(
         &mut self,
-        result: Result<crate::application::provision::ProvisionWriteOutcome, String>,
+        result: Result<
+            crate::application::provision::ProvisionWriteOutcome,
+            crate::application::error::OperationError,
+        >,
     ) {
         self.shell.critical_operation = false;
-        match result {
-            Ok(outcome) => {
-                self.provision.result_status = Some(outcome.execution_status());
-                self.provision.message = None;
-                self.provision.result_outcome = Some(outcome);
-            }
-            Err(message) => {
-                self.provision.result_status =
-                    Some(crate::application::provision::ProvisionExecutionStatus::FatalFailure);
-                self.provision.result_outcome = None;
-                self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
-            }
-        }
+        self.provision.apply_write_result(result);
         self.provision_initialize_result_workbench();
         self.provision_transition_finish_running();
+    }
+}
+
+impl ProvisionState {
+    pub(crate) fn apply_write_result(
+        &mut self,
+        result: Result<
+            crate::application::provision::ProvisionWriteOutcome,
+            crate::application::error::OperationError,
+        >,
+    ) {
+        match result {
+            Ok(outcome) => {
+                self.result_status = Some(outcome.execution_status());
+                self.message = None;
+                self.result_outcome = Some(outcome);
+            }
+            Err(error) => {
+                use crate::application::error::MediaState;
+                use crate::application::provision::ProvisionExecutionStatus as Status;
+                self.result_status = Some(match error.media_state {
+                    Some(MediaState::Intermediate) => Status::MediaIntermediate,
+                    Some(MediaState::Unknown) => Status::MediaStateUnknown,
+                    _ => Status::FatalFailure,
+                });
+                self.result_outcome = None;
+                self.message = Some(crate::tui::ui::UiMessage::error(error.to_string()));
+            }
+        }
+        self.stage = ProvisionStage::Result;
+    }
+}
+
+#[cfg(test)]
+mod feature_tests {
+    use super::*;
+    #[test]
+    fn unsafe_write_completion_is_testable_without_app_state() {
+        use crate::application::{
+            error::{MediaState, OperationError},
+            provision::ProvisionExecutionStatus,
+        };
+        for (state, status) in [
+            (
+                MediaState::Unknown,
+                ProvisionExecutionStatus::MediaStateUnknown,
+            ),
+            (
+                MediaState::Intermediate,
+                ProvisionExecutionStatus::MediaIntermediate,
+            ),
+        ] {
+            let mut feature = ProvisionState::default();
+            feature
+                .apply_write_result(Err(OperationError::from("failure").with_media_state(state)));
+            assert_eq!(feature.stage, ProvisionStage::Result);
+            assert_eq!(feature.result_status, Some(status));
+            assert!(feature.result_outcome.is_none());
+            assert!(feature.message.is_some());
+        }
     }
 }

@@ -397,6 +397,71 @@ fn start_format_with_restore(outcome: MetadataRestoreOutcome, encrypted: bool) -
     state
 }
 
+#[test]
+fn unsafe_post_restore_results_invalidate_authorization_for_every_write_action() {
+    use edpcli::application::error::{MediaState, OperationError};
+    use edpcli::application::media_identity::{
+        MediaIdentityPin, MediaIdentityResumePin, MediaIdentitySnapshot,
+    };
+    use edpcli::application::post_restore::PostRestoreFormatError;
+
+    for media_state in [
+        MediaState::Intermediate,
+        MediaState::Unknown,
+        MediaState::RolledBack,
+    ] {
+        for action in 0..3 {
+            let mut outcome = plain_needs_format_outcome();
+            outcome.format_target_pin = Some(MediaIdentityResumePin::from_pin(
+                &MediaIdentityPin::new(MediaIdentitySnapshot::default(), &[0; 13 * 512]),
+            ));
+            let mut state = AppState::new();
+            begin_post_restore(&mut state, outcome);
+            let error =
+                OperationError::from("injected write outcome").with_media_state(media_state);
+            match action {
+                0 => state.finish_post_restore_format(PostRestoreFormatResult {
+                    partition_index: 1,
+                    filesystem: FilesystemKind::ExFat,
+                    result: Err(PostRestoreFormatError::Operation(error)),
+                }),
+                1 => state.finish_post_restore_encrypted_format(EncryptedPostRestoreFormatResult {
+                    partition_index: 1,
+                    filesystem: FilesystemKind::ExFat,
+                    result: Err(EncryptedPostRestoreError::Operation(
+                        PostRestoreFormatError::Operation(error),
+                    )),
+                }),
+                _ => state.finish_post_restore_reinitialize(EncryptedPartitionReinitializeResult {
+                    partition_index: 1,
+                    filesystem: FilesystemKind::ExFat,
+                    result: Err(error),
+                }),
+            }
+            let outcome = state.wizard().unwrap().restore_outcome.as_ref().unwrap();
+            assert!(outcome.report.metadata_restored && outcome.report.readback_verified);
+            if media_state.requires_reinspection() {
+                assert!(outcome.format_target_pin.is_none());
+                assert!(outcome
+                    .assessment
+                    .partitions
+                    .iter()
+                    .all(|partition| partition.state == PostRestorePartitionState::Unsupported));
+                state.begin_selected_post_restore_action();
+                assert_eq!(state.wizard().unwrap().stage, WizardStage::PostRestore);
+                assert!(state.wizard().unwrap().pending_format.is_none());
+                assert!(!state.is_critical_operation());
+            } else {
+                assert!(outcome.format_target_pin.is_some());
+                assert_eq!(
+                    outcome.assessment.partitions[0].state,
+                    PostRestorePartitionState::NeedsFormat
+                );
+            }
+        }
+    }
+}
+
 fn format_work_event() -> edpcli::application::progress::ProgressEvent {
     use edpcli::application::progress::{
         FormatStep, LogPolicy, OperationKind, Phase, ProgressEvent, Step, TransactionActivity,

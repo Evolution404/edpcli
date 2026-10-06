@@ -1,0 +1,8 @@
+{
+  "fast_max_seconds": 60,
+  "ci_max_seconds": 180,
+  "binary_timeout_seconds": 180,
+  "compile_timeout_seconds": 600,
+  "doctest_timeout_seconds": 180,
+  "gate_deadline_seconds": 900
+}

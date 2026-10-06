@@ -9,23 +9,19 @@ use std::time::Duration;
 pub use crate::platform::ExtDisk;
 use crate::platform::HardwareProbe;
 
-/// 子进程执行抽象: 成功返回 stdout 文本(非零退出/超时/启动失败均为 Err)。
-/// 等价 Python subprocess.check_output(text=True, errors='ignore', timeout=…)。
-pub trait CmdRunner {
-    fn check_output(&self, cmd: &[&str], timeout: Duration) -> io::Result<String>;
-
-    /// 可选的原生硬件探测。测试 runner 默认没有 native backend；
-    /// production `SysRunner` 由当前平台实现提供。
-    fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {
-        None
-    }
-
-    fn hardware_serial(&self, _disk: u32) -> Option<String> {
-        None
-    }
-}
+pub use crate::ports::CmdRunner;
 
 pub struct SysRunner;
+
+impl SysRunner {
+    pub fn run_command(
+        &self,
+        cmd: &[&str],
+        timeout: Duration,
+    ) -> io::Result<crate::ports::CommandOutcome> {
+        crate::infrastructure::process::run_command(cmd, timeout)
+    }
+}
 
 impl CmdRunner for SysRunner {
     fn check_output(&self, cmd: &[&str], timeout: Duration) -> io::Result<String> {
@@ -38,6 +34,13 @@ impl CmdRunner for SysRunner {
 
     fn hardware_serial(&self, disk: u32) -> Option<String> {
         crate::platform::hardware_serial(disk)
+    }
+
+    fn device_geometry(
+        &self,
+        disk: u32,
+    ) -> Option<crate::domain::hardware::ObservedDeviceGeometry> {
+        crate::platform::device_geometry(self, disk)
     }
 }
 
@@ -133,6 +136,13 @@ impl CmdRunner for ReadProbeCache<'_> {
         value
     }
 
+    fn device_geometry(
+        &self,
+        disk: u32,
+    ) -> Option<crate::domain::hardware::ObservedDeviceGeometry> {
+        self.inner.device_geometry(disk)
+    }
+
     fn hardware_serial(&self, disk: u32) -> Option<String> {
         // Keep raw serial transient; canonical observation hashes it immediately.
         self.inner.hardware_serial(disk)
@@ -142,6 +152,15 @@ impl CmdRunner for ReadProbeCache<'_> {
 /// 当前平台整盘总扇区数；失败/缺失返回 None。
 pub fn disk_total_sectors(runner: &dyn CmdRunner, disk: u32) -> Option<u64> {
     crate::platform::disk_total_sectors(runner, disk)
+}
+
+pub fn device_geometry(
+    runner: &dyn CmdRunner,
+    disk: u32,
+) -> Option<crate::domain::hardware::ObservedDeviceGeometry> {
+    runner
+        .device_geometry(disk)
+        .or_else(|| crate::platform::fallback_device_geometry(runner, disk))
 }
 
 /// USB VID/PID(hex4); 失败返回 ("xxxx","xxxx")。
@@ -205,6 +224,26 @@ mod tests {
         }
     }
 
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn geometry_uses_observed_block_size_without_a_512_default() {
+        for (size, logical, supported) in [
+            (8192, Some(512), true),
+            (8192, Some(4096), false),
+            (8192, None, false),
+            (8193, Some(512), false),
+        ] {
+            let block = logical
+                .map(|n| format!("<key>DeviceBlockSize</key><integer>{n}</integer>"))
+                .unwrap_or_default();
+            let runner = FakeRunner { outputs: HashMap::from([("diskutil info -plist disk6".into(), format!("<plist><dict><key>DiskSize</key><integer>{size}</integer>{block}<key>PhysicalBlockSize</key><integer>4096</integer></dict></plist>"))]) };
+            let geometry = device_geometry(&runner, 6).unwrap();
+            assert_eq!(geometry.capacity_bytes, size);
+            assert_eq!(geometry.logical_sector_bytes, logical);
+            assert_eq!(geometry.physical_sector_bytes, Some(4096));
+            assert_eq!(geometry.writable_protocol_sectors().is_ok(), supported);
+        }
+    }
     // 与 Python test_list.py 相同的 8 盘矩阵: disk4=USB(未识别), disk6=USB(cems),
     // disk7=Thunderbolt, disk0/1=系统盘, disk8=DMG虚拟盘
     #[cfg(target_os = "macos")]
@@ -223,7 +262,7 @@ mod tests {
         );
         let info = |name: &str, proto: &str, internal: bool, extra: &str, size: i64| {
             format!(
-                "<plist version=\"1.0\"><dict><key>WholeDisk</key><{}/><key>Internal</key><{}/><key>BusProtocol</key><string>{}</string><key>TotalSize</key><integer>{}</integer>{}</dict></plist>",
+                "<plist version=\"1.0\"><dict><key>WholeDisk</key><{}/><key>Internal</key><{}/><key>BusProtocol</key><string>{}</string><key>DeviceBlockSize</key><integer>512</integer><key>TotalSize</key><integer>{}</integer>{}</dict></plist>",
                 if name.ends_with("s1") { "false" } else { "true" },
                 if internal { "true" } else { "false" },
                 proto,
@@ -298,7 +337,7 @@ mod tests {
         let mut m = HashMap::new();
         m.insert(
             "diskutil info -plist disk6".to_string(),
-            "<plist version=\"1.0\"><dict><key>DiskSize</key><integer>62914560000</integer><key>TotalSize</key><integer>999</integer></dict></plist>".to_string(),
+            "<plist version=\"1.0\"><dict><key>DiskSize</key><integer>62914560000</integer><key>DeviceBlockSize</key><integer>512</integer><key>TotalSize</key><integer>999</integer></dict></plist>".to_string(),
         );
         let runner = FakeRunner { outputs: m };
         assert_eq!(disk_total_sectors(&runner, 6), Some(62914560000 / 512));
@@ -310,7 +349,7 @@ mod tests {
         let mut m = HashMap::new();
         m.insert(
             "diskutil info -plist disk4".to_string(),
-            "<plist version=\"1.0\"><dict><key>IOKitSize</key><integer>15502147584</integer><key>Size</key><integer>15502147584</integer><key>TotalSize</key><integer>15502143488</integer></dict></plist>".to_string(),
+            "<plist version=\"1.0\"><dict><key>IOKitSize</key><integer>15502147584</integer><key>Size</key><integer>15502147584</integer><key>DeviceBlockSize</key><integer>512</integer><key>TotalSize</key><integer>15502143488</integer></dict></plist>".to_string(),
         );
         let runner = FakeRunner { outputs: m };
         assert_eq!(disk_total_sectors(&runner, 4), Some(30_277_632));

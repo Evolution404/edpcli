@@ -41,3 +41,5 @@ pub use registry::{
     default_registry, detect_boot_sector, detect_boot_sector_with_geometry, DetectedFilesystem,
     DriverRegistry,
 };
+
+pub(crate) mod probe;

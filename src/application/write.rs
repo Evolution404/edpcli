@@ -13,8 +13,9 @@ pub use backup::{backup_create_flow, backup_create_on_disk, backup_create_on_dis
 #[path = "write/restore.rs"]
 mod restore;
 pub use restore::{
-    restore_flow, restore_flow_typed, restore_on_disk, restore_on_disk_typed,
-    restore_on_disk_typed_with_pin, restore_on_disk_with_pin,
+    resolve_restore_backup_path, restore_flow, restore_flow_typed, restore_metadata_on_device,
+    restore_on_disk, restore_on_disk_typed, restore_on_disk_typed_with_pin,
+    restore_on_disk_with_pin, RestoreMetadataRequest,
 };
 
 use std::path::PathBuf;

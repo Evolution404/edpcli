@@ -204,7 +204,8 @@ pub fn media_identity_from_protocol_image(
             .filter(|value| !value.is_empty()),
         transport: probe.as_ref().map(|value| value.transport),
         total_sectors,
-        logical_sector_size: Some(SECTOR as u32),
+        logical_sector_size: sysinfo::device_geometry(runner, disk)
+            .and_then(|geometry| geometry.logical_sector_bytes),
     };
 
     let candidates = generate_candidates(runner, disk);

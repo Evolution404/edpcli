@@ -1,4 +1,4 @@
-use super::PreparedProvision;
+use super::*;
 
 impl PreparedProvision {
     pub const fn total_sectors(&self) -> u64 {
@@ -30,5 +30,59 @@ impl PreparedProvision {
             )),
             Self::Plain(_) => None,
         }
+    }
+}
+
+impl super::PreparedNewProvision {
+    pub fn disk(&self) -> &u32 {
+        &self.disk
+    }
+    pub fn device_id(&self) -> &String {
+        &self.device_id
+    }
+    pub fn source_kind(&self) -> &crate::provision::DiskProvisionKind {
+        &self.source_kind
+    }
+    pub fn mode(&self) -> &OfficialPartitionMode {
+        &self.mode
+    }
+    pub fn force_change_password(&self) -> &bool {
+        &self.force_change_password
+    }
+    pub fn pass_info_policy(&self) -> &PassInfoPolicy {
+        &self.pass_info_policy
+    }
+    pub fn lce_start_lba(&self) -> &u64 {
+        &self.lce_start_lba
+    }
+    pub fn write_image(&self) -> &OfficialProvisionWriteImage {
+        &self.write_image
+    }
+    pub fn format_targets(&self) -> &Vec<PlannedPartitionFormat> {
+        &self.format_targets
+    }
+    pub fn target_plan(&self) -> &Option<TargetProvisionPlan> {
+        &self.target_plan
+    }
+}
+
+impl super::PreparedPlainProvision {
+    pub fn disk(&self) -> &u32 {
+        &self.disk
+    }
+    pub fn device_id(&self) -> &String {
+        &self.device_id
+    }
+    pub fn plan(&self) -> &PlainProvisionPlan {
+        &self.plan
+    }
+    pub fn write_plan(&self) -> &PlainProvisionWritePlan {
+        &self.write_plan
+    }
+    pub fn source_kind(&self) -> &crate::provision::DiskProvisionKind {
+        &self.source_kind
+    }
+    pub fn source_lce_start_lba(&self) -> &Option<u64> {
+        &self.source_lce_start_lba
     }
 }

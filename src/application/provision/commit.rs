@@ -2,6 +2,8 @@ use super::*;
 #[path = "commit/partition_format.rs"]
 mod partition_format;
 #[cfg(test)]
+mod tests;
+#[cfg(test)]
 pub(super) use partition_format::execute_partition_format;
 use partition_format::format_partition_with_progress;
 #[path = "commit/validation.rs"]
@@ -9,14 +11,6 @@ mod validation;
 pub(super) use validation::{
     validate_key_disposition_plan, validate_preserve_source_snapshot, validate_target_write_set,
 };
-
-pub fn commit_plain_provision(
-    runner: &dyn CmdRunner,
-    dev: &mut dyn SectorDev,
-    prepared: &PreparedPlainProvision,
-) -> EdpCliResult<()> {
-    commit_plain_provision_with_progress(runner, dev, prepared, &mut |_, _, _| {})
-}
 
 pub(super) fn commit_plain_provision_with_progress(
     runner: &dyn CmdRunner,
@@ -37,7 +31,7 @@ pub(super) fn commit_plain_provision_with_progress(
             format!("错误: 无法卸载/锁定 disk{}: {error}", prepared.disk),
         )
     })?;
-    let _session = session
+    let mut locked_session = session
         .reopen_and_verify(dev, OPEN_WAIT, |dev| {
             verify_reopened_snapshot(dev, &prepared.source_metadata)?;
             let fresh = super::super::media_identity_observer::observe_media_identity_readonly(
@@ -60,8 +54,10 @@ pub(super) fn commit_plain_provision_with_progress(
                 err(EXIT_IO, format!("错误: 无法以读写方式重开目标盘: {error}"))
             }
             ReopenAndVerifyError::Verify(error) => error,
+            ReopenAndVerifyError::Geometry(error) => error,
         })?;
 
+    let dev = locked_session.device();
     let fresh_probe = runner
         .hardware_probe(prepared.disk)
         .or_else(|| crate::platform::fallback_hardware_probe(runner, prepared.disk))
@@ -111,14 +107,6 @@ pub(super) fn commit_plain_provision_with_progress(
     Ok(())
 }
 
-pub fn commit_provision(
-    runner: &dyn CmdRunner,
-    dev: &mut dyn SectorDev,
-    prepared: &PreparedProvision,
-) -> EdpCliResult<ProvisionCommitOutcome> {
-    commit_provision_with_progress(runner, dev, prepared, &mut |_, _, _| {})
-}
-
 pub(super) fn commit_provision_with_progress(
     runner: &dyn CmdRunner,
     dev: &mut dyn SectorDev,
@@ -160,14 +148,6 @@ pub fn capture_manufacturer_lba3(
     Ok(())
 }
 
-pub fn commit_new_provision(
-    runner: &dyn CmdRunner,
-    dev: &mut dyn SectorDev,
-    prepared: &PreparedNewProvision,
-) -> EdpCliResult<ProvisionCommitReport> {
-    commit_new_provision_with_progress(runner, dev, prepared, &mut |_, _, _| {})
-}
-
 pub(super) fn commit_new_provision_with_progress(
     runner: &dyn CmdRunner,
     dev: &mut dyn SectorDev,
@@ -201,7 +181,7 @@ pub(super) fn commit_new_provision_with_progress(
             format!("错误: 无法卸载/锁定 disk{}: {error}", prepared.disk),
         )
     })?;
-    let _session = session
+    let mut locked_session = session
         .reopen_and_verify(dev, OPEN_WAIT, |dev| {
             if let Some(source_metadata) = &prepared.source_metadata {
                 verify_reopened_snapshot(dev, source_metadata)?;
@@ -226,7 +206,10 @@ pub(super) fn commit_new_provision_with_progress(
                 err(EXIT_IO, format!("错误: 无法以读写方式重开目标盘: {error}"))
             }
             ReopenAndVerifyError::Verify(error) => error,
+            ReopenAndVerifyError::Geometry(error) => error,
         })?;
+
+    let dev = locked_session.device();
     let fresh_probe = runner
         .hardware_probe(prepared.disk)
         .or_else(|| crate::platform::fallback_hardware_probe(runner, prepared.disk))
@@ -279,11 +262,7 @@ pub(super) fn commit_new_provision_with_progress(
         provision_succeeded: true,
         formats: Vec::new(),
     };
-    for choice in prepared
-        .format_targets
-        .iter()
-        .filter(|choice| choice.selected)
-    {
+    report.formats = execute_selected_formats(&prepared.format_targets, |choice| {
         let result =
             format_partition_with_progress(runner, dev, prepared, choice, &mut |activity| {
                 progress(
@@ -292,17 +271,42 @@ pub(super) fn commit_new_provision_with_progress(
                     Some(activity),
                 );
             });
-        report.formats.push(PartitionFormatResult {
-            role: choice.target.role,
-            result: result.map_err(|error| error.msg),
-        });
         progress(
             Phase::Format,
             Step::PartitionFormat(choice.target.role),
             None,
         );
-    }
+        result
+    });
     Ok(report)
+}
+
+/// Stop on the first failed format, including a successful rollback. The protocol
+/// transaction is already committed; later partition writes need a fresh assessment.
+pub(super) fn execute_selected_formats(
+    choices: &[PlannedPartitionFormat],
+    mut execute: impl FnMut(
+        &PlannedPartitionFormat,
+    ) -> Result<(), crate::application::error::OperationError>,
+) -> Vec<PartitionFormatResult> {
+    let mut stopped_after = None;
+    choices
+        .iter()
+        .filter(|choice| choice.selected)
+        .map(|choice| {
+            let result = match stopped_after {
+                Some(after) => Err(PartitionFormatError::Skipped { after }),
+                None => execute(choice).map_err(|error| {
+                    stopped_after = Some(choice.target.role);
+                    PartitionFormatError::Failed(error)
+                }),
+            };
+            PartitionFormatResult {
+                role: choice.target.role,
+                result,
+            }
+        })
+        .collect()
 }
 
 fn verify_format_identity(

@@ -1,6 +1,6 @@
 //! Read-only filesystem analysis used by provisioning and migration.
 
-use crate::backup_metadata::PartitionGeometry;
+use crate::domain::geometry::PartitionGeometry;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::Write;
@@ -250,8 +250,8 @@ pub fn analyze_partition(
     };
     // Reuse Metadata's recognizer for known signatures. FAT16 is classified
     // by BPB cluster count below, not by the informational FAT label.
-    let probe = crate::backup_metadata::probe_filesystem(p, &boot);
-    if matches!(probe.kind, crate::backup_metadata::FilesystemKind::Exfat)
+    let probe = crate::filesystem::probe::probe_filesystem(p, &boot);
+    if matches!(probe.kind, crate::domain::geometry::FilesystemKind::Exfat)
         || &boot[3..11] == b"EXFAT   "
     {
         match exfat::parse(reader, p.sector_count, &boot) {
@@ -285,7 +285,7 @@ pub fn analyze_partition(
         }
         return report;
     }
-    if matches!(probe.kind, crate::backup_metadata::FilesystemKind::Ntfs)
+    if matches!(probe.kind, crate::domain::geometry::FilesystemKind::Ntfs)
         || &boot[3..11] == b"NTFS    "
     {
         report.status = AnalysisStatus::Unsupported;

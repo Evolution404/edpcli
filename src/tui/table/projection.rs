@@ -143,7 +143,17 @@ fn safe(value: &str) -> String {
 }
 
 pub fn backup_health_text(backup: &crate::application::BackupWorkspaceItem) -> &'static str {
-    backup.health().label()
+    if backup.display_cached {
+        use crate::application::BackupHealth;
+        match backup.health() {
+            BackupHealth::Verified => "EDPB ✓ · 缓存",
+            BackupHealth::VerificationFailed => "校验失败 · 缓存",
+            BackupHealth::CoreDataInvalid => "大小异常 · 缓存",
+            BackupHealth::Invalid => "EDPB ✗ · 缓存",
+        }
+    } else {
+        backup.health().label()
+    }
 }
 
 pub fn device_table_view(rows: &[crate::disk_scan::Row], generation: u64) -> TableViewData {

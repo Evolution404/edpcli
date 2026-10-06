@@ -62,10 +62,7 @@ fn invalidate_filesystems(
 ) -> Result<(), String> {
     use edpcli::application::support::{EdpCliError, EXIT_TARGET, SECTOR};
     use edpcli::application::target_session::{ReadOnly, TargetSession};
-    use edpcli::diskio::{
-        execute_write_transaction, raw_path, FileDev, SectorDev, SectorWriteStage,
-        WriteTransactionPlan,
-    };
+    use edpcli::diskio::{raw_path, FileDev, SectorDev, SectorWriteStage, WriteTransactionPlan};
     use std::time::Duration;
     pin(runner, disk, expected)?;
     let verified = edpcli::edpb::VerifiedBackupReader::open(backup)?;
@@ -115,7 +112,7 @@ fn invalidate_filesystems(
     }
     let session = TargetSession::<ReadOnly>::open_usb(runner, disk).map_err(|error| error.msg)?;
     let prepared = session.prepare_write().map_err(|error| error.to_string())?;
-    let _locked = prepared
+    let mut locked = prepared
         .reopen_and_verify(&mut dev, Duration::from_secs(10), |dev| {
             pin(runner, disk, expected)
                 .map_err(|message| EdpCliError::new(EXIT_TARGET, message))?;
@@ -133,7 +130,9 @@ fn invalidate_filesystems(
             Ok(())
         })
         .map_err(|error| format!("HIL reopen guard: {error:?}"))?;
-    execute_write_transaction(&mut dev, &plan).map_err(|error| error.msg)?;
+    locked
+        .execute_transaction(&plan)
+        .map_err(|error| error.msg)?;
     println!("[PASS] explicit filesystem-header damage written and readback verified");
     Ok(())
 }

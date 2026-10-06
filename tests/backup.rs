@@ -714,6 +714,7 @@ fn grouped_identity(onlyid: &str) -> MediaIdentitySnapshot {
 
 fn fake_entry(name: &str, onlyid: &str, mtime: i64) -> BackupEntry {
     BackupEntry {
+        display_cached: false,
         meta: Some(BackupMeta {
             disk: 6,
             secs: Some(122880000),

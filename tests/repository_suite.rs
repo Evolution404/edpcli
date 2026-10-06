@@ -14,3 +14,6 @@ mod physical_hil_contract;
 mod provision_capability_parity;
 #[path = "test_infrastructure.rs"]
 mod test_infrastructure;
+
+#[path = "architecture_dependencies.rs"]
+mod architecture_dependencies;

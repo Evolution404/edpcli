@@ -1,14 +1,23 @@
 use super::*;
 
-pub(super) fn read_exact_at(file: &mut File, offset: u64, len: usize) -> Result<Vec<u8>, String> {
+fn read_exact_at(
+    file: &mut File,
+    offset: u64,
+    len: usize,
+    control: Option<&crate::ports::ReadControl>,
+) -> Result<Vec<u8>, String> {
     file.seek(SeekFrom::Start(offset))
         .map_err(|e| format!("EDPB seek failed: {e}"))?;
     let mut out = Vec::new();
     out.try_reserve_exact(len)
         .map_err(|error| format!("EDPB allocation failed: {error}"))?;
     out.resize(len, 0);
-    file.read_exact(&mut out)
-        .map_err(|e| format!("EDPB read failed: {e}"))?;
+    crate::bounded_read::ControlledRead {
+        reader: file,
+        control,
+    }
+    .read_exact(&mut out)
+    .map_err(|e| format!("EDPB read failed: {e}"))?;
     Ok(out)
 }
 
@@ -26,7 +35,19 @@ impl VerifiedBackupReader {
             return Err(format!("not an .{EXTENSION} backup: {}", path.display()));
         }
         let mut file = File::open(path).map_err(|error| format!("open EDPB failed: {error}"))?;
-        verify_snapshot(&mut file)
+        verify_snapshot(&mut file, None)
+    }
+
+    pub fn open_controlled(
+        path: &Path,
+        control: &crate::ports::ReadControl,
+    ) -> Result<Self, String> {
+        control.check().map_err(|error| error.to_string())?;
+        if path.extension().and_then(|value| value.to_str()) != Some(EXTENSION) {
+            return Err("not an .edpb backup".into());
+        }
+        let mut file = File::open(path).map_err(|error| format!("open EDPB failed: {error}"))?;
+        verify_snapshot(&mut file, Some(control))
     }
 
     pub fn verified(&self) -> &VerifiedContainer {
@@ -49,7 +70,10 @@ pub fn verify_file(path: &Path) -> Result<VerifiedContainer, String> {
     Ok(VerifiedBackupReader::open(path)?.verified)
 }
 
-fn verify_snapshot(file: &mut File) -> Result<VerifiedBackupReader, String> {
+fn verify_snapshot(
+    file: &mut File,
+    control: Option<&crate::ports::ReadControl>,
+) -> Result<VerifiedBackupReader, String> {
     let initial_metadata = file
         .metadata()
         .map_err(|error| format!("read EDPB metadata failed: {error}"))?;
@@ -60,7 +84,7 @@ fn verify_snapshot(file: &mut File) -> Result<VerifiedBackupReader, String> {
     if file_len < (HEADER_SIZE + FOOTER_SIZE) as u64 {
         return Err("EDPB file too short".into());
     }
-    let header = read_exact_at(file, 0, HEADER_SIZE)?;
+    let header = read_exact_at(file, 0, HEADER_SIZE, control)?;
     if header.get(..8) != Some(FILE_MAGIC.as_slice()) {
         return Err("EDPB magic mismatch".into());
     }
@@ -85,7 +109,7 @@ fn verify_snapshot(file: &mut File) -> Result<VerifiedBackupReader, String> {
     {
         return Err("EDPB footer offset or file length mismatch".into());
     }
-    let footer = read_exact_at(file, footer_offset, FOOTER_SIZE)?;
+    let footer = read_exact_at(file, footer_offset, FOOTER_SIZE, control)?;
     if footer.get(..8) != Some(FOOTER_MAGIC.as_slice()) {
         return Err("EDPB footer magic mismatch".into());
     }
@@ -112,7 +136,7 @@ fn verify_snapshot(file: &mut File) -> Result<VerifiedBackupReader, String> {
     }
     let manifest_size =
         super::limits::bounded_len(manifest_len, super::limits::MAX_MANIFEST_BYTES, "manifest")?;
-    let manifest_bytes = read_exact_at(file, manifest_offset, manifest_size)?;
+    let manifest_bytes = read_exact_at(file, manifest_offset, manifest_size, control)?;
     if sha256_bytes(&manifest_bytes) != header_manifest_sha {
         return Err("EDPB manifest SHA-256 mismatch".into());
     }
@@ -145,7 +169,7 @@ fn verify_snapshot(file: &mut File) -> Result<VerifiedBackupReader, String> {
             return Err(format!("Artifact {} chunk out of bounds", artifact.id));
         }
         chunk_ranges.push((storage.frame_offset, data_end, artifact.id.as_str()));
-        let frame = read_exact_at(file, storage.frame_offset, CHUNK_HEADER_SIZE)?;
+        let frame = read_exact_at(file, storage.frame_offset, CHUNK_HEADER_SIZE, control)?;
         if frame.get(..8) != Some(CHUNK_MAGIC.as_slice()) {
             return Err(format!("Artifact {} chunk magic mismatch", artifact.id));
         }
@@ -172,7 +196,7 @@ fn verify_snapshot(file: &mut File) -> Result<VerifiedBackupReader, String> {
             .checked_add(storage.stored_length)
             .filter(|total| *total <= super::limits::MAX_PAYLOAD_BYTES)
             .ok_or("EDPB total payload exceeds read budget")?;
-        let data = read_exact_at(file, storage.data_offset, length)?;
+        let data = read_exact_at(file, storage.data_offset, length, control)?;
         let actual_sha = sha256_bytes(&data);
         if actual_sha != frame_sha || hex(&actual_sha) != storage.sha256 {
             return Err(format!("Artifact {} SHA-256 mismatch", artifact.id));
@@ -192,8 +216,14 @@ fn verify_snapshot(file: &mut File) -> Result<VerifiedBackupReader, String> {
 
     file.seek(SeekFrom::Start(0))
         .map_err(|e| format!("EDPB full-file seek failed: {e}"))?;
-    let file_sha256 = crate::sha256::sha256_reader_hex(file, super::limits::MAX_CONTAINER_BYTES)
-        .map_err(|error| format!("EDPB full-file read failed: {error}"))?;
+    let file_sha256 = crate::sha256::sha256_reader_hex(
+        &mut crate::bounded_read::ControlledRead {
+            reader: &mut *file,
+            control,
+        },
+        super::limits::MAX_CONTAINER_BYTES,
+    )
+    .map_err(|error| format!("EDPB full-file read failed: {error}"))?;
     let after = file
         .metadata()
         .map_err(|error| format!("read EDPB metadata failed: {error}"))?;

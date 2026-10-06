@@ -97,6 +97,7 @@ fn backup(
     kind: Option<edpcli::provision::DiskProvisionKind>,
 ) -> edpcli::application::BackupWorkspaceItem {
     edpcli::application::BackupWorkspaceItem {
+        display_cached: false,
         index,
         path: format!("backup-{index}.edpb").into(),
         file_name: format!("backup-{index}.edpb"),

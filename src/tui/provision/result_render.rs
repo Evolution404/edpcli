@@ -19,6 +19,18 @@ fn status_label(
             "⚠ 制盘完成 · 部分格式化失败",
             crate::tui::ui::ResultTone::Warning,
         ),
+        Some(Status::FormatRolledBack) => (
+            "⚠ 协议已写入 · 失败分区已回滚",
+            crate::tui::ui::ResultTone::Warning,
+        ),
+        Some(Status::MediaIntermediate) => (
+            "✗ 介质处于中间态 · 已停止写入",
+            crate::tui::ui::ResultTone::Danger,
+        ),
+        Some(Status::MediaStateUnknown) => (
+            "✗ 介质状态未确认 · 已停止写入",
+            crate::tui::ui::ResultTone::Danger,
+        ),
         Some(Status::FatalFailure) | None => ("✗ 制 盘 失 败", crate::tui::ui::ResultTone::Danger),
     }
 }
@@ -51,9 +63,21 @@ fn verification_lines(state: &AppState) -> Vec<(String, crate::tui::ui::ResultTo
                             format!("✓ {}格式化读回通过", item.role.label()),
                             crate::tui::ui::ResultTone::Success,
                         ),
+                        Err(error) if error.is_skipped() => (
+                            format!("— {}格式化未执行：{}", item.role.label(), error),
+                            crate::tui::ui::ResultTone::Muted,
+                        ),
                         Err(error) => (
                             format!("⚠ {}格式化失败：{}", item.role.label(), error),
-                            crate::tui::ui::ResultTone::Warning,
+                            if error
+                                .operation_error()
+                                .and_then(|error| error.media_state)
+                                .is_some_and(|state| state.requires_reinspection())
+                            {
+                                crate::tui::ui::ResultTone::Danger
+                            } else {
+                                crate::tui::ui::ResultTone::Warning
+                            },
                         ),
                     });
                 }
@@ -71,7 +95,7 @@ fn verification_lines(state: &AppState) -> Vec<(String, crate::tui::ui::ResultTo
         }
         lines.extend(outcome.warnings.iter().map(|warning| {
             (
-                format!("⚠ {}", warning.message()),
+                format!("⚠ {}", crate::ui::provision_warning_text(warning)),
                 crate::tui::ui::ResultTone::Warning,
             )
         }));

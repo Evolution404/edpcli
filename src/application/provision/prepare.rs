@@ -51,23 +51,26 @@ pub fn prepare_target_provision(
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<PreparedNewProvision> {
     let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
-    let total_sectors = target_session
-        .total_sectors()
-        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
+    let geometry = target_session.writable_geometry()?;
+    let total_sectors = geometry
+        .writable_protocol_sectors()
+        .map_err(|message| err(EXIT_TARGET, message))?;
     let probe = target_session
         .hardware_probe()
         .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘 USB/SCSI 硬件身份"))?;
     let target = TargetIdentity::from_probe(&probe, total_sectors)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 目标硬件身份不完整: {message}")))?;
     let device_id = target.device_id().to_string();
-    let compatibility =
-        locate_lba7_compatibility_extent_from_verified_usb_capacity(total_sectors, SECTOR as u32)
-            .ok_or_else(|| {
-            err(
-                EXIT_TARGET,
-                "错误: 当前目标不符合已验证的 512B/255x63 USB LCE 几何",
-            )
-        })?;
+    let compatibility = locate_lba7_compatibility_extent_from_verified_usb_capacity(
+        total_sectors,
+        geometry.logical_sector_bytes.unwrap_or(0),
+    )
+    .ok_or_else(|| {
+        err(
+            EXIT_TARGET,
+            "错误: 当前目标不符合已验证的 512B/255x63 USB LCE 几何",
+        )
+    })?;
     let source_metadata = read_image(dev)?;
     let source_identity =
         classify_live_source_identity(runner, disk, &source_metadata, total_sectors, dev)?;
@@ -538,9 +541,10 @@ pub fn prepare_plain_provision(
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<PreparedPlainProvision> {
     let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
-    let total_sectors = target_session
-        .total_sectors()
-        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
+    let geometry = target_session.writable_geometry()?;
+    let total_sectors = geometry
+        .writable_protocol_sectors()
+        .map_err(|message| err(EXIT_TARGET, message))?;
     if total_sectors != plan.total_sectors {
         return Err(err(
             EXIT_TARGET,

@@ -138,6 +138,7 @@ pub fn device_scan_needs_elevation(
 /// Stable backup row shared by CLI/TUI read-side views.
 #[derive(Debug, Clone)]
 pub struct BackupWorkspaceItem {
+    pub display_cached: bool,
     pub index: usize,
     pub path: std::path::PathBuf,
     pub file_name: String,
@@ -224,6 +225,7 @@ fn workspace_from_selector(
         .map(|(index, entry)| {
             let ownership = crate::metainfo::backup_ownership(entry);
             BackupWorkspaceItem {
+                display_cached: entry.display_cached,
                 index,
                 path: entry.path.clone(),
                 file_name: entry

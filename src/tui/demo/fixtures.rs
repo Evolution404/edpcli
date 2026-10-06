@@ -414,6 +414,7 @@ pub(super) fn backup(
         identity.hardware.serial_quality = SerialQuality::Missing;
     }
     BackupWorkspaceItem {
+        display_cached: false,
         index,
         path: std::path::PathBuf::from(format!("DEMO/{name}")),
         file_name: format!("DEMO-{name}"),

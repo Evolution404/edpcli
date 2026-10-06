@@ -1,5 +1,7 @@
+use super::create::mtime_epoch;
 use crate::common::SECTOR;
-use crate::diskio::*;
+use crate::infrastructure::clock::SystemClock;
+use crate::ports::Clock;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
@@ -179,6 +181,8 @@ impl BackupIntegrityStatus {
 
 #[derive(Debug, Clone)]
 pub struct BackupEntry {
+    /// Display-only cache provenance; never a write or delete grant.
+    pub display_cached: bool,
     pub meta: Option<BackupMeta>,
     pub path: PathBuf,
     pub mtime: i64,
@@ -318,7 +322,7 @@ fn scan_backup_dir_with_budget(
     let mut weight = 0usize;
     for item in read_dir {
         let item = item.map_err(|error| format!("备份目录读取失败: {error}"))?;
-        if let Some((entry, retained_weight)) = scan_backup_file_impl(&item.path(), false) {
+        if let Some((entry, retained_weight)) = scan_backup_file_impl(&item.path(), false, None) {
             if entries.len() >= max_entries {
                 return Err(format!(
                     "备份目录扫描超过条目预算 {max_entries}，未返回不完整编号；请分目录管理备份"
@@ -335,15 +339,22 @@ fn scan_backup_dir_with_budget(
 
 /// Load and validate one exact backup without hashing every sibling in its directory.
 pub fn scan_backup_file(path: &Path) -> Option<BackupEntry> {
-    scan_backup_file_impl(path, true).map(|(entry, _)| entry)
+    scan_backup_file_impl(path, true, None).map(|(entry, _)| entry)
 }
 
-fn scan_backup_file_impl(path: &Path, retain_manifest: bool) -> Option<(BackupEntry, usize)> {
+pub(super) fn scan_backup_file_impl(
+    path: &Path,
+    retain_manifest: bool,
+    control: Option<&crate::ports::ReadControl>,
+) -> Option<(BackupEntry, usize)> {
     let file_type = fs::symlink_metadata(path).ok()?.file_type();
     if !file_type.is_file() || path.extension().and_then(|e| e.to_str()) != Some("edpb") {
         return None;
     }
-    let verification = crate::edpb::VerifiedBackupReader::open(path);
+    let verification = match control {
+        Some(control) => crate::edpb::VerifiedBackupReader::open_controlled(path, control),
+        None => crate::edpb::VerifiedBackupReader::open(path),
+    };
     let verification_error = verification.as_ref().err().cloned();
     let reader = verification.ok();
     let verified = reader.as_ref().map(|reader| reader.verified());
@@ -351,7 +362,14 @@ fn scan_backup_file_impl(path: &Path, retain_manifest: bool) -> Option<(BackupEn
         .map(|container| container.file_sha256.clone())
         .or_else(|| {
             let mut file = fs::File::open(path).ok()?;
-            crate::sha256::sha256_reader_hex(&mut file, crate::edpb::MAX_CONTAINER_BYTES).ok()
+            crate::sha256::sha256_reader_hex(
+                &mut crate::bounded_read::ControlledRead {
+                    reader: &mut file,
+                    control,
+                },
+                crate::edpb::MAX_CONTAINER_BYTES,
+            )
+            .ok()
         });
     let coverage = verified.map(|container| {
         crate::backup_coverage::BackupCoverage::from_manifest(&container.manifest)
@@ -430,6 +448,7 @@ fn scan_backup_file_impl(path: &Path, retain_manifest: bool) -> Option<(BackupEn
     });
     Some((
         BackupEntry {
+            display_cached: false,
             meta,
             path: path.to_path_buf(),
             mtime: mtime_epoch(path),

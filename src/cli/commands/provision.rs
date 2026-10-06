@@ -407,11 +407,51 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                 Ok(value) => value,
                 Err(error) => return finish(Err(error)),
             };
-            let status = write.execution_status();
-            for line in write.summary_lines() {
+            for line in provision_write_summary_lines(&write) {
                 println!("{line}");
             }
-            status.exit_code()
+            write.exit_code()
         }
     }
+}
+
+fn provision_write_summary_lines(
+    outcome: &crate::application::provision::ProvisionWriteOutcome,
+) -> Vec<String> {
+    use crate::application::provision::{ProvisionCommitOutcome, ProvisionExecutionStatus};
+
+    let mut lines = vec![format!("制盘前自动备份：{}", outcome.backup.path.display())];
+    match &outcome.commit {
+            ProvisionCommitOutcome::Official(report) => {
+                lines.push("制盘：成功，协议与几何读回验证通过。".into());
+                if report.formats.is_empty() {
+                    lines.push("格式化：未选择任何分区".into());
+                }
+                for item in &report.formats {
+                    lines.push(match &item.result {
+                        Ok(()) => format!("格式化：✓ {}，读回验证通过", item.role.label()),
+                        Err(message) if message.is_skipped() => format!("格式化：— {}：{message}", item.role.label()),
+                        Err(message) => format!("格式化：✗ {}：{message}", item.role.label()),
+                    });
+                }
+            }
+            ProvisionCommitOutcome::Plain { partition_count } => lines.push(format!(
+                "恢复普通盘：成功，{partition_count} 个 MBR 主分区已写入并读回验证；LBA3 保留，EDP 状态已清除。"
+            )),
+        }
+    lines.extend(
+        outcome
+            .warnings
+            .iter()
+            .map(crate::ui::provision_warning_text),
+    );
+    if matches!(
+        outcome.execution_status(),
+        ProvisionExecutionStatus::MediaIntermediate | ProvisionExecutionStatus::MediaStateUnknown
+    ) {
+        lines.push(
+            "介质状态未安全确认：已停止后续写入；请重新检查设备，禁止直接继续格式化。".into(),
+        );
+    }
+    lines
 }

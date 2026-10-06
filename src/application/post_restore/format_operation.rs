@@ -47,7 +47,7 @@ pub fn format_partition_after_restore_on_disk_assessed(
             .as_ref()
             .ok_or(PostRestoreFormatError::TargetIdentityMissing)?;
         let mut dev = crate::application::device::open_readonly_usb_disk(runner, disk)
-            .map_err(|error| PostRestoreFormatError::Operation(error.msg))?;
+            .map_err(|error| PostRestoreFormatError::Operation(error.into()))?;
         format_partition_on_disk_with_key(
             runner,
             disk,
@@ -176,7 +176,9 @@ pub fn format_encrypted_partition_after_restore_on_disk(
                 ))?;
         let mut dev =
             crate::application::device::open_readonly_usb_disk(runner, disk).map_err(|error| {
-                EncryptedPostRestoreError::Operation(PostRestoreFormatError::Operation(error.msg))
+                EncryptedPostRestoreError::Operation(PostRestoreFormatError::Operation(
+                    error.into(),
+                ))
             })?;
         format_encrypted_partition_on_disk(
             runner,
@@ -222,7 +224,7 @@ pub(super) fn verify_current_target(
     let observed = crate::application::media_identity_observer::observe_media_identity_readonly(
         runner, disk, dev,
     )
-    .map_err(|error| PostRestoreFormatError::Operation(error.msg))?;
+    .map_err(|error| PostRestoreFormatError::Operation(error.into()))?;
     expected
         .verify(&observed.snapshot, &observed.protocol_image)
         .map_err(PostRestoreFormatError::TargetIdentity)?;
@@ -253,7 +255,7 @@ pub(super) fn verify_current_target(
             read_sector(dev, lba)
         })
         .map_err(|message| {
-            PostRestoreFormatError::Operation(format!("重读分区表失败: {message}"))
+            PostRestoreFormatError::Operation((format!("重读分区表失败: {message}")).into())
         })?;
         if !table.partitions.iter().any(|current| {
             current.index == partition.index as usize
@@ -266,11 +268,11 @@ pub(super) fn verify_current_target(
         }
     } else {
         let image = ProvisionImage::from_bytes(observed.protocol_image).map_err(|message| {
-            PostRestoreFormatError::Operation(format!("重读 EDP 协议失败: {message}"))
+            PostRestoreFormatError::Operation((format!("重读 EDP 协议失败: {message}")).into())
         })?;
         let parsed = parse_existing_provision(&image, &outcome.device_id, total_sectors)
             .map_err(|message| {
-                PostRestoreFormatError::Operation(format!("重读 EDP 分区失败: {message}"))
+                PostRestoreFormatError::Operation((format!("重读 EDP 分区失败: {message}")).into())
             })?
             .ok_or_else(|| {
                 PostRestoreFormatError::Operation("当前盘缺少有效 EDP 分区记录".into())
@@ -372,6 +374,7 @@ fn format_partition_on_disk_with_key(
     assessment_sink: &mut Option<PostRestoreAssessment>,
 ) -> PostRestoreFormatResult {
     format_progress::emit(prompt, format_progress::stage(FormatStep::VerifyTarget));
+    let mut format_committed = false;
     let result = (|| -> Result<(), PostRestoreFormatError> {
         if !outcome.report.metadata_restored || !outcome.report.readback_verified {
             return Err(PostRestoreFormatError::Operation(
@@ -419,7 +422,7 @@ fn format_partition_on_disk_with_key(
             });
         }
         let session = TargetSession::<ReadOnly>::open_usb(runner, disk)
-            .map_err(|error| PostRestoreFormatError::Operation(error.msg))?;
+            .map_err(|error| PostRestoreFormatError::Operation(error.into()))?;
         verify_current_target(
             runner,
             disk,
@@ -447,7 +450,8 @@ fn format_partition_on_disk_with_key(
                 &outcome.partitions,
             ),
         };
-        let fresh_assessment = assess(dev).map_err(PostRestoreFormatError::Operation)?;
+        let fresh_assessment =
+            assess(dev).map_err(|error| PostRestoreFormatError::Operation(error.into()))?;
         let fresh = fresh_assessment
             .partitions
             .iter()
@@ -477,9 +481,9 @@ fn format_partition_on_disk_with_key(
         }
         format_progress::emit(prompt, format_progress::stage(FormatStep::LockAndReopen));
         let session = session.prepare_write().map_err(|error| {
-            PostRestoreFormatError::Operation(format!("无法卸载/锁定 disk{disk}: {error}"))
+            PostRestoreFormatError::Operation((format!("无法卸载/锁定 disk{disk}: {error}")).into())
         })?;
-        let _session = session
+        let mut locked_session = session
             .reopen_and_verify(dev, REOPEN_WAIT, |dev| {
                 verify_current_target(
                     runner,
@@ -490,7 +494,8 @@ fn format_partition_on_disk_with_key(
                     partition,
                     original_key.map_or(KeyCheck::Plain, |(_, key)| KeyCheck::Existing(key)),
                 )?;
-                let reopened = assess(dev).map_err(PostRestoreFormatError::Operation)?;
+                let reopened =
+                    assess(dev).map_err(|error| PostRestoreFormatError::Operation(error.into()))?;
                 let candidate = reopened
                     .partitions
                     .iter()
@@ -514,11 +519,16 @@ fn format_partition_on_disk_with_key(
                 Ok(())
             })
             .map_err(|error| match error {
-                ReopenAndVerifyError::Reopen(error) => {
-                    PostRestoreFormatError::Operation(format!("重开 disk{disk} 失败: {error}"))
-                }
+                ReopenAndVerifyError::Reopen(error) => PostRestoreFormatError::Operation(
+                    (format!("重开 disk{disk} 失败: {error}")).into(),
+                ),
                 ReopenAndVerifyError::Verify(error) => error,
+                ReopenAndVerifyError::Geometry(error) => {
+                    PostRestoreFormatError::Operation(error.into())
+                }
             })?;
+
+        let dev = locked_session.device();
         let format = format_partition_after_restore(
             dev,
             &fresh_assessment,
@@ -530,8 +540,9 @@ fn format_partition_on_disk_with_key(
             &mut |event| prompt.operation_progress(event),
         );
         format.result?;
+        format_committed = true;
         format_progress::emit(prompt, format_progress::stage(FormatStep::Reassess));
-        let after = assess(dev).map_err(PostRestoreFormatError::Operation)?;
+        let after = assess(dev).map_err(|error| PostRestoreFormatError::Operation(error.into()))?;
         let candidate = after
             .partitions
             .iter()
@@ -555,7 +566,14 @@ fn format_partition_on_disk_with_key(
         *assessment_sink = Some(after);
         format_progress::emit(prompt, format_progress::completed());
         Ok(())
-    })();
+    })()
+    .map_err(|error| {
+        if format_committed && error.media_state().is_none() {
+            PostRestoreFormatError::UnverifiedAfterWrite(Box::new(error))
+        } else {
+            error
+        }
+    });
     PostRestoreFormatResult {
         partition_index: request.partition_index,
         filesystem: request.filesystem,

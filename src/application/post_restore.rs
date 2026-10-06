@@ -192,7 +192,8 @@ pub enum PostRestoreFormatError {
     TargetIdentity(crate::media_identity::MediaIdentityPinConflict),
     TargetGeometryChanged,
     Cancelled,
-    Operation(String),
+    Operation(crate::application::error::OperationError),
+    UnverifiedAfterWrite(Box<PostRestoreFormatError>),
 }
 
 impl From<FilesystemError> for PostRestoreFormatError {
@@ -228,12 +229,32 @@ impl std::fmt::Display for PostRestoreFormatError {
                 formatter.write_str("格式化目标总扇区数或逻辑扇区大小不一致")
             }
             Self::Cancelled => formatter.write_str("已取消本次分区格式化"),
-            Self::Operation(message) => formatter.write_str(message),
+            Self::Operation(error) => std::fmt::Display::fmt(error, formatter),
+            Self::UnverifiedAfterWrite(error) => write!(formatter, "写后介质状态未确认：{error}"),
         }
     }
 }
 
 impl std::error::Error for PostRestoreFormatError {}
+
+impl PostRestoreFormatError {
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            Self::Operation(error) => error.exit_code(),
+            Self::UnverifiedAfterWrite(_) => crate::common::EXIT_INTERMEDIATE,
+            Self::Cancelled => crate::common::EXIT_TARGET,
+            _ => crate::common::EXIT_IO,
+        }
+    }
+
+    pub fn media_state(&self) -> Option<crate::application::error::MediaState> {
+        match self {
+            Self::Operation(error) => error.media_state,
+            Self::UnverifiedAfterWrite(_) => Some(crate::application::error::MediaState::Unknown),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PostRestoreFormatResult {
@@ -319,6 +340,7 @@ pub(crate) fn format_partition_after_restore(
     file_key: Option<&[u8; 16]>,
     observer: &mut dyn FnMut(crate::application::progress::ProgressEvent),
 ) -> PostRestoreFormatResult {
+    let mut writing_started = false;
     let result = (|| -> Result<(), PostRestoreFormatError> {
         validate_writable_filesystem(request.filesystem)?;
         if request.partition_index != partition.index {
@@ -380,39 +402,57 @@ pub(crate) fn format_partition_after_restore(
             partition.start_lba,
             &image,
             &mut |activity| {
+                if matches!(
+                    activity.phase,
+                    crate::diskio::TransactionActivityPhase::Write
+                        | crate::diskio::TransactionActivityPhase::FormatWrite
+                ) {
+                    writing_started = true;
+                }
                 crate::application::progress::emit_isolated(
                     observer,
                     format_progress::activity(activity),
                 );
             },
         )
-        .map_err(|error| PostRestoreFormatError::Operation(error.msg))?;
+        .map_err(|error| PostRestoreFormatError::Operation(error.into()))?;
         crate::application::progress::emit_isolated(
             observer,
             format_progress::stage(crate::application::progress::FormatStep::VerifyFilesystem),
         );
-        let boot =
-            read_sector(dev, partition.start_lba).map_err(PostRestoreFormatError::Operation)?;
+        let boot = read_sector(dev, partition.start_lba)
+            .map_err(|error| PostRestoreFormatError::Operation(error.into()))?;
         let plain_boot = if let Some(file_key) = file_key {
-            decrypt_mode2(&boot, file_key).map_err(PostRestoreFormatError::Operation)?
+            decrypt_mode2(&boot, file_key)
+                .map_err(|error| PostRestoreFormatError::Operation(error.into()))?
         } else {
             boot
         };
         let detected = crate::filesystem::detect_boot_sector(partition.sector_count, &plain_boot)?
             .ok_or_else(|| {
                 PostRestoreFormatError::Operation(
-                    "格式化后文件系统 boot sector 未通过严格校验".to_string(),
+                    ("格式化后文件系统 boot sector 未通过严格校验".to_string()).into(),
                 )
             })?;
         if detected != request.filesystem {
-            return Err(PostRestoreFormatError::Operation(format!(
-                "格式化后文件系统类型不一致: expected {}, got {}",
-                request.filesystem.config_token(),
-                detected.label()
-            )));
+            return Err(PostRestoreFormatError::Operation(
+                (format!(
+                    "格式化后文件系统类型不一致: expected {}, got {}",
+                    request.filesystem.config_token(),
+                    detected.label()
+                ))
+                .into(),
+            ));
         }
         Ok(())
-    })();
+    })()
+    .map_err(|error| {
+        if writing_started && error.media_state().is_none() {
+            PostRestoreFormatError::UnverifiedAfterWrite(Box::new(error))
+        } else {
+            error
+        }
+    });
     PostRestoreFormatResult {
         partition_index: request.partition_index,
         filesystem: request.filesystem,

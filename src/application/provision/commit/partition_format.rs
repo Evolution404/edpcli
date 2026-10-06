@@ -42,10 +42,39 @@ pub(super) fn format_partition_with_progress(
     prepared: &PreparedNewProvision,
     choice: &PlannedPartitionFormat,
     observer: &mut dyn FnMut(diskio::TransactionActivity),
-) -> EdpCliResult<()> {
-    verify_format_identity(runner, dev, prepared)?;
-    execute_partition_format_observed(dev, choice, observer)?;
-    verify_format_identity(runner, dev, prepared)?;
+) -> Result<(), crate::application::error::OperationError> {
+    use crate::application::error::{MediaState, OperationError};
+    verify_format_identity(runner, dev, prepared).map_err(|error| {
+        OperationError::from(error)
+            .in_phase("格式化前身份复核")
+            .with_media_state(MediaState::Unchanged)
+    })?;
+    let mut writing_started = false;
+    execute_partition_format_observed(dev, choice, &mut |activity| {
+        if matches!(
+            activity.phase,
+            diskio::TransactionActivityPhase::Write | diskio::TransactionActivityPhase::FormatWrite
+        ) {
+            writing_started = true;
+        }
+        observer(activity);
+    })
+    .map_err(|error| {
+        let mut error = OperationError::from(error).in_phase("分区格式化");
+        if error.media_state.is_none() {
+            error.media_state = Some(if writing_started {
+                MediaState::Unknown
+            } else {
+                MediaState::Unchanged
+            });
+        }
+        error
+    })?;
+    verify_format_identity(runner, dev, prepared).map_err(|error| {
+        OperationError::from(error)
+            .in_phase("格式化后身份复核")
+            .with_media_state(MediaState::Unknown)
+    })?;
     Ok(())
 }
 

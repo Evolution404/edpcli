@@ -33,7 +33,7 @@ pub(super) fn apply(
     }
     if let Some((_operation_id, result)) = updates.write {
         let success = result.is_ok();
-        state.provision_finish_write(result.map_err(|error| error.to_string()));
+        state.provision_finish_write(result);
         if success {
             tasks.request_workspace_scan(backup_dir.to_path_buf());
             state.set_device_scan_pending(true);

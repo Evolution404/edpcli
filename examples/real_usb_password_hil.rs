@@ -651,7 +651,7 @@ mod macos {
             _ => return Err("build 阶段 planner 未生成官方制盘计划".into()),
         };
         let target_plan = official
-            .target_plan
+            .target_plan()
             .as_ref()
             .ok_or_else(|| "build 阶段缺少 TargetProvisionPlan".to_string())?;
         for role in [
@@ -676,7 +676,7 @@ mod macos {
             }
         }
         if official
-            .format_targets
+            .format_targets()
             .iter()
             .filter(|choice| choice.target.format_capable)
             .any(|choice| !choice.selected)
@@ -748,7 +748,7 @@ mod macos {
             _ => return Err("rewrap 阶段 planner 未生成官方制盘计划".into()),
         };
         let target_plan = official
-            .target_plan
+            .target_plan()
             .as_ref()
             .ok_or_else(|| "rewrap 阶段缺少 TargetProvisionPlan".to_string())?;
         for role in [PartitionRole::Share, PartitionRole::Encrypt] {
@@ -768,10 +768,14 @@ mod macos {
                 ));
             }
         }
-        if official.format_targets.iter().any(|choice| choice.selected) {
+        if official
+            .format_targets()
+            .iter()
+            .any(|choice| choice.selected)
+        {
             return Err("password-only rewrap 不得包含 filesystem format".into());
         }
-        for &lba in official.write_image.patch.keys() {
+        for &lba in official.write_image().patch.keys() {
             let lba = lba as u64;
             if (SHARE_START..SHARE_START + SHARE_SECTORS).contains(&lba)
                 || (ENCRYPT_START..ENCRYPT_START + ENCRYPT_SECTORS).contains(&lba)

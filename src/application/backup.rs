@@ -317,6 +317,7 @@ mod tests {
 
     fn entry(name: &str, onlyid: &str) -> BackupEntry {
         BackupEntry {
+            display_cached: false,
             meta: Some(BackupMeta {
                 disk: 6,
                 secs: Some(122880000),

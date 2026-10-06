@@ -44,6 +44,7 @@ fn device(disk: u32) -> Row {
 
 fn backup(index: usize, name: &str) -> BackupWorkspaceItem {
     BackupWorkspaceItem {
+        display_cached: false,
         index,
         path: PathBuf::from(name),
         file_name: name.into(),

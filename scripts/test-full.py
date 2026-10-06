@@ -24,6 +24,7 @@ from typing import Iterable
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from change_scope import documentation_suites
+from test_gate import BUDGETS, run_watchdog
 
 
 def configure_console_encoding() -> None:
@@ -224,7 +225,7 @@ def cargo_compile(suites: list[str], env: dict[str, str]) -> list[TestArtifact]:
     print("[compile] " + " ".join(command), flush=True)
     started = time.monotonic()
     process = subprocess.Popen(
-        command,
+        [sys.executable, "scripts/test_gate.py", "--phase", "compile", "--deadline", str(BUDGETS["compile_timeout_seconds"]), "--", *command],
         cwd=ROOT,
         stdout=subprocess.PIPE,
         stderr=None,
@@ -272,6 +273,8 @@ def cargo_compile(suites: list[str], env: dict[str, str]) -> list[TestArtifact]:
     returncode = process.wait()
     duration = time.monotonic() - started
     print(f"[compile] exit={returncode} duration={duration:.2f}s artifacts={len(artifacts)}")
+    if returncode == 124:
+        raise TimeoutError("compile forced deadline exceeded")
     if returncode != 0:
         raise RuntimeError(f"cargo test --no-run failed with exit code {returncode}")
 
@@ -359,7 +362,7 @@ def run_artifacts(
 def run_doctests(env: dict[str, str]) -> TestResult:
     started = time.monotonic()
     completed = subprocess.run(
-        ["cargo", "test", "--doc", "--locked", "--quiet"],
+        [sys.executable, "scripts/test_gate.py", "--phase", "doctest", "--deadline", str(BUDGETS["doctest_timeout_seconds"]), "--", "cargo", "test", "--doc", "--locked", "--quiet"],
         cwd=ROOT,
         env=env,
         text=True,
@@ -375,6 +378,7 @@ def run_doctests(env: dict[str, str]) -> TestResult:
         completed.returncode,
         completed.stdout,
         completed.stderr,
+        timed_out=completed.returncode == 124,
     )
 
 
@@ -403,10 +407,12 @@ def parse_args() -> argparse.Namespace:
         default=int(os.environ.get("EDPCLI_TEST_THREADS", "4")),
         help="Rust test threads per test binary (env: EDPCLI_TEST_THREADS)",
     )
+    parser.add_argument("--watchdog-worker", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--deadline-seconds", type=float, default=float(os.environ.get("EDPCLI_GATE_DEADLINE_SECS", BUDGETS["gate_deadline_seconds"])), help="forced total deadline including compile, tests and doctests")
     parser.add_argument(
         "--timeout",
         type=int,
-        default=int(os.environ.get("EDPCLI_TEST_BINARY_TIMEOUT_SECS", "180")),
+        default=int(os.environ.get("EDPCLI_TEST_BINARY_TIMEOUT_SECS", BUDGETS["binary_timeout_seconds"])),
     )
     max_seconds = os.environ.get("EDPCLI_TEST_MAX_SECONDS")
     parser.add_argument(
@@ -424,6 +430,8 @@ def main() -> int:
     if args.list_changed_paths:
         print("\n".join(changed_paths()))
         return 0
+    if not args.watchdog_worker:
+        return run_watchdog([sys.executable, str(Path(__file__).resolve()), "--watchdog-worker", *sys.argv[1:]], args.deadline_seconds, "full" if args.profile == "full" else "fast-runner")
     if args.workers < 1 or args.workers > 8:
         raise SystemExit("--workers must be between 1 and 8")
     if args.test_threads < 1 or args.test_threads > 16:
@@ -470,6 +478,10 @@ def main() -> int:
         print("[PASS] PTY replay validation / owned-process cleanup checks", flush=True)
     try:
         artifacts = cargo_compile(suites, env)
+    except TimeoutError as error:
+        annotate_failure(str(error))
+        print(f"[TIMEOUT] {error}", file=sys.stderr)
+        return 124
     except RuntimeError as error:
         annotate_failure(str(error))
         print(f"[FAIL] {error}", file=sys.stderr)
@@ -507,7 +519,7 @@ def main() -> int:
             f"{result.name} exit={result.returncode}" for result in failures
         )
         annotate_failure(summary)
-        return 1
+        return 124 if any(result.timed_out for result in failures) else 1
     if args.max_seconds is not None and total > args.max_seconds:
         summary = (
             "timing budget exceeded: "

@@ -184,6 +184,7 @@ fn v3_raw_serial_can_form_strong_group_without_persisted_serial_digest() {
     let mut second = first.clone();
 
     let make_entry = |path: &str, snapshot: MediaIdentitySnapshot| BackupEntry {
+        display_cached: false,
         meta: Some(BackupMeta {
             disk: 5,
             secs: Some(245_760_000),

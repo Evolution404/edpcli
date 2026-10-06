@@ -196,7 +196,7 @@ pub fn ioreg_usb(disk: u32, vid: i64, pid: i64) -> String {
 
 pub fn diskutil_info_plist(total_size: i64) -> String {
     format!(
-        "<plist version=\"1.0\"><dict><key>DiskSize</key><integer>{s}</integer><key>TotalSize</key><integer>{s}</integer><key>WholeDisk</key><true/><key>Internal</key><false/><key>BusProtocol</key><string>USB</string></dict></plist>",
+        "<plist version=\"1.0\"><dict><key>DiskSize</key><integer>{s}</integer><key>DeviceBlockSize</key><integer>512</integer><key>TotalSize</key><integer>{s}</integer><key>WholeDisk</key><true/><key>Internal</key><false/><key>BusProtocol</key><string>USB</string></dict></plist>",
         s = total_size
     )
 }

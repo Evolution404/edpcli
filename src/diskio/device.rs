@@ -4,18 +4,7 @@ pub fn raw_path(disk: u32) -> String {
     crate::platform::raw_disk_path(disk)
 }
 
-pub trait SectorDev {
-    fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>>;
-    fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()>;
-    /// 将此前写入提交到设备/介质。测试假件默认无操作；真实 FileDev 覆盖实现。
-    fn sync(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-    /// 写阶段前切换为 O_RDWR(卸载后调用)。默认无操作 — 测试镜像本就可写。
-    fn reopen_rdwr(&mut self, _wait: Duration) -> io::Result<()> {
-        Ok(())
-    }
-}
+pub use crate::ports::SectorDev;
 
 /// 只读展示/诊断路径的扇区缓存。
 ///

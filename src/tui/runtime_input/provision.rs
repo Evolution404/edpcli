@@ -188,7 +188,7 @@ pub(super) fn handle_provision_key(
                         if let Err(message) =
                             tasks.request_provision_write(prepared, backup_dir.to_path_buf())
                         {
-                            state.provision_finish_write(Err(message.to_string()));
+                            state.provision_finish_write(Err(message.into()));
                         }
                     }
                 }

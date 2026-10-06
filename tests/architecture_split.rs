@@ -338,6 +338,7 @@ fn library_root_exposes_stable_interfaces_only() {
         "edpb",
         "inspect",
         "platform",
+        "ports",
         "protocol",
         "provision",
         "tui",
@@ -364,6 +365,7 @@ fn library_root_exposes_stable_interfaces_only() {
             "edpb",
             "inspect",
             "platform",
+            "ports",
             "protocol",
             "provision",
             "tui",
@@ -918,6 +920,8 @@ fn typed_write_events_are_rendered_outside_application_layer() {
 fn domain_and_application_import_direction_is_guarded() {
     let mut domain = rust_sources_under("src/provision");
     domain.extend(rust_sources_under("src/protocol"));
+    domain.extend(rust_sources_under("src/domain"));
+    domain.extend(rust_sources_under("src/ports.rs"));
     assert_sources_exclude(domain, &["crate::tui", "crate::cli"]);
 
     let mut application = rust_sources_under("src/application");
@@ -1464,6 +1468,8 @@ fn production_and_demo_share_one_tui_action_controller() {
 #[test]
 fn infrastructure_does_not_depend_on_application_layer() {
     let mut infrastructure = rust_sources_under("src/diskio");
+    infrastructure.extend(rust_sources_under("src/infrastructure"));
+    infrastructure.extend(rust_sources_under("src/edpb"));
     for path in ["src/edpb.rs", "src/disk_scan.rs"] {
         infrastructure.push(Path::new(env!("CARGO_MANIFEST_DIR")).join(path));
     }

@@ -9,7 +9,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub use crate::domain::hardware::{
-    ExtDisk, HardwareProbe, InquiryInfo, NativeTransport, PlatformKind,
+    ExtDisk, HardwareProbe, InquiryInfo, NativeTransport, ObservedDeviceGeometry, PlatformKind,
 };
 
 /// 稳定平台门面下的设备标识推导。
@@ -24,6 +24,15 @@ pub mod system {
 
 pub struct WriteGuard {
     _inner: imp::WriteGuard,
+}
+
+#[cfg(all(feature = "ci-virtual-disk", target_os = "macos"))]
+pub(crate) struct NativeCommandRunner;
+#[cfg(all(feature = "ci-virtual-disk", target_os = "macos"))]
+impl crate::ports::CmdRunner for NativeCommandRunner {
+    fn check_output(&self, cmd: &[&str], timeout: std::time::Duration) -> io::Result<String> {
+        crate::infrastructure::process::check_output(cmd, timeout)
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -122,29 +131,51 @@ pub fn hardware_serial(disk: u32) -> Option<String> {
 /// 平台原生探测缺字段时的兼容探测。仅平台实现知道具体 OS 工具或 API；
 /// 业务层只消费统一的 `HardwareProbe`。
 pub fn fallback_hardware_probe(
-    runner: &dyn crate::sysinfo::CmdRunner,
+    runner: &dyn crate::ports::CmdRunner,
     disk: u32,
 ) -> Option<HardwareProbe> {
     imp::fallback_hardware_probe(runner, disk)
 }
 
-pub fn is_system_disk(runner: &dyn crate::sysinfo::CmdRunner, disk: u32) -> bool {
+pub fn is_system_disk(runner: &dyn crate::ports::CmdRunner, disk: u32) -> bool {
     imp::is_system_disk(runner, disk)
 }
 
-pub fn list_external_disks(runner: &dyn crate::sysinfo::CmdRunner) -> Vec<ExtDisk> {
+pub fn list_external_disks(runner: &dyn crate::ports::CmdRunner) -> Vec<ExtDisk> {
     imp::list_external_disks(runner)
 }
 
-pub fn disk_total_sectors(runner: &dyn crate::sysinfo::CmdRunner, disk: u32) -> Option<u64> {
+pub fn disk_total_sectors(runner: &dyn crate::ports::CmdRunner, disk: u32) -> Option<u64> {
     imp::disk_total_sectors(runner, disk)
 }
 
-pub fn usb_vid_pid(runner: &dyn crate::sysinfo::CmdRunner, disk: u32) -> (String, String) {
+pub fn device_geometry(
+    runner: &dyn crate::ports::CmdRunner,
+    disk: u32,
+) -> Option<ObservedDeviceGeometry> {
+    imp::device_geometry(runner, disk)
+}
+
+pub(crate) fn fallback_device_geometry(
+    runner: &dyn crate::ports::CmdRunner,
+    disk: u32,
+) -> Option<ObservedDeviceGeometry> {
+    #[cfg(target_os = "macos")]
+    {
+        imp::device_geometry(runner, disk)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (runner, disk);
+        None
+    }
+}
+
+pub fn usb_vid_pid(runner: &dyn crate::ports::CmdRunner, disk: u32) -> (String, String) {
     imp::usb_vid_pid(runner, disk)
 }
 
-pub fn prepare_write(runner: &dyn crate::sysinfo::CmdRunner, disk: u32) -> io::Result<WriteGuard> {
+pub fn prepare_write(runner: &dyn crate::ports::CmdRunner, disk: u32) -> io::Result<WriteGuard> {
     imp::prepare_write(runner, disk).map(|inner| WriteGuard { _inner: inner })
 }
 

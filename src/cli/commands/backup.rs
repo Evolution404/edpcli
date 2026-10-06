@@ -239,7 +239,10 @@ pub(in crate::cli) fn real_flow(
             );
             match result.result {
                 Ok(()) => println!("分区 {index} 已使用新密码和新 FileKey 重建；读回验证通过"),
-                Err(message) => eprintln!("分区 {index} 清空重建失败: {message}"),
+                Err(error) => {
+                    eprintln!("分区 {index} 清空重建失败: {error}；已停止后续写入");
+                    return error.exit_code();
+                }
             }
             // The restored-protocol resume pin predates the new key records.
             break;
@@ -267,10 +270,16 @@ pub(in crate::cli) fn real_flow(
                 Ok(()) => println!("分区 {index} 使用原密钥域格式化成功，读回验证通过"),
                 Err(crate::application::post_restore::EncryptedPostRestoreError::FileKey(
                     error,
-                )) => eprintln!("分区 {index} 原密钥验证失败: {error}"),
+                )) => {
+                    eprintln!("分区 {index} 原密钥验证失败: {error}");
+                    return crate::common::EXIT_TARGET;
+                }
                 Err(crate::application::post_restore::EncryptedPostRestoreError::Operation(
-                    message,
-                )) => eprintln!("分区 {index} 格式化失败: {message}"),
+                    error,
+                )) => {
+                    eprintln!("分区 {index} 格式化失败: {error}；已停止后续写入");
+                    return error.exit_code();
+                }
             }
         } else {
             let result = crate::application::post_restore::format_partition_after_restore_on_disk(
@@ -278,7 +287,10 @@ pub(in crate::cli) fn real_flow(
             );
             match result.result {
                 Ok(()) => println!("分区 {index} 格式化成功，读回与重新评估均通过"),
-                Err(message) => eprintln!("分区 {index} 格式化失败: {message}"),
+                Err(error) => {
+                    eprintln!("分区 {index} 格式化失败: {error}；已停止后续写入");
+                    return error.exit_code();
+                }
             }
         }
     }

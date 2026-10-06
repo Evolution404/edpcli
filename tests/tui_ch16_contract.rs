@@ -1145,6 +1145,9 @@ fn ch16_provision_result_uses_workbench_hero_and_panes() {
         (Status::Success, "✓制盘成功"),
         (Status::CompletedWithWarnings, "⚠制盘完成·存在警告"),
         (Status::PartialFormatFailure, "⚠制盘完成·部分格式化失败"),
+        (Status::FormatRolledBack, "⚠协议已写入·失败分区已回滚"),
+        (Status::MediaIntermediate, "✗介质处于中间态·已停止写入"),
+        (Status::MediaStateUnknown, "✗介质状态未确认·已停止写入"),
         (Status::FatalFailure, "✗制盘失败"),
     ] {
         state.provision_mut().result_status = Some(status);
@@ -1156,6 +1159,29 @@ fn ch16_provision_result_uses_workbench_hero_and_panes() {
         assert!(text.contains("Enter/Esc返回设备列表"));
         assert!(!text.contains("Esc/Enter返回设备列表"));
         assert!(!text.contains("最近进度事件"));
+    }
+}
+
+#[test]
+fn ch16_provision_failed_worker_retains_unsafe_media_state() {
+    use edpcli::application::error::{MediaState, OperationError};
+    use edpcli::application::provision::ProvisionExecutionStatus as Status;
+    use edpcli::tui::state::ProvisionStage;
+
+    for (media_state, expected) in [
+        (MediaState::Intermediate, Status::MediaIntermediate),
+        (MediaState::Unknown, Status::MediaStateUnknown),
+    ] {
+        let mut state = provision_state();
+        state.provision_mut().stage = ProvisionStage::Running;
+        state.provision_finish_write(Err(
+            OperationError::from("injected worker failure").with_media_state(media_state)
+        ));
+        assert_eq!(state.provision().result_status, Some(expected));
+        assert!(state.provision().result_outcome.is_none());
+        let text = rendered_lines(&state, 140, 40).join("\n").replace(' ', "");
+        assert!(text.contains("已停止写入"));
+        assert!(!text.contains("✓制盘成功"));
     }
 }
 

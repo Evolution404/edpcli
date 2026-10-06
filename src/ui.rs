@@ -343,6 +343,22 @@ pub fn disk_menu_str(disks: &[crate::sysinfo::ExtDisk]) -> String {
 // ══════════════════════════════════════════════════════════════════
 // 4. 真盘流程
 
+pub fn provision_warning_text(warning: &crate::application::provision::ProvisionWarning) -> String {
+    match warning {
+        crate::application::provision::ProvisionWarning::IncompleteFormat => {
+            "部分格式化步骤未完成；未记录成功的介质历史".into()
+        }
+        crate::application::provision::ProvisionWarning::AfterIdentityObservationFailed(
+            message,
+        ) => {
+            format!("制盘已完成，但无法采集写后介质身份：{message}")
+        }
+        crate::application::provision::ProvisionWarning::HostLineagePersistenceFailed(message) => {
+            format!("制盘已完成，但主机介质历史保存失败：{message}")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

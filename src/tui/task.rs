@@ -226,6 +226,8 @@ pub struct TaskHub {
     tx: Sender<WorkerResult>,
     rx: Receiver<WorkerResult>,
     device_slot: TaskSlot<ScanRequest>,
+    device_display_scan: Option<Arc<crate::application::catalog_snapshot::CatalogSnapshot>>,
+    backup_display_scan: Option<Arc<crate::application::catalog_snapshot::CatalogSnapshot>>,
     backup_slot: TaskSlot<ScanRequest>,
     advanced_inspect_slot: TaskSlot<()>,
     advanced_inspect_sector_slot: TaskSlot<()>,
@@ -252,6 +254,8 @@ impl TaskHub {
             tx,
             rx,
             device_slot: TaskSlot::new(),
+            device_display_scan: None,
+            backup_display_scan: None,
             backup_slot: TaskSlot::new(),
             advanced_inspect_slot: TaskSlot::new(),
             advanced_inspect_sector_slot: TaskSlot::new(),
@@ -305,9 +309,17 @@ impl TaskHub {
     }
 
     pub fn request_workspace_scan(&mut self, root: PathBuf) -> (u64, u64) {
+        if let Some(previous) = self.device_display_scan.take() {
+            previous.cancel();
+        }
+        if let Some(previous) = self.backup_display_scan.take() {
+            previous.cancel();
+        }
         let snapshot = Arc::new(crate::application::catalog_snapshot::CatalogSnapshot::new(
             &root,
         ));
+        self.device_display_scan = Some(snapshot.clone());
+        self.backup_display_scan = Some(snapshot.clone());
         let devices = self.request_device_scan_model(ScanRequest {
             root: root.clone(),
             snapshot: Some(snapshot.clone()),
@@ -320,9 +332,21 @@ impl TaskHub {
     }
 
     pub fn request_device_scan(&mut self, backup_dir: PathBuf) -> u64 {
+        let snapshot = Arc::new(crate::application::catalog_snapshot::CatalogSnapshot::new(
+            &backup_dir,
+        ));
+        if let Some(previous) = self.device_display_scan.replace(snapshot.clone()) {
+            if !self
+                .backup_display_scan
+                .as_ref()
+                .is_some_and(|other| Arc::ptr_eq(&previous, other))
+            {
+                previous.cancel();
+            }
+        }
         self.request_device_scan_model(ScanRequest {
             root: backup_dir,
-            snapshot: None,
+            snapshot: Some(snapshot),
         })
     }
 
@@ -362,9 +386,21 @@ impl TaskHub {
     }
 
     pub fn request_backup_scan(&mut self, backup_dir: PathBuf) -> u64 {
+        let snapshot = Arc::new(crate::application::catalog_snapshot::CatalogSnapshot::new(
+            &backup_dir,
+        ));
+        if let Some(previous) = self.backup_display_scan.replace(snapshot.clone()) {
+            if !self
+                .device_display_scan
+                .as_ref()
+                .is_some_and(|other| Arc::ptr_eq(&previous, other))
+            {
+                previous.cancel();
+            }
+        }
         self.request_backup_scan_model(ScanRequest {
             root: backup_dir,
-            snapshot: None,
+            snapshot: Some(snapshot),
         })
     }
 

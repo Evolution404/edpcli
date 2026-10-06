@@ -1,6 +1,7 @@
 //! Separately authorized replacement of one EDP encrypted key domain.
 
 use super::*;
+use crate::application::error::{MediaState, OperationError};
 use crate::application::media_identity::MediaIdentityResumePin;
 use crate::application::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use crate::application::Prompter;
@@ -15,7 +16,7 @@ use super::format_operation::{failure, verify_current_target, KeyCheck, REOPEN_W
 pub struct EncryptedPartitionReinitializeResult {
     pub partition_index: u32,
     pub filesystem: FilesystemKind,
-    pub result: Result<(), String>,
+    pub result: Result<(), OperationError>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -31,6 +32,7 @@ pub fn reinitialize_encrypted_partition_on_disk(
     volume_label: &str,
     volume_serial: u32,
 ) -> EncryptedPartitionReinitializeResult {
+    let mut committed = false;
     let result = (|| -> EdpCliResult<()> {
         if !outcome.report.metadata_restored || !outcome.report.readback_verified {
             return Err(failure("元数据恢复尚未成功且读回验证，禁止重建密钥域"));
@@ -154,7 +156,7 @@ pub fn reinitialize_encrypted_partition_on_disk(
         let session = session.prepare_write().map_err(|error| {
             EdpCliError::new(EXIT_IO, format!("无法卸载/锁定 disk{disk}: {error}"))
         })?;
-        let _locked = session
+        let mut locked_session = session
             .reopen_and_verify(dev, REOPEN_WAIT, |dev| {
                 verify_current_target(
                     runner, disk, dev, expected, outcome, partition, KeyCheck::Reinitialize,
@@ -166,8 +168,11 @@ pub fn reinitialize_encrypted_partition_on_disk(
                     EdpCliError::new(EXIT_IO, format!("重开 disk{disk} 失败: {error}"))
                 }
                 ReopenAndVerifyError::Verify(error) => error,
+            ReopenAndVerifyError::Geometry(error) => error,
             })?;
-        diskio::execute_write_transaction(dev, &transaction)?;
+
+    let dev = locked_session.device();        diskio::execute_write_transaction(dev, &transaction)?;
+        committed = true;
         let after = assess_partitions_with_password_readonly(
             dev,
             &outcome.device_state,
@@ -189,7 +194,13 @@ pub fn reinitialize_encrypted_partition_on_disk(
         file_key.fill(0);
         Ok(())
     })()
-    .map_err(|error| error.msg);
+    .map_err(|error| {
+        let mut error = OperationError::from(error).in_phase("重建加密分区");
+        if error.media_state.is_none() {
+            error.media_state = Some(if committed { MediaState::Unknown } else { MediaState::Unchanged });
+        }
+        error
+    });
     EncryptedPartitionReinitializeResult {
         partition_index: request.partition_index,
         filesystem,
@@ -206,7 +217,7 @@ pub fn reinitialize_encrypted_partition_after_restore_on_disk(
     filesystem: FilesystemKind,
     volume_label: &str,
 ) -> EncryptedPartitionReinitializeResult {
-    let result = (|| -> EdpCliResult<Result<(), String>> {
+    let result = (|| -> EdpCliResult<Result<(), OperationError>> {
         let expected = outcome
             .format_target_pin
             .as_ref()
@@ -231,7 +242,7 @@ pub fn reinitialize_encrypted_partition_after_restore_on_disk(
         filesystem,
         result: match result {
             Ok(result) => result,
-            Err(error) => Err(error.msg),
+            Err(error) => Err(error.into()),
         },
     }
 }

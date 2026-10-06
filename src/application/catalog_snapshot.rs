@@ -8,17 +8,26 @@ use std::{
 #[derive(Debug)]
 pub(crate) struct CatalogSnapshot {
     root: PathBuf,
+    control: crate::ports::ReadControl,
     catalog: OnceLock<BackupCatalog>,
 }
 impl CatalogSnapshot {
     pub(crate) fn new(root: &Path) -> Self {
         Self {
             root: root.to_owned(),
+            control: crate::ports::ReadControl::new(
+                1024 * 1024 * 1024,
+                std::time::Duration::from_secs(20),
+            ),
             catalog: OnceLock::new(),
         }
     }
+    pub(crate) fn cancel(&self) {
+        self.control.cancel();
+    }
     pub(crate) fn catalog(&self) -> &BackupCatalog {
-        self.catalog.get_or_init(|| BackupCatalog::load(&self.root))
+        self.catalog
+            .get_or_init(|| BackupCatalog::load_for_display(&self.root, &self.control))
     }
 }
 

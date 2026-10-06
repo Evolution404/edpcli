@@ -29,6 +29,18 @@ impl BackupCatalog {
         }
     }
 
+    pub(crate) fn load_for_display(root: &Path, control: &crate::ports::ReadControl) -> Self {
+        let (entries, scan_error) = match diskio::scan_backup_dir_display(root, control) {
+            Ok(scan) => (scan.entries, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
+        Self {
+            root: root.to_owned(),
+            entries,
+            scan_error,
+        }
+    }
+
     pub fn scan_error(&self) -> Option<&str> {
         self.scan_error.as_deref()
     }

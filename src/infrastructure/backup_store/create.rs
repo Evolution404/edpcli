@@ -1,5 +1,6 @@
+use super::catalog::{lba4_label_id_from, scan_backup_dir, BackupEntry, DiskFacts};
 use crate::common::{EdpCliError, EdpCliResult, EXIT_BACKUP, EXIT_IO, SECTOR};
-use crate::diskio::*;
+use crate::ports::Clock;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};

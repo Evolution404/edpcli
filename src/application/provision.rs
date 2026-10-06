@@ -11,7 +11,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::backup_metadata::{parse_lba7_compatibility_geometry, PartitionGeometry};
-use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_OK, EXIT_TARGET, SECTOR};
+use crate::common::{
+    EdpCliError, EdpCliResult, EXIT_INTERMEDIATE, EXIT_IO, EXIT_OK, EXIT_ROLLED_BACK, EXIT_TARGET,
+    SECTOR,
+};
 use crate::diskio::{self, SectorDev};
 use crate::filesystem::analysis::{analyze_partition, AnalysisStatus, PartitionReader};
 use crate::filesystem::{FilesystemKind, SparseFilesystemImage};
@@ -263,7 +266,49 @@ impl std::fmt::Debug for PlannedPartitionFormat {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PartitionFormatResult {
     pub role: PartitionRole,
-    pub result: Result<(), String>,
+    pub result: Result<(), PartitionFormatError>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PartitionFormatError {
+    Failed(super::error::OperationError),
+    Skipped { after: PartitionRole },
+}
+
+impl PartitionFormatError {
+    pub fn operation_error(&self) -> Option<&super::error::OperationError> {
+        match self {
+            Self::Failed(error) => Some(error),
+            Self::Skipped { .. } => None,
+        }
+    }
+
+    pub const fn is_skipped(&self) -> bool {
+        matches!(self, Self::Skipped { .. })
+    }
+}
+
+impl From<String> for PartitionFormatError {
+    fn from(message: String) -> Self {
+        Self::Failed(message.into())
+    }
+}
+
+impl From<&str> for PartitionFormatError {
+    fn from(message: &str) -> Self {
+        Self::Failed(message.into())
+    }
+}
+
+impl std::fmt::Display for PartitionFormatError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Failed(error) => std::fmt::Display::fmt(error, f),
+            Self::Skipped { after } => {
+                write!(f, "未执行：{}格式化失败后已停止后续写入", after.label())
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -293,6 +338,9 @@ pub enum ProvisionExecutionStatus {
     Success,
     CompletedWithWarnings,
     PartialFormatFailure,
+    FormatRolledBack,
+    MediaIntermediate,
+    MediaStateUnknown,
     FatalFailure,
 }
 
@@ -301,12 +349,52 @@ impl ProvisionExecutionStatus {
         match self {
             Self::Success | Self::CompletedWithWarnings => EXIT_OK,
             Self::PartialFormatFailure | Self::FatalFailure => EXIT_IO,
+            Self::FormatRolledBack => EXIT_ROLLED_BACK,
+            Self::MediaIntermediate | Self::MediaStateUnknown => EXIT_INTERMEDIATE,
         }
     }
 }
 
 impl ProvisionWriteOutcome {
+    pub fn exit_code(&self) -> i32 {
+        let status = self.execution_status();
+        if matches!(
+            status,
+            ProvisionExecutionStatus::MediaIntermediate
+                | ProvisionExecutionStatus::MediaStateUnknown
+        ) {
+            return status.exit_code();
+        }
+        if let ProvisionCommitOutcome::Official(report) = &self.commit {
+            if let Some(code) = report
+                .formats
+                .iter()
+                .find_map(|format| format.result.as_ref().err()?.operation_error()?.code)
+            {
+                return code;
+            }
+        }
+        status.exit_code()
+    }
+
     pub fn execution_status(&self) -> ProvisionExecutionStatus {
+        use super::error::MediaState;
+        if let ProvisionCommitOutcome::Official(report) = &self.commit {
+            let states = report
+                .formats
+                .iter()
+                .filter_map(|format| format.result.as_ref().err()?.operation_error()?.media_state)
+                .collect::<Vec<_>>();
+            if states.contains(&MediaState::Intermediate) {
+                return ProvisionExecutionStatus::MediaIntermediate;
+            }
+            if states.contains(&MediaState::Unknown) {
+                return ProvisionExecutionStatus::MediaStateUnknown;
+            }
+            if states.contains(&MediaState::RolledBack) {
+                return ProvisionExecutionStatus::FormatRolledBack;
+            }
+        }
         if self
             .warnings
             .iter()
@@ -324,29 +412,6 @@ impl ProvisionWriteOutcome {
             ProvisionExecutionStatus::CompletedWithWarnings
         }
     }
-
-    pub fn summary_lines(&self) -> Vec<String> {
-        let mut lines = vec![format!("制盘前自动备份：{}", self.backup.path.display())];
-        match &self.commit {
-            ProvisionCommitOutcome::Official(report) => {
-                lines.push("制盘：成功，协议与几何读回验证通过。".into());
-                if report.formats.is_empty() {
-                    lines.push("格式化：未选择任何分区".into());
-                }
-                for item in &report.formats {
-                    lines.push(match &item.result {
-                        Ok(()) => format!("格式化：✓ {}，读回验证通过", item.role.label()),
-                        Err(message) => format!("格式化：✗ {}：{message}", item.role.label()),
-                    });
-                }
-            }
-            ProvisionCommitOutcome::Plain { partition_count } => lines.push(format!(
-                "恢复普通盘：成功，{partition_count} 个 MBR 主分区已写入并读回验证；LBA3 保留，EDP 状态已清除。"
-            )),
-        }
-        lines.extend(self.warnings.iter().map(ProvisionWarning::message));
-        lines
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -354,20 +419,6 @@ pub enum ProvisionWarning {
     IncompleteFormat,
     AfterIdentityObservationFailed(String),
     HostLineagePersistenceFailed(String),
-}
-
-impl ProvisionWarning {
-    pub fn message(&self) -> String {
-        match self {
-            Self::IncompleteFormat => "部分格式化步骤未完成；未记录成功的介质历史".into(),
-            Self::AfterIdentityObservationFailed(message) => {
-                format!("制盘已完成，但无法采集写后介质身份：{message}")
-            }
-            Self::HostLineagePersistenceFailed(message) => {
-                format!("制盘已完成，但主机介质历史保存失败：{message}")
-            }
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -379,18 +430,23 @@ pub struct ProvisionKeyProbe {
     pub encrypt_opaque_profile: bool,
 }
 
+/// Prepared safety facts cannot be edited by external callers; prepare a new request instead.
+/// ```compile_fail
+/// use edpcli::application::provision::PreparedNewProvision;
+/// fn change_target(plan: &mut PreparedNewProvision) { plan.disk = 99; }
+/// ```
 #[derive(Clone, Eq, PartialEq)]
 pub struct PreparedNewProvision {
-    pub disk: u32,
-    pub device_id: String,
-    pub source_kind: crate::provision::DiskProvisionKind,
-    pub mode: OfficialPartitionMode,
-    pub force_change_password: bool,
-    pub pass_info_policy: PassInfoPolicy,
-    pub lce_start_lba: u64,
-    pub write_image: OfficialProvisionWriteImage,
-    pub format_targets: Vec<PlannedPartitionFormat>,
-    pub target_plan: Option<TargetProvisionPlan>,
+    pub(crate) disk: u32,
+    pub(crate) device_id: String,
+    pub(crate) source_kind: crate::provision::DiskProvisionKind,
+    pub(crate) mode: OfficialPartitionMode,
+    pub(crate) force_change_password: bool,
+    pub(crate) pass_info_policy: PassInfoPolicy,
+    pub(crate) lce_start_lba: u64,
+    pub(crate) write_image: OfficialProvisionWriteImage,
+    pub(crate) format_targets: Vec<PlannedPartitionFormat>,
+    pub(crate) target_plan: Option<TargetProvisionPlan>,
     source_metadata: Option<Vec<u8>>,
     before_pin: MediaIdentityPin,
     plan: OfficialProvisionPlan,
@@ -402,12 +458,12 @@ pub struct PreparedNewProvision {
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct PreparedPlainProvision {
-    pub disk: u32,
-    pub device_id: String,
-    pub plan: PlainProvisionPlan,
-    pub write_plan: PlainProvisionWritePlan,
-    pub source_kind: crate::provision::DiskProvisionKind,
-    pub source_lce_start_lba: Option<u64>,
+    pub(crate) disk: u32,
+    pub(crate) device_id: String,
+    pub(crate) plan: PlainProvisionPlan,
+    pub(crate) write_plan: PlainProvisionWritePlan,
+    pub(crate) source_kind: crate::provision::DiskProvisionKind,
+    pub(crate) source_lce_start_lba: Option<u64>,
     source_metadata: Vec<u8>,
     before_pin: MediaIdentityPin,
     expected_probe: crate::platform::HardwareProbe,
@@ -598,9 +654,7 @@ mod prepare;
 mod prepared_projection;
 mod progress_projection;
 
-pub use commit::{
-    capture_manufacturer_lba3, commit_new_provision, commit_plain_provision, commit_provision,
-};
+pub use commit::capture_manufacturer_lba3;
 pub use error::ProvisionPlanningError;
 pub use export::{
     export_provision_image, export_sparse_plain_provision_image, export_sparse_provision_image,
@@ -623,23 +677,86 @@ pub fn prepare_provision_on_disk(
     prepare_provision(runner, disk, request, &mut dev)
 }
 
+/// Real device commit requires a verified, source-bound backup capability.
+/// ```compile_fail
+/// use edpcli::application::provision::{PreparedProvision, commit_provision_on_disk};
+/// use edpcli::ports::CmdRunner;
+/// fn bypass(runner: &dyn CmdRunner, prepared: &PreparedProvision) {
+///     commit_provision_on_disk(runner, prepared).unwrap();
+/// }
+/// ```
 pub fn commit_provision_on_disk(
     runner: &dyn CmdRunner,
-    prepared: &PreparedProvision,
+    backed_up: &BackedUpPreparedProvision<'_>,
 ) -> EdpCliResult<ProvisionCommitOutcome> {
-    let mut dev = open_readonly_usb_disk(runner, prepared.disk())?;
-    commit_provision(runner, &mut dev, prepared)
+    commit_provision_on_disk_with_progress(runner, backed_up, &mut |_, _, _| {})
+}
+
+/// A source-bound backup proof. Only the verified backup acquisition creates it.
+/// ```no_run
+/// use edpcli::application::provision::{BackedUpPreparedProvision, commit_provision_on_disk};
+/// use edpcli::ports::CmdRunner;
+/// fn commit(runner: &dyn CmdRunner, proof: &BackedUpPreparedProvision<'_>) {
+///     commit_provision_on_disk(runner, proof).unwrap();
+/// }
+/// ```
+pub struct BackedUpPreparedProvision<'a> {
+    prepared: &'a PreparedProvision,
+    backup: super::write::BackupReport,
+    sha256: String,
+}
+
+impl BackedUpPreparedProvision<'_> {
+    pub fn prepared(&self) -> &PreparedProvision {
+        self.prepared
+    }
+    pub fn backup(&self) -> &super::write::BackupReport {
+        &self.backup
+    }
+}
+
+pub fn backup_prepared_provision_on_disk<'a>(
+    runner: &dyn CmdRunner,
+    prepared: &'a PreparedProvision,
+    backup_dir: PathBuf,
+    prompt: &mut dyn super::Prompter,
+) -> EdpCliResult<BackedUpPreparedProvision<'a>> {
+    let expected_onlyid = prepared.source_backup_onlyid()?;
+    let backup = super::write::backup_create_on_disk(
+        runner,
+        prepared.disk(),
+        backup_dir,
+        prompt,
+        expected_onlyid.as_deref(),
+        Some(prepared.device_id()),
+    )?;
+    let sha256 =
+        verify_mandatory_backup_pin(&backup, prepared.before_pin(), prepared.source_metadata()?)?;
+    Ok(BackedUpPreparedProvision {
+        prepared,
+        backup,
+        sha256,
+    })
 }
 
 fn commit_provision_on_disk_with_progress(
     runner: &dyn CmdRunner,
-    prepared: &PreparedProvision,
+    backed_up: &BackedUpPreparedProvision<'_>,
     progress: &mut dyn FnMut(
         crate::application::progress::Phase,
         crate::application::progress::Step,
         Option<diskio::TransactionActivity>,
     ),
 ) -> EdpCliResult<ProvisionCommitOutcome> {
+    let prepared = backed_up.prepared;
+    let fresh_sha256 = verify_mandatory_backup_pin(
+        &backed_up.backup,
+        prepared.before_pin(),
+        prepared.source_metadata()?,
+    )?;
+    if fresh_sha256 != backed_up.sha256 {
+        return Err(err(EXIT_TARGET, "错误: 已授权备份内容发生变化，禁止提交"));
+    }
     let mut dev = open_readonly_usb_disk(runner, prepared.disk())?;
     commit::commit_provision_with_progress(runner, &mut dev, prepared, progress)
 }
@@ -823,13 +940,18 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
     );
     let backup_sha256 =
         verify_mandatory_backup_pin(&backup, prepared.before_pin(), prepared.source_metadata()?)?;
+    let backed_up = BackedUpPreparedProvision {
+        prepared,
+        backup,
+        sha256: backup_sha256.clone(),
+    };
     current += 1;
     emit_isolated(
         sink,
         ProgressEvent::new(Phase::Identity, Step::BackupVerification, current, total),
     );
     let commit =
-        commit_provision_on_disk_with_progress(runner, prepared, &mut |phase, step, work| {
+        commit_provision_on_disk_with_progress(runner, &backed_up, &mut |phase, step, work| {
             if work.is_none() && step != Step::LockAndReopen {
                 current += 1;
             }
@@ -837,7 +959,7 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
             emit_isolated(sink, event);
         })?;
     let mut outcome = ProvisionWriteOutcome {
-        backup,
+        backup: backed_up.backup,
         commit,
         warnings: Vec::new(),
     };
@@ -845,9 +967,25 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
     {
         outcome.warnings.push(ProvisionWarning::IncompleteFormat);
         let mut complete = ProgressEvent::new(Phase::Complete, Step::Completed, total, total);
-        complete.severity = Severity::Warning;
+        let unsafe_state = matches!(
+            outcome.execution_status(),
+            ProvisionExecutionStatus::MediaIntermediate
+                | ProvisionExecutionStatus::MediaStateUnknown
+        );
+        complete.severity = if unsafe_state {
+            Severity::Error
+        } else {
+            Severity::Warning
+        };
         complete.log_policy = LogPolicy::Append;
-        complete.detail = Some("制盘事务完成，但至少一个分区格式化失败".into());
+        complete.detail = Some(
+            if unsafe_state {
+                "协议已写入；格式化或回滚后介质状态未安全确认，已停止后续写入，请重新检查设备。"
+            } else {
+                "协议已写入；至少一个分区格式化失败，后续分区未执行。"
+            }
+            .into(),
+        );
         emit_isolated(sink, complete);
         return Ok(outcome);
     }

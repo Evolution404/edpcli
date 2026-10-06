@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 
 use super::{ExtDisk, HardwareProbe, InquiryInfo, NativeTransport, PlatformKind};
 use crate::common::SECTOR;
-use crate::sysinfo::CmdRunner;
+use crate::ports::CmdRunner;
 
 pub(super) const fn kind() -> PlatformKind {
     PlatformKind::Linux
@@ -313,6 +313,31 @@ pub(super) fn disk_total_sectors(_runner: &dyn CmdRunner, disk: u32) -> Option<u
         .ok()
 }
 
+pub(super) fn device_geometry(
+    _runner: &dyn CmdRunner,
+    disk: u32,
+) -> Option<super::ObservedDeviceGeometry> {
+    let name = block_name(disk)?;
+    geometry_from_sysfs(
+        &read_trim(format!("/sys/class/block/{name}/size"))?,
+        read_trim(format!("/sys/class/block/{name}/queue/logical_block_size")).as_deref(),
+        read_trim(format!("/sys/class/block/{name}/queue/physical_block_size")).as_deref(),
+    )
+}
+
+fn geometry_from_sysfs(
+    size: &str,
+    logical: Option<&str>,
+    physical: Option<&str>,
+) -> Option<super::ObservedDeviceGeometry> {
+    Some(super::ObservedDeviceGeometry {
+        // Linux sysfs size is always measured in 512-byte sectors, independently of queue block sizes.
+        capacity_bytes: size.parse::<u64>().ok()?.checked_mul(512)?,
+        logical_sector_bytes: logical.and_then(|value| value.parse().ok()),
+        physical_sector_bytes: physical.and_then(|value| value.parse().ok()),
+    })
+}
+
 pub(super) fn usb_vid_pid(_runner: &dyn CmdRunner, disk: u32) -> (String, String) {
     let Some(probe) = hardware_probe(disk) else {
         return ("xxxx".into(), "xxxx".into());
@@ -483,5 +508,15 @@ mod tests {
             }
         }
         assert!(is_system_disk(&NoopRunner, u32::MAX));
+    }
+    #[test]
+    fn sysfs_geometry_distinguishes_capacity_units_and_logical_blocks() {
+        for (logical, accepted) in [(Some("512"), true), (Some("4096"), false), (None, false)] {
+            let geometry = geometry_from_sysfs("16", logical, Some("4096")).unwrap();
+            assert_eq!(geometry.capacity_bytes, 8192);
+            assert_eq!(geometry.physical_sector_bytes, Some(4096));
+            assert_eq!(geometry.writable_protocol_sectors().is_ok(), accepted);
+        }
+        assert!(geometry_from_sysfs(&u64::MAX.to_string(), Some("512"), None).is_none());
     }
 }

@@ -149,7 +149,10 @@ pub(super) fn render_partition_pane(
                     .find(|item| Some(item.role) == partition.role)
                     .and_then(|item| item.result.as_ref().err())
                 {
-                    lines.push(Line::from(Span::styled(safe(error), theme.danger())));
+                    lines.push(Line::from(Span::styled(
+                        safe(&error.to_string()),
+                        theme.danger(),
+                    )));
                 }
             }
             lines.push(Line::from("Enter 检查当前分区 · Esc 返回设备列表"));

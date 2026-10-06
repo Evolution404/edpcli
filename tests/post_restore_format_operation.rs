@@ -27,6 +27,8 @@ struct SparseFormatDev {
     swap_on_reopen: bool,
     fail_write: bool,
     fail_write_once_after: Option<usize>,
+    fail_boot_read_after_write: Option<usize>,
+    boot_reads_after_write: usize,
 }
 
 impl SparseFormatDev {
@@ -46,12 +48,20 @@ impl SparseFormatDev {
             swap_on_reopen: false,
             fail_write: false,
             fail_write_once_after: None,
+            fail_boot_read_after_write: None,
+            boot_reads_after_write: 0,
         }
     }
 }
 
 impl SectorDev for SparseFormatDev {
     fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+        if lba == 2_048 && !self.writes.is_empty() {
+            self.boot_reads_after_write += 1;
+            if self.fail_boot_read_after_write == Some(self.boot_reads_after_write) {
+                return Err(io::Error::other("injected post-write boot read failure"));
+            }
+        }
         Ok(self
             .sectors
             .get(&lba)
@@ -193,7 +203,22 @@ fn format_progress_reports_actual_work_and_only_completes_after_reassessment() {
 fn format_progress_keeps_rollback_visible_without_marking_success() {
     let mut dev = SparseFormatDev::new();
     let (result, outcome, events) = run_with_progress(&mut dev, Some(2), false);
-    assert!(result.result.is_err());
+    let error = result.result.as_ref().unwrap_err();
+    assert_eq!(
+        error.media_state(),
+        Some(edpcli::application::error::MediaState::RolledBack)
+    );
+    let PostRestoreFormatError::Operation(error) = error else {
+        panic!("transaction error must retain its code");
+    };
+    assert_eq!(
+        error.code,
+        Some(edpcli::application::support::EXIT_ROLLED_BACK)
+    );
+    assert_eq!(
+        error.exit_code(),
+        edpcli::application::support::EXIT_ROLLED_BACK
+    );
     for step in [
         FormatStep::RollbackWrite,
         FormatStep::RollbackSync,
@@ -212,6 +237,36 @@ fn format_progress_keeps_rollback_visible_without_marking_success() {
         .writes
         .iter()
         .all(|lba| dev.sectors[lba] == vec![0; SECTOR]));
+}
+
+#[test]
+fn post_write_boot_verification_and_reassessment_failures_mark_media_unknown() {
+    for fail_on_read in [2, 3] {
+        let mut dev = SparseFormatDev::new();
+        dev.fail_boot_read_after_write = Some(fail_on_read);
+        let (result, outcome, events) = run_with_progress(&mut dev, None, false);
+        let error = result.result.as_ref().unwrap_err();
+        assert_eq!(
+            error.exit_code(),
+            edpcli::application::support::EXIT_INTERMEDIATE
+        );
+        assert_eq!(
+            error.media_state(),
+            Some(edpcli::application::error::MediaState::Unknown)
+        );
+        assert!(matches!(
+            error,
+            PostRestoreFormatError::UnverifiedAfterWrite(_)
+        ));
+        assert!(!dev.writes.is_empty());
+        assert!(outcome.report.metadata_restored && outcome.report.readback_verified);
+        assert!(events.iter().all(|event| event.step != Step::Completed));
+        if fail_on_read == 3 {
+            assert!(events
+                .iter()
+                .any(|event| event.step == Step::PostRestoreFormat(FormatStep::Reassess)));
+        }
+    }
 }
 
 #[test]

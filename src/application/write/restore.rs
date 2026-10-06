@@ -25,18 +25,11 @@ pub fn restore_flow_typed(
     let img = observed.protocol_image;
     let target_identity = observed.snapshot;
     let raw_target_device_id = identify(ctx.runner, disk, &img[7 * SECTOR..8 * SECTOR]).device_id;
-    let lba4 = &img[4 * SECTOR..5 * SECTOR];
     let label_id = target_identity.protocol.onlyid.clone();
-    let tag16 = diskio::lba4_tag16_from(lba4)
-        .ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少 16B 身份标签"))?;
-    let target_lba4_nonzero = lba4.iter().any(|byte| *byte != 0);
-    let selector = BackupSelector::load(&ctx.backup_dir);
     let path: PathBuf = match bin {
-        Some(target) => selector
-            .resolve_one(&target)
-            .map(|entry| entry.path.clone())
-            .map_err(|message| err(EXIT_BACKUP, format!("错误: {message}")))?,
+        Some(target) => resolve_restore_backup_path(&ctx.backup_dir, &target)?,
         None => {
+            let selector = BackupSelector::load(&ctx.backup_dir);
             let choices: Vec<_> = selector
                 .numbered_with_indices()
                 .into_iter()
@@ -113,16 +106,10 @@ pub fn restore_flow_typed(
 
     // Protocol tag remains a separate consistency check for EDP backups only; it
     // cannot override the strong physical-media + exact-geometry write grant.
-    let backup_tag16 = backup_protocol
-        .as_deref()
-        .and_then(|data| diskio::lba4_tag16_from(&data[4 * SECTOR..5 * SECTOR]));
-    let backup_identity = backup_identity(&verified.manifest)?;
-    let current_total_sectors = sysinfo::disk_total_sectors(ctx.runner, disk)
-        .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得当前目标盘总扇区数，拒绝恢复"))?;
-    let geometry = RestoreGeometryRequirements {
-        total_sectors: current_total_sectors,
-        logical_sector_size: SECTOR as u32,
-    };
+    let observed_geometry = target_session.writable_geometry()?;
+    let current_total_sectors = observed_geometry
+        .writable_protocol_sectors()
+        .map_err(|message| err(EXIT_TARGET, message))?;
     let transaction = build_metadata_restore_plan(
         &reader,
         backup_protocol.as_deref(),
@@ -139,6 +126,126 @@ pub fn restore_flow_typed(
     {
         return Err(err(EXIT_CANCELLED, "已取消"));
     }
+    let expected_target = MediaIdentityResumePin::from_pin(
+        &crate::media_identity::MediaIdentityPin::new(target_identity, &img),
+    );
+    let request = RestoreMetadataRequest {
+        disk,
+        backup_path: path,
+        confirmed: true,
+        expected_target,
+        expected_backup_sha256: verified.file_sha256.clone(),
+    };
+    restore_metadata_on_device(ctx.runner, &request, dev, &mut |event| {
+        // The compatibility adapter already emitted this before confirmation.
+        if !matches!(event, WriteEvent::BackupShaVerified { .. }) {
+            ctx.prompt.write_event(event);
+        }
+    })
+}
+
+/// Exact filenames avoid a sibling scan; numeric selections preserve the global catalog numbering.
+pub fn resolve_restore_backup_path(root: &std::path::Path, target: &str) -> EdpCliResult<PathBuf> {
+    if !target.is_empty() && target.bytes().all(|byte| byte.is_ascii_digit()) {
+        return BackupSelector::load(root)
+            .resolve_one(target)
+            .map(|entry| entry.path.clone())
+            .map_err(|message| err(EXIT_BACKUP, message));
+    }
+    let root = std::fs::canonicalize(root).map_err(|error| err(EXIT_BACKUP, error.to_string()))?;
+    let raw = std::path::Path::new(target);
+    let candidate = if raw.components().count() == 1 {
+        root.join(raw)
+    } else if raw.is_absolute() {
+        raw.to_owned()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| err(EXIT_BACKUP, error.to_string()))?
+            .join(raw)
+    };
+    let path =
+        std::fs::canonicalize(candidate).map_err(|error| err(EXIT_BACKUP, error.to_string()))?;
+    if !path.starts_with(&root) || path.extension().and_then(|part| part.to_str()) != Some("edpb") {
+        return Err(err(EXIT_BACKUP, "拒绝访问备份目录之外或非 .edpb 路径"));
+    }
+    Ok(path)
+}
+
+/// Fully selected frontend request; confirmation is an explicit fact, not a prompt callback.
+#[derive(Clone, Debug)]
+pub struct RestoreMetadataRequest {
+    pub disk: u32,
+    pub backup_path: PathBuf,
+    pub confirmed: bool,
+    pub expected_target: MediaIdentityResumePin,
+    pub expected_backup_sha256: String,
+}
+
+fn emit_restore_event(sink: &mut dyn FnMut(WriteEvent), event: WriteEvent) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sink(event)));
+}
+
+pub fn restore_metadata_on_device(
+    runner: &dyn CmdRunner,
+    request: &RestoreMetadataRequest,
+    dev: &mut dyn SectorDev,
+    sink: &mut dyn FnMut(WriteEvent),
+) -> EdpCliResult<crate::application::post_restore::MetadataRestoreOutcome> {
+    if !request.confirmed {
+        return Err(err(EXIT_CANCELLED, "已取消"));
+    }
+    let disk = request.disk;
+    let path = request.backup_path.clone();
+    let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
+    verify_resume_identity_pin(runner, disk, &request.expected_target, dev)?;
+    let observed = observe_media_identity_readonly(runner, disk, dev)?;
+    let img = observed.protocol_image;
+    let target_identity = observed.snapshot;
+    let raw_target_device_id = identify(runner, disk, &img[7 * SECTOR..8 * SECTOR]).device_id;
+    let lba4 = &img[4 * SECTOR..5 * SECTOR];
+    let tag16 =
+        diskio::lba4_tag16_from(lba4).ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少身份标签"))?;
+    let target_lba4_nonzero = lba4.iter().any(|byte| *byte != 0);
+    // One verified snapshot binds the manifest and all bytes consumed by restore.
+    let reader = crate::edpb::VerifiedBackupReader::open(&path).map_err(|message| {
+        err(
+            EXIT_BACKUP,
+            format!("错误: EDPB 校验失败 {}: {}", path.display(), message),
+        )
+    })?;
+    let verified = reader.verified();
+    if verified.file_sha256 != request.expected_backup_sha256 {
+        return Err(err(EXIT_BACKUP, "确认后备份内容发生变化，禁止恢复"));
+    }
+    let backup_protocol = backup_protocol_image(&reader)?;
+    emit_restore_event(
+        sink,
+        WriteEvent::BackupShaVerified {
+            digest: verified.file_sha256.clone(),
+        },
+    );
+
+    // Protocol tag remains a separate consistency check for EDP backups only; it
+    // cannot override the strong physical-media + exact-geometry write grant.
+    let backup_tag16 = backup_protocol
+        .as_deref()
+        .and_then(|data| diskio::lba4_tag16_from(&data[4 * SECTOR..5 * SECTOR]));
+    let backup_identity = backup_identity(&verified.manifest)?;
+    let observed_geometry = target_session.writable_geometry()?;
+    let current_total_sectors = observed_geometry
+        .writable_protocol_sectors()
+        .map_err(|message| err(EXIT_TARGET, message))?;
+    let geometry = RestoreGeometryRequirements {
+        total_sectors: current_total_sectors,
+        logical_sector_size: observed_geometry.logical_sector_bytes.unwrap_or(0),
+    };
+    let transaction = build_metadata_restore_plan(
+        &reader,
+        backup_protocol.as_deref(),
+        &img,
+        raw_target_device_id.as_deref(),
+        current_total_sectors,
+    )?;
     authorize_restore(
         &backup_identity,
         &target_identity,
@@ -150,12 +257,12 @@ pub fn restore_flow_typed(
     let target_session = target_session
         .prepare_write()
         .map_err(|e| err(EXIT_IO, format!("错误: 无法卸载 disk{}: {}", disk, e)))?;
-    let _target_session = target_session
+    let mut locked_session = target_session
         .reopen_and_verify(dev, OPEN_WAIT, |dev| {
             verify_reopened_snapshot(dev, &img)?;
             let fresh =
                 crate::application::media_identity_observer::observe_media_identity_readonly(
-                    ctx.runner, disk, dev,
+                    runner, disk, dev,
                 )?;
             authorize_restore(
                 &backup_identity,
@@ -172,7 +279,10 @@ pub fn restore_flow_typed(
                 format!("错误: 无法以读写打开 {}: {}", raw_path(disk), e),
             ),
             ReopenAndVerifyError::Verify(error) => error,
+            ReopenAndVerifyError::Geometry(error) => error,
         })?;
+
+    let dev = locked_session.device();
     diskio::execute_write_transaction(dev, &transaction)?;
     let report = crate::application::post_restore::MetadataRestoreReport {
         metadata_restored: true,
@@ -185,10 +295,10 @@ pub fn restore_flow_typed(
             .map(|artifact| artifact.id.clone())
             .collect(),
     };
-    ctx.prompt.write_event(WriteEvent::RestoreWriteCompleted);
+    emit_restore_event(sink, WriteEvent::RestoreWriteCompleted);
     let format_target_pin =
         crate::application::media_identity_observer::observe_media_identity_readonly(
-            ctx.runner, disk, dev,
+            runner, disk, dev,
         )
         .ok()
         .map(|observed| {
@@ -211,9 +321,12 @@ pub fn restore_flow_typed(
             format!("恢复后只读检查失败: {error}"),
         )
     });
-    ctx.prompt.write_event(WriteEvent::PostRestoreAssessment {
-        assessment: assessment.clone(),
-    });
+    emit_restore_event(
+        sink,
+        WriteEvent::PostRestoreAssessment {
+            assessment: assessment.clone(),
+        },
+    );
     let layout = crate::application::post_restore::project_restored_layout_readonly(
         dev,
         &verified.manifest.snapshot.device_state,

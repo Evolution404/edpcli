@@ -227,7 +227,12 @@ impl TaskHub {
                 )
                 .map_err(crate::application::error::OperationError::from)
             }))
-            .unwrap_or_else(|_| Err("制盘后台任务异常终止".into()));
+            .unwrap_or_else(|_| {
+                Err(
+                    crate::application::error::OperationError::from("制盘后台任务异常终止")
+                        .with_media_state(crate::application::error::MediaState::Unknown),
+                )
+            });
             progress.flush();
             let _ = tx.send(WorkerResult::Provision(ProvisionWorkerResult::Write {
                 operation_id,

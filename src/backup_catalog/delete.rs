@@ -145,6 +145,7 @@ mod tests {
         let path = root.join("sample.edpb");
         fs::write(&path, b"original").unwrap();
         let entry = BackupEntry {
+            display_cached: false,
             meta: None,
             path,
             mtime: 0,

@@ -119,7 +119,11 @@ impl TaskHub {
                         filesystem: intent.request.filesystem,
                         result: Err(
                             crate::application::post_restore::PostRestoreFormatError::Operation(
-                                format!("格式化后台任务异常终止: {}", panic_message(payload)),
+                                crate::application::error::OperationError::from(format!(
+                                    "格式化后台任务异常终止: {}",
+                                    panic_message(payload)
+                                ))
+                                .with_media_state(crate::application::error::MediaState::Unknown),
                             ),
                         ),
                     },
@@ -164,7 +168,11 @@ impl TaskHub {
                     result: Err(
                         crate::application::post_restore::EncryptedPostRestoreError::Operation(
                             crate::application::post_restore::PostRestoreFormatError::Operation(
-                                format!("加密格式化后台任务异常终止: {}", panic_message(payload)),
+                                crate::application::error::OperationError::from(format!(
+                                    "加密格式化后台任务异常终止: {}",
+                                    panic_message(payload)
+                                ))
+                                .with_media_state(crate::application::error::MediaState::Unknown),
                             ),
                         ),
                     ),
@@ -215,10 +223,10 @@ impl TaskHub {
                 crate::application::post_restore::EncryptedPartitionReinitializeResult {
                     partition_index: intent.request.partition_index,
                     filesystem: intent.filesystem,
-                    result: Err(format!(
+                    result: Err(crate::application::error::OperationError::from(format!(
                         "密钥域重建后台任务异常终止: {}",
                         panic_message(payload)
-                    )),
+                    )).with_media_state(crate::application::error::MediaState::Unknown)),
                 }
             });
             let _ = tx.send(WorkerResult::PostRestoreReinitialize {

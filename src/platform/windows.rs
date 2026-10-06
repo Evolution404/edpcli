@@ -9,7 +9,7 @@ use std::ptr::{null, null_mut};
 
 use super::{ExtDisk, HardwareProbe, InquiryInfo, NativeTransport, PlatformKind};
 use crate::common::SECTOR;
-use crate::sysinfo::CmdRunner;
+use crate::ports::CmdRunner;
 use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
     CM_Get_Device_IDW, CM_Get_Parent, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInterfaces,
     SetupDiGetClassDevsW, SetupDiGetDeviceInterfaceDetailW, CR_SUCCESS, DIGCF_DEVICEINTERFACE,
@@ -157,6 +157,7 @@ pub(super) fn disk_selector_value(disk: u32) -> String {
 
 #[derive(Debug, Clone)]
 struct WinDiskProbe {
+    logical_sector_bytes: u32,
     size: u64,
     removable: bool,
     usb: bool,
@@ -455,6 +456,7 @@ fn query_disk(disk: u32) -> io::Result<WinDiskProbe> {
     }
 
     Ok(WinDiskProbe {
+        logical_sector_bytes: geometry.Geometry.BytesPerSector,
         size: geometry.DiskSize as u64,
         removable: descriptor.RemovableMedia,
         usb: descriptor.BusType == BusTypeUsb,
@@ -525,6 +527,21 @@ pub(super) fn list_external_disks(_runner: &dyn CmdRunner) -> Vec<ExtDisk> {
             })
         })
         .collect()
+}
+
+pub(super) fn device_geometry(
+    _runner: &dyn CmdRunner,
+    disk: u32,
+) -> Option<super::ObservedDeviceGeometry> {
+    let probe = query_disk(disk).ok()?;
+    Some(geometry_from_native(probe.size, probe.logical_sector_bytes))
+}
+fn geometry_from_native(capacity_bytes: u64, logical: u32) -> super::ObservedDeviceGeometry {
+    super::ObservedDeviceGeometry {
+        capacity_bytes,
+        logical_sector_bytes: (logical > 0).then_some(logical),
+        physical_sector_bytes: None,
+    }
 }
 
 pub(super) fn disk_total_sectors(_runner: &dyn CmdRunner, disk: u32) -> Option<u64> {
@@ -989,5 +1006,19 @@ mod tests {
         assert_eq!(parse_disk_selector(r"\\.\physicaldrive3").unwrap(), 3);
         assert!(parse_disk_selector("C:").is_err());
         assert!(parse_disk_selector("PhysicalDrive").is_err());
+    }
+    #[test]
+    fn native_geometry_preserves_unknown_and_4kn_observations() {
+        for (logical, accepted) in [(512, true), (4096, false), (0, false)] {
+            let geometry = geometry_from_native(8192, logical);
+            assert_eq!(
+                geometry.logical_sector_bytes,
+                (logical != 0).then_some(logical)
+            );
+            assert_eq!(geometry.writable_protocol_sectors().is_ok(), accepted);
+        }
+        assert!(geometry_from_native(8193, 512)
+            .writable_protocol_sectors()
+            .is_err());
     }
 }
