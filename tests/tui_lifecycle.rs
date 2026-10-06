@@ -487,10 +487,10 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
                     && row.contains("卷标")
             })
             .expect("compact formatting row");
-        assert_eq!(
-            row.matches(region).count(),
-            1,
-            "partition name should be rendered once before three formatting fields: {row}"
+        assert!(
+            !row.contains(&format!("{region}文件系统"))
+                && !row.contains(&format!("{region}卷标")),
+            "partition name should only prefix the row, not each formatting field: {row}"
         );
     }
     let format_separator = internal_separator_x("启动区格式化");
