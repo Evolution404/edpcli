@@ -152,7 +152,7 @@ fn write_plain_metadata_v3(
         }],
         regions: vec![Region {
             id: region_id.clone(),
-            role: "partition_table".into(),
+            role: "plain_partition_table".into(),
             start_lba: Some(0),
             sector_count: Some(1),
             semantic_status: SemanticStatus::Identified,

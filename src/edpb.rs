@@ -4,7 +4,7 @@
 //! metadata live in one .edpb file. Legacy .bin files are not runtime input.
 
 use std::collections::BTreeSet;
-use std::fs::{self, File, OpenOptions};
+use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 

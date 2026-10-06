@@ -250,6 +250,12 @@ fn inspect_backup_file_exports_selected_lbas() {
     assert!(stdout.contains("onlyid=1402259934"));
     assert!(stdout.contains("PDKB"));
     assert!(stdout.contains("A6B0 整扇 512B"));
+    let export = std::fs::read_dir(&export)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.is_dir())
+        .unwrap();
+    assert!(export.join("complete.json").is_file());
     for name in [
         "LBA11_decoded.bin",
         "LBA11_decoded.hex",

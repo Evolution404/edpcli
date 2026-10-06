@@ -18,6 +18,12 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
         )));
     }
 
+    let mut bundle = request
+        .export_dir
+        .as_deref()
+        .map(super::export::ExportBundle::new)
+        .transpose()?;
+    let export_dir = bundle.as_ref().map(|b| b.dir.clone());
     let mut items = Vec::with_capacity(lbas.len());
     for lba in lbas {
         context
@@ -117,7 +123,7 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
 
         match request.mode {
             AdvancedInspectMode::Raw => {
-                if let Some(dir) = &request.export_dir {
+                if let Some(dir) = &export_dir {
                     export_advanced_bytes(dir, lba, "raw", &raw)?;
                 }
             }
@@ -141,7 +147,7 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
                         item.decoded_sha256 = Some(crate::sha256::sha256_hex(&decoded));
                         item.method = Some(method);
                         item.decode_ranges = decode_ranges;
-                        if let Some(dir) = &request.export_dir {
+                        if let Some(dir) = &export_dir {
                             export_advanced_bytes(dir, lba, "decoded", &decoded)?;
                         }
                         item.decoded = Some(decoded);
@@ -167,7 +173,7 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
                     partition_boot.as_deref(),
                     partition_boot_issue.as_deref(),
                 )?;
-                if let Some(dir) = &request.export_dir {
+                if let Some(dir) = &export_dir {
                     export_advanced_meta(dir, lba, &text)?;
                 }
                 item.meta_text = Some(text);
@@ -182,12 +188,15 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
             Err(error) => (None, Some(error)),
         };
     let topology = super::super::inspect_tree::build_inspect_topology(&context);
+    if let Some(bundle) = &mut bundle {
+        bundle.finish()?;
+    }
     Ok(AdvancedInspectWorkspace {
         source,
         meta,
         mode: request.mode,
         items,
-        export_dir: request.export_dir.clone(),
+        export_dir,
         topology,
         disk_layout,
         disk_layout_issue,

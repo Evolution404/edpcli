@@ -41,10 +41,14 @@ pub(super) fn export_advanced_bytes(
         ))
     })?;
     let base = format!("LBA{lba}_{suffix}");
-    std::fs::write(dir.join(format!("{base}.bin")), data)
+    crate::infrastructure::atomic_file::write(&dir.join(format!("{base}.bin")), data, false)
         .map_err(|error| InspectError::io(format!("导出 {base}.bin 失败: {error}")))?;
-    std::fs::write(dir.join(format!("{base}.hex")), advanced_plain_hex(data))
-        .map_err(|error| InspectError::io(format!("导出 {base}.hex 失败: {error}")))?;
+    crate::infrastructure::atomic_file::write(
+        &dir.join(format!("{base}.hex")),
+        advanced_plain_hex(data).as_bytes(),
+        false,
+    )
+    .map_err(|error| InspectError::io(format!("导出 {base}.hex 失败: {error}")))?;
     Ok(())
 }
 
@@ -55,6 +59,56 @@ pub(super) fn export_advanced_meta(dir: &Path, lba: u64, text: &str) -> Result<(
             dir.display()
         ))
     })?;
-    std::fs::write(dir.join(format!("LBA{lba}_meta.txt")), text)
-        .map_err(|error| InspectError::io(format!("导出 LBA{lba}_meta.txt 失败: {error}")))
+    crate::infrastructure::atomic_file::write(
+        &dir.join(format!("LBA{lba}_meta.txt")),
+        text.as_bytes(),
+        false,
+    )
+    .map_err(|error| InspectError::io(format!("导出 LBA{lba}_meta.txt 失败: {error}")))
+}
+
+/// Each export run is isolated; only a published completion marker declares it usable.
+pub(super) struct ExportBundle {
+    pub dir: std::path::PathBuf,
+    complete: bool,
+}
+impl ExportBundle {
+    pub fn new(parent: &Path) -> Result<Self, InspectError> {
+        let mut nonce = [0; 16];
+        getrandom::fill(&mut nonce).map_err(|e| InspectError::io(e.to_string()))?;
+        let dir = parent.join(format!(
+            "inspect-{}",
+            nonce.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        ));
+        crate::infrastructure::atomic_file::private_directory(&dir)
+            .map_err(|e| InspectError::io(e.to_string()))?;
+        Ok(Self {
+            dir,
+            complete: false,
+        })
+    }
+    pub fn finish(&mut self) -> Result<(), InspectError> {
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(&self.dir).map_err(|e| InspectError::io(e.to_string()))? {
+            let entry = entry.map_err(|e| InspectError::io(e.to_string()))?;
+            let bytes = std::fs::read(entry.path()).map_err(|e| InspectError::io(e.to_string()))?;
+            files.push(serde_json::json!({"name": entry.file_name().to_string_lossy(), "bytes": bytes.len(), "sha256": crate::sha256::sha256_hex(&bytes)}));
+        }
+        files.sort_by_key(|f| f["name"].as_str().unwrap_or_default().to_owned());
+        let bytes = serde_json::to_vec_pretty(
+            &serde_json::json!({"schema":"edpcli.inspect-export.v1", "files":files}),
+        )
+        .map_err(|e| InspectError::io(e.to_string()))?;
+        crate::infrastructure::atomic_file::write(&self.dir.join("complete.json"), &bytes, false)
+            .map_err(|e| InspectError::io(e.to_string()))?;
+        self.complete = true;
+        Ok(())
+    }
+}
+impl Drop for ExportBundle {
+    fn drop(&mut self) {
+        if !self.complete {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
 }

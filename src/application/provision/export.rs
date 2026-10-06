@@ -19,17 +19,9 @@ pub fn export_sparse_provision_image(
         .total_sectors
         .checked_mul(SECTOR as u64)
         .ok_or_else(|| err(EXIT_IO, "错误: 镜像长度溢出"))?;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(path)
-        .map_err(|error| {
-            err(
-                EXIT_IO,
-                format!("错误: 无法创建 {}: {error}", path.display()),
-            )
-        })?;
+    let mut candidate = crate::infrastructure::atomic_file::AtomicFile::new(path)
+        .map_err(|error| err(EXIT_IO, format!("错误: 无法创建镜像候选文件: {error}")))?;
+    let file = &mut candidate.file;
     file.set_len(byte_len)
         .map_err(|error| err(EXIT_IO, format!("错误: 无法设置镜像长度: {error}")))?;
     for (&lba, sector) in &prepared.write_image.patch {
@@ -63,8 +55,9 @@ pub fn export_sparse_provision_image(
                 })?;
         }
     }
-    file.sync_all()
-        .map_err(|error| err(EXIT_IO, format!("错误: 镜像同步失败: {error}")))?;
+    candidate
+        .publish(true)
+        .map_err(|error| err(EXIT_IO, format!("错误: 镜像发布失败: {error}")))?;
     Ok(())
 }
 
@@ -77,17 +70,9 @@ pub fn export_sparse_plain_provision_image(
         .total_sectors
         .checked_mul(SECTOR as u64)
         .ok_or_else(|| err(EXIT_IO, "错误: Plain 镜像长度溢出"))?;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(path)
-        .map_err(|error| {
-            err(
-                EXIT_IO,
-                format!("错误: 无法创建 {}: {error}", path.display()),
-            )
-        })?;
+    let mut candidate = crate::infrastructure::atomic_file::AtomicFile::new(path)
+        .map_err(|error| err(EXIT_IO, format!("错误: 无法创建镜像候选文件: {error}")))?;
+    let file = &mut candidate.file;
     file.set_len(byte_len)
         .map_err(|error| err(EXIT_IO, format!("错误: 无法设置 Plain 镜像长度: {error}")))?;
 
@@ -105,8 +90,9 @@ pub fn export_sparse_plain_provision_image(
     file.seek(SeekFrom::Start(3 * SECTOR as u64))
         .and_then(|_| file.write_all(lba3))
         .map_err(|error| err(EXIT_IO, format!("错误: 写入 Plain 镜像 LBA3 失败: {error}")))?;
-    file.sync_all()
-        .map_err(|error| err(EXIT_IO, format!("错误: Plain 镜像同步失败: {error}")))?;
+    candidate
+        .publish(true)
+        .map_err(|error| err(EXIT_IO, format!("错误: Plain 镜像发布失败: {error}")))?;
     Ok(())
 }
 

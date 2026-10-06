@@ -1,7 +1,6 @@
 use super::catalog::{lba4_label_id_from, scan_backup_dir, BackupEntry, DiskFacts};
 use crate::common::{EdpCliError, EdpCliResult, EXIT_BACKUP, EXIT_IO, SECTOR};
 use crate::ports::Clock;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -27,10 +26,6 @@ fn validate_backup_device_id(device_id: &str) -> EdpCliResult<()> {
             ),
         ))
     }
-}
-
-fn sync_dir(dir: &Path) -> EdpCliResult<()> {
-    crate::platform::sync_directory(dir).map_err(io_err)
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -65,7 +60,7 @@ fn prepare_backup_capture_with_state<'a>(
             ),
         ));
     }
-    fs::create_dir_all(bak_dir).map_err(io_err)?;
+    crate::infrastructure::atomic_file::private_directory(bak_dir).map_err(io_err)?;
     let epoch = clock.now_epoch();
     let ts = clock.fmt_ts(epoch);
     let secs = facts
@@ -133,7 +128,6 @@ pub fn create_plain_backup(
     };
     crate::edpb::write_metadata_backup_with_identity(&path, &capture, identity)
         .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
-    sync_dir(bak_dir)?;
     Ok(path)
 }
 
@@ -159,7 +153,6 @@ pub fn create_metadata_backup(
     };
     crate::edpb::write_metadata_backup_with_identity(&path, &capture, identity)
         .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
-    sync_dir(bak_dir)?;
     Ok(path)
 }
 

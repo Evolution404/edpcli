@@ -277,7 +277,11 @@ fn decode_utf16_name(entry: &[u8]) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
-fn parse_gpt<F>(total: u64, read_sector: &mut F) -> Result<PartitionTableSnapshot, String>
+fn parse_gpt<F>(
+    total: u64,
+    read_sector: &mut F,
+    validate_mirror: bool,
+) -> Result<PartitionTableSnapshot, String>
 where
     F: FnMut(u64) -> Result<Vec<u8>, String>,
 {
@@ -313,6 +317,20 @@ where
         ));
     }
     let entry_sectors = entry_bytes.div_ceil(SECTOR);
+    validate_extent(
+        "GPT primary array",
+        header.partition_entries_lba,
+        entry_sectors as u64,
+        total,
+    )?;
+    if header.partition_entries_lba < 2
+        || header
+            .partition_entries_lba
+            .checked_add(entry_sectors as u64)
+            .is_none_or(|end| end > header.first_usable_lba)
+    {
+        return Err("GPT primary array overlaps usable/header sectors".into());
+    }
     let mut array = Vec::with_capacity(entry_sectors * SECTOR);
     for offset in 0..entry_sectors {
         let lba = header
@@ -325,6 +343,53 @@ where
     header
         .validate_partition_array(&array)
         .map_err(|error| format!("GPT partition array CRC/长度无效: {error:?}"))?;
+
+    if validate_mirror {
+        if header.backup_lba != total - 1 {
+            return Err("GPT backup header conflicts with disk geometry".into());
+        }
+        let raw = read_exact_sector(read_sector, header.backup_lba)?;
+        let GptHeaderState::Enabled(backup) = lba1::parse_header_at(
+            raw.as_slice()
+                .try_into()
+                .map_err(|_| "GPT backup header length")?,
+            header.backup_lba,
+        )
+        .map_err(|error| format!("GPT backup header invalid: {error:?}"))?
+        .header
+        else {
+            return Err("GPT backup header missing".into());
+        };
+        if backup.backup_lba != header.current_lba
+            || backup.first_usable_lba != header.first_usable_lba
+            || backup.last_usable_lba != header.last_usable_lba
+            || backup.disk_guid != header.disk_guid
+            || backup.entry_count != header.entry_count
+            || backup.entry_size != header.entry_size
+            || backup.partition_array_crc32 != header.partition_array_crc32
+            || backup
+                .partition_entries_lba
+                .checked_add(entry_sectors as u64)
+                != Some(backup.current_lba)
+            || backup.partition_entries_lba <= header.last_usable_lba
+        {
+            return Err("GPT backup header geometry/CRC contract conflicts with primary".into());
+        }
+        let mut mirror = Vec::with_capacity(entry_sectors * SECTOR);
+        for offset in 0..entry_sectors {
+            mirror.extend_from_slice(&read_exact_sector(
+                read_sector,
+                backup.partition_entries_lba + offset as u64,
+            )?);
+        }
+        mirror.truncate(entry_bytes);
+        backup
+            .validate_partition_array(&mirror)
+            .map_err(|error| format!("GPT backup array CRC invalid: {error:?}"))?;
+        if mirror != array {
+            return Err("GPT primary and backup partition arrays differ".into());
+        }
+    }
 
     let mut partitions = Vec::new();
     for (entry_index, entry) in array.as_chunks::<GPT_ENTRY_SIZE>().0.iter().enumerate() {
@@ -404,9 +469,58 @@ where
     })
 }
 
-pub fn read_partition_table<F>(
+pub fn read_partition_table<F>(total: u64, read_sector: F) -> Result<PartitionTableSnapshot, String>
+where
+    F: FnMut(u64) -> Result<Vec<u8>, String>,
+{
+    read_partition_table_inner(total, read_sector, false)
+}
+
+/// Captures once, validates once, and returns the exact table bytes used by the parser.
+/// Backup creation and restore authorization share this bounded evidence contract.
+pub(crate) fn capture_partition_table<F>(
     total: u64,
     mut read_sector: F,
+) -> Result<(PartitionTableSnapshot, Vec<Vec<u8>>), String>
+where
+    F: FnMut(u64) -> Result<Vec<u8>, String>,
+{
+    let mut sectors = std::collections::BTreeMap::new();
+    let mut cached = |lba| {
+        if let Some(bytes) = sectors.get(&lba) {
+            return Ok(Vec::clone(bytes));
+        }
+        if lba >= total {
+            return Err("partition-table read exceeds geometry".into());
+        }
+        let bytes = read_sector(lba)?;
+        if bytes.len() != SECTOR {
+            return Err("partition-table sector length invalid".into());
+        }
+        sectors.insert(lba, bytes.clone());
+        Ok(bytes)
+    };
+    let table = read_partition_table_inner(total, &mut cached, true)?;
+    let mut evidence = Vec::new();
+    for extent in &table.table_extents {
+        let mut bytes = Vec::new();
+        for offset in 0..extent.sector_count {
+            bytes.extend_from_slice(&cached(
+                extent
+                    .start_lba
+                    .checked_add(offset)
+                    .ok_or("partition-table address overflow")?,
+            )?);
+        }
+        evidence.push(bytes);
+    }
+    Ok((table, evidence))
+}
+
+fn read_partition_table_inner<F>(
+    total: u64,
+    mut read_sector: F,
+    validate_mirror: bool,
 ) -> Result<PartitionTableSnapshot, String>
 where
     F: FnMut(u64) -> Result<Vec<u8>, String>,
@@ -423,7 +537,7 @@ where
         .iter()
         .any(|partition| partition.partition_type == 0xee)
     {
-        return parse_gpt(total, &mut read_sector);
+        return parse_gpt(total, &mut read_sector, validate_mirror);
     }
 
     let mut partitions = Vec::new();

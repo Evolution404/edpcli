@@ -440,3 +440,51 @@ fn oversized_manifest_is_rejected_before_deserialization() {
         .unwrap_err()
         .contains("manifest exceeds read budget"));
 }
+
+#[test]
+fn writer_rejects_user_payload_restore_and_excessive_manifest() {
+    use edpcli::edpb::*;
+    let tmp = TempDir::new("restore_authority");
+    let data = vec![0; 13 * 512];
+    let mut metadata = MetadataCapture {
+        core: capture(&data),
+        partitions: vec![],
+        regions: vec![Region {
+            id: "userdata".into(),
+            role: "ordinary_file_payload".into(),
+            start_lba: Some(2048),
+            sector_count: Some(1),
+            semantic_status: SemanticStatus::Identified,
+        }],
+        extents: vec![Extent {
+            id: "userdata".into(),
+            region_id: "userdata".into(),
+            start_lba: 2048,
+            sector_count: 1,
+            purpose: "ordinary_file_payload".into(),
+        }],
+        artifacts: vec![ArtifactInput {
+            id: "userdata".into(),
+            kind: "raw_sectors".into(),
+            media_type: "application/octet-stream".into(),
+            source_extent_ids: vec!["userdata".into()],
+            derivation: None,
+            restore_policy: RestorePolicy::Restorable,
+            completeness: ArtifactCompleteness::Partial,
+            data: vec![0; 512],
+        }],
+        notes: vec![],
+    };
+    let path = tmp.0.join("bad.edpb");
+    assert!(write_metadata_backup(&path, &metadata).is_err());
+    assert!(!path.exists());
+    metadata.artifacts[0].completeness = ArtifactCompleteness::Complete;
+    assert!(write_metadata_backup(&path, &metadata).is_err());
+    assert!(!path.exists());
+    metadata.regions.clear();
+    metadata.extents.clear();
+    metadata.artifacts.clear();
+    metadata.notes.push("x".repeat(4 * 1024 * 1024));
+    assert!(write_metadata_backup(&path, &metadata).is_err());
+    assert!(!path.exists());
+}

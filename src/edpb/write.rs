@@ -101,16 +101,17 @@ pub(super) fn write_container(
     if path.extension().and_then(|v| v.to_str()) != Some(EXTENSION) {
         return Err(format!("EDPB file must use .{EXTENSION} extension"));
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("create backup directory failed: {e}"))?;
-    }
-
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .read(true)
-        .write(true)
-        .open(path)
-        .map_err(|e| format!("create EDPB failed {}: {e}", path.display()))?;
+    let plain_metadata = capture.device_state.eq_ignore_ascii_case("plain")
+        && capture_level == CaptureLevel::Metadata;
+    super::limits::validate_payload_lengths(
+        extra_artifacts
+            .iter()
+            .map(|a| a.data.len() as u64)
+            .chain((!plain_metadata).then_some(capture.lba0_12.len() as u64)),
+    )?;
+    let mut candidate = crate::infrastructure::atomic_file::AtomicFile::new(path)
+        .map_err(|e| format!("create private EDPB candidate failed: {e}"))?;
+    let file = &mut candidate.file;
 
     let result = (|| -> Result<Manifest, String> {
         file.write_all(&[0u8; HEADER_SIZE])
@@ -144,7 +145,8 @@ pub(super) fn write_container(
         }
         inputs.extend_from_slice(extra_artifacts);
 
-        for input in inputs {
+        super::limits::validate_payload_lengths(inputs.iter().map(|a| a.data.len() as u64))?;
+        for input in &inputs {
             let frame_offset = file
                 .stream_position()
                 .map_err(|e| format!("read EDPB chunk position failed: {e}"))?;
@@ -154,11 +156,11 @@ pub(super) fn write_container(
             file.write_all(&input.data)
                 .map_err(|e| format!("write EDPB chunk {} failed: {e}", input.id))?;
             manifest.artifacts.push(Artifact {
-                id: input.id,
-                kind: input.kind,
-                media_type: input.media_type,
-                source_extent_ids: input.source_extent_ids,
-                derivation: input.derivation,
+                id: input.id.clone(),
+                kind: input.kind.clone(),
+                media_type: input.media_type.clone(),
+                source_extent_ids: input.source_extent_ids.clone(),
+                derivation: input.derivation.clone(),
                 restore_policy: input.restore_policy,
                 completeness: input.completeness,
                 storage: ChunkStorage {
@@ -176,8 +178,29 @@ pub(super) fn write_container(
             .stream_position()
             .map_err(|e| format!("read EDPB write position failed: {e}"))?;
         validate_manifest_graph(&manifest)?;
+        super::validate::validate_restore_evidence(&manifest, |id| {
+            inputs
+                .iter()
+                .find(|a| a.id == id)
+                .map(|a| a.data.as_slice())
+                .ok_or_else(|| format!("missing artifact {id}"))
+        })?;
         let manifest_bytes = serde_json::to_vec_pretty(&manifest)
             .map_err(|e| format!("serialize EDPB manifest failed: {e}"))?;
+        super::limits::bounded_len(
+            manifest_bytes.len() as u64,
+            super::limits::MAX_MANIFEST_BYTES,
+            "manifest",
+        )?;
+        let projected_size = manifest_offset
+            .checked_add(manifest_bytes.len() as u64)
+            .and_then(|v| v.checked_add(FOOTER_SIZE as u64))
+            .ok_or("EDPB container length overflow")?;
+        super::limits::bounded_len(
+            projected_size,
+            super::limits::MAX_CONTAINER_BYTES,
+            "container",
+        )?;
         let manifest_sha = sha256_bytes(&manifest_bytes);
         file.write_all(&manifest_bytes)
             .map_err(|e| format!("write EDPB manifest failed: {e}"))?;
@@ -208,11 +231,11 @@ pub(super) fn write_container(
         Ok(manifest)
     })();
 
-    if result.is_err() {
-        drop(file);
-        let _ = fs::remove_file(path);
-    }
-    result
+    let manifest = result?;
+    candidate
+        .publish(false)
+        .map_err(|e| format!("publish EDPB failed {}: {e}", path.display()))?;
+    Ok(manifest)
 }
 
 pub fn write_core_backup(path: &Path, capture: &CoreCapture<'_>) -> Result<Manifest, String> {

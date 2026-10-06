@@ -49,18 +49,6 @@ pub struct CaptureIssue {
     pub error: String,
 }
 
-fn u32le(raw: &[u8], offset: usize) -> Option<u32> {
-    raw.get(offset..offset + 4)
-        .and_then(|v| v.try_into().ok())
-        .map(u32::from_le_bytes)
-}
-
-fn u64le(raw: &[u8], offset: usize) -> Option<u64> {
-    raw.get(offset..offset + 8)
-        .and_then(|v| v.try_into().ok())
-        .map(u64::from_le_bytes)
-}
-
 fn read_extent(
     dev: &mut dyn SectorDev,
     start_lba: u64,
@@ -70,6 +58,13 @@ fn read_extent(
         .checked_mul(SECTOR as u64)
         .and_then(|v| usize::try_from(v).ok())
         .ok_or_else(|| "metadata extent byte length overflow".to_string())?;
+    if byte_len > 64 * 1024 * 1024 {
+        return Err("metadata extent exceeds allocation budget".into());
+    }
+    start_lba
+        .checked_add(sector_count)
+        .filter(|end| *end <= u64::from(u32::MAX) + 1)
+        .ok_or("metadata extent exceeds SectorDev address range")?;
     let mut out = Vec::with_capacity(byte_len);
     for offset in 0..sector_count {
         let lba = start_lba
@@ -140,114 +135,6 @@ fn add_raw_extent(
 }
 
 pub use crate::domain::geometry::{parse_lba7_compatibility_geometry, parse_partition_geometry};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PlainGptHeader {
-    current_lba: u64,
-    backup_lba: u64,
-    first_usable_lba: u64,
-    last_usable_lba: u64,
-    disk_guid: [u8; 16],
-    partition_entries_lba: u64,
-    entry_count: u32,
-    entry_size: u32,
-    partition_array_crc32: u32,
-}
-
-fn parse_plain_gpt_header(raw: &[u8], expected_current_lba: u64) -> Result<PlainGptHeader, String> {
-    if raw.len() != SECTOR || raw.get(..8) != Some(b"EFI PART") {
-        return Err(format!(
-            "GPT header LBA{expected_current_lba} signature/length invalid"
-        ));
-    }
-    let header_size = u32le(raw, 12).ok_or_else(|| "GPT header_size missing".to_string())? as usize;
-    if !(92..=SECTOR).contains(&header_size) {
-        return Err(format!(
-            "GPT header LBA{expected_current_lba} header_size invalid"
-        ));
-    }
-    let stored_crc = u32le(raw, 16).ok_or_else(|| "GPT header_crc32 missing".to_string())?;
-    let mut crc_bytes = raw[..header_size].to_vec();
-    crc_bytes[16..20].fill(0);
-    if crate::protocol::lba1::crc32_ieee(&crc_bytes) != stored_crc {
-        return Err(format!("GPT header LBA{expected_current_lba} CRC mismatch"));
-    }
-    let current_lba = u64le(raw, 24).ok_or_else(|| "GPT current_lba missing".to_string())?;
-    if current_lba != expected_current_lba {
-        return Err(format!(
-            "GPT header current_lba={current_lba}, expected {expected_current_lba}"
-        ));
-    }
-    Ok(PlainGptHeader {
-        current_lba,
-        backup_lba: u64le(raw, 32).ok_or_else(|| "GPT backup_lba missing".to_string())?,
-        first_usable_lba: u64le(raw, 40)
-            .ok_or_else(|| "GPT first_usable_lba missing".to_string())?,
-        last_usable_lba: u64le(raw, 48).ok_or_else(|| "GPT last_usable_lba missing".to_string())?,
-        disk_guid: raw[56..72]
-            .try_into()
-            .map_err(|_| "GPT disk_guid missing".to_string())?,
-        partition_entries_lba: u64le(raw, 72)
-            .ok_or_else(|| "GPT partition_entries_lba missing".to_string())?,
-        entry_count: u32le(raw, 80).ok_or_else(|| "GPT entry_count missing".to_string())?,
-        entry_size: u32le(raw, 84).ok_or_else(|| "GPT entry_size missing".to_string())?,
-        partition_array_crc32: u32le(raw, 88)
-            .ok_or_else(|| "GPT partition_array_crc32 missing".to_string())?,
-    })
-}
-
-fn validate_plain_gpt_mirror(dev: &mut dyn SectorDev, total_sectors: u64) -> Result<(), String> {
-    if total_sectors < 4 {
-        return Err("GPT source disk is too small".into());
-    }
-    let primary_raw = read_extent(dev, 1, 1)?;
-    let primary = parse_plain_gpt_header(&primary_raw, 1)?;
-    if primary.backup_lba != total_sectors - 1 {
-        return Err(format!(
-            "GPT primary backup_lba={} conflicts with disk geometry {}",
-            primary.backup_lba,
-            total_sectors - 1
-        ));
-    }
-    let entry_bytes = usize::try_from(primary.entry_count)
-        .ok()
-        .and_then(|count| count.checked_mul(primary.entry_size as usize))
-        .ok_or_else(|| "GPT entry array length overflow".to_string())?;
-    if entry_bytes == 0 || primary.entry_size != 128 {
-        return Err("GPT entry array geometry unsupported".into());
-    }
-    let entry_sectors = entry_bytes.div_ceil(SECTOR) as u64;
-    let mut primary_entries = read_extent(dev, primary.partition_entries_lba, entry_sectors)?;
-    primary_entries.truncate(entry_bytes);
-    if crate::protocol::lba1::crc32_ieee(&primary_entries) != primary.partition_array_crc32 {
-        return Err("GPT primary partition array CRC mismatch".into());
-    }
-
-    let backup_raw = read_extent(dev, primary.backup_lba, 1)?;
-    let backup = parse_plain_gpt_header(&backup_raw, primary.backup_lba)?;
-    if backup.backup_lba != primary.current_lba
-        || backup.first_usable_lba != primary.first_usable_lba
-        || backup.last_usable_lba != primary.last_usable_lba
-        || backup.disk_guid != primary.disk_guid
-        || backup.entry_count != primary.entry_count
-        || backup.entry_size != primary.entry_size
-        || backup.partition_array_crc32 != primary.partition_array_crc32
-    {
-        return Err("GPT backup header geometry/CRC contract conflicts with primary".into());
-    }
-    if backup.partition_entries_lba + entry_sectors != backup.current_lba {
-        return Err("GPT backup partition array is not adjacent to backup header".into());
-    }
-    let mut backup_entries = read_extent(dev, backup.partition_entries_lba, entry_sectors)?;
-    backup_entries.truncate(entry_bytes);
-    if crate::protocol::lba1::crc32_ieee(&backup_entries) != backup.partition_array_crc32 {
-        return Err("GPT backup partition array CRC mismatch".into());
-    }
-    if backup_entries != primary_entries {
-        return Err("GPT primary and backup partition arrays differ".into());
-    }
-    Ok(())
-}
 
 fn read_device_sector(dev: &mut dyn SectorDev, lba: u64) -> Result<Vec<u8>, String> {
     let lba = u32::try_from(lba).map_err(|_| format!("LBA{lba} exceeds SectorDev u32 range"))?;
@@ -415,15 +302,13 @@ pub fn acquire_plain_metadata(
     dev: &mut dyn SectorDev,
     total_sectors: u64,
 ) -> Result<MetadataAcquisition, String> {
-    let table = crate::partition_table::read_partition_table(total_sectors, |lba| {
-        let lba = u32::try_from(lba)
-            .map_err(|_| format!("partition-table LBA{lba} exceeds SectorDev u32 range"))?;
-        dev.read_sector(lba)
-            .map_err(|error| format!("read partition-table LBA{lba} failed: {error}"))
-    })?;
-    if table.kind == PartitionTableKind::Gpt {
-        validate_plain_gpt_mirror(dev, total_sectors)?;
-    }
+    let (table, evidence) =
+        crate::partition_table::capture_partition_table(total_sectors, |lba| {
+            let lba = u32::try_from(lba)
+                .map_err(|_| format!("partition-table LBA{lba} exceeds SectorDev u32 range"))?;
+            dev.read_sector(lba)
+                .map_err(|error| format!("read partition-table LBA{lba} failed: {error}"))
+        })?;
 
     let mut out = MetadataAcquisition::default();
     for partition in &table.partitions {
@@ -454,7 +339,7 @@ pub fn acquire_plain_metadata(
         semantic_status: SemanticStatus::Identified,
     });
     for (index, extent) in table.table_extents.iter().enumerate() {
-        let data = read_extent(dev, extent.start_lba, extent.sector_count)?;
+        let data = evidence[index].clone();
         let extent_id = format!("extent.plain.partition_table.{index}");
         out.extents.push(Extent {
             id: extent_id.clone(),

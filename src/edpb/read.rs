@@ -204,6 +204,12 @@ fn verify_snapshot(
         artifacts.insert(artifact.id.clone(), data);
     }
 
+    super::validate::validate_restore_evidence(&manifest, |id| {
+        artifacts
+            .get(id)
+            .map(Vec::as_slice)
+            .ok_or_else(|| format!("missing artifact {id}"))
+    })?;
     chunk_ranges.sort_by_key(|range| range.0);
     for pair in chunk_ranges.windows(2) {
         if pair[0].1 > pair[1].0 {

@@ -1,7 +1,5 @@
 //! Immutable host-side identity transition records. No USB sector is used for lineage.
 
-use std::fs::{self, OpenOptions};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -27,7 +25,7 @@ fn valid_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-/// Temp file -> fsync file -> atomic rename -> fsync containing directory.
+/// Temp file -> fsync file -> exclusive publication -> fsync containing directory.
 /// A transaction id is never reused; an existing record is never modified.
 pub(super) fn persist(
     backup_dir: &Path,
@@ -45,45 +43,11 @@ pub(super) fn persist(
         return Err("invalid host lineage record fields".into());
     }
     let directory = backup_dir.join(".edpcli/identity-lineage/v1");
-    fs::create_dir_all(&directory)
-        .map_err(|error| format!("create host lineage directory failed: {error}"))?;
     let final_path = directory.join(format!("{}.json", record.transaction_id));
-    if final_path.exists() {
-        return Err("immutable host lineage record already exists".into());
-    }
-
-    let mut random = [0u8; 8];
-    getrandom::fill(&mut random)
-        .map_err(|error| format!("host lineage temp id generation failed: {error}"))?;
-    let temp_path = directory.join(format!(
-        ".{}-{:016x}.tmp",
-        record.transaction_id,
-        u64::from_be_bytes(random)
-    ));
-    let result = (|| -> Result<(), String> {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp_path)
-            .map_err(|error| format!("create host lineage temp file failed: {error}"))?;
-        serde_json::to_writer_pretty(&mut file, record)
-            .map_err(|error| format!("serialize host lineage record failed: {error}"))?;
-        file.write_all(b"\n")
-            .map_err(|error| format!("write host lineage record failed: {error}"))?;
-        file.sync_all()
-            .map_err(|error| format!("sync host lineage file failed: {error}"))?;
-        drop(file);
-        if final_path.exists() {
-            return Err("immutable host lineage record already exists".into());
-        }
-        fs::rename(&temp_path, &final_path)
-            .map_err(|error| format!("rename host lineage file failed: {error}"))?;
-        crate::platform::sync_directory(&directory)
-            .map_err(|error| format!("sync host lineage directory failed: {error}"))?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temp_path);
-    }
-    result.map(|()| final_path)
+    let mut bytes = serde_json::to_vec_pretty(record)
+        .map_err(|e| format!("serialize host lineage record failed: {e}"))?;
+    bytes.push(b'\n');
+    crate::infrastructure::atomic_file::write(&final_path, &bytes, false)
+        .map_err(|e| format!("publish immutable host lineage failed: {e}"))?;
+    Ok(final_path)
 }

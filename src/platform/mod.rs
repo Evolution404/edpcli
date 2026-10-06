@@ -114,8 +114,17 @@ pub fn sync_raw_device(file: &File) -> io::Result<()> {
     imp::sync_raw_device(file)
 }
 
-pub fn sync_directory(path: &std::path::Path) -> io::Result<()> {
-    imp::sync_directory(path)
+pub fn sync_directory(path: &std::path::Path) -> io::Result<DirectoryDurability> {
+    #[cfg(unix)]
+    {
+        imp::sync_directory(path)?;
+        Ok(DirectoryDurability::Synced)
+    }
+    #[cfg(windows)]
+    {
+        let _ = path;
+        Ok(DirectoryDurability::WriteThroughPublicationRequired)
+    }
 }
 
 pub fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
@@ -211,4 +220,32 @@ mod tests {
         #[cfg(target_os = "windows")]
         assert_eq!(kind(), PlatformKind::Windows);
     }
+}
+
+/// New private files/directories inherit only owner, system and administrator access on Windows.
+pub(crate) fn protect_private_path(path: &std::path::Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        windows::protect_private_path(path)
+    }
+    #[cfg(unix)]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+/// The caller must distinguish Unix directory fsync from Windows write-through publication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectoryDurability {
+    Synced,
+    WriteThroughPublicationRequired,
+}
+#[cfg(windows)]
+pub(crate) fn publish_file(
+    source: &std::path::Path,
+    target: &std::path::Path,
+    replace: bool,
+) -> io::Result<()> {
+    windows::publish_file(source, target, replace)
 }

@@ -284,8 +284,8 @@ fn chapter_18_b2_plain_gpt_capture_requires_primary_and_backup_metadata_only() {
     assert_eq!(capture.artifacts.len(), 5);
     for lba in [0u32, 1, 2, (total - 2) as u32, (total - 1) as u32] {
         assert!(
-            dev.reads.contains(&lba),
-            "missing GPT metadata read at LBA{lba}"
+            dev.reads.iter().filter(|read| **read == lba).count() == 1,
+            "GPT metadata must be captured once at LBA{lba}"
         );
     }
     assert!(capture
@@ -902,4 +902,20 @@ fn filesystem_kind_serialization_is_stable() {
         serde_json::to_value(&FilesystemKind::Ntfs).unwrap(),
         serde_json::Value::String("ntfs".into())
     );
+}
+
+#[test]
+fn plain_gpt_overbudget_is_rejected_before_array_read() {
+    let total = 100_000u64;
+    let mut header = test_gpt_header(1, total - 1, 2, total, 0);
+    header[80..84].copy_from_slice(&65_537u32.to_le_bytes());
+    header[16..20].fill(0);
+    let crc = test_crc32_ieee(&header[..92]);
+    header[16..20].copy_from_slice(&crc.to_le_bytes());
+    let mut dev = ReadOnlySparseDev::new();
+    dev.insert(0, test_mbr(0xee, 1, (total - 1) as u32));
+    dev.insert(1, header);
+    assert!(acquire_plain_metadata(&mut dev, total).is_err());
+    assert_eq!(dev.reads, vec![0, 1]);
+    assert_eq!(dev.writes, 0);
 }

@@ -78,7 +78,7 @@ fn plain_sparse_edpb(tag: &str) -> (common::TmpDir, PathBuf) {
         }],
         regions: vec![edpb::Region {
             id: region_id.clone(),
-            role: "partition_table".into(),
+            role: "plain_partition_table".into(),
             start_lba: Some(0),
             sector_count: Some(1),
             semantic_status: edpb::SemanticStatus::Identified,

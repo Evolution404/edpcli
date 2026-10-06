@@ -57,6 +57,10 @@ impl Lba1View {
 }
 
 pub fn parse_lba1(raw: &[u8; 512]) -> Result<Lba1View> {
+    parse_header_at(raw, 1)
+}
+
+pub(crate) fn parse_header_at(raw: &[u8; 512], expected_lba: u64) -> Result<Lba1View> {
     if raw.iter().all(|b| *b == 0) {
         return Ok(Lba1View {
             wire: WireSector(*raw),
@@ -96,7 +100,7 @@ pub fn parse_lba1(raw: &[u8; 512]) -> Result<Lba1View> {
         entry_size: u32le(raw, 84),
         partition_array_crc32: u32le(raw, 88),
     };
-    if header.current_lba != 1
+    if header.current_lba != expected_lba
         || header.first_usable_lba > header.last_usable_lba
         || header.entry_count == 0
     {
