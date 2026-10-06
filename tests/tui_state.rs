@@ -1896,9 +1896,7 @@ fn provision_format_controls_follow_current_mode_targets() {
     let mut state = AppState::new();
     state.provision_mut().kind = ProvisionKind::Mode1;
     let fields = state.provision_visible_fields();
-    assert!(fields
-        .iter()
-        .any(|(label, _, _)| label == "二合一区格式化"));
+    assert!(fields.iter().any(|(label, _, _)| label == "二合一区格式化"));
     assert!(fields.iter().any(|(label, _, _)| label == "保密区格式化"));
     assert!(!fields.iter().any(|(label, _, _)| label == "启动区格式化"));
     let share_index = fields
