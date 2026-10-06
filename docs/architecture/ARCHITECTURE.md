@@ -6,7 +6,7 @@
 
 `CLI / TUI -> application -> domain + stable protocol/provision/filesystem facades -> infrastructure + platform`
 
-当前仍是单个 crate，但已经按责任建立内部边界；能力使用单一实现归属路径；开发期遗留导入别名和无人调用的包装不作为兼容要求保留。EDP 介质协议与历史 EDPB 读取兼容单独维护。
+当前仍是单个 crate，但已经按责任建立内部边界；能力使用单一实现归属路径；开发期遗留导入别名和无人调用的包装不作为兼容要求保留。EDP 介质协议的历史兼容继续维护；EDPB 容器仅接受当前 v3 清单。
 
 - `src/cli*.rs`：CLI 参数解析与文本入口；公开命令目录统一由 `src/command_spec.rs` 描述，并供帮助与补全功能共用。
 - `src/tui/`：交互式前端。`AppState` 只保留 `shell` 与设备、检查、备份、制盘、恢复五个功能状态；`TaskHub` 负责刷新代次、单任务并发控制、关键写入任务与进度运输。帮助、页内动作提示和可用性描述通过 `ActionSpec` 与键位表共用语义；前端不实现裸盘安全策略。
