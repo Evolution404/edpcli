@@ -1,9 +1,5 @@
 use super::*;
 
-pub fn analyze_sector(lba: u32, raw: &[u8], meta: &InspectMeta) -> SectorView {
-    analyze_sector_with_context(lba, raw, meta, None)
-}
-
 pub fn analyze_sector_with_context(
     lba: u32,
     raw: &[u8],

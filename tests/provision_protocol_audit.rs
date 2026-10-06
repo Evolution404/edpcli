@@ -2387,7 +2387,7 @@ fn lba4_server_flag_wire_representation_is_not_inferred_from_identity_shape() {
         let generic_flags = &generic[0x2d..0x2f];
 
         let inspect_meta = InspectMeta::from_backup_meta(&meta);
-        let view = edpcli::inspect::analyze_sector(4, raw, &inspect_meta);
+        let view = edpcli::inspect::analyze_sector_with_context(4, raw, &inspect_meta, None);
         assert_eq!(
             &view.decoded[0x45..0x47],
             generic_flags,

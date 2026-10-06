@@ -43,7 +43,6 @@ pub fn backup_create_flow(
             total_sectors: Some(total_sectors),
             vid,
             pid,
-            label_id: identity.protocol.onlyid.clone(),
         };
         let metadata =
             crate::backup_metadata::acquire_metadata(dev, &img, &device_id, total_sectors)
@@ -95,7 +94,6 @@ pub fn backup_create_flow(
             total_sectors: Some(total_sectors),
             vid,
             pid,
-            label_id: None,
         };
         let metadata = crate::backup_metadata::acquire_plain_metadata(dev, total_sectors).map_err(
             |message| {

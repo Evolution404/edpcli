@@ -139,9 +139,6 @@ impl OfficialPartitionGeometry {
 pub struct OfficialProvisionPlan {
     pub mode: OfficialPartitionMode,
     pub sizes: OfficialPartitionSizes,
-    /// Compatibility setting for the explicit legacy exFAT builder. New disk
-    /// provisioning uses `filesystems` for every partition and for the MBR.
-    pub filesystem_format: FilesystemKind,
     pub filesystems: OfficialPartitionFilesystems,
     pub lba7_compatibility_extent: Lba7CompatibilityExtentLayout,
     pub lba7_key_material: LegacyLba7KeyMaterial,
@@ -186,7 +183,6 @@ impl OfficialProvisionPlan {
         Ok(Self {
             mode,
             sizes,
-            filesystem_format,
             filesystems: OfficialPartitionFilesystems::all(filesystem_format),
             lba7_compatibility_extent,
             lba7_key_material,

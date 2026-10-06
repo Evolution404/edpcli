@@ -68,6 +68,11 @@ impl SectorDev for FaultDev {
         }
         Ok(())
     }
+
+    // This test device is already writable.
+    fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 fn choices() -> Vec<PlannedPartitionFormat> {

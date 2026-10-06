@@ -14,10 +14,7 @@ use edpcli::platform::identity::identify;
 #[cfg(target_os = "macos")]
 #[test]
 fn identify_picks_edpf_verified_candidate() {
-    let Some(data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let data = load_disk_image("netac");
     let runner = netac_runner(99);
     // 传输模式未知 → 候选序 [长(BOT带rev), 短(UAS)]; 长的不解 EDPF, 落到短的
     let r = identify(&runner, 99, &data[7 * SECTOR..8 * SECTOR]);
@@ -29,10 +26,7 @@ fn identify_picks_edpf_verified_candidate() {
 #[cfg(target_os = "macos")]
 #[test]
 fn identify_no_candidate_matches() {
-    let Some(data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let data = load_disk_image("netac");
     let runner = netac_runner(99).canned_remove_scsi(); // ioreg 失败 → 无候选
     let r = identify(&runner, 99, &data[7 * SECTOR..8 * SECTOR]);
     assert!(r.device_id.is_none() && r.crc.is_none() && r.k0.is_none());
@@ -50,10 +44,7 @@ fn identify_no_candidate_matches() {
 #[cfg(target_os = "macos")]
 #[test]
 fn scan_and_print_all_row_kinds() {
-    let Some(netac) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let netac = load_disk_image("netac");
     let mut m = std::collections::HashMap::new();
     m.insert(
         "diskutil list -plist".to_string(),
@@ -225,10 +216,7 @@ fn scan_and_print_all_row_kinds() {
 #[cfg(target_os = "macos")]
 #[test]
 fn scan_prefers_live_plain_filesystem_over_stale_edp_protocol_fields() {
-    let Some(mut stale) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let mut stale = load_disk_image("netac");
     const TOTAL: u64 = 122_880_000;
     stale[..SECTOR].fill(0);
     let entry = 0x1be;

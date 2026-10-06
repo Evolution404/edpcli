@@ -216,21 +216,13 @@ pub(super) fn render_lba0_4(
             } else {
                 diagnostics.push(InspectDiagnostic::new(
                     InspectDiagnosticCode::MissingProtocolContext,
-                    "LBA2 缺 LBA1 上下文，使用单扇区兼容 profile",
+                    "LBA2 缺少权威 LBA1 上下文，保留原始字节",
                 ));
-                notes.push(
-                    "未提供完整 LBA0–12 上下文；LBA2 单扇区 API 仅以全零/非零选择兼容 profile，CLI/TUI 会以 LBA1 为权威。"
-                        .into(),
-                );
-                (
-                    if raw_sector.iter().all(|byte| *byte == 0) {
-                        crate::protocol::profile::GptLayout::Absent
-                    } else {
-                        crate::protocol::profile::GptLayout::Enabled
-                    },
-                    "single-sector fallback",
-                )
+                return "RAW（缺少 LBA1 上下文）".into();
             };
+            if profile == crate::protocol::profile::GptLayout::Unknown {
+                return "RAW（LBA1 上下文无效）".into();
+            }
             match lba2::parse_lba2(raw_sector, profile) {
                 Ok(view) => {
                     fields.push(profile_field(

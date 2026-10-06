@@ -22,7 +22,7 @@ struct Image {
 }
 
 fn setup() -> Option<Image> {
-    let base = load_disk_image("netac")?;
+    let base = load_disk_image("netac");
     let tmp = TmpDir::new("atomic");
     let path = tmp.0.join("disk.img");
     fs::write(&path, &base).unwrap();
@@ -67,6 +67,10 @@ impl SectorDev for FlakyDev {
     fn sync(&mut self) -> std::io::Result<()> {
         self.inner.sync()
     }
+
+    fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// 包装 FileDev: 写入扇区数达到阈值后, LBA12 的读回返回全零(模拟"读回与写入不符")。
@@ -101,6 +105,10 @@ impl SectorDev for SyncFailDev {
         }
         self.inner.sync()
     }
+
+    fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 impl SectorDev for TamperReadDev {
@@ -117,6 +125,10 @@ impl SectorDev for TamperReadDev {
     }
     fn sync(&mut self) -> std::io::Result<()> {
         self.inner.sync()
+    }
+
+    fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+        Ok(())
     }
 }
 

@@ -304,7 +304,7 @@ impl EvidenceSource {
                 }
             })?;
         let current_plain_v3 = verified.manifest.schema == "edpb.manifest.v3"
-            && verified.manifest.backup_purpose == Some(crate::edpb::BackupPurpose::MetadataOnly)
+            && verified.manifest.backup_purpose == crate::edpb::BackupPurpose::MetadataOnly
             && verified.manifest.snapshot.capture_level == crate::edpb::CaptureLevel::Metadata
             && canonical.protocol.provision_kind
                 == Some(crate::provision::DiskProvisionKind::Plain);

@@ -205,10 +205,6 @@ impl InspectTopology {
         lazy_sector_location(&self.root, lba, &mut Vec::new())
     }
 
-    pub fn find_label_path(&self, query: &str) -> Option<Vec<String>> {
-        self.find_label_paths(query).into_iter().next()
-    }
-
     pub fn find_label_paths(&self, query: &str) -> Vec<Vec<String>> {
         let query = query.trim().to_lowercase();
         if query.is_empty() {

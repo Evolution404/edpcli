@@ -7,7 +7,7 @@ pub fn export_sparse_provision_image(
     if prepared.target_plan.as_ref().is_some_and(|plan| {
         plan.partitions
             .iter()
-            .any(|part| part.action == PartitionAction::PreserveExact)
+            .any(|part| part.disposition.preserves_extent())
     }) {
         return Err(err(
             EXIT_TARGET,

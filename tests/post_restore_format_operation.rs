@@ -455,10 +455,7 @@ fn format_failure_preserves_verified_metadata_restore_result() {
 
 #[test]
 fn encrypted_edp_partition_cannot_enter_plaintext_format() {
-    let Some(image) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实协议夹具不可用");
-        return;
-    };
+    let image = load_disk_image("netac");
     let protocol = image[..13 * SECTOR].to_vec();
     let provision = edpcli::provision::ProvisionImage::from_bytes(protocol.clone()).unwrap();
     let parsed = edpcli::provision::parse_existing_provision(

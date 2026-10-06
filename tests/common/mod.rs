@@ -41,22 +41,43 @@ pub const KEYS: [&str; 3] = ["netac", "lexar", "aigo"];
 pub const AIGO_NEG_BIN: &str =
     "disk4_1953525168_vid174c_pid55aa_disk&ven_aigo&prod_hd806_onlyid-1833210541_20260903_121552.bin";
 
-/// 13 扇区协议夹具的完整路径; 文件不存在返回 None(用例自行跳过)。
-pub fn fixture_bin(key: &str) -> Option<PathBuf> {
-    let (bin, _) = fixture(key)?;
-    let p = PathBuf::from(FIXTURE_DIR).join(bin);
-    p.exists().then_some(p)
+/// Required protocol fixtures fail closed on missing, truncated or corrupt evidence.
+pub fn fixture_bin(key: &str) -> PathBuf {
+    let (name, _) = fixture(key).expect("unknown required fixture key");
+    let path = PathBuf::from(FIXTURE_DIR).join(name);
+    required_image(&path);
+    path
 }
-
-pub fn neg_id_bin() -> Option<PathBuf> {
-    let p = PathBuf::from(FIXTURE_DIR).join(AIGO_NEG_BIN);
-    p.exists().then_some(p)
+pub fn neg_id_bin() -> PathBuf {
+    let path = PathBuf::from(FIXTURE_DIR).join(AIGO_NEG_BIN);
+    required_image(&path);
+    path
 }
-
-/// 严格读取一张 LBA0-12 / 6656B 协议镜像；其它长度直接拒绝。
-pub fn load_disk_image(key: &str) -> Option<Vec<u8>> {
-    let data = fs::read(fixture_bin(key)?).ok()?;
-    (data.len() == edpcli::application::support::METADATA_IMAGE_LEN).then_some(data)
+pub fn required_image(path: &std::path::Path) -> Vec<u8> {
+    let data = fs::read(path)
+        .unwrap_or_else(|error| panic!("required fixture {}: {error}", path.display()));
+    assert_eq!(
+        data.len(),
+        edpcli::application::support::METADATA_IMAGE_LEN,
+        "required fixture length: {}",
+        path.display()
+    );
+    let hash_path = PathBuf::from(format!("{}.sha256", path.display()));
+    let expected = fs::read_to_string(&hash_path)
+        .unwrap_or_else(|error| panic!("required fixture hash {}: {error}", hash_path.display()));
+    assert_eq!(
+        sha256_hex(&data),
+        expected
+            .split_whitespace()
+            .next()
+            .expect("empty fixture hash"),
+        "required fixture SHA-256: {}",
+        path.display()
+    );
+    data
+}
+pub fn load_disk_image(key: &str) -> Vec<u8> {
+    required_image(&fixture_bin(key))
 }
 
 pub fn read_fn_of(

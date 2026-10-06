@@ -11,10 +11,7 @@ pub fn canonical_media_identity(
 
     validate_manifest_identity(manifest)?;
 
-    let identity = manifest
-        .identity
-        .as_ref()
-        .ok_or_else(|| "EDPB manifest v3 missing typed identity".to_string())?;
+    let identity = &manifest.identity;
     Ok(MediaIdentitySnapshot {
         hardware: HardwareIdentityEvidence {
             vid: identity.hardware.vid,

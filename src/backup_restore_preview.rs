@@ -170,7 +170,7 @@ fn build_layout(manifest: &Manifest, is_plain: bool) -> Result<DiskLayoutModel, 
 impl BackupRestorePreview {
     pub fn from_manifest(manifest: &Manifest) -> Self {
         let is_plain = manifest.snapshot.device_state.eq_ignore_ascii_case("plain");
-        let restore_contract = manifest.restore_contract.clone();
+        let restore_contract = Some(manifest.restore_contract.clone());
         let mut region_statuses = Vec::new();
 
         if is_plain {
@@ -316,15 +316,17 @@ mod tests {
                 capture_level: CaptureLevel::Metadata,
                 device_state: device_state.into(),
             },
-            backup_purpose: Some(BackupPurpose::MetadataOnly),
-            restore_contract: Some(RestoreContract::metadata_only(restores_edp_protocol)),
+            backup_purpose: BackupPurpose::MetadataOnly,
+            restore_contract: RestoreContract::metadata_only(restores_edp_protocol),
             device: DeviceIdentity {
                 vid: "1234".into(),
                 pid: "5678".into(),
                 device_id: "disk&ven_test&prod_test".into(),
                 onlyid: Some("7001".into()),
             },
-            identity: None,
+            identity: crate::edpb::manifest_identity_from_snapshot(
+                &crate::media_identity::MediaIdentitySnapshot::default(),
+            ),
             geometry: DeviceGeometry {
                 logical_sector_size: 512,
                 physical_sector_size: None,

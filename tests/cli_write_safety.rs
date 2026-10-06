@@ -319,6 +319,10 @@ impl SectorDev for SwapOnReopenDev {
         self.switched = true;
         Ok(())
     }
+
+    fn sync(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 struct ReopenSerialRunner {
@@ -362,14 +366,15 @@ impl SectorDev for ReopenSerialDev {
         self.reopened.store(true, Ordering::SeqCst);
         Ok(())
     }
+
+    fn sync(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[test]
 fn backup_create_is_read_only_and_verifiable() {
-    let Some(orig) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let orig = load_disk_image("netac");
 
     // 手动 backup create 的 runner 故意删除卸载命令：只读路径若误入
     // prepare_write/unmount，此测试会立即失败。
@@ -425,10 +430,7 @@ fn backup_create_is_read_only_and_verifiable() {
 
 #[test]
 fn edp_backup_records_hardware_serial_binding_when_available() {
-    let Some(orig) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let orig = load_disk_image("netac");
     let serial = "NETAC-HIL-SERIAL-001";
     let runner = netac_serial_runner(6, serial);
     let tmp = TmpDir::new("backup_create_serial_binding");
@@ -455,10 +457,7 @@ fn edp_backup_records_hardware_serial_binding_when_available() {
 
 #[test]
 fn restore_clone_with_same_edp_identity_but_different_usb_serial_is_rejected_before_write() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("restore_edp_clone_serial_conflict");
     let backup = tmp.0.join("same-protocol-clone.edpb");
     write_test_edpb_with_serial(
@@ -496,9 +495,7 @@ fn restore_clone_with_same_edp_identity_but_different_usb_serial_is_rejected_bef
 
 #[test]
 fn restore_numeric_selector_cannot_bypass_serial_authorization() {
-    let Some(original) = load_disk_image("netac") else {
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("restore_numeric_clone_conflict");
     let backup = tmp.0.join("clone.edpb");
     write_test_edpb_with_serial(
@@ -527,9 +524,7 @@ fn restore_numeric_selector_cannot_bypass_serial_authorization() {
 
 #[test]
 fn retired_edpb_schema_is_rejected_before_any_device_write() {
-    let Some(original) = load_disk_image("netac") else {
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("restore_retired_edpb");
     let runner = netac_serial_runner(6, "NETAC-RAW-SERIAL-001");
     for schema in ["edpb.manifest.v1", "edpb.manifest.v2"] {
@@ -565,9 +560,7 @@ fn retired_edpb_schema_is_rejected_before_any_device_write() {
 
 #[test]
 fn restore_weak_backup_cannot_authorize_destructive_write() {
-    let Some(original) = load_disk_image("netac") else {
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("restore_weak_backup");
     let backup = tmp.0.join("weak.edpb");
     write_test_edpb(
@@ -596,9 +589,7 @@ fn restore_weak_backup_cannot_authorize_destructive_write() {
 
 #[test]
 fn restore_geometry_conflict_rejected_before_write() {
-    let Some(original) = load_disk_image("netac") else {
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("restore_geometry_conflict");
     let backup = tmp.0.join("wrong-geometry.edpb");
     write_test_edpb_with_serial(
@@ -627,9 +618,7 @@ fn restore_geometry_conflict_rejected_before_write() {
 
 #[test]
 fn restore_vid_pid_hard_conflict_rejected_before_write() {
-    let Some(original) = load_disk_image("netac") else {
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("restore_vid_pid_conflict");
     let backup = tmp.0.join("source.edpb");
     write_netac_edpb(&backup, &original, "edp");
@@ -656,9 +645,7 @@ fn restore_vid_pid_hard_conflict_rejected_before_write() {
 
 #[test]
 fn restore_same_protocol_clone_swapped_after_reopen_has_zero_writes() {
-    let Some(original) = load_disk_image("netac") else {
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("restore_same_protocol_reopen_clone");
     let backup = tmp.0.join("source.edpb");
     write_test_edpb_with_serial(
@@ -695,9 +682,7 @@ fn restore_same_protocol_clone_swapped_after_reopen_has_zero_writes() {
 
 #[test]
 fn restore_corrupt_edp_with_nonzero_lba4_does_not_fallback_plain() {
-    let Some(original) = load_disk_image("netac") else {
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("restore_corrupt_edp_not_plain");
     let backup = tmp.0.join("source.edpb");
     write_netac_edpb(&backup, &original, "edp");
@@ -724,10 +709,7 @@ fn restore_corrupt_edp_with_nonzero_lba4_does_not_fallback_plain() {
 
 #[test]
 fn restore_numeric_target_uses_backup_selector_and_current_disk_identity() {
-    let Some(orig) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let orig = load_disk_image("netac");
     let runner = netac_runner(6);
     let tmp = TmpDir::new("restore_numeric_selector");
     let backup_dir = tmp.0.join("bak");
@@ -765,10 +747,7 @@ fn restore_rejects_legacy_bin_when_device_id_is_unavailable() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let mut runner = netac_runner(26);
     runner.canned.remove("ioreg -r -c IOSCSITargetDevice -l");
 
@@ -803,10 +782,7 @@ fn restore_rejects_legacy_bin_when_device_id_is_unavailable() {
 
 #[test]
 fn restore_refuses_when_current_disk_identity_tag_is_zero() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let runner = netac_runner(26);
     let tmp = TmpDir::new("restore_zero_current_identity");
     let bakfile = tmp.0.join(
@@ -839,10 +815,7 @@ fn restore_refuses_when_current_disk_identity_tag_is_zero() {
 
 #[test]
 fn corrupt_edp_with_nonzero_lba4_never_falls_back_to_plain_backup() {
-    let Some(mut original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let mut original = load_disk_image("netac");
     original[7 * SECTOR..8 * SECTOR].fill(0);
     let runner = netac_serial_runner(26, "NETAC-HIL-SERIAL-001");
     let tmp = TmpDir::new("corrupt_edp_not_plain");
@@ -873,10 +846,7 @@ fn corrupt_edp_with_nonzero_lba4_never_falls_back_to_plain_backup() {
 
 #[test]
 fn restore_allows_plain_lba4_zero_only_with_matching_hardware_binding() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let serial = "NETAC-HIL-SERIAL-001";
     let runner = netac_serial_runner(26, serial);
     let tmp = TmpDir::new("restore_plain_matching_hardware");
@@ -921,10 +891,7 @@ fn restore_allows_plain_lba4_zero_only_with_matching_hardware_binding() {
 
 #[test]
 fn restore_plain_lba4_zero_rejects_wrong_hardware_serial() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("restore_plain_wrong_hardware");
     let bakfile = tmp.0.join("serial-bound.edpb");
     write_test_edpb_with_serial(
@@ -968,10 +935,7 @@ fn restore_plain_lba4_zero_rejects_wrong_hardware_serial() {
 
 #[test]
 fn standalone_plain_backup_without_usable_serial_remains_allowed_as_weak_identity() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let current = plain_metadata(original);
     let runner = netac_runner(26);
     let tmp = TmpDir::new("plain_backup_weak_identity");
@@ -1001,10 +965,7 @@ fn standalone_plain_backup_without_usable_serial_remains_allowed_as_weak_identit
 
 #[test]
 fn plain_backup_uses_hardware_identity_and_serial_binding() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let serial = "NETAC-HIL-SERIAL-001";
     let runner = netac_serial_runner(26, serial);
     let tmp = TmpDir::new("plain_backup_hardware_identity");
@@ -1086,10 +1047,7 @@ fn plain_backup_uses_hardware_identity_and_serial_binding() {
 
 #[test]
 fn chapter_18_b4_plain_v3_restore_writes_partition_metadata_without_protocol_core() {
-    let Some(original_edp) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original_edp = load_disk_image("netac");
     let serial = "NETAC-HIL-SERIAL-001";
     let runner = netac_serial_runner(26, serial);
     let tmp = TmpDir::new("chapter18_b4_plain_restore");
@@ -1183,10 +1141,7 @@ fn chapter_18_b4_plain_v3_restore_writes_partition_metadata_without_protocol_cor
 
 #[test]
 fn restore_picker_selects_newest_and_writes() {
-    let Some(orig) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let orig = load_disk_image("netac");
     let (Some((conv, _)),) = (mode1_fixture_image("netac"),) else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -1239,10 +1194,7 @@ fn restore_picker_selects_newest_and_writes() {
 
 #[test]
 fn restore_edpb_payload_hash_mismatch_rejected() {
-    let Some(orig) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let orig = load_disk_image("netac");
     let runner = netac_runner(26);
     let tmp = TmpDir::new("restore_edpb_hash");
     let bakfile = tmp.0.join("broken.edpb");
@@ -1273,10 +1225,7 @@ fn restore_edpb_payload_hash_mismatch_rejected() {
 
 #[test]
 fn restore_valid_edpb_needs_no_external_sidecar() {
-    let Some(orig) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let orig = load_disk_image("netac");
     let runner = netac_serial_runner(26, "NETAC-HIL-SERIAL-001");
     let tmp = TmpDir::new("restore_edpb_no_sidecar");
     let bakfile = tmp.0.join(
@@ -1307,10 +1256,7 @@ fn restore_valid_edpb_needs_no_external_sidecar() {
 
 #[test]
 fn restore_truncated_edpb_is_rejected() {
-    let Some(orig) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let orig = load_disk_image("netac");
     let runner = netac_runner(26);
     let tmp = TmpDir::new("restore_truncated_edpb");
     let bakfile = tmp.0.join("truncated.edpb");
@@ -1340,10 +1286,7 @@ fn restore_truncated_edpb_is_rejected() {
 
 #[test]
 fn restore_explicit_backup_from_other_disk_is_rejected() {
-    let (Some(current), Some(other)) = (load_disk_image("netac"), load_disk_image("lexar")) else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let (current, other) = (load_disk_image("netac"), load_disk_image("lexar"));
     let runner = netac_runner(26);
     let tmp = TmpDir::new("restore_wrong_disk");
     let bakfile = tmp.0.join("other-disk.edpb");
@@ -1380,10 +1323,7 @@ fn restore_explicit_backup_from_other_disk_is_rejected() {
 
 #[test]
 fn restore_no_backup_found() {
-    let Some(orig) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let orig = load_disk_image("netac");
     let runner = netac_runner(26);
     let tmp = TmpDir::new("restore_none");
     let empty_bak = tmp.0.join("none");
@@ -1409,10 +1349,7 @@ fn restore_no_backup_found() {
 
 #[test]
 fn restore_refuses_if_disk_identity_changes_after_reopen() {
-    let (Some(netac), Some(lexar)) = (load_disk_image("netac"), load_disk_image("lexar")) else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let (netac, lexar) = (load_disk_image("netac"), load_disk_image("lexar"));
     let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
     let tmp = TmpDir::new("restore_swap_after_reopen");
     let backup = tmp.0.join(
@@ -1478,6 +1415,10 @@ impl SectorDev for RestorableSparseDev {
     fn reopen_rdwr(&mut self, _wait: std::time::Duration) -> std::io::Result<()> {
         Ok(())
     }
+
+    fn sync(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[test]
@@ -1487,10 +1428,7 @@ fn restore_metadata_edpb_restores_lba0_12_and_validated_lce_together() {
         SemanticStatus,
     };
 
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let device_id = "disk&ven_netac&prod_onlydisk";
     let total_sectors = 122_880_000u64;
     let geometry = edpcli::application::backup::parse_lba7_compatibility_geometry(

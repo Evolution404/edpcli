@@ -8,9 +8,6 @@ use crate::provision::DiskProvisionKind;
 
 use super::BackupWorkspaceItem;
 
-pub const IDENTITY_HEADINGS: [&str; 7] =
-    ["容量", "VID:PID", "型号", "onlyid", "姓名", "部门", "盘型"];
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdentityReliability {
     Strong,

@@ -82,6 +82,14 @@ impl SectorDev for ReadOnlySparseDev {
             "Metadata capture must never write the source device",
         ))
     }
+
+    fn sync(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 fn ntfs_boot(mft_lcn: u64, mftmirr_lcn: u64) -> Vec<u8> {
@@ -382,10 +390,7 @@ fn plain_fat16_metadata_capture_preserves_volume_label_and_empty_label_is_none()
 
 #[test]
 fn authentic_lba12_yields_bounded_partition_geometry() {
-    let Some(image) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实协议夹具不可用");
-        return;
-    };
+    let image = load_disk_image("netac");
     let partitions =
         parse_partition_geometry(&image, NETAC_DEVICE_ID, NETAC_TOTAL_SECTORS).unwrap();
 
@@ -405,10 +410,7 @@ fn authentic_lba12_yields_bounded_partition_geometry() {
 
 #[test]
 fn authentic_lexar_lba7_points_to_six_sector_compatibility_extent() {
-    let Some(image) = load_disk_image("lexar") else {
-        eprintln!("跳过: 真实 Lexar 协议夹具不可用");
-        return;
-    };
+    let image = load_disk_image("lexar");
     let compat =
         parse_lba7_compatibility_geometry(&image, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
     assert_eq!(compat.start_lba, LEXAR_LBA7_COMPAT_START);
@@ -435,10 +437,7 @@ fn authentic_lexar_lba7_points_to_six_sector_compatibility_extent() {
 
 #[test]
 fn metadata_capture_reads_complete_lba7_compatibility_extent_without_magic_tail_window() {
-    let Some(image) = load_disk_image("lexar") else {
-        eprintln!("跳过: 真实 Lexar 协议夹具不可用");
-        return;
-    };
+    let image = load_disk_image("lexar");
     let mut dev = ReadOnlySparseDev::new();
     let mut expected = Vec::new();
     for offset in 0..LBA7_COMPAT_EXTENT_SECTORS {
@@ -503,10 +502,7 @@ fn metadata_capture_reads_complete_lba7_compatibility_extent_without_magic_tail_
 
 #[test]
 fn lba7_compatibility_pointer_remains_authoritative_when_chs_cross_check_differs() {
-    let Some(image) = load_disk_image("lexar") else {
-        eprintln!("跳过: 真实 Lexar 协议夹具不可用");
-        return;
-    };
+    let image = load_disk_image("lexar");
     let altered_start = LEXAR_LBA7_COMPAT_START - 1;
     let altered = rewrite_lexar_lba7_compatibility_pointer(&image, altered_start);
     let parsed =
@@ -605,10 +601,7 @@ fn chapter_18_b5_edp_nondefault_password_is_typed_password_required() {
         assess_partitions_readonly, PostRestorePartitionState,
     };
 
-    let Some(image) = load_disk_image("lexar") else {
-        eprintln!("跳过: Lexar 协议夹具不可用");
-        return;
-    };
+    let image = load_disk_image("lexar");
     let geometry = parse_partition_geometry(&image, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
     let encrypted_index = geometry
         .iter()
@@ -656,10 +649,7 @@ fn chapter_18_b5_edp_bad_file_key_crc_is_typed_crypto_metadata_invalid() {
         assess_partitions_readonly, PostRestorePartitionState,
     };
 
-    let Some(image) = load_disk_image("lexar") else {
-        eprintln!("跳过: Lexar 协议夹具不可用");
-        return;
-    };
+    let image = load_disk_image("lexar");
     let geometry = parse_partition_geometry(&image, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
     let encrypted_index = geometry
         .iter()
@@ -763,10 +753,7 @@ fn edp_metadata_capture_maps_lba10_volume_labels_without_reading_partition_files
 
 #[test]
 fn chapter_18_b3_edp_metadata_capture_excludes_filesystem_and_keeps_protocol_extents() {
-    let Some(image) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实协议夹具不可用");
-        return;
-    };
+    let image = load_disk_image("netac");
     let partitions =
         parse_partition_geometry(&image, NETAC_DEVICE_ID, NETAC_TOTAL_SECTORS).unwrap();
     let sample_partition = &partitions[0];
@@ -812,10 +799,7 @@ fn chapter_18_b3_edp_metadata_capture_excludes_filesystem_and_keeps_protocol_ext
 
 #[test]
 fn metadata_container_only_marks_protocol_and_validated_lce_restorable() {
-    let Some(image) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实协议夹具不可用");
-        return;
-    };
+    let image = load_disk_image("netac");
     let mut dev = ReadOnlySparseDev::new();
     let acquisition =
         acquire_metadata(&mut dev, &image, NETAC_DEVICE_ID, NETAC_TOTAL_SECTORS).unwrap();
@@ -865,10 +849,7 @@ fn metadata_container_only_marks_protocol_and_validated_lce_restorable() {
 
 #[test]
 fn metadata_container_detects_corruption_in_non_protocol_artifact() {
-    let Some(image) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实协议夹具不可用");
-        return;
-    };
+    let image = load_disk_image("netac");
     let mut dev = ReadOnlySparseDev::new();
     let acquisition =
         acquire_metadata(&mut dev, &image, NETAC_DEVICE_ID, NETAC_TOTAL_SECTORS).unwrap();

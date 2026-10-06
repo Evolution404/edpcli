@@ -233,9 +233,7 @@ impl AppState {
                     .result
                     .as_ref()
                     .and_then(|workspace| workspace.backup_manifest.as_ref())
-                    .map_or(0, |manifest| {
-                        4 + usize::from(manifest.restore_contract.is_some())
-                    });
+                    .map_or(0, |_| 5);
                 8 + usize::from(row.range.byte_range.is_some())
                     + usize::from(row.decoder.is_some())
                     + manifest_lines

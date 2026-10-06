@@ -20,13 +20,6 @@ impl TaskHub {
         }
     }
 
-    pub fn request_provision_key_probe(&mut self, disk: u32) -> Result<u64, &'static str> {
-        self.request_key_probe_session(KeyProbeContext {
-            disk,
-            session_id: 0,
-        })
-    }
-
     pub(crate) fn request_key_probe_session(
         &mut self,
         context: KeyProbeContext,
@@ -63,17 +56,6 @@ impl TaskHub {
                 result,
             }));
         });
-    }
-
-    // Compatibility entry point; production supplies an explicit form session.
-    pub fn request_provision_source_password_verify(
-        &mut self,
-        disk: u32,
-        domain: crate::provision::KeyDomainRole,
-        password: String,
-        revision: u64,
-    ) -> Result<u64, &'static str> {
-        self.request_source_password_verify_session(disk, domain, password.into(), revision, 0)
     }
 
     pub(crate) fn request_source_password_verify_session(

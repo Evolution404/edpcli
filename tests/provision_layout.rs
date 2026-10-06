@@ -159,7 +159,7 @@ fn generated_mode0_exfat_front_uses_mbr_07_from_the_initial_protocol_image() {
 #[test]
 fn official_plan_defaults_to_current_writer_exfat_but_accepts_other_configured_formats() {
     let default = official_plan(OfficialPartitionMode::BootShareCombined);
-    assert_eq!(default.filesystem_format, FilesystemKind::ExFat);
+    assert_eq!(default.filesystems.encrypt, FilesystemKind::ExFat);
 
     let compat = locate_lba7_compatibility_extent_from_geometry(1024, 255, 63, 512).unwrap();
     let current = wrap_file_key(
@@ -180,7 +180,7 @@ fn official_plan_defaults_to_current_writer_exfat_but_accepts_other_configured_f
             current,
         )
         .unwrap();
-        assert_eq!(plan.filesystem_format, format);
+        assert_eq!(plan.filesystems.encrypt, format);
     }
 }
 

@@ -578,12 +578,6 @@ pub const PROFILE_AXIS_DETECTORS: &[ProfileAxisDetector] = &[
     ),
 ];
 
-pub fn profile_axis_detector(axis: &str) -> Option<&'static ProfileAxisDetector> {
-    PROFILE_AXIS_DETECTORS
-        .iter()
-        .find(|entry| entry.axis == axis)
-}
-
 pub fn detect_profile_axes(
     raw: &[u8; PROTOCOL_IMAGE_BYTES],
     context: ProfileDetectionContext<'_>,

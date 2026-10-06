@@ -23,15 +23,15 @@ pub(super) fn base_manifest(
             capture_level: CaptureLevel::Core,
             device_state: capture.device_state.clone(),
         },
-        backup_purpose: Some(BackupPurpose::MetadataOnly),
-        restore_contract: Some(RestoreContract::metadata_only(restores_edp_protocol)),
+        backup_purpose: BackupPurpose::MetadataOnly,
+        restore_contract: RestoreContract::metadata_only(restores_edp_protocol),
         device: DeviceIdentity {
             vid: capture.vid.clone(),
             pid: capture.pid.clone(),
             device_id: capture.device_id.clone(),
             onlyid: capture.onlyid.clone(),
         },
-        identity: Some(typed_identity),
+        identity: typed_identity,
         geometry: DeviceGeometry {
             logical_sector_size: capture.logical_sector_size,
             physical_sector_size: None,
@@ -267,24 +267,6 @@ pub fn write_core_backup_with_identity(
         &[],
         &[],
         Some(identity),
-    )
-}
-
-pub fn write_core_backup_with_notes(
-    path: &Path,
-    capture: &CoreCapture<'_>,
-    notes: &[String],
-) -> Result<Manifest, String> {
-    write_container(
-        path,
-        capture,
-        CaptureLevel::Core,
-        &[],
-        &[],
-        &[],
-        &[],
-        notes,
-        None,
     )
 }
 

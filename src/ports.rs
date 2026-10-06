@@ -19,14 +19,10 @@ pub trait CmdRunner {
 pub trait SectorDev {
     fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>>;
     fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()>;
-    /// Compatibility default for memory devices. Native devices must implement durable sync.
-    fn sync(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-    /// Compatibility default for memory devices already open for writing.
-    fn reopen_rdwr(&mut self, _wait: Duration) -> io::Result<()> {
-        Ok(())
-    }
+    /// Complete durable synchronization, or return an error.
+    fn sync(&mut self) -> io::Result<()>;
+    /// Reopen with write access, or return an error.
+    fn reopen_rdwr(&mut self, wait: Duration) -> io::Result<()>;
 }
 
 pub trait Clock {

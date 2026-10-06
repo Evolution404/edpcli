@@ -33,9 +33,9 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
     use crate::filesystem::FilesystemKind;
     use crate::protocol::edpf::EdpPartitionType;
     use crate::provision::{
-        OfficialPartitionMode, PartitionAction, PartitionRole, PassthroughBasis,
-        PasswordDisposition, RegionDisposition, SourcePasswordKnowledge, TargetPartitionGeometry,
-        TargetPartitionPlan, TargetPasswordPolicy, TargetProvisionPlan,
+        OfficialPartitionMode, PartitionRole, PassthroughBasis, PasswordDisposition,
+        RegionDisposition, SourcePasswordKnowledge, TargetPartitionGeometry, TargetPartitionPlan,
+        TargetPasswordPolicy, TargetProvisionPlan,
     };
 
     let plan = TargetProvisionPlan {
@@ -50,7 +50,6 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
                     physically_encrypted: false,
                     filesystem: Some(FilesystemKind::ExFat),
                 },
-                action: PartitionAction::Rebuild,
                 disposition: RegionDisposition::Rebuild,
                 password_disposition: Some(PasswordDisposition::Rebuild),
                 source_password_knowledge: None,
@@ -67,7 +66,6 @@ fn target_plan_summary_reports_exact_geometry_and_data_fate() {
                     physically_encrypted: true,
                     filesystem: Some(FilesystemKind::ExFat),
                 },
-                action: PartitionAction::PreserveExact,
                 disposition: RegionDisposition::PreserveOpaque,
                 password_disposition: Some(PasswordDisposition::Passthrough(
                     PassthroughBasis::OpaqueCompatible,

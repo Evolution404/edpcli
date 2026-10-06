@@ -12,7 +12,7 @@ use edpcli::edpb::{
 };
 
 fn fixture_edpb(key: &str, tag: &str) -> Option<(TmpDir, PathBuf)> {
-    let data = load_disk_image(key)?;
+    let data = load_disk_image(key);
     let (disk, sectors, vid, pid, device_id, onlyid) = match key {
         "netac" => (
             6,

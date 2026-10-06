@@ -4,7 +4,7 @@
 
 use crate::gold_name;
 
-use edpcli::inspect::{analyze_sector, InspectMeta};
+use edpcli::inspect::{analyze_sector_with_context, InspectMeta};
 use edpcli::protocol::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
 use std::{fs, path::Path};
 
@@ -235,7 +235,7 @@ fn authentic_mode1_lba4_flags_require_a_separate_representation_audit() {
 
     // Current inspect exposes the rolling-reader view for this nonzero-HSerial
     // profile. Neither it nor the wire zeros prove producer-side flag values.
-    let view = analyze_sector(4, raw, &InspectMeta::default());
+    let view = analyze_sector_with_context(4, raw, &InspectMeta::default(), None);
     assert_eq!(&view.decoded[0x45..0x47], &[0xd4, 0xd9]);
     assert!(view.fields.iter().any(|field| {
         field.label == "bDataToServer"

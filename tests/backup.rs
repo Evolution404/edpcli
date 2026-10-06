@@ -42,7 +42,6 @@ fn netac_facts() -> DiskFacts {
         total_sectors: Some(122880000),
         vid: "0dd8".into(),
         pid: "2005".into(),
-        label_id: Some("1402259934".into()),
     }
 }
 
@@ -191,10 +190,7 @@ fn write_plain_metadata_v3(
 
 #[test]
 fn edpb_backup_label_id_comes_from_raw_lba4() {
-    let Some(data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let data = load_disk_image("netac");
     let tmp = TmpDir::new("edpb_label_id");
     let path = write_backup(
         &tmp.0,
@@ -213,14 +209,11 @@ fn edpb_backup_label_id_comes_from_raw_lba4() {
 
 #[test]
 fn find_backups_lba4_final_filter() {
-    let (Some(netac), Some(lexar), Some(real_bin)) = (
+    let (netac, lexar, real_bin) = (
         load_disk_image("netac"),
         load_disk_image("lexar"),
         fixture_bin("netac"),
-    ) else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    );
     let tmp = TmpDir::new("find");
     // 同型号模式但 LBA4 是他盘(lexar 内容)的备份 → 被 LBA4 终验剔除
     let real = write_backup(
@@ -248,10 +241,7 @@ fn find_backups_lba4_final_filter() {
 
 #[test]
 fn backup_written_as_single_edpb_with_internal_hashes_and_onlyid() {
-    let Some(data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let data = load_disk_image("netac");
     let tmp = TmpDir::new("backup");
     let path = create_test_metadata_backup(
         &netac_facts(),
@@ -280,10 +270,7 @@ fn backup_written_as_single_edpb_with_internal_hashes_and_onlyid() {
 
 #[test]
 fn backup_rejects_incomplete_lba_image_before_creating_files() {
-    let Some(mut data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let mut data = load_disk_image("netac");
     data.pop();
     let tmp = TmpDir::new("backup_short_image");
     let result = create_test_metadata_backup(
@@ -302,13 +289,9 @@ fn backup_rejects_incomplete_lba_image_before_creating_files() {
 
 #[test]
 fn backup_filename_onlyid_is_derived_from_lba4_content() {
-    let Some(data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let data = load_disk_image("netac");
     let tmp = TmpDir::new("backup_content_onlyid");
-    let mut facts = netac_facts();
-    facts.label_id = Some("999999999".into());
+    let facts = netac_facts();
     let path = create_test_metadata_backup(
         &facts,
         &data,
@@ -324,10 +307,7 @@ fn backup_filename_onlyid_is_derived_from_lba4_content() {
 
 #[test]
 fn find_backups_ignores_matching_non_bin_files() {
-    let Some(data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let data = load_disk_image("netac");
     let tmp = TmpDir::new("find_only_bin");
     let bin = write_backup(
         &tmp.0,
@@ -372,10 +352,7 @@ fn find_backups_prefers_device_id_tier_before_generic_fallback() {
 
 #[test]
 fn backup_rejects_device_id_with_path_separators_before_creating_files() {
-    let Some(data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let data = load_disk_image("netac");
     let tmp = TmpDir::new("backup_device_id_path_escape");
     let bak = tmp.0.join("bak");
     fs::create_dir_all(&bak).unwrap();
@@ -400,10 +377,7 @@ fn backup_rejects_device_id_with_path_separators_before_creating_files() {
 
 #[test]
 fn creating_new_backup_does_not_rename_existing_history() {
-    let Some(data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let data = load_disk_image("netac");
     let tmp = TmpDir::new("backup_no_implicit_migrate");
     let legacy = tmp
         .0
@@ -432,10 +406,7 @@ fn creating_new_backup_does_not_rename_existing_history() {
 
 #[test]
 fn backup_collision_never_overwrites_existing_file() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("backup_collision");
     let path = create_test_metadata_backup(
         &netac_facts(),
@@ -559,10 +530,7 @@ fn plain_v3_metadata_without_protocol_core_is_healthy_and_keeps_plain_kind() {
 
 #[test]
 fn scan_backup_dir_reports_edpb_integrity_and_ignores_legacy_bin() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("scan_backup");
 
     let ok = write_backup(
@@ -617,10 +585,7 @@ fn scan_backup_dir_reports_edpb_integrity_and_ignores_legacy_bin() {
 
 #[test]
 fn scan_backup_dir_rejects_raw_7168_bytes_disguised_as_edpb() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("scan_backup_reject_7168");
     let mut legacy = original;
     legacy.extend_from_slice(&[0u8; SECTOR]);
@@ -639,10 +604,7 @@ fn scan_backup_dir_rejects_raw_7168_bytes_disguised_as_edpb() {
 
 #[test]
 fn legacy_bin_is_not_a_runtime_backup_even_with_valid_sidecar() {
-    let Some(data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let data = load_disk_image("netac");
     let tmp = TmpDir::new("legacy_bin_rejected");
     let legacy = tmp.0.join(
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170000.bin",
@@ -664,10 +626,7 @@ fn legacy_bin_is_not_a_runtime_backup_even_with_valid_sidecar() {
 
 #[test]
 fn scan_is_read_only_and_infers_missing_onlyid_in_memory() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("scan_read_only");
     let legacy = write_backup(
         &tmp.0,
@@ -696,10 +655,7 @@ fn scan_is_read_only_and_infers_missing_onlyid_in_memory() {
 
 #[test]
 fn scan_prefers_lba4_identity_over_filename_onlyid() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("scan_onlyid_content_wins");
     let path = write_backup(
         &tmp.0,
@@ -830,10 +786,7 @@ fn prune_uses_backup_name_time_before_filesystem_mtime() {
 
 #[test]
 fn verify_and_prune_preview_exit_contract() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let Some((mode1, _)) = mode1_fixture_image("netac") else {
         eprintln!("跳过: 真实备份不可用");
         return;
@@ -877,10 +830,7 @@ fn verify_and_prune_preview_exit_contract() {
 
 #[test]
 fn delete_cancel_yes_missing_and_last_backup_guard() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("rm_backup");
     let first = write_backup(
         &tmp.0,
@@ -956,11 +906,7 @@ impl edpcli::cli::Prompter for ReplaceBeforeConfirm {
 
 #[test]
 fn delete_refuses_if_confirmed_backup_is_replaced_before_delete() {
-    let (Some(original), Some(replacement)) = (load_disk_image("netac"), load_disk_image("lexar"))
-    else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let (original, replacement) = (load_disk_image("netac"), load_disk_image("lexar"));
     let tmp = TmpDir::new("rm_replaced_after_confirm_view");
     let victim = write_backup(
         &tmp.0,
@@ -992,11 +938,7 @@ fn delete_refuses_if_confirmed_backup_is_replaced_before_delete() {
 
 #[test]
 fn global_numbered_delete_follows_backup_list_order() {
-    let (Some(original), Some(other_disk)) = (load_disk_image("netac"), load_disk_image("lexar"))
-    else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let (original, other_disk) = (load_disk_image("netac"), load_disk_image("lexar"));
     let tmp = TmpDir::new("onlyid_numbered_rm");
     let names = [
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_170001.edpb",
@@ -1032,10 +974,7 @@ fn global_numbered_delete_follows_backup_list_order() {
 
 #[test]
 fn delete_without_target_enters_global_picker_then_confirms() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("onlyid_picker_rm");
     let older = write_backup(
         &tmp.0,
@@ -1067,10 +1006,7 @@ const SHARED_GROUP_B: &str = "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&pro
 
 #[test]
 fn cli_and_tui_delete_share_retention_floor_and_execution() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let cli_tmp = TmpDir::new("shared_floor_cli");
     let tui_tmp = TmpDir::new("shared_floor_tui");
     for dir in [&cli_tmp.0, &tui_tmp.0] {
@@ -1115,10 +1051,7 @@ fn cli_and_tui_delete_share_retention_floor_and_execution() {
 
 #[test]
 fn batch_delete_plan_pins_each_path_and_sha_before_execution() {
-    let Some(original) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    };
+    let original = load_disk_image("netac");
     let tmp = TmpDir::new("batch_delete_plan");
     let first = write_backup(
         &tmp.0,

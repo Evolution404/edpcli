@@ -209,10 +209,7 @@ pub(super) fn validate_manifest_identity(manifest: &Manifest) -> Result<(), Stri
             manifest.schema
         ));
     }
-    let identity = manifest
-        .identity
-        .as_ref()
-        .ok_or_else(|| "EDPB manifest v3 missing typed identity".to_string())?;
+    let identity = &manifest.identity;
     if manifest
         .provenance
         .notes

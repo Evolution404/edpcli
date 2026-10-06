@@ -33,7 +33,7 @@ fn meta_for(key: &str) -> SemanticContext {
 
 #[test]
 fn aigo_summary_contains_identity_and_ownership() {
-    let data = load_disk_image("aigo").expect("aigo fixture");
+    let data = load_disk_image("aigo");
     let meta = meta_for("aigo");
     let summary = summarize(&meta, |lba| {
         let start = lba as usize * 512;
@@ -85,7 +85,7 @@ fn aigo_summary_contains_identity_and_ownership() {
 
 #[test]
 fn netac_summary_reads_long_department_name() {
-    let data = load_disk_image("netac").expect("netac fixture");
+    let data = load_disk_image("netac");
     let meta = meta_for("netac");
     let summary = summarize(&meta, |lba| {
         let start = lba as usize * 512;
@@ -99,7 +99,7 @@ fn netac_summary_reads_long_department_name() {
 
 #[test]
 fn render_uses_semantic_colors_and_no_color_remains_plain() {
-    let data = load_disk_image("aigo").expect("aigo fixture");
+    let data = load_disk_image("aigo");
     let meta = meta_for("aigo");
     let summary = summarize(&meta, |lba| {
         let start = lba as usize * 512;

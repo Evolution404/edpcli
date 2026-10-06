@@ -61,7 +61,6 @@ impl ParsedExistingProvision {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TargetPartitionPlan {
     pub geometry: TargetPartitionGeometry,
-    pub action: PartitionAction,
     pub disposition: RegionDisposition,
     pub password_disposition: Option<super::super::PasswordDisposition>,
     pub source_password_knowledge: Option<super::super::SourcePasswordKnowledge>,
@@ -268,10 +267,8 @@ impl TargetProvisionPlan {
                     }
                 }
             }
-            let action = disposition.legacy_action();
             partitions.push(TargetPartitionPlan {
                 geometry: *target,
-                action,
                 disposition,
                 password_disposition,
                 source_password_knowledge,
@@ -306,7 +303,6 @@ impl TargetProvisionPlan {
         if !part.disposition.preserves_extent() {
             return false;
         }
-        part.action = PartitionAction::Rebuild;
         part.disposition = RegionDisposition::Rebuild;
         part.password_disposition = super::super::KeyDomainRole::from_partition_role(role)
             .map(|_| super::super::PasswordDisposition::Rebuild);
@@ -320,13 +316,13 @@ impl TargetProvisionPlan {
     pub fn preserved_extents(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
         self.partitions
             .iter()
-            .filter(|part| part.action == PartitionAction::PreserveExact)
+            .filter(|part| part.disposition.preserves_extent())
             .map(|part| (part.geometry.start_lba, part.geometry.sector_count))
     }
 
     pub fn has_preserved_partitions(&self) -> bool {
         self.partitions
             .iter()
-            .any(|part| part.action == PartitionAction::PreserveExact)
+            .any(|part| part.disposition.preserves_extent())
     }
 }

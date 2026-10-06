@@ -8,7 +8,7 @@ use common::*;
 use edpcli::edpb::{self, CoreCapture};
 
 fn two_netac_backups() -> Option<TmpDir> {
-    let data = load_disk_image("netac")?;
+    let data = load_disk_image("netac");
     let tmp = TmpDir::new("cli_ux");
     for ts in ["20260910_172300", "20260911_172300"] {
         let name = format!(

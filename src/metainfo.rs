@@ -4,7 +4,6 @@
 //! 元信息卡片，重点突出 onlyid、device_id、Dept、User、SAFE6 与分区摘要。
 
 use std::io;
-use std::path::Path;
 
 use crate::common::SECTOR;
 use crate::infrastructure::backup_store::catalog::BackupEntry;
@@ -432,16 +431,6 @@ pub fn render_with_source(summary: &MetaInfoSummary, source: Option<&str>) -> St
         ));
     }
     out
-}
-
-/// Convenience adapter; consumers that already verified a file should reuse the snapshot.
-pub fn summarize_backup<C: SemanticContextSource>(
-    path: &Path,
-    meta: &C,
-) -> io::Result<MetaInfoSummary> {
-    let reader = crate::edpb::VerifiedBackupReader::open(path)
-        .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
-    summarize_verified_backup(&reader, meta)
 }
 
 pub(crate) fn summarize_verified_backup<C: SemanticContextSource>(

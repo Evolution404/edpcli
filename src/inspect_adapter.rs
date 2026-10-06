@@ -9,7 +9,7 @@ use crate::protocol::{
     edpf::{EdpfEntry64, EdpfEntry96, PassInfo},
     lba0, lba1, lba10, lba11, lba12, lba2, lba3, lba4, lba5, lba6, lba7, lba8, lba9,
     profile::{
-        DeptLayout, HostHardinfoSource, Lba10Eesi, Lba11Capacity, Lba12Mode, Lba7EntryCount,
+        HostHardinfoSource, Lba10Eesi, Lba11Capacity, Lba12Mode, Lba7EntryCount,
         Lba7PassinfoVersion, Lba8UsbOnlyInfo,
     },
 };
@@ -39,7 +39,7 @@ pub use field_contract::{
     FieldTransform, InspectDiagnostic, InspectDiagnosticCode, InspectFieldKey, InspectParseState,
     SectorFieldStatus,
 };
-pub use lba_adapter::{analyze_sector, analyze_sector_with_context};
+pub use lba_adapter::analyze_sector_with_context;
 pub use mbr_adapter::analyze_mbr_sector;
 pub use metadata::InspectMeta;
 pub use model::{DecodeRange, FieldChild, FieldStyle, SectorField, SectorView};

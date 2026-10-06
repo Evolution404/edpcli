@@ -100,7 +100,7 @@ fn copied_backups() -> Option<(TmpDir, Vec<String>)> {
     let tmp = TmpDir::new("selectors");
     let mut names = Vec::new();
     for key in ["netac", "aigo", "lexar"] {
-        let src = fixture_bin(key)?;
+        let src = fixture_bin(key);
         let (name, _) = fixture(key)?;
         let bytes = fs::read(src).expect("read protocol fixture");
         let name = format!("{}.edpb", name.strip_suffix(".bin").unwrap());

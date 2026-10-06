@@ -27,17 +27,15 @@ pub(super) fn render_lba9_12(
             if let Some((crc, _)) = crc_key(meta) {
                 let companion =
                     protocol_sector(protocol_image, 6).and_then(|raw6| lba6::parse_lba6(raw6).ok());
-                let (dept_profile, long_user) = companion
-                    .as_ref()
-                    .map(|view| (view.dept_profile(), view.has_long_user()))
-                    .unwrap_or((DeptLayout::Short, false));
-                if companion.is_none() {
+                let Some(companion) = companion else {
                     diagnostics.push(InspectDiagnostic::new(
                         InspectDiagnosticCode::MissingProtocolContext,
-                        "LBA9 缺 LBA6 上下文，使用单扇区兼容解析",
+                        "LBA9 缺少有效 LBA6 上下文，保留原始字节",
                     ));
-                    notes.push("未提供完整 LBA0–12 上下文；LBA9 使用 short/non-long-user 兼容解析，仅用于单扇区 API。CLI/TUI 会提供 LBA6 上下文。".into());
-                }
+                    return "RAW（缺少有效 LBA6 上下文）".into();
+                };
+                let (dept_profile, long_user) =
+                    (companion.dept_profile(), companion.has_long_user());
                 match lba9::parse_lba9(raw_sector, crc, dept_profile, long_user) {
                     Ok(view) => {
                         *decoded = view.decoded().to_vec();

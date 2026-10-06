@@ -553,7 +553,7 @@ fn plain_to_official_plan_matrix_initializes_key_domains_and_only_preserves_exac
 
         for part in &plan.partitions {
             if part.geometry.role == PartitionRole::Boot && !exact_boot.is_empty() {
-                assert_eq!(part.action, PartitionAction::PreserveExact, "{mode:?}");
+                assert!(part.disposition.preserves_extent(), "{mode:?}");
                 assert_eq!(
                     part.disposition,
                     RegionDisposition::PreserveVerified,
@@ -566,9 +566,8 @@ fn plain_to_official_plan_matrix_initializes_key_domains_and_only_preserves_exac
                 assert_eq!(part.password_disposition, None);
                 assert_eq!(part.target_password_policy, None);
             } else if KeyDomainRole::from_partition_role(part.geometry.role).is_some() {
-                assert_eq!(
-                    part.action,
-                    PartitionAction::Rebuild,
+                assert!(
+                    !part.disposition.preserves_extent(),
                     "{mode:?} {:?}",
                     part.geometry.role
                 );
@@ -582,9 +581,8 @@ fn plain_to_official_plan_matrix_initializes_key_domains_and_only_preserves_exac
                     Some(edpcli::provision::TargetPasswordPolicy::InitializeNew)
                 );
             } else {
-                assert_eq!(
-                    part.action,
-                    PartitionAction::Rebuild,
+                assert!(
+                    !part.disposition.preserves_extent(),
                     "{mode:?} {:?}",
                     part.geometry.role
                 );
@@ -1055,7 +1053,7 @@ fn default_password_probe_is_per_domain_and_enables_verified_preserve() {
         .iter()
         .find(|part| part.geometry.role == PartitionRole::Encrypt)
         .unwrap();
-    assert_eq!(encrypt.action, PartitionAction::PreserveExact);
+    assert!(encrypt.disposition.preserves_extent());
 }
 
 fn generated_source_with_force_change(
@@ -1185,7 +1183,8 @@ fn target_plan_matrix_matches_geometry_for_all_sixteen_edp_transitions() {
                 let expected =
                     decide_partition_action(source.profile.partition(target.role), target);
                 assert_eq!(
-                    planned.action, expected,
+                    planned.disposition.preserves_extent(),
+                    expected == PartitionAction::PreserveExact,
                     "{source_mode:?} -> {target_mode:?} {:?}",
                     target.role
                 );
@@ -1432,7 +1431,7 @@ fn incompatible_target_role_requires_rebuild_and_explicit_format_authorization()
         .find(|part| part.geometry.role == PartitionRole::BootShareCombined)
         .expect("mode1 combined target");
     assert_eq!(combined.disposition, RegionDisposition::Rebuild);
-    assert_eq!(combined.action, PartitionAction::Rebuild);
+    assert!(!combined.disposition.preserves_extent());
     assert_eq!(combined.preserved_record, None);
     assert_eq!(
         combined.password_disposition,
@@ -1451,7 +1450,7 @@ fn incompatible_target_role_requires_rebuild_and_explicit_format_authorization()
         .find(|part| part.geometry.role == PartitionRole::BootShareCombined)
         .unwrap();
     assert_eq!(combined.disposition, RegionDisposition::Rebuild);
-    assert_eq!(combined.action, PartitionAction::Rebuild);
+    assert!(!combined.disposition.preserves_extent());
     assert_eq!(
         combined.password_disposition,
         Some(PasswordDisposition::Rebuild)
@@ -1481,7 +1480,7 @@ fn target_plan_preserves_only_verified_matching_data() {
         &domain_secrets(Some(b"ProofPass1!"), b"ProofPass1!"),
     )
     .unwrap();
-    assert_eq!(unknown_fs.partitions[1].action, PartitionAction::Rebuild);
+    assert!(!unknown_fs.partitions[1].disposition.preserves_extent());
 
     source
         .confirm_filesystem(PartitionRole::Encrypt, FilesystemKind::ExFat)
@@ -1494,8 +1493,8 @@ fn target_plan_preserves_only_verified_matching_data() {
         &domain_secrets(Some(b"ProofPass1!"), b"ProofPass1!"),
     )
     .unwrap();
-    assert_eq!(plan.partitions[0].action, PartitionAction::Rebuild);
-    assert_eq!(plan.partitions[1].action, PartitionAction::PreserveExact);
+    assert!(!plan.partitions[0].disposition.preserves_extent());
+    assert!(plan.partitions[1].disposition.preserves_extent());
     assert_eq!(
         plan.partitions[1].password_disposition,
         Some(PasswordDisposition::Passthrough(PassthroughBasis::Verified))
@@ -1525,10 +1524,7 @@ fn target_plan_preserves_only_verified_matching_data() {
         &domain_secrets(Some(b"incorrect"), b"ProofPass1!"),
     )
     .unwrap();
-    assert_eq!(
-        wrong_password.partitions[1].action,
-        PartitionAction::PreserveExact
-    );
+    assert!(wrong_password.partitions[1].disposition.preserves_extent());
     assert_eq!(
         wrong_password.partitions[1].disposition,
         RegionDisposition::PreserveOpaque
@@ -1627,7 +1623,7 @@ fn exact_encrypted_extent_with_unknown_password_stays_a_preserve_candidate() {
         .find(|part| part.geometry.role == PartitionRole::Encrypt)
         .expect("mode1 encrypt target");
 
-    assert_eq!(encrypt.action, PartitionAction::PreserveExact);
+    assert!(encrypt.disposition.preserves_extent());
     assert_eq!(encrypt.disposition, RegionDisposition::PreserveOpaque);
     assert_eq!(
         encrypt.password_disposition,
@@ -1671,7 +1667,7 @@ fn verified_source_with_different_target_password_plans_rewrap_without_rebuild()
         .iter()
         .find(|part| part.geometry.role == PartitionRole::Encrypt)
         .unwrap();
-    assert_eq!(encrypt.action, PartitionAction::PreserveExact);
+    assert!(encrypt.disposition.preserves_extent());
     assert_eq!(encrypt.disposition, RegionDisposition::RewrapVerified);
     assert_eq!(
         encrypt.password_disposition,

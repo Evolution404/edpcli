@@ -22,14 +22,6 @@ impl RegionDisposition {
             Self::PreserveOpaque | Self::PreserveVerified | Self::RewrapVerified
         )
     }
-
-    pub const fn legacy_action(self) -> PartitionAction {
-        if self.preserves_extent() {
-            PartitionAction::PreserveExact
-        } else {
-            PartitionAction::Rebuild
-        }
-    }
 }
 
 /// Geometry alone is necessary but not sufficient for actual preservation. The

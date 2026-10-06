@@ -500,6 +500,10 @@ impl SectorDev for ReadOnlyAuditDev {
             "identity observation attempted a read-write reopen",
         ))
     }
+
+    fn sync(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -565,6 +569,14 @@ impl SectorDev for StaleEdpPlainDev {
         Err(io::Error::other(
             "stale identity observation attempted a write",
         ))
+    }
+
+    fn sync(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+        Ok(())
     }
 }
 

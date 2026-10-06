@@ -6,10 +6,6 @@ use common::*;
 use edpcli::application::support::SECTOR;
 use edpcli::protocol::sectors::parse_lba12;
 
-fn have_all_fixtures() -> bool {
-    KEYS.iter().all(|k| fixture_bin(k).is_some())
-}
-
 #[test]
 fn short_sector_inputs_fail_closed_instead_of_panicking() {
     let short = vec![0u8; SECTOR - 1];
@@ -21,13 +17,9 @@ fn short_sector_inputs_fail_closed_instead_of_panicking() {
 // ══════════════════════════════════════════════════════════════════
 #[test]
 fn parse_lba12_original_and_mode1() {
-    if !have_all_fixtures() {
-        eprintln!("跳过: 真实备份不可用");
-        return;
-    }
     for key in KEYS {
         // 原盘: 恒 3 条 EDPF; type=4 entry 的 start/size 与金标布局一致
-        let data = load_disk_image(key).unwrap();
+        let data = load_disk_image(key);
         let (_, did) = fixture(key).unwrap();
         let parts = parse_lba12(&data[12 * SECTOR..13 * SECTOR], did).unwrap();
         assert_eq!(parts.len(), 3, "{}", key);

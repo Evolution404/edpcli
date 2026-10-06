@@ -184,11 +184,17 @@ fn selected_device_identity_is_rechecked_before_the_operation_starts() {
         fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
             unreachable!("identity verification is read-only")
         }
+
+        fn sync(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
-    let Some(image) = common::load_disk_image("netac") else {
-        return;
-    };
+    let image = common::load_disk_image("netac");
     let runner = common::FakeRunner {
         canned: Default::default(),
     };
@@ -239,6 +245,14 @@ fn plain_identity_recheck_accepts_zero_lba4_and_rejects_explicit_edp_onlyid() {
 
         fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
             unreachable!("identity verification is read-only")
+        }
+
+        fn sync(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+            Ok(())
         }
     }
 
@@ -299,6 +313,14 @@ fn edp_identity_recheck_accepts_short_and_revision_candidates_for_same_hardware(
         fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
             unreachable!("identity verification is read-only")
         }
+
+        fn sync(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     let actual = "disk&ven_aigo&prod_u335&rev_1100";
@@ -357,6 +379,14 @@ fn plain_identity_recheck_accepts_whole_disk_ntfs_with_nonzero_lba4_code() {
 
         fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
             unreachable!("identity verification is read-only")
+        }
+
+        fn sync(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+            Ok(())
         }
     }
 

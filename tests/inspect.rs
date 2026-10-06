@@ -2,8 +2,8 @@ use crate::common;
 
 use common::*;
 use edpcli::inspect::{
-    analyze_sector, render_fields, render_hex, FieldStyle, FieldTransform, InspectDiagnosticCode,
-    InspectMeta, InspectParseState,
+    analyze_sector_with_context, render_fields, render_hex, FieldStyle, FieldTransform,
+    InspectDiagnosticCode, InspectMeta, InspectParseState,
 };
 use edpcli::protocol::crypto::{a7f0_full, crc32_bare, xor_rolling};
 
@@ -84,7 +84,7 @@ fn ch14_lba8_summary_uses_stable_field_keys_not_display_labels() {
 
 #[test]
 fn ch14_missing_lba8_context_is_a_typed_diagnostic() {
-    let view = analyze_sector(8, &[0; 512], &InspectMeta::default());
+    let view = analyze_sector_with_context(8, &[0; 512], &InspectMeta::default(), None);
     assert_eq!(view.parse_state, InspectParseState::MissingContext);
     assert!(view
         .diagnostics
@@ -94,7 +94,7 @@ fn ch14_missing_lba8_context_is_a_typed_diagnostic() {
 
 #[test]
 fn ch14_short_sector_has_invalid_parse_state_without_guessing_fields() {
-    let view = analyze_sector(0, &[0; 511], &InspectMeta::default());
+    let view = analyze_sector_with_context(0, &[0; 511], &InspectMeta::default(), None);
     assert_eq!(view.parse_state, InspectParseState::Invalid);
     assert!(view.fields.is_empty());
     assert_eq!(view.diagnostics[0].code, InspectDiagnosticCode::ShortSector);
@@ -102,8 +102,13 @@ fn ch14_short_sector_has_invalid_parse_state_without_guessing_fields() {
 
 #[test]
 fn ch14_pass_info_exposes_exact_field_transform_provenance() {
-    let data = load_disk_image("netac").expect("netac fixture");
-    let view = analyze_sector(12, &data[12 * 512..13 * 512], &meta_for("netac"));
+    let data = load_disk_image("netac");
+    let view = analyze_sector_with_context(
+        12,
+        &data[12 * 512..13 * 512],
+        &meta_for("netac"),
+        Some(&data),
+    );
     for offset in [0x120, 0x123, 0x126] {
         let field = view
             .fields
@@ -129,14 +134,14 @@ fn ch14_pass_info_exposes_exact_field_transform_provenance() {
 
 #[test]
 fn ch14_field_statuses_are_produced_from_protocol_evidence() {
-    let data = load_disk_image("netac").expect("netac fixture");
+    let data = load_disk_image("netac");
     let meta = meta_for("netac");
-    let lba5 = analyze_sector(5, &data[5 * 512..6 * 512], &meta);
+    let lba5 = analyze_sector_with_context(5, &data[5 * 512..6 * 512], &meta, Some(&data));
     assert_eq!(
         lba5.fields[0].status,
         edpcli::inspect::SectorFieldStatus::Preserved
     );
-    let lba8 = analyze_sector(8, &data[8 * 512..9 * 512], &meta);
+    let lba8 = analyze_sector_with_context(8, &data[8 * 512..9 * 512], &meta, Some(&data));
     assert!(lba8.fields.iter().any(|field| {
         field.start == 0x040 && field.status == edpcli::inspect::SectorFieldStatus::Reserved
     }));
@@ -255,10 +260,10 @@ fn meta_for(key: &str) -> InspectMeta {
 
 #[test]
 fn lba7_and_lba12_decode_to_edpf_with_semantic_fields() {
-    let data = load_disk_image("netac").expect("netac fixture");
+    let data = load_disk_image("netac");
     let meta = meta_for("netac");
 
-    let v7 = analyze_sector(7, &data[7 * 512..8 * 512], &meta);
+    let v7 = analyze_sector_with_context(7, &data[7 * 512..8 * 512], &meta, Some(&data));
     assert_eq!(&v7.decoded[..4], b"EDPF");
     assert!(v7.method.contains("XOR"));
     assert!(v7
@@ -270,7 +275,7 @@ fn lba7_and_lba12_decode_to_edpf_with_semantic_fields() {
         .iter()
         .any(|f| f.label == "起始 LBA" && f.style == FieldStyle::Address));
 
-    let v12 = analyze_sector(12, &data[12 * 512..13 * 512], &meta);
+    let v12 = analyze_sector_with_context(12, &data[12 * 512..13 * 512], &meta, Some(&data));
     assert_eq!(&v12.decoded[..4], b"EDPF");
     assert!(v12.decoded[0x170..].iter().all(|byte| *byte == 0));
     assert!(v12.method.contains("整扇 512B"));
@@ -283,9 +288,9 @@ fn lba7_and_lba12_decode_to_edpf_with_semantic_fields() {
 
 #[test]
 fn lba6_reports_safe6_checksum_and_identity_fields() {
-    let data = load_disk_image("aigo").expect("aigo fixture");
+    let data = load_disk_image("aigo");
     let meta = meta_for("aigo");
-    let v = analyze_sector(6, &data[6 * 512..7 * 512], &meta);
+    let v = analyze_sector_with_context(6, &data[6 * 512..7 * 512], &meta, Some(&data));
     assert_eq!(v.decoded.len(), 512);
     assert!(v.method.contains("SAFE6"));
     assert!(v.fields.iter().any(|f| f.label == "device_id CRC32"));
@@ -315,9 +320,9 @@ fn lba6_reports_safe6_checksum_and_identity_fields() {
 
 #[test]
 fn lba11_can_decrypt_from_explicit_device_metadata() {
-    let data = load_disk_image("netac").expect("netac fixture");
+    let data = load_disk_image("netac");
     let meta = meta_for("netac");
-    let v = analyze_sector(11, &data[11 * 512..12 * 512], &meta);
+    let v = analyze_sector_with_context(11, &data[11 * 512..12 * 512], &meta, Some(&data));
     assert!(v.method.contains("PDKB"), "{}", v.method);
     assert_eq!(&v.decoded[0x100..0x104], b"PDKB");
     assert!(v.fields.iter().any(|f| f.label == "PDKB device_id"));
@@ -326,7 +331,7 @@ fn lba11_can_decrypt_from_explicit_device_metadata() {
 #[test]
 fn lba5_is_reported_as_an_opaque_write_protection_probe_sector() {
     let raw = [0u8; 512];
-    let view = analyze_sector(5, &raw, &InspectMeta::default());
+    let view = analyze_sector_with_context(5, &raw, &InspectMeta::default(), None);
     assert!(view.method.contains("写保护探测"));
     assert!(view.fields.iter().any(|field| {
         field.start == 0
@@ -359,7 +364,7 @@ fn lba1_uses_the_canonical_gpt_header_parser() {
     let crc = crc32_ieee_test(&raw[..92]);
     raw[0x10..0x14].copy_from_slice(&crc.to_le_bytes());
 
-    let view = analyze_sector(1, &raw, &InspectMeta::default());
+    let view = analyze_sector_with_context(1, &raw, &InspectMeta::default(), None);
     assert!(
         view.method.contains("canonical protocol::lba1"),
         "{}",
@@ -382,7 +387,7 @@ fn lba1_uses_the_canonical_gpt_header_parser() {
 #[test]
 fn lba2_uses_canonical_absent_profile_without_inventing_entries() {
     let raw = [0u8; 512];
-    let view = analyze_sector(2, &raw, &InspectMeta::default());
+    let view = analyze_sector_with_context(2, &raw, &InspectMeta::default(), Some(&[0; 13 * 512]));
     assert!(
         view.method.contains("canonical protocol::lba2"),
         "{}",
@@ -419,7 +424,7 @@ fn lba4_zero_ciphertext_byte_is_decrypted_unless_whole_short_gap_is_unwritten() 
     raw[0x47..0x1fc].fill(0);
     assert_eq!(&raw[0x20..0x22], &[0, 0]);
 
-    let view = analyze_sector(4, &raw, &InspectMeta::default());
+    let view = analyze_sector_with_context(4, &raw, &InspectMeta::default(), None);
     assert_eq!(&view.decoded[0x20..0x22], &plain[0x20..0x22]);
     assert_eq!(&view.decoded[0x39..0x3d], b"LLGB");
     assert_eq!(&view.decoded[0x1fc..0x200], b"LLGB");
@@ -450,7 +455,7 @@ fn lba4_post_xor_wire_flags_do_not_override_official_reader_view() {
     let generic = xor_rolling(&raw[0x18..], k0);
     assert_ne!(&generic[0x2d..0x2f], &[0xaf, 0x36]);
 
-    let view = analyze_sector(4, &raw, &InspectMeta::default());
+    let view = analyze_sector_with_context(4, &raw, &InspectMeta::default(), None);
     assert_eq!(&view.decoded[0x45..0x47], &generic[0x2d..0x2f]);
     assert_eq!(&view.decoded[0x39..0x3d], b"LLGB");
     assert_eq!(&view.decoded[0x1fc..0x200], b"LLGB");
@@ -486,7 +491,7 @@ fn lba4_current_identity_shape_does_not_reclassify_post_xor_flags() {
     let generic = xor_rolling(&raw[0x18..], k0);
     assert_ne!(&generic[0x2d..0x2f], &[0, 0]);
 
-    let view = analyze_sector(4, &raw, &InspectMeta::default());
+    let view = analyze_sector_with_context(4, &raw, &InspectMeta::default(), None);
     assert_eq!(&view.decoded[0x45..0x47], &generic[0x2d..0x2f]);
     assert_eq!(&view.decoded[0x39..0x3d], b"LLGB");
     assert_eq!(&view.decoded[0x1fc..0x200], b"LLGB");
@@ -495,7 +500,7 @@ fn lba4_current_identity_shape_does_not_reclassify_post_xor_flags() {
 
 #[test]
 fn lba4_legacy_restore_profile_keeps_rolling_decoded_server_flags() {
-    let data = load_disk_image("netac").expect("netac real-device fixture");
+    let data = load_disk_image("netac");
     let meta = meta_for("netac");
     let raw = &data[4 * 512..5 * 512];
 
@@ -506,7 +511,7 @@ fn lba4_legacy_restore_profile_keeps_rolling_decoded_server_flags() {
     // rolling-representation observation, not an identity-based classifier.
     assert_eq!(&raw[0x45..0x47], &[0xaf, 0x36]);
 
-    let view = analyze_sector(4, raw, &meta);
+    let view = analyze_sector_with_context(4, raw, &meta, None);
     assert_ne!(
         u32::from_le_bytes(view.decoded[0x1c..0x20].try_into().unwrap()),
         1_402_259_934u32,
@@ -538,7 +543,7 @@ fn lba10_decodes_only_the_eesi_head_and_preserves_tail_bytes() {
         ..InspectMeta::default()
     };
 
-    let view = analyze_sector(10, &raw, &meta);
+    let view = analyze_sector_with_context(10, &raw, &meta, None);
     assert_eq!(&view.decoded[..4], b"EESI");
     assert_eq!(view.decoded[0x04..0x08], 1u32.to_le_bytes());
     assert_eq!(view.decoded[0x80], 0x5a);
@@ -590,7 +595,7 @@ fn lba9_decodes_eetu_and_sapf_without_inventing_overlapping_eppe() {
         device_id: Some(device_id.into()),
         ..InspectMeta::default()
     };
-    let view = analyze_sector(9, &raw, &meta);
+    let view = analyze_sector_with_context(9, &raw, &meta, Some(&[0; 13 * 512]));
 
     assert_eq!(&view.decoded[..4], b"EETU");
     assert_eq!(&view.decoded[0x100..0x104], b"SAPF");
@@ -641,7 +646,7 @@ fn lba9_decodes_eppe_as_its_own_canonical_overlay_profile() {
         device_id: Some(device_id.into()),
         ..InspectMeta::default()
     };
-    let view = analyze_sector(9, &raw, &meta);
+    let view = analyze_sector_with_context(9, &raw, &meta, Some(&[0; 13 * 512]));
 
     assert_eq!(&view.decoded[0x180..0x184], b"EPPE");
     assert!(!view
@@ -657,9 +662,9 @@ fn lba9_decodes_eppe_as_its_own_canonical_overlay_profile() {
 #[test]
 fn hex_renderer_has_offsets_and_field_legend_without_color() {
     edpcli::cli::terminal_ui::set_enabled_for_tests(false);
-    let data = load_disk_image("netac").expect("netac fixture");
+    let data = load_disk_image("netac");
     let meta = meta_for("netac");
-    let v = analyze_sector(7, &data[7 * 512..8 * 512], &meta);
+    let v = analyze_sector_with_context(7, &data[7 * 512..8 * 512], &meta, Some(&data));
     let out = render_hex(&v, false);
     assert!(out.contains("+0x000:"));
     assert!(out.contains("+0x1F0:"));
@@ -671,9 +676,9 @@ fn hex_renderer_has_offsets_and_field_legend_without_color() {
 #[test]
 fn lba8_llgb_fields_render_as_vertical_key_value_rows() {
     edpcli::cli::terminal_ui::set_enabled_for_tests(false);
-    let data = load_disk_image("aigo").expect("aigo fixture");
+    let data = load_disk_image("aigo");
     let meta = meta_for("aigo");
-    let view = analyze_sector(8, &data[8 * 512..9 * 512], &meta);
+    let view = analyze_sector_with_context(8, &data[8 * 512..9 * 512], &meta, Some(&data));
     let out = render_fields(&view);
 
     assert!(out.contains("[ELABEL]"), "{out}");
@@ -725,7 +730,7 @@ fn lba8_splits_elabel_bytes_before_gbk_decoding_each_value() {
         device_id: Some(device_id.into()),
         ..InspectMeta::default()
     };
-    let view = analyze_sector(8, &raw, &meta);
+    let view = analyze_sector_with_context(8, &raw, &meta, None);
     let out = render_fields(&view);
 
     assert!(out.contains("User"), "{out}");
@@ -763,7 +768,7 @@ fn lba8_preserves_a_malformed_label_value_instead_of_collapsing_it_to_safe6() {
         device_id: Some(device_id.into()),
         ..InspectMeta::default()
     };
-    let view = analyze_sector(8, &raw, &meta);
+    let view = analyze_sector_with_context(8, &raw, &meta, None);
     let out = render_fields(&view);
 
     assert!(out.contains("Label  江苏电力!SAFE6"), "{out}");
@@ -804,7 +809,7 @@ fn lba8_decrypts_the_llgb_length_instead_of_a_fixed_0x170_prefix() {
         device_id: Some(device_id.into()),
         ..InspectMeta::default()
     };
-    let view = analyze_sector(8, &raw, &meta);
+    let view = analyze_sector_with_context(8, &raw, &meta, None);
     let out = render_fields(&view);
 
     assert!(out.contains("VOLC2"), "{out}");
@@ -843,7 +848,7 @@ fn lba8_preserves_nonzero_bytes_after_the_dynamic_encrypted_prefix() {
         device_id: Some(device_id.into()),
         ..InspectMeta::default()
     };
-    let view = analyze_sector(8, &raw, &meta);
+    let view = analyze_sector_with_context(8, &raw, &meta, None);
 
     assert_eq!(
         &view.decoded[0x1f0..0x1f4],
@@ -885,7 +890,7 @@ fn lba8_preserves_nonzero_backing_inside_the_last_encrypted_block() {
         device_id: Some(device_id.into()),
         ..InspectMeta::default()
     };
-    let view = analyze_sector(8, &raw, &meta);
+    let view = analyze_sector_with_context(8, &raw, &meta, None);
 
     assert_eq!(
         &view.decoded[logical_len + 1..encrypted_len],
@@ -925,7 +930,7 @@ fn lba8_decrypts_one_extra_block_when_logical_length_is_16_byte_aligned() {
         device_id: Some(device_id.into()),
         ..InspectMeta::default()
     };
-    let view = analyze_sector(8, &raw, &meta);
+    let view = analyze_sector_with_context(8, &raw, &meta, None);
 
     assert!(
         view.method.contains(&format!("前 {encrypted_len}B")),
@@ -942,10 +947,15 @@ fn lba8_decrypts_one_extra_block_when_logical_length_is_16_byte_aligned() {
 #[test]
 fn repeated_structures_render_as_groups_instead_of_repeating_prefixes() {
     edpcli::cli::terminal_ui::set_enabled_for_tests(false);
-    let data = load_disk_image("netac").expect("netac fixture");
+    let data = load_disk_image("netac");
     let meta = meta_for("netac");
 
-    let edpf = render_fields(&analyze_sector(7, &data[7 * 512..8 * 512], &meta));
+    let edpf = render_fields(&analyze_sector_with_context(
+        7,
+        &data[7 * 512..8 * 512],
+        &meta,
+        Some(&data),
+    ));
     assert!(edpf.contains("Entry[0]"), "{edpf}");
     assert!(edpf.contains("Entry[1]"), "{edpf}");
     assert_eq!(
@@ -954,7 +964,12 @@ fn repeated_structures_render_as_groups_instead_of_repeating_prefixes() {
         "Entry 标题应只显示一次: {edpf}"
     );
 
-    let mbr = render_fields(&analyze_sector(0, &data[..512], &meta));
+    let mbr = render_fields(&analyze_sector_with_context(
+        0,
+        &data[..512],
+        &meta,
+        Some(&data),
+    ));
     assert!(mbr.contains("分区 P1"), "{mbr}");
     assert_eq!(mbr.matches("P1").count(), 1, "P1 标题应只显示一次: {mbr}");
     edpcli::cli::terminal_ui::reset_enabled_for_tests();
@@ -963,11 +978,16 @@ fn repeated_structures_render_as_groups_instead_of_repeating_prefixes() {
 #[test]
 fn structured_output_keeps_known_sector_lines_readable() {
     edpcli::cli::terminal_ui::set_enabled_for_tests(false);
-    let data = load_disk_image("aigo").expect("aigo fixture");
+    let data = load_disk_image("aigo");
     let meta = meta_for("aigo");
     for lba in [0u32, 4, 6, 7, 8, 9, 11, 12] {
         let start = lba as usize * 512;
-        let out = render_fields(&analyze_sector(lba, &data[start..start + 512], &meta));
+        let out = render_fields(&analyze_sector_with_context(
+            lba,
+            &data[start..start + 512],
+            &meta,
+            Some(&data),
+        ));
         for line in out.lines() {
             assert!(
                 line.chars().count() <= 120,
@@ -982,9 +1002,14 @@ fn structured_output_keeps_known_sector_lines_readable() {
 #[test]
 fn edpf_key_material_renders_as_separate_rows() {
     edpcli::cli::terminal_ui::set_enabled_for_tests(false);
-    let data = load_disk_image("netac").expect("netac fixture");
+    let data = load_disk_image("netac");
     let meta = meta_for("netac");
-    let out = render_fields(&analyze_sector(7, &data[7 * 512..8 * 512], &meta));
+    let out = render_fields(&analyze_sector_with_context(
+        7,
+        &data[7 * 512..8 * 512],
+        &meta,
+        Some(&data),
+    ));
     assert!(out.contains("pwd_crc"), "{out}");
     assert!(out.contains("key_crc"), "{out}");
     assert!(out.contains("key8"), "{out}");
@@ -1001,9 +1026,9 @@ fn edpf_key_material_renders_as_separate_rows() {
 #[test]
 fn mbr_empty_partition_slots_are_summarized_not_expanded() {
     edpcli::cli::terminal_ui::set_enabled_for_tests(false);
-    let data = load_disk_image("aigo").expect("aigo fixture");
+    let data = load_disk_image("aigo");
     let meta = meta_for("aigo");
-    let view = analyze_sector(0, &data[..512], &meta);
+    let view = analyze_sector_with_context(0, &data[..512], &meta, Some(&data));
     let out = render_fields(&view);
     assert!(out.contains("分区 P1"), "{out}");
     assert!(!out.contains("分区 P2"), "空分区不应展开: {out}");
@@ -1013,4 +1038,18 @@ fn mbr_empty_partition_slots_are_summarized_not_expanded() {
         view.notes
     );
     edpcli::cli::terminal_ui::reset_enabled_for_tests();
+}
+
+#[test]
+fn companion_dependent_sectors_fail_closed_without_context() {
+    for lba in [2, 9] {
+        let raw = [0; 512];
+        let view = analyze_sector_with_context(lba, &raw, &meta_for("netac"), None);
+        assert_eq!(view.decoded, raw);
+        assert_eq!(
+            view.parse_state,
+            edpcli::inspect::InspectParseState::MissingContext
+        );
+        assert!(view.method.starts_with("RAW"));
+    }
 }

@@ -15,4 +15,11 @@
 | F14 私有文件 | 已实现 | Unix 文件 0600、新目录 0700、sudo 归属；Windows 受保护 owner/SYSTEM/admin DACL |
 | F16 原子导出 | 已实现 | 稀疏镜像候选文件；Inspect 独立运行目录及含哈希的完成标记 |
 
+| F4 无调用开发遗留 | 已实现 | 删除 14 个定义、未使用载荷 locator/stream 链及 DiskFacts.label_id；保留实时文件系统安全检查 |
+| F5 单一计划状态 | 已实现 | RegionDisposition 是唯一保存状态；删除全局 filesystem_format |
+| F6 v3 必需字段 | 已实现 | 目的、恢复契约、身份强类型必填；合法现有 JSON 不变 |
+| F7 Inspect 上下文 | 已实现 | 删除无上下文入口及 LBA2/LBA9 猜测；缺少上下文保持 raw |
+| F8 同步能力 | 已实现 | SectorDev.sync/reopen_rdwr 为必需实现；测试设备显式声明行为 |
+| F15 必需金标 | 已实现 | 文件、长度、SHA 校验失败立即失败；删除跳过必需文件的分支 |
+
 其余项目正在实施，最终验证及提交记录在完成后更新。

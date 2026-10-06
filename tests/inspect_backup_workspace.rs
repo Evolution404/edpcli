@@ -13,7 +13,7 @@ use edpcli::tui::{
 use ratatui::{backend::TestBackend, Terminal};
 
 fn netac_edpb(tag: &str) -> Option<(common::TmpDir, PathBuf)> {
-    let data = common::load_disk_image("netac")?;
+    let data = common::load_disk_image("netac");
     let tmp = common::TmpDir::new(tag);
     let path = tmp.0.join("netac.edpb");
     edpb::write_core_backup(

@@ -437,6 +437,16 @@ mod tests {
         fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
             Ok(())
         }
+
+        // Explicit test device synchronization contract.
+        fn sync(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        // This test device is already writable.
+        fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     #[test]
@@ -570,6 +580,16 @@ mod tests {
         }
 
         fn write_sector(&mut self, _lba: u32, _data: &[u8]) -> io::Result<()> {
+            Ok(())
+        }
+
+        // Explicit test device synchronization contract.
+        fn sync(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        // This test device is already writable.
+        fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
             Ok(())
         }
     }

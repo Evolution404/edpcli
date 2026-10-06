@@ -67,10 +67,7 @@ fn identity(
 }
 
 fn copied_catalog() -> Option<(TmpDir, BackupCatalog)> {
-    let Some(data) = load_disk_image("netac") else {
-        eprintln!("跳过: 真实备份不可用");
-        return None;
-    };
+    let data = load_disk_image("netac");
     let tmp = TmpDir::new("backup_catalog");
     let first = tmp.0.join(
         "disk6_122880000_vid0dd8_pid2005_disk&ven_netac&prod_onlydisk_onlyid1402259934_20260910_172300.edpb",

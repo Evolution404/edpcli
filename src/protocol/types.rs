@@ -2,7 +2,6 @@
 use std::fmt;
 
 pub const SECTOR_BYTES: usize = 512;
-pub const IMAGE_BYTES: usize = 13 * SECTOR_BYTES;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProtocolError {

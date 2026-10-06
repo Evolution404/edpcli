@@ -93,23 +93,6 @@ impl CapacityInput {
             ..self
         }
     }
-
-    /// Changing the presentation alone must never round the canonical sector value.
-    pub fn to_quick(self, unit: QuickCapacityUnit) -> Result<Self, String> {
-        let divisor = match unit {
-            QuickCapacityUnit::MiB => 2048,
-            QuickCapacityUnit::GiB => 2_097_152,
-        };
-        if !self.sectors.is_multiple_of(divisor) {
-            return Err(
-                "exact capacity is not a whole quick unit; explicit rounded value required".into(),
-            );
-        }
-        Ok(Self {
-            mode: CapacityInputMode::Quick,
-            ..self
-        })
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

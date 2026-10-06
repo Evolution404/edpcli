@@ -8,13 +8,10 @@ pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String>
     if manifest.geometry.logical_sector_size != 512 {
         return Err("EDPB restore requires 512-byte sectors".into());
     }
-    if manifest.backup_purpose != Some(BackupPurpose::MetadataOnly) {
+    if manifest.backup_purpose != BackupPurpose::MetadataOnly {
         return Err("EDPB manifest v3 must declare metadata_only backup purpose".into());
     }
-    let contract = manifest
-        .restore_contract
-        .as_ref()
-        .ok_or_else(|| "EDPB manifest v3 missing restore contract".to_string())?;
+    let contract = &manifest.restore_contract;
     if !contract.restores_partition_structure
         || contract.restores_filesystem
         || contract.restores_user_data

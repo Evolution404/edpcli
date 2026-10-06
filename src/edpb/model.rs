@@ -1,7 +1,6 @@
 use super::*;
 
 pub const EXTENSION: &str = "edpb";
-pub const FORMAT_NAME: &str = "edpb";
 pub const FORMAT_MAJOR: u16 = 1;
 pub const FORMAT_MINOR: u16 = 0;
 pub const HEADER_SIZE: usize = 96;
@@ -242,13 +241,10 @@ pub struct Manifest {
     pub schema: String,
     pub container_version: ContainerVersion,
     pub snapshot: SnapshotInfo,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub backup_purpose: Option<BackupPurpose>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub restore_contract: Option<RestoreContract>,
+    pub backup_purpose: BackupPurpose,
+    pub restore_contract: RestoreContract,
     pub device: DeviceIdentity,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identity: Option<ManifestIdentity>,
+    pub identity: ManifestIdentity,
     pub geometry: DeviceGeometry,
     pub observation: Observation,
     #[serde(default)]

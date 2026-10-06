@@ -36,6 +36,10 @@ impl SectorDev for VirtualDisk {
     fn sync(&mut self) -> io::Result<()> {
         Ok(())
     }
+
+    fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 struct PartitionView<'a> {

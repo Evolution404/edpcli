@@ -342,7 +342,7 @@ pub(in crate::application::provision) fn validate_target_write_set(
         }
     }
     if target_plan.partitions.iter().any(|part| {
-        part.action == PartitionAction::PreserveExact
+        part.disposition.preserves_extent()
             && KeyDomainRole::from_partition_role(part.geometry.role).is_some()
             && part.preserved_record.is_none()
     }) {

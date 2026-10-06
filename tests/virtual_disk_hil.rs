@@ -17,9 +17,9 @@ use edpcli::provision::{
     generate_official_image, parse_existing_provision, prefill_for_target_mode,
     unwrap_legacy_lba7_file_key, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
     KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, OfficialPartitionMode,
-    OfficialPartitionSizes, OfficialProvisionPlan, OnlyId, PartitionAction, PartitionRole,
-    ProvisionEntropy, ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-    RegionDisposition, SourcePasswordKnowledge, TargetIdentity, TargetProvisionPlan,
+    OfficialPartitionSizes, OfficialProvisionPlan, OnlyId, PartitionRole, ProvisionEntropy,
+    ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec, RegionDisposition,
+    SourcePasswordKnowledge, TargetIdentity, TargetProvisionPlan,
 };
 
 static HIL_LOCK: Mutex<()> = Mutex::new(());
@@ -254,7 +254,7 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
     assert!(exact
         .partitions
         .iter()
-        .all(|part| part.action == PartitionAction::PreserveExact));
+        .all(|part| part.disposition.preserves_extent()));
     assert_eq!(
         part(&exact, PartitionRole::Share).disposition,
         RegionDisposition::PreserveVerified

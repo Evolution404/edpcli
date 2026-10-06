@@ -333,19 +333,9 @@ impl ProgressEvent {
         self
     }
 
-    pub fn with_stage(mut self, stage: StageProgress) -> Self {
-        self.stage = Some(stage);
-        self
-    }
-
     pub fn with_work(mut self, work: WorkProgress) -> Self {
         self.delivery = ProgressDelivery::WorkSnapshot;
         self.work = Some(work);
-        self
-    }
-
-    pub fn with_log_policy(mut self, log_policy: LogPolicy) -> Self {
-        self.log_policy = log_policy;
         self
     }
 

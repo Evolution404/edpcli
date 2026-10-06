@@ -223,6 +223,11 @@ mod tests {
             }
             Ok(())
         }
+
+        // Explicit test device synchronization contract.
+        fn sync(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
     fn geometry(logical: Option<u32>, capacity: u64) -> ObservedDeviceGeometry {
         ObservedDeviceGeometry {

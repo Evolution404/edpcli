@@ -25,9 +25,8 @@ mod macos {
     use edpcli::ports::SectorDev;
     use edpcli::provision::{
         parse_existing_provision, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
-        OfficialPartitionMode, PartitionAction, PartitionRole, ProvisionImage, ProvisionTarget,
-        RegionDisposition, SourcePasswordKnowledge, TargetIdentity, DEFAULT_KEY_DOMAIN_PASSWORD,
-        DEFAULT_SAFE6_LABEL,
+        OfficialPartitionMode, PartitionRole, ProvisionImage, ProvisionTarget, RegionDisposition,
+        SourcePasswordKnowledge, TargetIdentity, DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_SAFE6_LABEL,
     };
 
     const ENABLE_ENV: &str = "EDPCLI_REAL_USB_PASSWORD_HIL";
@@ -666,13 +665,11 @@ mod macos {
                 .iter()
                 .find(|part| part.geometry.role == role)
                 .ok_or_else(|| format!("build planner 缺少 {}", role.label()))?;
-            if part.disposition != RegionDisposition::Rebuild
-                || part.action != PartitionAction::Rebuild
-            {
+            if part.disposition != RegionDisposition::Rebuild {
                 return Err(format!(
                     "Plain→mode0 {} 必须 Rebuild，实际 {:?}/{:?}",
                     role.label(),
-                    part.action,
+                    part.disposition,
                     part.disposition
                 ));
             }
@@ -759,13 +756,11 @@ mod macos {
                 .iter()
                 .find(|part| part.geometry.role == role)
                 .ok_or_else(|| format!("rewrap planner 缺少 {}", role.label()))?;
-            if part.disposition != RegionDisposition::RewrapVerified
-                || part.action != PartitionAction::PreserveExact
-            {
+            if part.disposition != RegionDisposition::RewrapVerified {
                 return Err(format!(
                     "{} password-only 必须 RewrapVerified/PreserveExact，实际 {:?}/{:?}",
                     role.label(),
-                    part.action,
+                    part.disposition,
                     part.disposition
                 ));
             }

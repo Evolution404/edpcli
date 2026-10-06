@@ -15,7 +15,6 @@ pub struct DiskFacts {
     pub total_sectors: Option<u64>,
     pub vid: String,
     pub pid: String,
-    pub label_id: Option<String>,
 }
 
 /// LBA4 开头的 `$$$<labelOnlyId>$$$` → 十进制字符串; 非法返回 None。

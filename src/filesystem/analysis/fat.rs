@@ -1,6 +1,6 @@
 //! FAT BPB, allocation tables and directory metadata; never file payloads.
 //! Layout follows the Microsoft FAT on-disk specification.
-use super::{payload_locator_from_cluster_lbas, FileEntry, PartitionReader};
+use super::{FileEntry, PartitionReader};
 use std::collections::{BTreeSet, VecDeque};
 
 pub(super) struct Inventory {
@@ -216,7 +216,6 @@ pub(super) fn parse(
         mtime: None,
         ctime: None,
         attributes: 16,
-        payload_locator: None,
     }];
     let mut paths = BTreeSet::from([String::from("/")]);
     let mut dir_bytes = 0usize;
@@ -305,25 +304,6 @@ pub(super) fn parse(
                 if size > allocated {
                     return Err("file size exceeds cluster allocation".into());
                 }
-                let payload_locator = if is_dir {
-                    None
-                } else {
-                    let cluster_starts = chain
-                        .iter()
-                        .map(|&cluster| {
-                            (cluster as u64)
-                                .checked_sub(2)
-                                .and_then(|index| index.checked_mul(spc))
-                                .and_then(|offset| data.checked_add(offset))
-                                .ok_or_else(|| "FAT file cluster LBA overflows".to_string())
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    Some(payload_locator_from_cluster_lbas(
-                        size,
-                        spc,
-                        &cluster_starts,
-                    )?)
-                };
                 entries.push(FileEntry {
                     path: full.clone(),
                     is_directory: is_dir,
@@ -332,7 +312,6 @@ pub(super) fn parse(
                     mtime: timestamp(u16le(e, 24), u16le(e, 22), 0),
                     ctime: timestamp(u16le(e, 16), u16le(e, 14), e[13]),
                     attributes: e[11] as u32,
-                    payload_locator,
                 });
                 if is_dir {
                     pending.push_back((full, chain));

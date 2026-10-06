@@ -49,6 +49,10 @@ impl SectorDev for MemoryDev {
         self.syncs += 1;
         Ok(())
     }
+
+    fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 fn patch() -> BTreeMap<u32, Vec<u8>> {
@@ -302,6 +306,10 @@ impl SectorDev for DiagnosticDev {
         if matches!(self.phase, FailurePhase::Sync) && self.inner.syncs == 2 {
             return Err(io::Error::other("injected sync failure"));
         }
+        Ok(())
+    }
+
+    fn reopen_rdwr(&mut self, _: std::time::Duration) -> std::io::Result<()> {
         Ok(())
     }
 }

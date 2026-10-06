@@ -635,11 +635,6 @@ mod tests {
                 physically_encrypted: false,
                 filesystem: Some(filesystem),
             },
-            action: if disposition == RegionDisposition::Rebuild {
-                PartitionAction::Rebuild
-            } else {
-                PartitionAction::PreserveExact
-            },
             disposition,
             password_disposition: None,
             source_password_knowledge: None,

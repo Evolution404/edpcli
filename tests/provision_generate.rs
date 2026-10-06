@@ -1,5 +1,5 @@
 use edpcli::application::metadata::ownership_from_lba8;
-use edpcli::inspect::{analyze_sector, InspectMeta};
+use edpcli::inspect::{analyze_sector_with_context, InspectMeta};
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::protocol::crypto::{a7f0_full, crc32_bare};
 use edpcli::protocol::{
@@ -99,7 +99,13 @@ fn generated_pass_info_carries_all_user_configurable_policy_fields() {
         onlyid: None,
     };
     for (lba, base) in [(7usize, 0xc0usize), (12usize, 0x120usize)] {
-        let decoded = analyze_sector(lba as u32, sector(image.as_bytes(), lba), &meta).decoded;
+        let decoded = analyze_sector_with_context(
+            lba as u32,
+            sector(image.as_bytes(), lba),
+            &meta,
+            Some(image.as_bytes()),
+        )
+        .decoded;
         let stored: &[u8; 14] = decoded[base..base + 14].try_into().unwrap();
         let pass = edpcli::protocol::edpf::PassInfo::decode_stored(stored);
         assert_eq!(pass.force_change_share, 1);
@@ -137,7 +143,7 @@ fn generated_image_is_structurally_complete_metadata() {
         size_bytes: Some(spec.target().total_sectors() * 512),
         onlyid: Some(spec.metadata().onlyid().text().into()),
     };
-    let lba4 = analyze_sector(4, sector(bytes, 4), &meta);
+    let lba4 = analyze_sector_with_context(4, sector(bytes, 4), &meta, Some(bytes));
     assert!(lba4.method.contains("labelOnlyId=1402259934"));
     assert_eq!(&lba4.decoded[0x39..0x3d], b"LLGB");
     let onlyid_bits = spec.metadata().onlyid().bits();
@@ -169,7 +175,7 @@ fn generated_image_is_structurally_complete_metadata() {
         "current SAFE6 canonical must full-roll the extension instead of emitting the historical raw-zero short form"
     );
 
-    let lba6 = analyze_sector(6, sector(bytes, 6), &meta);
+    let lba6 = analyze_sector_with_context(6, sector(bytes, 6), &meta, Some(bytes));
     assert_eq!(&lba6.decoded[0x1c0..0x1c8], b"322CA28A");
     assert_eq!(lba6.decoded[0x1c8], 0);
     assert!(lba6.decoded[0x1c9..0x1d0].iter().all(|byte| *byte == 0));
@@ -187,7 +193,7 @@ fn generated_image_is_structurally_complete_metadata() {
         .iter()
         .any(|field| field.label == "校验和" && field.value.contains('✓')));
 
-    let lba7 = analyze_sector(7, sector(bytes, 7), &meta);
+    let lba7 = analyze_sector_with_context(7, sector(bytes, 7), &meta, Some(bytes));
     assert_eq!(&lba7.decoded[0..4], b"EDPF");
     assert_eq!(
         u32::from_le_bytes(lba7.decoded[0x0c..0x10].try_into().unwrap()),
@@ -214,7 +220,7 @@ fn generated_image_is_structurally_complete_metadata() {
         Some("江苏省电力有限公司/泰州供电公司/输电运检中心")
     );
 
-    let lba11 = analyze_sector(11, sector(bytes, 11), &meta);
+    let lba11 = analyze_sector_with_context(11, sector(bytes, 11), &meta, Some(bytes));
     assert_eq!(&sector(bytes, 11)[..4], b"DRKB");
     assert_eq!(
         &sector(bytes, 11)[4..0x100],
@@ -227,7 +233,7 @@ fn generated_image_is_structurally_complete_metadata() {
         .iter()
         .any(|field| field.label == "PDKB device_id" && field.value == spec.target().device_id()));
 
-    let lba12 = analyze_sector(12, sector(bytes, 12), &meta);
+    let lba12 = analyze_sector_with_context(12, sector(bytes, 12), &meta, Some(bytes));
     assert_eq!(
         u32::from_le_bytes(lba12.decoded[0x0c..0x10].try_into().unwrap()),
         2
@@ -265,11 +271,11 @@ fn force_change_password_option_sets_both_pass_info_copies() {
         ..InspectMeta::default()
     };
 
-    let lba7 = analyze_sector(7, sector(bytes, 7), &meta);
+    let lba7 = analyze_sector_with_context(7, sector(bytes, 7), &meta, Some(bytes));
     assert_eq!(lba7.decoded[0xc2], 1);
     assert_eq!(lba7.decoded[0xc5], 1);
 
-    let lba12 = analyze_sector(12, sector(bytes, 12), &meta);
+    let lba12 = analyze_sector_with_context(12, sector(bytes, 12), &meta, Some(bytes));
     assert_eq!(lba12.decoded[0x122], 1);
     assert_eq!(lba12.decoded[0x125], 1);
 }
@@ -403,7 +409,12 @@ fn signed_onlyid_round_trips_through_generated_lba4() {
         size_bytes: Some(spec.target().total_sectors() * 512),
         onlyid: Some(spec.metadata().onlyid().text().into()),
     };
-    let lba4 = analyze_sector(4, sector(image.as_bytes(), 4), &meta);
+    let lba4 = analyze_sector_with_context(
+        4,
+        sector(image.as_bytes(), 4),
+        &meta,
+        Some(image.as_bytes()),
+    );
     assert!(lba4.method.contains("labelOnlyId=-1833210541"));
     assert_eq!(&lba4.decoded[0x39..0x3d], b"LLGB");
 }
