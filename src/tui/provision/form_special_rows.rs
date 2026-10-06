@@ -178,8 +178,7 @@ pub(super) fn paired_region_row(
                 _ => None,
             };
             if let Some(slot) = slot {
-                value_widths[slot] =
-                    value_widths[slot].max(desired_value_width(value, *secret));
+                value_widths[slot] = value_widths[slot].max(desired_value_width(value, *secret));
             }
         }
 
