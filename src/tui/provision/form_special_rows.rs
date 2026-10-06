@@ -239,8 +239,10 @@ pub(super) fn paired_region_row(
             }
             spans.push(Span::styled(format!("{} ", labels[position]), muted()));
 
-            let prefix_width =
-                2 + (if position == 0 { REGION_WIDTH } else { 0 }) + label_widths[position] + 1;
+            let prefix_width = 2
+                + (if position == 0 { REGION_WIDTH } else { 0 })
+                + label_widths[position]
+                + 1;
             let value_width = widths[position].saturating_sub(prefix_width).max(4);
             let (value, secret) = values[position];
             let shown = if editing_active {
