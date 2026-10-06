@@ -37,10 +37,10 @@ jobs:
             base="${PUSH_BEFORE_SHA}"
           fi
           if [[ -z "${base}" || "${base}" =~ ^0+$ ]]; then
-            base="$(git rev-parse HEAD^ 2>/dev/null || printf '%s' "${GITHUB_SHA}")"
+            base="$(git hash-object -t tree /dev/null)"
           fi
 
-          git diff --name-only "${base}" "${GITHUB_SHA}" | python3 scripts/change_scope.py >> "${GITHUB_OUTPUT}"
+          git diff --name-only --no-renames "${base}" "${GITHUB_SHA}" | python3 scripts/change_scope.py >> "${GITHUB_OUTPUT}"
 
   repository-audit:
     name: repository contract

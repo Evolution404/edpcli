@@ -23,7 +23,7 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from change_scope import documentation_suites
+from change_scope import classify, documentation_suites
 from test_gate import BUDGETS, run_watchdog
 
 
@@ -167,9 +167,13 @@ def suites_for_paths(paths: Iterable[str]) -> set[str]:
             selected.add(direct)
             continue
 
-        if path in {"Cargo.toml", "Cargo.lock", "src/lib.rs"}:
+        if path in {"Cargo.toml", "Cargo.lock", "src/lib.rs", "build.rs"}:
             return set(ALL_SUITES)
-        if path.startswith("tests/tui_") or path.startswith("src/tui/"):
+        if path.startswith("backup/"):
+            selected.update({"backup_suite", "protocol_suite"})
+        elif path.startswith("tests/fixtures/protocol/"):
+            selected.update({"backup_suite", "protocol_suite"})
+        elif path.startswith("tests/tui_") or path.startswith("src/tui/"):
             selected.add("tui_suite")
         elif path.startswith("tests/cli_") or path in {
             "src/cli.rs",
@@ -203,7 +207,7 @@ def suites_for_paths(paths: Iterable[str]) -> set[str]:
             "README.md",
         }:
             selected.add("repository_suite")
-        elif path.startswith(("src/", "tests/")):
+        elif path.startswith(("src/", "tests/")) or classify([path])["rust"]:
             return set(ALL_SUITES)
     return selected
 

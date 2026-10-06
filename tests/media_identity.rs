@@ -680,3 +680,19 @@ fn readonly_observation_never_writes_and_classifies_plain_with_fixture_geometry(
         "raw USB serial must never enter canonical snapshot/debug output"
     );
 }
+
+#[test]
+fn raw_only_serial_survives_resume_projection() {
+    let mut source = snapshot(
+        hardware(Some("RAW-ONLY-001"), 0x1234, 0x5678, 1_000_000),
+        Some("edp"),
+        Some("42"),
+        DiskProvisionKind::Mode0,
+    );
+    source.hardware.serial_sha256 = None;
+    let image = [0; 13 * 512];
+    let pin = MediaIdentityResumePin::from_pin(&MediaIdentityPin::new(source.clone(), &image));
+    assert!(pin.validate().is_ok());
+    assert!(pin.verify(&source, &image).is_ok());
+    assert!(!serde_json::to_string(&pin).unwrap().contains("RAW-ONLY"));
+}

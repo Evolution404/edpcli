@@ -187,7 +187,7 @@ pub struct MediaIdentityResumePin {
 impl MediaIdentityResumePin {
     pub fn from_pin(pin: &MediaIdentityPin) -> Self {
         Self {
-            serial_sha256: pin.snapshot.hardware.serial_sha256.clone(),
+            serial_sha256: serial_digest_for_pin(&pin.snapshot.hardware),
             serial_quality: pin.snapshot.hardware.serial_quality,
             vid: pin.snapshot.hardware.vid,
             pid: pin.snapshot.hardware.pid,

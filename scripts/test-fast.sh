@@ -13,6 +13,7 @@ fast_budget=$(python3 scripts/test_gate.py --budget-key fast_max_seconds) # defa
 
 cargo fmt --all -- --check
 git diff --check
+python3 scripts/test-change-scope.py
 
 changed_paths=$(python3 scripts/test-full.py --list-changed-paths)
 
