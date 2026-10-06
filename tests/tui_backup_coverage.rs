@@ -210,7 +210,7 @@ fn compact_backup_detail_and_coverage_remain_reachable_and_escape_returns() {
     assert!(list.contains("时间"), "{list}");
 
     use edpcli::tui::table_layout::TableKind;
-    assert!(state.move_table_column_edge_for_viewport(TableKind::Backups, true, 40, 10,));
+    assert!(state.move_table_column_edge_for_viewport(TableKind::Backups, true, 40,));
     let last_columns = text(&state, 40, 10).replace(' ', "");
     assert!(
         last_columns.contains("名称"),

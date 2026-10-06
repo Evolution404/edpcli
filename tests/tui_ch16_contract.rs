@@ -1275,7 +1275,7 @@ fn ch16_devices_compact_enter_opens_tree_then_detail_and_escape_walks_back() {
 
     let mut state = AppState::new();
     state.replace_devices(vec![device()]);
-    assert_eq!(state.activate_device_for_viewport(40).unwrap(), None);
+    assert_eq!(state.activate_selected_device(), Ok(()));
     assert_eq!(state.devices_focused_pane(), PaneId::DevicesTree);
     let text = rendered_lines(&state, 40, 10).join("\n").replace(' ', "");
     for value in ["设备信息", "身份与协议", "容量布局"] {

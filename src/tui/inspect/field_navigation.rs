@@ -73,11 +73,6 @@ impl AppState {
         true
     }
 
-    pub fn advanced_inspect_open_selected_field(&mut self) -> Option<(AdvancedInspectSource, u64)> {
-        let field = self.advanced_inspect_selected_field()?;
-        self.open_inspect_field_at(field.clone(), field.range.start)
-    }
-
     pub fn advanced_inspect_detail_open_selected(
         &mut self,
     ) -> Option<(AdvancedInspectSource, u64)> {

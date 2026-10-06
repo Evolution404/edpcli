@@ -127,26 +127,6 @@ pub fn group_digits(n: u64) -> String {
     out
 }
 
-/// Python 3 `round()` 语义: 银行家舍入(ties to even)。
-/// Rust `f64::round` 是 ties away from zero, 整扇区 tie(如 --size 50.5)会漂移。
-pub fn py_round_half_even(x: f64) -> i64 {
-    let floor = x.floor();
-    let diff = x - floor;
-    if diff < 0.5 {
-        floor as i64
-    } else if diff > 0.5 {
-        (floor + 1.0) as i64
-    } else {
-        // 恰为 .5: 取偶数邻域
-        let lo = floor as i64;
-        if lo % 2 == 0 {
-            lo
-        } else {
-            lo + 1
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,18 +176,5 @@ mod tests {
             fmt_capacity_with_system(512_000_000_000, CapacityUnitSystem::Decimal),
             "512.00GB"
         );
-    }
-
-    #[test]
-    fn py_round_ties_to_even() {
-        assert_eq!(py_round_half_even(2.5), 2);
-        assert_eq!(py_round_half_even(3.5), 4);
-        assert_eq!(py_round_half_even(0.5), 0);
-        assert_eq!(py_round_half_even(1.5), 2);
-        assert_eq!(py_round_half_even(2.4), 2);
-        assert_eq!(py_round_half_even(2.6), 3);
-        assert_eq!(py_round_half_even(98_632_812.5), 98_632_812); // --size 50.5 场景
-        assert_eq!(py_round_half_even(-1.5), -2); // Python round(-1.5) == -2
-        assert_eq!(py_round_half_even(-0.5), 0);
     }
 }

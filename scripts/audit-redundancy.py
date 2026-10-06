@@ -99,6 +99,15 @@ def evaluate(root, files, facts, texts, tests, rules):
                     for finding in findings[-1:]:
                         if finding['rule'] == rule['id'] and finding['path'] == fn['path'] and finding['subject'] == subject:
                             finding['evidence'] += '; overloaded/shared name: usage classification is conservative.'
+        elif kind == 'declaration_consumers':
+            for declaration in facts.get('declared_symbols', []):
+                if not declaration['path'].startswith('src/') or declaration['test_only'] or not declaration.get('public', False):
+                    continue
+                uses = refs[declaration['name']]
+                if not uses:
+                    add(rule, declaration['path'], declaration['name'], 'No AST consumer of this public declaration; exports, derive/macro behavior or external contracts require review.')
+                elif all(r['test_only'] for r in uses):
+                    add(rule, declaration['path'], declaration['name'], 'Only test consumers of declaration: ' + ', '.join(sorted({r['path'] for r in uses})))
         elif kind == 'test_only_module':
             modules = defaultdict(list)
             for fn in facts['functions']:

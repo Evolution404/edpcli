@@ -119,7 +119,7 @@ fn authorize_restore(
         ));
     }
     let identity_match = match_media_identity(backup, target, None);
-    match RestoreAuthorizationPolicy::evaluate(backup, target, &identity_match, geometry, None) {
+    match RestoreAuthorizationPolicy::evaluate(backup, target, &identity_match, geometry) {
         RestoreAuthorizationDecision::Authorized => {}
         RestoreAuthorizationDecision::Reject(reason) => {
             return Err(err(

@@ -66,12 +66,12 @@ impl AppState {
         }
     }
 
-    pub fn activate_device_for_viewport(&mut self, _width: u16) -> Result<Option<u32>, String> {
+    pub fn activate_selected_device(&mut self) -> Result<(), String> {
         if self.selected_device().is_none() {
             return Err("请先选择设备。".into());
         }
         self.focus_devices_pane(crate::tui::pane::PaneId::DevicesTree);
-        Ok(None)
+        Ok(())
     }
 
     pub fn device_info_selected_key(&self) -> DeviceInfoNodeKey {

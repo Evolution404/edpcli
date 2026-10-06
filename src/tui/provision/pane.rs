@@ -41,7 +41,7 @@ impl AppState {
         if self.provision.stage == ProvisionStage::Review {
             self.provision.pane_focus.spatial_provision_review(dx, dy);
         } else {
-            self.provision.pane_focus.spatial_provision_form(dx, dy);
+            self.provision.pane_focus.spatial_provision_form(dx);
         }
     }
 

@@ -178,7 +178,7 @@ fn post_restore_disk_layout_free_region_clears_partition_action_target() {
 
     let kind = edpcli::tui::table_layout::TableKind::ResultPartitions;
     assert_eq!(state.active_table_kind(), Some(kind));
-    assert!(!state.move_table_column_for_viewport(kind, true, 160, 30));
+    assert!(!state.move_table_column_for_viewport(kind, true, 160));
     assert_eq!(state.table_active_column(kind), 0);
     assert_eq!(
         state.post_restore_result_focused_pane(),

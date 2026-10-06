@@ -58,8 +58,8 @@ fn chapter_11_provision_escape_restores_device_selection() {
     state.replace_devices(vec![first, second]);
     state.navigate(NavCommand::Down, 20);
     assert_eq!(state.selected_device_disk(), Some(7));
-    state.scroll_table_for_viewport(TableKind::Devices, false, 80, 24);
-    state.scroll_table_for_viewport(TableKind::Devices, false, 80, 24);
+    state.scroll_table_for_viewport(TableKind::Devices, false, 80);
+    state.scroll_table_for_viewport(TableKind::Devices, false, 80);
     let expected_scroll = state.table_scroll_offset(TableKind::Devices);
     assert!(expected_scroll > 0);
     state.begin_provision_for_selected_device().unwrap();
@@ -236,15 +236,15 @@ fn provision_result_cycles_only_result_workbench_panes() {
     assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
     let kind = edpcli::tui::table_layout::TableKind::ResultPartitions;
     assert_eq!(state.table_active_column(kind), 0);
-    assert!(state.move_table_column_for_viewport(kind, false, 160, 30));
+    assert!(state.move_table_column_for_viewport(kind, false, 160));
     assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
     assert_eq!(state.table_active_column(kind), 1);
     for _ in 0..20 {
-        let _ = state.move_table_column_for_viewport(kind, false, 160, 30);
+        let _ = state.move_table_column_for_viewport(kind, false, 160);
     }
     assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
     assert_eq!(state.table_active_column(kind), 5);
-    assert!(!state.move_table_column_for_viewport(kind, false, 160, 30));
+    assert!(!state.move_table_column_for_viewport(kind, false, 160));
     assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
 
     state.provision_result_spatial_focus(1, 0);
@@ -277,13 +277,13 @@ fn provision_result_table_supports_edges_and_visual_order_copy_contract() {
     assert_eq!(state.provision_focused_pane(), PaneId::ResultPartitions);
     assert_eq!(state.active_table_kind(), Some(kind));
 
-    assert!(state.move_table_column_edge_for_viewport(kind, true, 160, 30));
+    assert!(state.move_table_column_edge_for_viewport(kind, true, 160));
     assert_eq!(state.table_active_column(kind), 5);
-    assert!(state.move_table_column_edge_for_viewport(kind, false, 160, 30));
+    assert!(state.move_table_column_edge_for_viewport(kind, false, 160));
     assert_eq!(state.table_active_column(kind), 0);
     assert_eq!(state.table_copy_payload(kind, false).as_deref(), Some("P1"));
 
-    assert!(state.reorder_table_column_for_viewport(kind, false, 160, 30));
+    assert!(state.reorder_table_column_for_viewport(kind, false, 160));
     assert_eq!(state.table_column_order(kind)[..2], [1, 0]);
     let row = state
         .table_copy_payload(kind, true)
@@ -2653,35 +2653,6 @@ fn invalid_partition_draft_remains_visible_with_red_conflict_segment_and_is_bloc
 }
 
 #[test]
-fn provision_form_sections_are_compact_and_user_facing() {
-    let mut state = AppState::new();
-    state.replace_devices(vec![device(64_000_000_000)]);
-    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
-
-    let fields = state.provision_visible_fields();
-    let mut sections = Vec::new();
-    for index in 0..fields.len() {
-        if let Some(section) = state.provision_field_section(index) {
-            if sections.last().copied() != Some(section) {
-                sections.push(section);
-            }
-        }
-        if let Some(hint) = state.provision_field_hint(index) {
-            for internal in ["canonical", "PassInfo", "XOR", "Preserve", "Rebuild"] {
-                assert!(
-                    !hint.contains(internal),
-                    "internal term leaked in hint: {hint}"
-                );
-            }
-        }
-    }
-    assert_eq!(
-        sections,
-        vec!["身份信息", "密码域", "分区布局", "格式化", "密码策略",]
-    );
-}
-
-#[test]
 fn provision_layout_editor_reports_total_space_and_selected_partition_limits() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
@@ -2728,32 +2699,6 @@ fn provision_layout_editor_reports_total_space_and_selected_partition_limits() {
             .any(|detail| detail.text.starts_with("✓ 当前布局")),
         "{details:?}"
     );
-}
-
-#[test]
-fn provision_compact_rows_keep_partition_capacity_and_start_together() {
-    let mut state = AppState::new();
-    state.replace_devices(vec![device(64_000_000_000)]);
-    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
-
-    let fields = state.provision_visible_fields();
-    let rows = state.provision_compact_field_rows();
-    let share_row = rows
-        .iter()
-        .find(|(_, indexes)| {
-            indexes
-                .iter()
-                .any(|index| fields[*index].0.starts_with("交换区容量"))
-        })
-        .expect("share row");
-    let labels = share_row
-        .1
-        .iter()
-        .map(|index| fields[*index].0.as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(labels.len(), 2);
-    assert_eq!(labels[0], "交换区起点 LBA");
-    assert!(labels[1].starts_with("交换区容量"));
 }
 
 #[test]
@@ -3424,13 +3369,13 @@ fn every_table_kind_supports_shared_whole_column_reordering() {
         assert_eq!(state.table_column_order(kind), original);
 
         assert!(
-            state.move_table_column_for_viewport(kind, false, 160, 30),
+            state.move_table_column_for_viewport(kind, false, 160),
             "{kind:?}: h/l should move active column to visual position 1"
         );
         assert_eq!(state.table_column_order(kind), original);
 
         assert!(
-            state.reorder_table_column_for_viewport(kind, true, 160, 30),
+            state.reorder_table_column_for_viewport(kind, true, 160),
             "{kind:?}: < should swap the whole active column left"
         );
         let mut expected = original.clone();
@@ -3439,7 +3384,7 @@ fn every_table_kind_supports_shared_whole_column_reordering() {
         assert_eq!(state.table_active_column(kind), 0);
 
         assert!(
-            state.reorder_table_column_for_viewport(kind, false, 160, 30),
+            state.reorder_table_column_for_viewport(kind, false, 160),
             "{kind:?}: > should swap the whole active column right"
         );
         assert_eq!(state.table_column_order(kind), original);
@@ -3454,8 +3399,8 @@ fn table_copy_follows_logical_column_after_runtime_reorder() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);
 
-    assert!(state.move_table_column_for_viewport(TableKind::Devices, false, 160, 30));
-    assert!(state.move_table_column_for_viewport(TableKind::Devices, false, 160, 30));
+    assert!(state.move_table_column_for_viewport(TableKind::Devices, false, 160));
+    assert!(state.move_table_column_for_viewport(TableKind::Devices, false, 160));
     assert_eq!(state.table_active_column(TableKind::Devices), 2);
     assert_eq!(
         state
@@ -3464,7 +3409,7 @@ fn table_copy_follows_logical_column_after_runtime_reorder() {
         Some("输电运检中心")
     );
 
-    assert!(state.reorder_table_column_for_viewport(TableKind::Devices, true, 160, 30));
+    assert!(state.reorder_table_column_for_viewport(TableKind::Devices, true, 160));
     assert_eq!(state.table_active_column(TableKind::Devices), 1);
     assert_eq!(state.table_logical_column(TableKind::Devices, 1), 2);
     assert_eq!(
@@ -3482,10 +3427,10 @@ fn table_copy_follows_logical_column_after_runtime_reorder() {
     assert_eq!(cells[1], "输电运检中心");
     assert_eq!(cells.len(), 11);
 
-    assert!(state.move_table_column_edge_for_viewport(TableKind::Devices, true, 160, 30));
+    assert!(state.move_table_column_edge_for_viewport(TableKind::Devices, true, 160));
     let last = state.table_copy_payload(TableKind::Devices, false).unwrap();
     assert!(!last.is_empty());
-    assert!(state.move_table_column_edge_for_viewport(TableKind::Devices, false, 160, 30));
+    assert!(state.move_table_column_edge_for_viewport(TableKind::Devices, false, 160));
     let first = state.table_copy_payload(TableKind::Devices, false).unwrap();
     assert_ne!(first, last);
 }

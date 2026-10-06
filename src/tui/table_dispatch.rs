@@ -5,7 +5,6 @@ use super::*;
 pub(super) fn dispatch_table_action_with_clipboard(
     state: &mut AppState,
     action: keymap::TuiAction,
-    viewport_height: usize,
     viewport_width: u16,
     clipboard: &mut dyn clipboard::ClipboardBackend,
 ) -> bool {
@@ -25,28 +24,28 @@ pub(super) fn dispatch_table_action_with_clipboard(
     }
     match action {
         TuiAction::TableColumnLeft => {
-            state.move_table_column_for_viewport(kind, true, viewport_width, viewport_height);
+            state.move_table_column_for_viewport(kind, true, viewport_width);
         }
         TuiAction::TableColumnRight => {
-            state.move_table_column_for_viewport(kind, false, viewport_width, viewport_height);
+            state.move_table_column_for_viewport(kind, false, viewport_width);
         }
         TuiAction::TableMoveColumnLeft => {
-            state.reorder_table_column_for_viewport(kind, true, viewport_width, viewport_height);
+            state.reorder_table_column_for_viewport(kind, true, viewport_width);
         }
         TuiAction::TableMoveColumnRight => {
-            state.reorder_table_column_for_viewport(kind, false, viewport_width, viewport_height);
+            state.reorder_table_column_for_viewport(kind, false, viewport_width);
         }
         TuiAction::TableColumnFirst => {
-            state.move_table_column_edge_for_viewport(kind, false, viewport_width, viewport_height);
+            state.move_table_column_edge_for_viewport(kind, false, viewport_width);
         }
         TuiAction::TableColumnLast => {
-            state.move_table_column_edge_for_viewport(kind, true, viewport_width, viewport_height);
+            state.move_table_column_edge_for_viewport(kind, true, viewport_width);
         }
         TuiAction::TableScrollLeft => {
-            state.scroll_table_for_viewport(kind, true, viewport_width, viewport_height);
+            state.scroll_table_for_viewport(kind, true, viewport_width);
         }
         TuiAction::TableScrollRight => {
-            state.scroll_table_for_viewport(kind, false, viewport_width, viewport_height);
+            state.scroll_table_for_viewport(kind, false, viewport_width);
         }
         TuiAction::TableSortToggle => state.toggle_table_sort(kind),
         TuiAction::TableSortClear => {
@@ -134,7 +133,6 @@ mod tests {
         assert!(dispatch_table_action_with_clipboard(
             &mut state,
             keymap::TuiAction::TableCopyCell,
-            30,
             160,
             &mut clipboard,
         ));
@@ -144,7 +142,6 @@ mod tests {
         assert!(dispatch_table_action_with_clipboard(
             &mut state,
             keymap::TuiAction::TableCopyRow,
-            30,
             160,
             &mut clipboard,
         ));
@@ -161,7 +158,6 @@ mod tests {
         assert!(dispatch_table_action_with_clipboard(
             &mut state,
             keymap::TuiAction::TableCopyCell,
-            30,
             160,
             &mut clipboard,
         ));

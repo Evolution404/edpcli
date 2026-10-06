@@ -24,11 +24,6 @@ impl AppState {
             .map(|descriptor| descriptor.section)
     }
 
-    pub fn provision_field_section(&self, display_index: usize) -> Option<&'static str> {
-        self.provision_field_section_typed(display_index)
-            .map(ProvisionFieldSection::label)
-    }
-
     pub(crate) fn provision_compact_field_rows_typed(
         &self,
     ) -> Vec<(ProvisionFieldSection, Vec<usize>)> {
@@ -71,13 +66,6 @@ impl AppState {
             index = end;
         }
         rows
-    }
-
-    pub fn provision_compact_field_rows(&self) -> Vec<(&'static str, Vec<usize>)> {
-        self.provision_compact_field_rows_typed()
-            .into_iter()
-            .map(|(section, indexes)| (section.label(), indexes))
-            .collect()
     }
 
     pub fn provision_field_hint(&self, display_index: usize) -> Option<String> {
@@ -141,5 +129,79 @@ impl AppState {
             ProvisionFieldId::MaxPasswordErrors(_) => Some("范围 0–255".into()),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provision_form_sections_are_compact_and_user_facing() {
+        let mut state = AppState::new();
+        state.provision_mut().kind = ProvisionKind::Mode0;
+
+        let fields = state.provision_visible_fields();
+        let mut sections = Vec::new();
+        for index in 0..fields.len() {
+            if let Some(section) = state
+                .provision_field_section_typed(index)
+                .map(ProvisionFieldSection::label)
+            {
+                if sections.last().copied() != Some(section) {
+                    sections.push(section);
+                }
+            }
+            if let Some(hint) = state.provision_field_hint(index) {
+                for internal in ["canonical", "PassInfo", "XOR", "Preserve", "Rebuild"] {
+                    assert!(
+                        !hint.contains(internal),
+                        "internal term leaked in hint: {hint}"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            sections,
+            vec!["身份信息", "密码域", "分区布局", "格式化", "密码策略",]
+        );
+    }
+
+    #[test]
+    fn provision_compact_rows_keep_partition_capacity_and_start_together() {
+        let mut state = AppState::new();
+        state.provision_mut().kind = ProvisionKind::Mode0;
+
+        let fields = state.provision_visible_fields();
+        let rows = state.provision_field_rows_for_width(68);
+        let share_row = rows
+            .iter()
+            .find(|(_, indexes)| {
+                indexes
+                    .iter()
+                    .any(|index| fields[*index].0.starts_with("交换区容量"))
+            })
+            .expect("share row");
+        let labels = share_row
+            .1
+            .iter()
+            .map(|index| fields[*index].0.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[0], "交换区起点 LBA");
+        assert!(labels[1].starts_with("交换区容量"));
+        let narrow = state.provision_field_rows_for_width(67);
+        assert!(narrow.iter().all(|(_, indexes)| indexes.len() == 1));
+        assert_eq!(
+            narrow
+                .iter()
+                .flat_map(|(_, indexes)| indexes)
+                .copied()
+                .collect::<Vec<_>>(),
+            rows.iter()
+                .flat_map(|(_, indexes)| indexes)
+                .copied()
+                .collect::<Vec<_>>()
+        );
     }
 }

@@ -6,7 +6,6 @@ pub(super) fn handle_backup_batch_key(
     keys: &mut KeyMapper,
     key: ct_event::KeyEvent,
     backup_dir: &Path,
-    _terminal_size: ratatui::layout::Size,
 ) -> Option<KeyOutcome> {
     if let Some(stage) = state.backup_batch_delete().map(|batch| batch.stage) {
         use state::BackupBatchDeleteStage;

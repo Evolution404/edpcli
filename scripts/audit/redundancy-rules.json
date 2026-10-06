@@ -27,6 +27,11 @@
       "description": "模块仍注册，但所有公开函数/声明仅由测试使用且无外部生产消费者"
     },
     {
+      "id": "declaration_consumers",
+      "kind": "declaration_consumers",
+      "description": "公开类型、常量等声明没有消费者或仅由测试使用"
+    },
+    {
       "id": "ignored_parameter",
       "kind": "ignored_parameter",
       "description": "生产函数声明但不读取的参数"
@@ -89,7 +94,13 @@
         "parse_advanced_lbas",
         "render_fields",
         "render_hex",
-        "from_backup_meta"
+        "from_backup_meta",
+        "py_round_half_even",
+        "backup_menu_str",
+        "advanced_inspect_open_selected_field",
+        "activate_device_for_viewport",
+        "provision_field_section",
+        "provision_compact_field_rows"
       ]
     }
   ]

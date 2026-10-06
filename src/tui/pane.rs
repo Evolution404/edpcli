@@ -284,7 +284,7 @@ impl PaneFocus {
         }
     }
 
-    pub fn spatial_provision_form(&mut self, dx: i8, _dy: i8) {
+    pub fn spatial_provision_form(&mut self, dx: i8) {
         match (self.focused, dx.signum()) {
             (PaneId::ProvisionParameters, 1) => self.focus(PaneId::ProvisionDiskLayout),
             (PaneId::ProvisionDiskLayout, -1) => self.focus(PaneId::ProvisionParameters),

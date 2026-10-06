@@ -713,7 +713,7 @@ fn disk_table_rendering() {
 }
 
 #[test]
-fn menus_are_numbered() {
+fn disk_menu_is_numbered() {
     use crate::platform::ExtDisk;
     let disks = vec![
         ExtDisk {
@@ -753,20 +753,5 @@ fn menus_are_numbered() {
         m.contains("disk4")
             && m.contains(&crate::common::fmt_capacity(64_000_000_000))
             && m.contains("0951:1666")
-    );
-
-    let b = backup_menu_str(&["2026-09-16 23:36".into(), "2026-08-27 22:25".into()]);
-    assert!(b.contains("编号") && b.contains("时间"), "{}", b);
-    assert!(
-        b.lines()
-            .any(|line| line.contains("1") && line.contains("2026-09-16 23:36")),
-        "{}",
-        b
-    );
-    assert!(
-        b.lines()
-            .any(|line| line.contains("2") && line.contains("2026-08-27 22:25")),
-        "{}",
-        b
     );
 }

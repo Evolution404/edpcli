@@ -457,7 +457,6 @@ impl RestoreAuthorizationPolicy {
         target: &MediaIdentitySnapshot,
         identity_match: &IdentityMatch,
         geometry: RestoreGeometryRequirements,
-        _lineage: Option<&ControlledLineageEvidence>,
     ) -> RestoreAuthorizationDecision {
         use RestoreAuthorizationDecision::{Authorized, Reject};
 

@@ -34,7 +34,7 @@ use commands::{list_needs_elevation, target_plan_summary_lines};
 // ══════════════════════════════════════════════════════════════════
 pub use crate::application::write::Prompter;
 pub(crate) use crate::application::write::{auto_pick_disk, guard_usb_disk};
-pub use crate::ui::{backup_menu_str, disk_menu_str};
+pub use crate::ui::disk_menu_str;
 /// CLI 文本渲染兼容门面；终端 TUI 仍位于 `crate::tui`。
 pub mod terminal_ui {
     pub use crate::ui::*;

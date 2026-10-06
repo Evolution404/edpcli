@@ -305,21 +305,6 @@ pub fn truncate_mid(s: &str, max: usize) -> String {
 }
 
 // CLI table renderers retained as presentation-only helpers. Application services never depend on CLI routing.
-/// restore 选单条目。
-pub fn backup_menu_str(entries: &[String]) -> String {
-    let rows = entries
-        .iter()
-        .enumerate()
-        .map(|(i, time)| {
-            vec![
-                crate::ui::TableCell::right((i + 1).to_string(), crate::ui::Tone::BoldCyan),
-                crate::ui::TableCell::left(time.clone(), crate::ui::Tone::Plain),
-            ]
-        })
-        .collect::<Vec<_>>();
-    crate::ui::render_table(&["编号", "时间"], &rows)
-}
-
 /// 多 USB 盘选单。
 pub fn disk_menu_str(disks: &[crate::platform::ExtDisk]) -> String {
     let rows = disks

@@ -386,7 +386,7 @@ fn backup_device_tree_filters_without_renumbering_and_search_stays_scoped() {
 
     use edpcli::tui::table_layout::TableKind;
     state.focus_backups_pane(PaneId::BackupsList);
-    assert!(state.move_table_column_for_viewport(TableKind::Backups, false, 160, 45));
+    assert!(state.move_table_column_for_viewport(TableKind::Backups, false, 160));
     state.toggle_table_sort(TableKind::Backups);
     let mut sorted_group = (0..state.visible_backup_count())
         .map(|position| state.backup_at_visible(position).unwrap().index)
@@ -668,12 +668,7 @@ fn backup_horizontal_scroll_reaches_real_right_edge_with_device_sidebar() {
 
     let terminal_width = 200u16;
     let terminal_height = 45usize;
-    while state.scroll_table_for_viewport(
-        TableKind::Backups,
-        false,
-        terminal_width,
-        terminal_height,
-    ) {}
+    while state.scroll_table_for_viewport(TableKind::Backups, false, terminal_width) {}
 
     let view = state
         .table_view_data(TableKind::Backups)

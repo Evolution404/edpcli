@@ -6,7 +6,6 @@ pub(super) fn handle_backup_prune_key(
     keys: &mut KeyMapper,
     key: ct_event::KeyEvent,
     backup_dir: &Path,
-    _terminal_size: ratatui::layout::Size,
 ) -> Option<KeyOutcome> {
     if let Some(stage) = state.backup_prune().map(|prune| prune.stage) {
         use state::BackupPruneStage;

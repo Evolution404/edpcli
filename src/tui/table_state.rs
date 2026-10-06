@@ -222,7 +222,6 @@ impl AppState {
         &self,
         kind: crate::tui::table_layout::TableKind,
         terminal_width: u16,
-        _terminal_height: usize,
     ) -> u16 {
         use crate::tui::table_layout::TableKind;
         match kind {
@@ -282,7 +281,6 @@ impl AppState {
         kind: crate::tui::table_layout::TableKind,
         reverse: bool,
         terminal_width: u16,
-        terminal_height: usize,
     ) -> bool {
         let active = self.table_interaction(kind).active_column();
         let count = crate::tui::table_layout::layout_for(kind).specs().len();
@@ -304,7 +302,7 @@ impl AppState {
         }
 
         let (layout, widths) = self.table_visual_geometry(kind);
-        let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
+        let viewport_width = self.table_viewport_width(kind, terminal_width);
         let interaction = self.shell.horizontal_scroll.entry(kind).or_default();
         interaction.set_active_column(target);
         interaction.ensure_active_visible_for_layout(&layout, &widths, viewport_width);
@@ -316,10 +314,9 @@ impl AppState {
         kind: crate::tui::table_layout::TableKind,
         reverse: bool,
         terminal_width: u16,
-        terminal_height: usize,
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
-        let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
+        let viewport_width = self.table_viewport_width(kind, terminal_width);
         let interaction = self.shell.horizontal_scroll.entry(kind).or_default();
         if kind == crate::tui::table_layout::TableKind::InspectFields {
             interaction.move_active_bounded(&layout, &widths, viewport_width, reverse)
@@ -333,10 +330,9 @@ impl AppState {
         kind: crate::tui::table_layout::TableKind,
         last: bool,
         terminal_width: u16,
-        terminal_height: usize,
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
-        let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
+        let viewport_width = self.table_viewport_width(kind, terminal_width);
         let interaction = self.shell.horizontal_scroll.entry(kind).or_default();
         if kind == crate::tui::table_layout::TableKind::InspectFields {
             interaction.move_active_edge_bounded(&layout, &widths, viewport_width, last)
@@ -460,10 +456,9 @@ impl AppState {
         kind: crate::tui::table_layout::TableKind,
         reverse: bool,
         terminal_width: u16,
-        terminal_height: usize,
     ) -> bool {
         let (layout, widths) = self.table_visual_geometry(kind);
-        let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
+        let viewport_width = self.table_viewport_width(kind, terminal_width);
         let interaction = self.shell.horizontal_scroll.entry(kind).or_default();
         if kind == crate::tui::table_layout::TableKind::InspectFields {
             interaction.scroll_viewport_bounded(&layout, &widths, viewport_width, reverse)
@@ -482,11 +477,11 @@ mod tests {
         let state = AppState::new();
         use crate::tui::table_layout::TableKind;
 
-        assert_eq!(state.table_viewport_width(TableKind::Backups, 100, 40), 66);
-        assert_eq!(state.table_viewport_width(TableKind::Backups, 140, 40), 100);
-        assert_eq!(state.table_viewport_width(TableKind::Backups, 200, 40), 156);
+        assert_eq!(state.table_viewport_width(TableKind::Backups, 100), 66);
+        assert_eq!(state.table_viewport_width(TableKind::Backups, 140), 100);
+        assert_eq!(state.table_viewport_width(TableKind::Backups, 200), 156);
         assert_eq!(
-            state.table_viewport_width(TableKind::Backups, 79, 40),
+            state.table_viewport_width(TableKind::Backups, 79),
             75,
             "compact mode has no side-by-side device tree"
         );

@@ -252,7 +252,7 @@ src/application/provision/progress_projection.rs	src/application	保留	Rust AST
 src/application/provision/tests.rs	src/application	更新	更新 mode2 容量回归到现行参数契约	4887cf1358507a23fff56b3b1f7df64659000c80dca923078d889fb7b30a4c40
 src/application/provision_geometry.rs	src/application	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	d9a865745310d1f822b79b776db3e12533676e6ba3b7585c6145410f8f5e754e
 src/application/target_session.rs	src/application	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	1ea4ad2fdc50021402dec23fb8da5a58b146d816dd98318fe34ddc4c0db961d5
-src/application/write.rs	src/application	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	e22f779b05c3194435d3dacabada113c12c9c1ec7a30db6c5aa707c881e00649
+src/application/write.rs	src/application	更新	更新当前恢复授权调用，移除无效 lineage 占位实参	e22f779b05c3194435d3dacabada113c12c9c1ec7a30db6c5aa707c881e00649
 src/application/write/backup.rs	src/application	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	e51a20990647338b2455cc055a2c1e1121f6c4697f1d87d1da045a31934a444a
 src/application/write/restore.rs	src/application	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	cfb70258a2b5d6372bb84a8111f3a3a37945f3bd659b41b72764ecfefb4ed713
 src/application/write/restore_plan.rs	src/application	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	c62419f5ad1cf4822ff151a51437d5cab100026bb7b44921626ebfc28fdd9879
@@ -264,13 +264,13 @@ src/backup_metadata.rs	src/根入口与门面	保留	Rust AST 模块图可达；
 src/backup_restore_preview.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	e355e51a1b471057ec54072238012748c2b59504f54502ed7f1970ffdd82fbf4
 src/bounded_read.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	70dcc3b23dcecbb2788accbe8b4ba22e24739828a419618a7a8bd54e667443bb
 src/build_info.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	fdd8b130faab7c2a4442d015cca853e8c9b5f21daaf6463b7a9e2c6e15354613
-src/cli.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	408464b5153ba9cecdb46f489e42a482d212875b0c4ca60919d9030d4c6393df
+src/cli.rs	src/根入口与门面	更新	清除旧 backup_menu_str 重导出；现行 CLI 路由与选择继续使用	408464b5153ba9cecdb46f489e42a482d212875b0c4ca60919d9030d4c6393df
 src/cli/commands/backup.rs	src/cli	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	6909308206634b47b6a09e2dabd15204f449aeeac0d0145f84fd8f82e75cfc29
 src/cli/commands/list.rs	src/cli	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	893de28188cd0cb2c009484feada39f3deee2b255140d11bce70a36cd92150a1
 src/cli/commands/mod.rs	src/cli	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	a27ebb2ce127c9fa7fed772d4352f1ea3d3728a44b9805ecc2b243c84e1263c4
 src/cli/commands/provision.rs	src/cli	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	e3e5a3008a4114aab6ac5ab8ae588e7c6e7e3a48a76626bf45af53c3ce795bcf
 src/cli/prompter.rs	src/cli	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	5808b2d7088222ac6fc6e97ba75b19f900c1b7077d399c8d5783bc079da167a2
-src/cli/tests.rs	src/cli	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	379bebfc8ff894acbaa583653e4259bb4b1d2f802fc566073a63a4e3c94e1017
+src/cli/tests.rs	src/cli	更新	删除仅验证旧备份菜单的断言；保留现行设备编号菜单契约	379bebfc8ff894acbaa583653e4259bb4b1d2f802fc566073a63a4e3c94e1017
 src/cli_args.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	aaf17451cfc2b7d4169bf107b7ab16e98633c7c924ed37605b9038e468ab5495
 src/cli_args/backup.rs	src/cli_args	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	95c732d06592a6b5493a1e7a4fdd37fa255d58026718d7bac0c2f599a0eb5c2b
 src/cli_args/help.rs	src/cli_args	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	dd2ccb7f62a2ac2e06452b3c07da1c499f434c0053421a33566a91b396afa046
@@ -279,7 +279,7 @@ src/cli_args/inspect.rs	src/cli_args	保留	Rust AST 模块图可达；含内部
 src/cli_args/parse_support.rs	src/cli_args	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	7dfd6c8f063bc4e9d94c7b28d8687f7e3639af7b61d475fc9bd577c7345809d1
 src/cli_args/provision.rs	src/cli_args	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	145f1aa6c1d3c44d69235b66781365797a0b437c2c985ccce9ec51a6d2aec509
 src/command_spec.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	9ea78a5ae858835e56db3179cf5fbf6387041acf0e330ef82676a8e0c8af30e2
-src/common.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	674f223585191c7bf850c85d2f8d025568a6781048eac2ee271a64b00bddad7d
+src/common.rs	src/根入口与门面	更新	移除旧浮点 Python 舍入辅助及孤立测试；当前容量使用精确整数算法	674f223585191c7bf850c85d2f8d025568a6781048eac2ee271a64b00bddad7d
 src/completion.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	035213507b057ba0d7150ffdfc801c78f9f6c3f0c275efc8f31141f06cd159ec
 src/disk_layout.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	46787a3aec062a59738c02e8cee86af748d4641100670274e4cff08664fd40b4
 src/disk_scan.rs	src/根入口与门面	更新	更新 SAFE6 标签读取消费者	11750fc0f97006a40da67461d7b4822dbc7f8850c2c9c656d5bbfdb517685d0d
@@ -349,7 +349,7 @@ src/inspect_cli.rs	src/根入口与门面	更新	补充现行请求转换的默�
 src/inspect_target.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	efdee5814f08c3a2c47026f022803ebf5d93ef4b5b221b9eca23c6dd1d80218b
 src/lib.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	10d7bb08271b0a3a835060ff7d50490d314d96b1629c21ff7830baf7fa3ef556
 src/main.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	40ef8f3d231dbcf35aac1e889a0026fc11b39096b743e4807186c4f555b46e41
-src/media_identity.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	808515e9bf199295ed75d4caa1ff837c00998440ca30bf9f56daf780cc5b0e58
+src/media_identity.rs	src/根入口与门面	更新	删除授权接口无效 lineage 参数；硬件/几何拒绝与匹配阶段 lineage 证据保持	808515e9bf199295ed75d4caa1ff837c00998440ca30bf9f56daf780cc5b0e58
 src/media_identity_observer.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	6d0cc4eef071048ab1805e9eb06e258f42b25afce2c4fe842f40a7ade3323ec1
 src/metainfo.rs	src/根入口与门面	更新	移除 SAFE6 标签解析不使用的语义上下文实参	8d2fc5331cc33634b5170d46ac018f498b92b449b515a3d55238324d0b8c3c79
 src/metainfo_cli.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	694ab10e503b47c7810b08cfe99ab449edd215ec9346f5f4118c87829932e331
@@ -427,7 +427,7 @@ src/tui/backups/task.rs	src/tui	保留	Rust AST 模块图可达；含内部测�
 src/tui/backups/view_state.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	a26b34cc61d0b19ac2dfab1cc3980501a9ddfb1c77bd3f6de70ab9b9024efa76
 src/tui/clipboard.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	a2f28ba15c16fd8fae2795e936a08f3c4604ba1dc39a97b1610a5df580f42252
 src/tui/command.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	515c30080a5aec7f46e61f3991744793d9f04e9248f96976f15b1c05f720d445
-src/tui/controller.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	99068809d06dc8d2cafca94c44ea31476bc9a1ffc016d1c4f711aa2920ed2bc1
+src/tui/controller.rs	src/tui	更新	清理已废弃入口或未读取参数的传递链；当前消费者与行为回归同步更新	99068809d06dc8d2cafca94c44ea31476bc9a1ffc016d1c4f711aa2920ed2bc1
 src/tui/controller/provision.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	7a392ff61b2f676df748ccb366047c40f880bcced77d7efed2643b82d21a3831
 src/tui/controller/tests.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	837f5e556a3938e65840e6e3087b123f93f503e57a88ed5ff1158a4368fe0d59
 src/tui/demo/fixtures.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	1c4e39b2ea41499010dd306927457d5904c991031e28590b50131d98b5e39bd4
@@ -437,7 +437,7 @@ src/tui/devices/detail_render.rs	src/tui	更新	移除旧入口或模块注册�
 src/tui/devices/list_render.rs	src/tui	更新	移除旧入口或模块注册；保留现行职责，消费者与回归同步更新	1f211dceefacf65dc86a4c5339ca96ab5ce30e9e354c2a938f5ee51f35703015
 src/tui/devices/presentation.rs	src/tui	更新	移除旧入口或模块注册；保留现行职责，消费者与回归同步更新	e0550203d2abf1530e129fc4eb0ecd9f5536cde9e85b12b972a2d58e095e0978
 src/tui/devices/render.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	19c5fb3a09b1bb684f7fb61b577e57c6d8222e56f3da2112e61e6a4562cb59bd
-src/tui/devices/state.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	6db832b5c6849bf8f2f4929e00ef071f1c79677c5d8c3eaac33f1e67e345e2f1
+src/tui/devices/state.rs	src/tui	更新	设备激活移除无效宽度与始终空的磁盘返回值，保持实际聚焦行为	6db832b5c6849bf8f2f4929e00ef071f1c79677c5d8c3eaac33f1e67e345e2f1
 src/tui/devices/tree_render.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	e4e4af38be5399038038583f1b720a3e452dd9fa14c2cb2d74df9c49643600aa
 src/tui/disk_layout.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	368fce9bfc9aa26a75b65526e713f68a5a818201dac1b509c9ae4c9e39a1b0c0
 src/tui/disk_layout/capacity_map.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	1517d901534c1bd19f0fc80fe42aafa25096ad831937d299352fdf4160b6c6bf
@@ -455,7 +455,7 @@ src/tui/help_tests.rs	src/tui	保留	Rust AST 模块图可达；含内部测试�
 src/tui/inspect/detail_render.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	60f5f77d2cdd01d7e61d3bd45259e2adb477bdf6ffbbd479e7ec8a33b002b041
 src/tui/inspect/detail_state.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	272e59c270501eff097b9c969e9713dffff959428dacc2c9f3699ade11a56959
 src/tui/inspect/evidence_table_render.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	fc6fecf50b2ecad6e780e49214973ca10e4658491fdbcc849a35790b698e3359
-src/tui/inspect/field_navigation.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	3870e39d82707db0ced81d3aeb5197aed7f1efa85d60a60f0292af06b1659d5d
+src/tui/inspect/field_navigation.rs	src/tui	更新	删除旧树字段直接打开 Hex 入口；回归改走当前详情选中字段流程	3870e39d82707db0ced81d3aeb5197aed7f1efa85d60a60f0292af06b1659d5d
 src/tui/inspect/field_table_render.rs	src/tui	更新	移除旧入口或模块注册；保留现行职责，消费者与回归同步更新	e0370dd83481ccaed035bbea8c1ce3f4279c74a7daaecccbcdd382df8a8867ff
 src/tui/inspect/jump_state.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	8fc62a3a5e599afb6b10d7c3dcfbbb42889a4f983c49129b7cea850586a5272c
 src/tui/inspect/layout.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	4563e378e5a5850ab7c140303cda57ac75c6458cb841c393761fb234f294df59
@@ -483,7 +483,7 @@ src/tui/operation_progress_compact.rs	src/tui	保留	Rust AST 模块图可达；
 src/tui/operation_progress_render.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	0f905981d47c57f57fc85ee9f9f4640f60c0611a8a383e1ba8b4162535e3db51
 src/tui/operation_progress_status.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	8d8be03439aab2f0ee319a90d7a4cd82075b6153f511ac7cbfc2692a295f19e8
 src/tui/overview.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	f45455f10b8c15877ff71e4187b753eddc8303eb8d3b4ca47ebcb6ab7a549d81
-src/tui/pane.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	f2a43f099e2deb62c01b643d4000e30c87f05170d42b77c6a4c9ff1a8277ceb9
+src/tui/pane.rs	src/tui	更新	删除制盘表单仅水平导航的无效 dy；其他工作区二维导航保留	f2a43f099e2deb62c01b643d4000e30c87f05170d42b77c6a4c9ff1a8277ceb9
 src/tui/post_restore_progress_state.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	95e02ce852611dd5373746687f5088eaee91c7f5649467e37e0a0e77a3ad2b64
 src/tui/progress_transport.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	6dddfdfb28388561930bc098fe81c27f22af50406a02c073431b0460ad64aa80
 src/tui/provision/advanced_identity.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	59007124282fe77294032a1d674f66ada8b9c0ce04426a4c6128336f405ab7d2
@@ -491,7 +491,7 @@ src/tui/provision/confirmation_render.rs	src/tui	保留	Rust AST 模块图可达
 src/tui/provision/editor.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	5855eaf10d7aa6f83d64534eb9e494fed2857cfbff7e0ca20e15343b48c8146d
 src/tui/provision/execution_state.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	ae5bfce1c41fe99157dffcf128b303b108baa873f966aa40c4e3675a3780ac7e
 src/tui/provision/field_input.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	9228b086db67f2e2fcdc7183402550973e43df751f522572cb11526a5c0ebaac
-src/tui/provision/field_layout.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	3d05166fa01f2502c22e6edd5ec9c162daade68c2f859dfa7e67ee0062285975
+src/tui/provision/field_layout.rs	src/tui	更新	删除字符串布局包装；测试迁到当前类型化模型并验证 67/68 列响应布局	3d05166fa01f2502c22e6edd5ec9c162daade68c2f859dfa7e67ee0062285975
 src/tui/provision/field_model.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	b47f4bde0827d3b75881cb224d94e0157c6d0da59fb686c6b71f7606463a2d6f
 src/tui/provision/field_presentation.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	a8c0b4492100e29899e9834e7ad55111df15c733a8f3d96035574f580cd6c3cd
 src/tui/provision/fields.rs	src/tui	更新	删除已废弃的密码验证描述参数及18处无效布尔实参；不改变当前字段能力	674efbccbe7cf098be0acc6b2ea21f3ba55dfc21e9da2e0e638db7f086b1eda1
@@ -508,7 +508,7 @@ src/tui/provision/lba8_identity_field.rs	src/tui	保留	Rust AST 模块图可达
 src/tui/provision/mode2_geometry_note.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	be05db696b761ccb38f4f6a811df50c9990ea1830cd7e050504519b8fdccc739
 src/tui/provision/navigation_model.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	9948cff60c93831b7ac95d17f672b9a24f0837b965da8b1424447af1a3c936ea
 src/tui/provision/option_editor.rs	src/tui	更新	删除旧强制改密专用包装；回归使用实际选中字段的切换入口	79c7bebb417de6e7f9c7b106fd15384f881a1d8462bb8086fed54c9a224aba9a
-src/tui/provision/pane.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	47b1b0a712f13226deb46776e9c9b75a02fe06e81ad463be69ba67c946d2cb3b
+src/tui/provision/pane.rs	src/tui	更新	制盘表单水平导航不再传无效 dy；Review 阶段仍使用二维导航	47b1b0a712f13226deb46776e9c9b75a02fe06e81ad463be69ba67c946d2cb3b
 src/tui/provision/password_model.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	74f7bded9c73302492d772d5f74227bef56e2478ad3dc7f9e839b000d7dc4e0b
 src/tui/provision/password_target_state.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	3532f493730b6dfc39c568691114da358ee1b3b7e71f559dba9a4f1be4f7de94
 src/tui/provision/password_verification.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	3d772db5608c0b91b730f1c82e85144477314260598fb8d719a73ef395053b89
@@ -556,9 +556,9 @@ src/tui/result_partition_detail.rs	src/tui	保留	Rust AST 模块图可达；含
 src/tui/result_partition_table_state.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	4a620bce8b38079d4e05960152556709049905169e6f0d2769b167eeb50722ef
 src/tui/result_workbench.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	841f6a6df53be3176f8f0de27861ec11919e8a709cea01d56c59a388ab9f812b
 src/tui/resume.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	75d0d26a1234596d3f12a024468650f6e76b063212d7c45b0b6858d88b25825e
-src/tui/runtime_input.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	2019f03fe589408ffcda0f74fc745c32afdddacf7990128ec3f02f0e28b045e6
-src/tui/runtime_input/backup_batch.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	c6ae519f95d5d6ec5b188d465cb12ffc213ff4b76c3902b7638993a1f0ace530
-src/tui/runtime_input/backup_prune.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	b7322b7535f7eeffd35de1a155a1ecdfdf3e5425b62a23213d13e42ad625ad3c
+src/tui/runtime_input.rs	src/tui	更新	清理已废弃入口或未读取参数的传递链；当前消费者与行为回归同步更新	2019f03fe589408ffcda0f74fc745c32afdddacf7990128ec3f02f0e28b045e6
+src/tui/runtime_input/backup_batch.rs	src/tui	更新	移除批量删除键处理不读取的终端尺寸参数	c6ae519f95d5d6ec5b188d465cb12ffc213ff4b76c3902b7638993a1f0ace530
+src/tui/runtime_input/backup_prune.rs	src/tui	更新	移除备份清理键处理不读取的终端尺寸参数	b7322b7535f7eeffd35de1a155a1ecdfdf3e5425b62a23213d13e42ad625ad3c
 src/tui/runtime_input/backup_wizard.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	f6b63cc52b148b18f9e3ed0010bd511eec06cf07e021bf1c29e5023dd7ec5d4e
 src/tui/runtime_input/inspect.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	5ee8b42620773aada8b87dd14b596fe7fc5a27b2d652d15f2f21a79f9b9f2791
 src/tui/runtime_input/post_restore_wizard.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	4b334e5ffd22578f33483b82357b92f520fb4c9d1ddf8b4dee3b23694e2a68f4
@@ -572,9 +572,9 @@ src/tui/state.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平
 src/tui/status.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	d16462e49b33ae8a87528e032cf62d1f2d1bca81dfa4967420a3313ed621f32a
 src/tui/table/projection.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	5e72e5322b53d471af58bf503a5e961b007a898094e4a326260f79e0dcec72da
 src/tui/table/schema.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	376c4b01f2a61bf6697e262ba34bfaff8713598bb2a4797bd2da5b4fe2f047ad
-src/tui/table_dispatch.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	f545e81d0762a14cba846dd584dead36dab4b1af95a403ae1e0ea130a2add880
+src/tui/table_dispatch.rs	src/tui	更新	删除表格调度的无效高度传递链，更新所有消费者与复制回归	f545e81d0762a14cba846dd584dead36dab4b1af95a403ae1e0ea130a2add880
 src/tui/table_layout.rs	src/tui	更新	删除无人使用的投影与旧排序包装，移除位置提示/偏移/可见性算法无效参数	686b13e98f3490ee2e360aca953c6ec2b0395c4add522718f3ced488a6b4cd96
-src/tui/table_state.rs	src/tui	更新	删除绕过当前视口算法的旧列移动/滚动包装；更新当前可见性调用	221a22baccc7547a569a0ce80ca470d8d7f3efe9131e0b40780f01989a18386b
+src/tui/table_state.rs	src/tui	更新	删除横向表格算法和所有调用链的无效终端高度；现行边界/可见性门禁通过	221a22baccc7547a569a0ce80ca470d8d7f3efe9131e0b40780f01989a18386b
 src/tui/task.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	5e1da3463f56c3627569d4543ad59aa162a61afc2b333a0a7444ac7e22d5ef32
 src/tui/task_gate.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	9b880240c3a517eef3d5e0587b429427ca0899281bd3355680aeb9e440ca5839
 src/tui/task_progress.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	ce3a990c0924f904394c1390d863127db5bbb6d711b6aaf6632991354351cc63
@@ -598,7 +598,7 @@ src/tui/ui/workspace_overview.rs	src/tui	保留	Rust AST 模块图可达；含�
 src/tui/wizard_result_render.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	24e8c7f0ba6cee5fe146b73e02ea2902d2ff560a1381a350c08d582a60789eda
 src/tui/workspace_layout.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	4143ebec455611f9e2e8a60dc6be8f17be133e64af34f08161d999304683c931
 src/tui/write_task.rs	src/tui	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	16147a6697d60e0ad8add5dd7168b02f80cf7281fc9e78c88765a6db0e5d77b9
-src/ui.rs	src/根入口与门面	保留	Rust AST 模块图可达；含内部测试及平台条件分支；公开符号引用已筛查	5b41f52dffdf6e82690a18a781b99a0eb47c944202a702936abc450b482ac003
+src/ui.rs	src/根入口与门面	更新	移除无人使用的旧备份编号菜单；保留实际使用的设备选择与当前表格展示	5b41f52dffdf6e82690a18a781b99a0eb47c944202a702936abc450b482ac003
 tests/architecture_dependencies.rs	tests	更新	增加所有 cfg 分支的生产源码注册检查，避免遗漏游离源码	302a01d66514229244c1009a6da60bf717bb2021ef4669b4b1dd5e87b4c4f596
 tests/architecture_split.rs	tests	更新	将旧校验回调实现断言改为固定长度 ProvisionImage 安全边界契约	dedac0531c737dd9cdd6069d31453c71cc2b4a8572c4e390e83aa42b7232ca28
 tests/atomic_write.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	de1b052b590c679bb9a6ce85486abfce23110079bcd9993c4987dd14c3f76bbd
@@ -675,7 +675,7 @@ tests/inspect_suite.rs	tests	保留	已接入 Cargo 测试或示例入口及 pat
 tests/inspect_target.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	011d6fd7ac461c16c5af86d810dac6931a9202631e4eaad37b3a3ec0510689c8
 tests/lba7_compat.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	bc9c77e8a2a8615721cb1bbc798b64421793814e7c6777267039308b5a6afc18
 tests/lba7_compatibility_ledger.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	bf00d58c3912e874f5e48293e38e79de31583b8179ba6ff702d15290fc0f99df
-tests/media_identity.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	657d560adbba09c3f36a240a9f9d298a4cee650db7899ccac41ba2aeec63d6d7
+tests/media_identity.rs	tests	更新	回归迁至现行入口/类型模型，删除无效视口实参；当前功能、安全与布局断言保留	657d560adbba09c3f36a240a9f9d298a4cee650db7899ccac41ba2aeec63d6d7
 tests/metainfo.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	8d2236f4e626440b481660b586e10932017ea5db2bdc8587f9948a219ca7fe3e
 tests/physical_hil_contract.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	36455c2bb49212b3bffd1d3a742d31f9844303f4bdf8c4c8a38118d16eacf3a3
 tests/plain_macos_virtual_hil.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	69336ae84296f00e1aee032e570faabe9dc76f8050eed44c4ba42c0ea7dc924d
@@ -725,33 +725,33 @@ tests/support/edpb_manifest.rs	tests	保留	已接入 Cargo 测试或示例入�
 tests/support/gold_name.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	ef0790f6d2a85eeca03ce6e2d1bd7892870f76edf6707955cb14c0a1dce68936
 tests/test_infrastructure.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	2530b3e9a5bb46fcce9e4d655671a28e1cde58a4a4cacc7148277e852a50ab50
 tests/tui_animation.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	946d3517ababc0568d5a804003029a9b6782495acf24c334796f63b253868a8b
-tests/tui_backup_coverage.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	c0d480d28f40666fe99909ffc5a12da743c061ca67ae1ba212a911aa059d2e57
+tests/tui_backup_coverage.rs	tests	更新	回归迁至现行入口/类型模型，删除无效视口实参；当前功能、安全与布局断言保留	c0d480d28f40666fe99909ffc5a12da743c061ca67ae1ba212a911aa059d2e57
 tests/tui_backup_create.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	635902cc7aa2286d6ad5bb3e55cdd4c9b81e8ca2e3668e23910fbea79813515d
 tests/tui_backup_delete_safety.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	c01967fbf5dd7315765be9fb2c8baaf4d642b1e8a37ca86eaac277de45c19fd0
 tests/tui_backup_management.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	2aa2dda957bc44f5c5548d55d8e350340b0f47dfee54d711f6c38a533b98ba88
 tests/tui_backup_workspace.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	3c3e41df0fccf84b6d9a79b4a155c4035879caea9a59f9a408408aaa411fcffb
-tests/tui_ch16_contract.rs	tests	更新	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	6811ffbac0004c3cfa6053be89c9d6fa5e821fc6bb7acb1e213cc32555d4f674
+tests/tui_ch16_contract.rs	tests	更新	回归迁至现行入口/类型模型，删除无效视口实参；当前功能、安全与布局断言保留	6811ffbac0004c3cfa6053be89c9d6fa5e821fc6bb7acb1e213cc32555d4f674
 tests/tui_contract.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	ae75b8f16004d7531a927bec3011e41a8c5e634fe37d012b77db7cd1aaf2fd6b
 tests/tui_demo.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	08f2ec8fc22d856373001d08292ebb7e471397985a1bb6708cc845baedb3f4e3
 tests/tui_desktop.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	55fff823be7348e78ce73a7788926724682f06c9b223f31c68f02770e2eb1630
 tests/tui_device_detail.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	f46911503f0d5aaa9a3ed1d6dfa673d24beb8d0e08c1eb572326c5c9cc44bdfc
 tests/tui_elevation_resume.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	df0e5837ecfc3bfd3c385121fe5b03701e72c1286fb24e07ed758cffe2286cc7
 tests/tui_keymap_contract.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	64d2186c888df0c15664a7a1bbf8c67470641caaf6c623e73556eb77dbf68f9c
-tests/tui_lifecycle.rs	tests	更新	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	b92ac05755c1dc52e33a92ef46cfaf3e784a3395b45f159cb2ad4a3c227000fe
+tests/tui_lifecycle.rs	tests	更新	回归迁至现行入口/类型模型，删除无效视口实参；当前功能、安全与布局断言保留	b92ac05755c1dc52e33a92ef46cfaf3e784a3395b45f159cb2ad4a3c227000fe
 tests/tui_nonblocking.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	ec10325c2c04ec97f2db3a0e048d38319bd383c5160a7e8d1a0b515f5091405a
 tests/tui_operation_progress.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	96e2bca52feec50af9de2aac123386ee4b4a0e63e63ed6313e15ae9aac8364de
 tests/tui_operation_result.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	7fe1a4a39a4f5defaa9e91cd3c8ab6f3917215849d62f3535079c0fb14f672a8
-tests/tui_pane_contract.rs	tests	更新	固定盘尾几何与选中区域回归迁到实际布局详情输出	38f7f8e21c0048035f54d75a31dfa03841f239b55916c1e29d607620b1366bbb
+tests/tui_pane_contract.rs	tests	更新	回归迁至现行入口/类型模型，删除无效视口实参；当前功能、安全与布局断言保留	38f7f8e21c0048035f54d75a31dfa03841f239b55916c1e29d607620b1366bbb
 tests/tui_search_command.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	5d9a4e90fe6e66d6e6060416ea88ac9934b815a6995e971c7ef079e1f01ee993
-tests/tui_sector_inspector.rs	tests	更新	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	035a8252021a35d255acc9f38a44ce02d31ad129532c60a27a020767f80d2f6c
+tests/tui_sector_inspector.rs	tests	更新	回归迁至现行入口/类型模型，删除无效视口实参；当前功能、安全与布局断言保留	035a8252021a35d255acc9f38a44ce02d31ad129532c60a27a020767f80d2f6c
 tests/tui_singleflight.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	6ef4e1a7c12284ef7675db559a62ba14f786ef3fb5f16f88d88b29e779f1fd92
-tests/tui_state.rs	tests	更新	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	a05e4209684e26ce89196f2f386fcc93c9461803084e6afbcb798beeb4ba5480
+tests/tui_state.rs	tests	更新	回归迁至现行入口/类型模型，删除无效视口实参；当前功能、安全与布局断言保留	a05e4209684e26ce89196f2f386fcc93c9461803084e6afbcb798beeb4ba5480
 tests/tui_suite.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	4f1cc5404b0eec60b13ce5d3527e1b832951cf820d37afc316c9023500220f8d
 tests/tui_table_layout.rs	tests	更新	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	ff653ab1621d39619973234cd55af1b756a12465a3f4fbc26a6e36ed7312ed97
 tests/tui_terminal_safety.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	e6a43de2125577826248cfb316aceaf8a54494e8c59bf58b1f0a5ac96b8202cc
 tests/tui_theme_contract.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	36a0a57abcae77999ba3189cdc3c68bb79e8dd76c54fc0543e1a69baa22d2d8a
 tests/tui_write_safety.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	704944e070ff692984afbe99843a18c1c213984acbba9021af1f67e214f53eb4
-tests/tui_write_target.rs	tests	更新	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	44793c656800371b36a4070ace97174f63800747d3e81987374dd004c0d537e5
-tests/tui_write_wizard.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	327897893856f6bf3792babae4d1c2167a0457324f6dffb0bc1b98cc8fc79625
+tests/tui_write_target.rs	tests	更新	回归迁至现行入口/类型模型，删除无效视口实参；当前功能、安全与布局断言保留	44793c656800371b36a4070ace97174f63800747d3e81987374dd004c0d537e5
+tests/tui_write_wizard.rs	tests	更新	回归迁至现行入口/类型模型，删除无效视口实参；当前功能、安全与布局断言保留	327897893856f6bf3792babae4d1c2167a0457324f6dffb0bc1b98cc8fc79625
 tests/virtual_disk_hil.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	dbad38e0ab96433d65f4b7aa9dfd7ca31b8399909d9753b08aaad2a2932b5bb7
 tests/write_progress_events.rs	tests	保留	已接入 Cargo 测试或示例入口及 path 模块图；覆盖当前能力、故障拒绝或独立 HIL	79b43e2ed0d61cd5f342f3b0271db9a2b0ed8b09542b02ffae3575a405343782

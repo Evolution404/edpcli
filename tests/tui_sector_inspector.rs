@@ -737,8 +737,7 @@ fn inspect_field_table_scrolls_to_true_right_edge_and_keeps_active_header_visibl
 
     let kind = TableKind::InspectFields;
     let terminal_width = 160;
-    let terminal_height = 50;
-    while state.scroll_table_for_viewport(kind, false, terminal_width, terminal_height) {}
+    while state.scroll_table_for_viewport(kind, false, terminal_width) {}
 
     let headings = edpcli::tui::state::INSPECT_DETAIL_HEADINGS;
     let rows = state.advanced_inspect_detail_rows();
@@ -760,9 +759,9 @@ fn inspect_field_table_scrolls_to_true_right_edge_and_keeps_active_header_visibl
     let expected_right_edge = layout.max_scroll(&visual_widths, None, viewport_width);
     assert_eq!(state.table_scroll_offset(kind), expected_right_edge);
 
-    state.move_table_column_edge_for_viewport(kind, false, terminal_width, terminal_height);
+    state.move_table_column_edge_for_viewport(kind, false, terminal_width);
     for _ in 0..4 {
-        assert!(state.move_table_column_for_viewport(kind, false, terminal_width, terminal_height));
+        assert!(state.move_table_column_for_viewport(kind, false, terminal_width));
     }
     assert_eq!(state.table_active_column(kind), 4);
     let offset = state.table_scroll_offset(kind);
@@ -1041,7 +1040,8 @@ fn field_to_hex_link_preserves_cross_sector_range_and_yank_register() {
         .advanced_inspect_selected_field()
         .expect("tree Field must resolve to the canonical InspectField");
     assert_eq!(selected.range, cross.range);
-    assert!(state.advanced_inspect_open_selected_field().is_none());
+    assert!(state.advanced_inspect_view_selected_field());
+    assert!(state.advanced_inspect_detail_open_selected().is_none());
     assert_eq!(state.navigation().depth(), 2);
     let sector = state.advanced_inspect_sector().unwrap();
     assert_eq!(sector.lba, 0);
@@ -1403,7 +1403,8 @@ fn structured_search_expands_field_path_and_keeps_field_to_hex_flow() {
     assert_eq!(field.label, "KnownField");
     assert_eq!(field.value, "typed-value");
 
-    assert!(state.advanced_inspect_open_selected_field().is_none());
+    assert!(state.advanced_inspect_view_selected_field());
+    assert!(state.advanced_inspect_detail_open_selected().is_none());
     let sector = state.advanced_inspect_sector().unwrap();
     assert_eq!(sector.lba, 0);
     assert_eq!(sector.cursor, 0);
@@ -1597,7 +1598,7 @@ fn inspect_field_table_sort_preserves_selected_field_identity() {
     let key = (before.field_index, before.child_index, before.range);
 
     for _ in 0..3 {
-        assert!(state.move_table_column_for_viewport(TableKind::InspectFields, false, 80, 24));
+        assert!(state.move_table_column_for_viewport(TableKind::InspectFields, false, 80));
     }
     assert_eq!(state.table_active_column(TableKind::InspectFields), 3);
 

@@ -230,7 +230,6 @@ fn authorize(
             total_sectors: 1_000_000,
             logical_sector_size: 512,
         },
-        None,
     )
 }
 
@@ -360,8 +359,7 @@ fn restore_authorization_keeps_physical_and_protocol_identity_separate() {
             RestoreGeometryRequirements {
                 total_sectors: 1_000_000,
                 logical_sector_size: 512
-            },
-            Some(&lineage)
+            }
         ),
         RestoreAuthorizationDecision::Reject(RestoreRejection::WeakHardwareBinding)
     );

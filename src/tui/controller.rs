@@ -378,7 +378,6 @@ pub(super) fn dispatch_action(
         let _ = super::table_dispatch::dispatch_table_action_with_clipboard(
             state,
             action,
-            viewport_height,
             viewport_width,
             clipboard,
         );
@@ -468,7 +467,7 @@ pub(super) fn dispatch_action(
                 if state.devices_focused_pane() == PaneId::DevicesTree {
                     state.device_info_focus_detail();
                 } else if state.devices_focused_pane() == PaneId::DevicesList {
-                    if let Err(message) = state.activate_device_for_viewport(viewport_width) {
+                    if let Err(message) = state.activate_selected_device() {
                         state.set_warning_notice(message);
                     }
                 }

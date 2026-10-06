@@ -111,12 +111,12 @@ pub(super) fn handle_key(
         return outcome;
     }
     if let Some(outcome) =
-        backup_batch::handle_backup_batch_key(state, tasks, keys, key, backup_dir, terminal_size)
+        backup_batch::handle_backup_batch_key(state, tasks, keys, key, backup_dir)
     {
         return outcome;
     }
     if let Some(outcome) =
-        backup_prune::handle_backup_prune_key(state, tasks, keys, key, backup_dir, terminal_size)
+        backup_prune::handle_backup_prune_key(state, tasks, keys, key, backup_dir)
     {
         return outcome;
     }

@@ -82,6 +82,23 @@ class RedundancyAuditTests(unittest.TestCase):
         found = self.findings(ROOT, [], facts, {})
         self.assertEqual({f['path'] for f in found if f['rule'] == 'test_only_module'}, {'src/old.rs', 'src/type_only.rs', 'src/inline_old.rs'})
 
+    def test_declaration_consumers_scan_all_public_types_and_constants(self):
+        declarations = [dict(path=path, name=name, public=public, test_only=test)
+                        for path, name, public, test in [
+                            ('src/a.rs', 'OldType', True, False),
+                            ('src/b.rs', 'OldConstant', True, False),
+                            ('src/c.rs', 'TestOnlyType', True, False),
+                            ('src/d.rs', 'LiveType', True, False),
+                            ('src/private.rs', 'Private', False, False),
+                            ('src/test.rs', 'TestFixture', True, True)]]
+        facts = dict(functions=[], registered=[], missing_modules=[], declared_symbols=declarations,
+                     references=[dict(path='tests/a.rs', name='TestOnlyType', test_only=True),
+                                 dict(path='src/main.rs', name='LiveType', test_only=False)])
+        findings = self.findings(ROOT, [], facts, {})
+        matches = [f for f in findings if f['rule'] == 'declaration_consumers']
+        self.assertEqual({f['subject'] for f in matches}, {'OldType', 'OldConstant', 'TestOnlyType'})
+        self.assertTrue(all(f['certainty'] == 'candidate' for f in matches))
+
     def test_new_unknown_rule_fails_instead_of_silently_skipping(self):
         with self.assertRaisesRegex(ValueError, 'Unimplemented'):
             redundancy_audit.evaluate(ROOT, [], dict(functions=[], references=[], registered=[], missing_modules=[]), {}, set(), [{'id': 'new', 'kind': 'new'}])
