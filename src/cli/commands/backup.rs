@@ -23,8 +23,7 @@ pub(in crate::cli) fn backup_create_real_flow(
         };
         let mut argv = argv_with_backup_dir_for_elevation(backup_dir_flag.as_deref());
         DeviceSelector::new(disk_opt).pin_argv(&mut argv, disk);
-        elevate::ensure_elevated(&argv);
-        unreachable!();
+        return elevate::ensure_elevated(&argv);
     }
 
     let mut prompt = StdPrompter;
@@ -93,8 +92,7 @@ pub(in crate::cli) fn real_flow(
             }
         };
         DeviceSelector::new(disk_opt).pin_argv(&mut argv, pinned_disk);
-        elevate::ensure_elevated(&argv); // 内部以子进程退出码结束, 不返回
-        unreachable!();
+        return elevate::ensure_elevated(&argv);
     }
     let bak = crate::application::resolve_backup_dir(backup_dir_flag.as_deref());
     // 手动管理员会话且旗标/配置都未命中时，明确告知备份去向。

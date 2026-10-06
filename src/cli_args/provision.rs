@@ -77,6 +77,7 @@ fn parse_plain_partition(
 
 fn parse_provision_opts(
     rest: &[String],
+    action: &str,
 ) -> Result<(ProvisionNewOpts, Option<String>, bool, Option<String>), String> {
     let mut disk = None;
     let mut target = None;
@@ -94,10 +95,11 @@ fn parse_provision_opts(
     let mut user = None;
     let mut dept = None;
     let mut label = None;
-    let mut share_source_password = None;
-    let mut share_target_password = None;
-    let mut encrypt_source_password = None;
-    let mut encrypt_target_password = None;
+    let mut share_source_password: Option<crate::domain::secret::SecretText> = None;
+    let mut share_target_password: Option<crate::domain::secret::SecretText> = None;
+    let mut encrypt_source_password: Option<crate::domain::secret::SecretText> = None;
+    let mut encrypt_target_password: Option<crate::domain::secret::SecretText> = None;
+    let mut prompt_passwords = false;
     let mut format_boot = false;
     let mut format_share = false;
     let mut format_encrypt = false;
@@ -116,6 +118,9 @@ fn parse_provision_opts(
     let mut yes = false;
     let mut i = 0usize;
     while i < rest.len() {
+        if crate::command_spec::option("provision", Some(action), flag_name(&rest[i])).is_none() {
+            return Err(format!("错误: 未知 provision 参数 {}", flag_name(&rest[i])));
+        }
         match flag_name(&rest[i]) {
             "--disk" => {
                 let value = take_value(rest, &mut i, "--disk")?;
@@ -225,17 +230,25 @@ fn parse_provision_opts(
             }
             "--share-source-password" => {
                 let value = take_value(rest, &mut i, "--share-source-password")?;
-                set_once(&mut share_source_password, value, "--share-source-password")?;
+                set_once(
+                    &mut share_source_password,
+                    value.into(),
+                    "--share-source-password",
+                )?;
             }
             "--share-target-password" => {
                 let value = take_value(rest, &mut i, "--share-target-password")?;
-                set_once(&mut share_target_password, value, "--share-target-password")?;
+                set_once(
+                    &mut share_target_password,
+                    value.into(),
+                    "--share-target-password",
+                )?;
             }
             "--encrypt-source-password" => {
                 let value = take_value(rest, &mut i, "--encrypt-source-password")?;
                 set_once(
                     &mut encrypt_source_password,
-                    value,
+                    value.into(),
                     "--encrypt-source-password",
                 )?;
             }
@@ -243,9 +256,12 @@ fn parse_provision_opts(
                 let value = take_value(rest, &mut i, "--encrypt-target-password")?;
                 set_once(
                     &mut encrypt_target_password,
-                    value,
+                    value.into(),
                     "--encrypt-target-password",
                 )?;
+            }
+            "--prompt-passwords" => {
+                set_switch(&mut prompt_passwords, &rest[i], "--prompt-passwords")?
             }
             "--format-boot" => set_switch(&mut format_boot, &rest[i], "--format-boot")?,
             "--format-share" => set_switch(&mut format_share, &rest[i], "--format-share")?,
@@ -364,6 +380,14 @@ fn parse_provision_opts(
         i += 1;
     }
 
+    if prompt_passwords
+        && (share_source_password.is_some()
+            || share_target_password.is_some()
+            || encrypt_source_password.is_some()
+            || encrypt_target_password.is_some())
+    {
+        return Err("错误: --prompt-passwords 不能与 argv 密码参数混用".into());
+    }
     let target = target.ok_or("错误: provision 必须指定 --target mode0|mode1|mode2|mode3|plain")?;
     if target == crate::provision::ProvisionTarget::Plain {
         let has_official_only = boot_mib.is_some()
@@ -383,6 +407,7 @@ fn parse_provision_opts(
             || share_target_password.is_some()
             || encrypt_source_password.is_some()
             || encrypt_target_password.is_some()
+            || prompt_passwords
             || format_boot
             || format_share
             || format_encrypt
@@ -420,10 +445,11 @@ fn parse_provision_opts(
                 user: String::new(),
                 dept: String::new(),
                 label: String::new(),
-                share_source_password: String::new(),
-                share_target_password: String::new(),
-                encrypt_source_password: String::new(),
-                encrypt_target_password: String::new(),
+                share_source_password: Default::default(),
+                share_target_password: Default::default(),
+                encrypt_source_password: Default::default(),
+                encrypt_target_password: Default::default(),
+                prompt_passwords: false,
                 format_boot: false,
                 format_share: false,
                 format_encrypt: false,
@@ -483,6 +509,7 @@ fn parse_provision_opts(
             encrypt_source_password: encrypt_source_password.unwrap_or_default(),
             encrypt_target_password: encrypt_target_password
                 .unwrap_or_else(|| crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.into()),
+            prompt_passwords,
             format_boot,
             format_share,
             format_encrypt,
@@ -515,7 +542,7 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
     let tail = &rest[1..];
     match action {
         "plan" | "image" | "write" => {
-            let (opts, out, yes, backup_dir) = parse_provision_opts(tail)?;
+            let (opts, out, yes, backup_dir) = parse_provision_opts(tail, action)?;
             match action {
                 "plan" => {
                     if out.is_some() || yes || backup_dir.is_some() {

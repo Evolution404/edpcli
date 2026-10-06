@@ -98,10 +98,11 @@ pub struct ProvisionNewOpts {
     pub user: String,
     pub dept: String,
     pub label: String,
-    pub share_source_password: String,
-    pub share_target_password: String,
-    pub encrypt_source_password: String,
-    pub encrypt_target_password: String,
+    pub share_source_password: crate::domain::secret::SecretText,
+    pub share_target_password: crate::domain::secret::SecretText,
+    pub encrypt_source_password: crate::domain::secret::SecretText,
+    pub encrypt_target_password: crate::domain::secret::SecretText,
+    pub prompt_passwords: bool,
     pub format_boot: bool,
     pub format_share: bool,
     pub format_encrypt: bool,
@@ -128,6 +129,7 @@ impl std::fmt::Debug for ProvisionNewOpts {
             .field("user", &self.user)
             .field("dept", &self.dept)
             .field("label", &self.label)
+            .field("prompt_passwords", &self.prompt_passwords)
             .field("share_source_password", &"[REDACTED]")
             .field("share_target_password", &"[REDACTED]")
             .field("encrypt_source_password", &"[REDACTED]")
@@ -209,7 +211,8 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
     let Some(first) = args.first() else {
         return Ok(Parsed::List { backup_dir: None });
     };
-    let rest: Vec<String> = args[1..].iter().map(|s| (*s).clone()).collect();
+    let rest =
+        crate::domain::secret::SecretArguments(args[1..].iter().map(|s| (*s).clone()).collect());
     match first.as_str() {
         "-h" | "--help" => Ok(Parsed::Help { topic: None }),
         "help" => {

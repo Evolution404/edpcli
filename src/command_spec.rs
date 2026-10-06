@@ -4,6 +4,9 @@
 pub struct OptionSpec {
     pub name: &'static str,
     pub takes_value: bool,
+    /// Value must never be logged or offered as a completion candidate.
+    pub sensitive: bool,
+    pub completion_visible: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +53,8 @@ const fn value(name: &'static str) -> OptionSpec {
     OptionSpec {
         name,
         takes_value: true,
+        sensitive: false,
+        completion_visible: true,
     }
 }
 
@@ -57,7 +62,30 @@ const fn switch(name: &'static str) -> OptionSpec {
     OptionSpec {
         name,
         takes_value: false,
+        sensitive: false,
+        completion_visible: true,
     }
+}
+
+const fn secret(name: &'static str) -> OptionSpec {
+    OptionSpec {
+        name,
+        takes_value: true,
+        sensitive: true,
+        completion_visible: false,
+    }
+}
+pub fn option(command_name: &str, action: Option<&str>, name: &str) -> Option<&'static OptionSpec> {
+    let spec = command(command_name)?;
+    spec.options
+        .iter()
+        .chain(
+            spec.actions
+                .iter()
+                .filter(|a| Some(a.name) == action)
+                .flat_map(|a| a.options),
+        )
+        .find(|o| o.name == name)
 }
 
 const EMPTY_OPTIONS: &[OptionSpec] = &[];
@@ -143,6 +171,11 @@ const PROVISION_COMMON_OPTIONS: &[OptionSpec] = &[
     value("--user"),
     value("--dept"),
     value("--label"),
+    secret("--share-source-password"),
+    secret("--share-target-password"),
+    secret("--encrypt-source-password"),
+    secret("--encrypt-target-password"),
+    switch("--prompt-passwords"),
     switch("--format-boot"),
     switch("--format-share"),
     switch("--format-encrypt"),

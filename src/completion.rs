@@ -64,7 +64,12 @@ fn action_words(command: &str) -> String {
 
 fn option_words(command: &str, action: Option<&str>) -> String {
     crate::command_spec::command(command)
-        .map(|spec| crate::command_spec::words(spec.option_names(action)))
+        .map(|spec| {
+            crate::command_spec::words(spec.option_names(action).into_iter().filter(|name| {
+                crate::command_spec::option(command, action, name)
+                    .is_some_and(|o| o.completion_visible)
+            }))
+        })
         .unwrap_or_default()
 }
 
@@ -74,11 +79,19 @@ fn fish_option_lines() -> String {
     let mut lines = Vec::new();
     for spec in crate::command_spec::top_level_specs() {
         let mut options = BTreeMap::new();
-        for option in spec.options {
+        for option in spec
+            .options
+            .iter()
+            .filter(|option| option.completion_visible)
+        {
             options.insert(option.name, option.takes_value);
         }
         for action in spec.actions {
-            for option in action.options {
+            for option in action
+                .options
+                .iter()
+                .filter(|option| option.completion_visible)
+            {
                 options.insert(option.name, option.takes_value);
             }
         }

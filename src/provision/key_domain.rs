@@ -19,6 +19,41 @@ impl SecretBytes {
         Self(value.as_ref().to_vec())
     }
 
+    pub fn from_owned(value: Vec<u8>) -> Self {
+        Self(value)
+    }
+    pub fn into_vec(mut self) -> Vec<u8> {
+        std::mem::take(&mut self.0)
+    }
+    pub fn clear(&mut self) {
+        crate::domain::secret::wipe_vec(&mut self.0);
+        self.0.clear();
+    }
+    pub fn push_bytes(&mut self, bytes: &[u8]) {
+        crate::domain::secret::reserve_secret(&mut self.0, bytes.len());
+        self.0.extend_from_slice(bytes);
+    }
+    pub fn push_char(&mut self, ch: char) {
+        let mut encoded = [0; 4];
+        self.push_bytes(ch.encode_utf8(&mut encoded).as_bytes());
+        crate::domain::secret::wipe(&mut encoded);
+    }
+    pub fn pop_char(&mut self) {
+        if self.0.is_empty() {
+            return;
+        }
+        let mut cut = self.0.len() - 1;
+        while cut > 0 && self.0[cut] & 0xc0 == 0x80 {
+            cut -= 1;
+        }
+        self.truncate(cut);
+    }
+    pub fn truncate(&mut self, length: usize) {
+        if length < self.0.len() {
+            crate::domain::secret::wipe(&mut self.0[length..]);
+            self.0.truncate(length);
+        }
+    }
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
@@ -42,7 +77,7 @@ impl fmt::Debug for SecretBytes {
 
 impl Drop for SecretBytes {
     fn drop(&mut self) {
-        crate::domain::secret::wipe(&mut self.0);
+        crate::domain::secret::wipe_vec(&mut self.0);
     }
 }
 
@@ -152,5 +187,25 @@ impl KeyDomainSecrets {
             .target_password
             .as_ref()
             .map(SecretBytes::as_bytes)
+    }
+}
+
+#[cfg(test)]
+mod secret_mutation_tests {
+    use super::*;
+    #[test]
+    fn removed_unicode_and_cancelled_bytes_are_wiped() {
+        let mut secret = SecretBytes::new("secret密");
+        let old_len = secret.0.len();
+        secret.pop_char();
+        assert_eq!(secret.as_bytes(), b"secret");
+        for index in secret.0.len()..old_len {
+            assert_eq!(unsafe { *secret.0.as_ptr().add(index) }, 0);
+        }
+        secret.push_char('码');
+        secret.clear();
+        for index in 0..secret.0.capacity() {
+            assert_eq!(unsafe { *secret.0.as_ptr().add(index) }, 0);
+        }
     }
 }

@@ -15,16 +15,36 @@ impl Prompter for StdPrompter {
     fn prompt_secret(&mut self, msg: &str) -> crate::provision::SecretBytes {
         use std::io::IsTerminal;
         if !io::stdin().is_terminal() {
-            let mut input = self.prompt_line(msg).into_bytes();
-            while input
-                .last()
-                .is_some_and(|byte| matches!(byte, b'\r' | b'\n'))
-            {
-                input.pop();
+            print!("{msg}");
+            let _ = io::stdout().flush();
+            let mut input = crate::provision::SecretBytes::default();
+            let mut byte = [0; 1];
+            let mut overflow = false;
+            loop {
+                match std::io::Read::read(&mut io::stdin(), &mut byte) {
+                    Ok(0) => break,
+                    Ok(_) if byte[0] == b'\n' => break,
+                    Ok(_) => {
+                        if input.as_bytes().len() < 512 {
+                            input.push_bytes(&byte);
+                        } else {
+                            overflow = true;
+                        }
+                    }
+                    Err(_) => {
+                        input.clear();
+                        break;
+                    }
+                }
             }
-            let secret = crate::provision::SecretBytes::new(&input);
-            input.fill(0);
-            return secret;
+            crate::domain::secret::wipe(&mut byte);
+            if input.as_bytes().last() == Some(&b'\r') {
+                input.truncate(input.as_bytes().len() - 1);
+            }
+            if overflow {
+                input.clear();
+            }
+            return input;
         }
         if crossterm::terminal::enable_raw_mode().is_err() {
             eprintln!("无法安全关闭密码输入回显，已取消输入");
@@ -39,7 +59,7 @@ impl Prompter for StdPrompter {
         let _guard = RawModeGuard;
         print!("{msg}");
         let _ = io::stdout().flush();
-        let mut input = String::new();
+        let mut input = crate::domain::secret::SecretText::default();
         loop {
             match crossterm::event::read() {
                 Ok(crossterm::event::Event::Key(key))
@@ -59,6 +79,10 @@ impl Prompter for StdPrompter {
                                 .modifiers
                                 .contains(crossterm::event::KeyModifiers::CONTROL) =>
                         {
+                            if input.as_bytes().len() + c.len_utf8() > 512 {
+                                input.clear();
+                                break;
+                            }
                             input.push(c);
                         }
                         crossterm::event::KeyCode::Esc => {
@@ -84,10 +108,7 @@ impl Prompter for StdPrompter {
             }
         }
         println!();
-        let secret = crate::provision::SecretBytes::new(input.as_bytes());
-        let mut bytes = input.into_bytes();
-        bytes.fill(0);
-        secret
+        crate::provision::SecretBytes::from_owned(input.into_bytes())
     }
     fn confirm_yes(&mut self, msg: &str) -> bool {
         self.prompt_line(msg).trim() == "YES"

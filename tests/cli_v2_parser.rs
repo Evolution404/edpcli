@@ -837,3 +837,33 @@ fn development_provision_options_are_rejected_and_not_advertised() {
         }
     }
 }
+
+#[test]
+fn controlled_password_input_is_catalogued_and_exclusive() {
+    let args: Vec<String> = [
+        "provision",
+        "plan",
+        "--target",
+        "mode0",
+        "--prompt-passwords",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    let Parsed::Provision(ProvisionAction::Plan(opts)) = parse_args(&args).unwrap() else {
+        panic!("wrong command")
+    };
+    assert!(opts.prompt_passwords);
+    let mut conflicting = args;
+    conflicting.extend(["--share-target-password".into(), "secret".into()]);
+    assert!(parse_args(&conflicting).is_err());
+    for name in [
+        "--share-source-password",
+        "--share-target-password",
+        "--encrypt-source-password",
+        "--encrypt-target-password",
+    ] {
+        let spec = edpcli::command_spec::option("provision", Some("plan"), name).unwrap();
+        assert!(spec.sensitive && spec.takes_value && !spec.completion_visible);
+    }
+}

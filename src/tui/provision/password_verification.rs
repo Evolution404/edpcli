@@ -7,19 +7,26 @@ pub(crate) use super::password_model::{
 impl AppState {
     pub fn provision_source_password_verify_request(
         &mut self,
-    ) -> Result<Option<(crate::provision::KeyDomainRole, String, u64)>, String> {
+    ) -> Result<
+        Option<(
+            crate::provision::KeyDomainRole,
+            crate::domain::secret::SecretText,
+            u64,
+        )>,
+        String,
+    > {
         let Some(id) = self.provision_field_id(self.provision.field_selected) else {
             return Ok(None);
         };
         let (domain, password, revision) = match id {
             ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Share) => (
                 crate::provision::KeyDomainRole::Share,
-                self.provision.form.share_source_password.as_str(),
+                &self.provision.form.share_source_password,
                 self.provision.share_source_password_revision,
             ),
             ProvisionFieldId::SourcePassword(crate::provision::KeyDomainRole::Encrypt) => (
                 crate::provision::KeyDomainRole::Encrypt,
-                self.provision.form.encrypt_source_password.as_str(),
+                &self.provision.form.encrypt_source_password,
                 self.provision.encrypt_source_password_revision,
             ),
             _ => return Ok(None),
@@ -52,7 +59,7 @@ impl AppState {
                     ProvisionPasswordVerificationState::Verifying;
             }
         }
-        Ok(Some((domain, password.to_string(), revision)))
+        Ok(Some((domain, password.clone(), revision)))
     }
 
     pub fn provision_finish_key_probe(

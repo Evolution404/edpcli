@@ -89,6 +89,26 @@ impl AppState {
         }
     }
 
+    pub(super) fn provision_selected_secret_mut(
+        &mut self,
+    ) -> Option<&mut crate::domain::secret::SecretText> {
+        use crate::provision::KeyDomainRole;
+        match self.provision_field_id(self.provision.field_selected)? {
+            ProvisionFieldId::SourcePassword(KeyDomainRole::Share) => {
+                Some(&mut self.provision.form.share_source_password)
+            }
+            ProvisionFieldId::SourcePassword(KeyDomainRole::Encrypt) => {
+                Some(&mut self.provision.form.encrypt_source_password)
+            }
+            ProvisionFieldId::TargetPassword(KeyDomainRole::Share) => {
+                Some(&mut self.provision.form.share_target_password)
+            }
+            ProvisionFieldId::TargetPassword(KeyDomainRole::Encrypt) => {
+                Some(&mut self.provision.form.encrypt_target_password)
+            }
+            _ => None,
+        }
+    }
     pub(super) fn provision_replace_selected_field(&mut self, value: String) -> bool {
         use crate::provision::KeyDomainRole;
         match self.provision_field_id(self.provision.field_selected) {

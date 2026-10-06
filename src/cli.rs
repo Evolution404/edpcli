@@ -68,7 +68,7 @@ fn should_default_to_tui_for_test(
 }
 
 pub fn run() -> i32 {
-    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let argv = SecretArgv(std::env::args().skip(1).collect());
 
     // 人直接在交互式终端输入 bare `edpcli` 时进入 TUI；管道、重定向和脚本
     // 继续走 CLI v2 的 bare=list 语义，避免破坏已有自动化。
@@ -184,3 +184,5 @@ fn finish(r: EdpCliResult<i32>) -> i32 {
 
 #[cfg(test)]
 mod tests;
+
+use crate::domain::secret::SecretArguments as SecretArgv;

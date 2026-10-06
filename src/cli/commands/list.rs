@@ -18,8 +18,7 @@ pub(in crate::cli) fn list_flow(runner: &SysRunner, backup_dir_flag: Option<Stri
     if list_needs_elevation(&rows, elevate::is_root(), has_sentinel) {
         println!("检测到外接盘，但读取身份、姓名和部门等裸盘信息需要管理员权限。");
         let argv = argv_with_backup_dir_for_elevation(backup_dir_flag.as_deref());
-        elevate::ensure_elevated(&argv);
-        unreachable!();
+        return elevate::ensure_elevated(&argv);
     }
 
     print!("{}", print_disk_table(&rows));

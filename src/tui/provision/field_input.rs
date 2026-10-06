@@ -133,6 +133,16 @@ impl AppState {
         let Some(id) = self.provision_field_id(self.provision.field_selected) else {
             return;
         };
+        if let Some(secret) = self.provision_selected_secret_mut() {
+            if secret.as_str().chars().count() >= 128 || !secret.insert_char(cursor, ch) {
+                return;
+            }
+            self.provision.field_cursor = cursor + 1;
+            self.provision_mark_source_password_unverified(Some(id));
+            self.provision_mark_target_password_edited(Some(id));
+            self.provision.message = None;
+            return;
+        }
         let Some(current) = self.provision_selected_field() else {
             return;
         };
@@ -164,6 +174,16 @@ impl AppState {
         if cursor == 0 {
             return;
         }
+        if let Some(secret) = self.provision_selected_secret_mut() {
+            if !secret.remove_char(cursor - 1) {
+                return;
+            }
+            self.provision.field_cursor = cursor - 1;
+            self.provision_mark_source_password_unverified(id);
+            self.provision_mark_target_password_edited(id);
+            self.provision.message = None;
+            return;
+        }
         if let Some(field) = self.provision_selected_field() {
             let mut chars = field.chars().collect::<Vec<_>>();
             if cursor <= chars.len() {
@@ -181,6 +201,15 @@ impl AppState {
     pub fn provision_delete_char(&mut self) {
         let cursor = self.provision_field_cursor();
         let id = self.provision_field_id(self.provision.field_selected);
+        if let Some(secret) = self.provision_selected_secret_mut() {
+            if !secret.remove_char(cursor) {
+                return;
+            }
+            self.provision_mark_source_password_unverified(id);
+            self.provision_mark_target_password_edited(id);
+            self.provision.message = None;
+            return;
+        }
         if let Some(field) = self.provision_selected_field() {
             let mut chars = field.chars().collect::<Vec<_>>();
             if cursor < chars.len() {

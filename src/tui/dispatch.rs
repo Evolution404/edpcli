@@ -284,7 +284,7 @@ pub(super) fn start_provision_source_password_verify(state: &mut AppState, tasks
             if let Err(message) = tasks.request_source_password_verify_session(
                 disk,
                 domain,
-                password.into(),
+                password,
                 revision,
                 state.provision().session_id,
             ) {

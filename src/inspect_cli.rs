@@ -288,8 +288,7 @@ fn inspect_disk_flow(runner: &dyn CmdRunner, mut opts: InspectOpts) -> i32 {
             }
         };
         selector.pin_argv(&mut argv, n);
-        elevate::ensure_elevated(&argv);
-        unreachable!();
+        return elevate::ensure_elevated(&argv);
     }
 
     let mut prompt = StdPrompter;

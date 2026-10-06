@@ -161,8 +161,7 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
             };
             DeviceSelector::new(None).pin_argv(&mut argv, n);
         }
-        elevate::ensure_elevated(&argv);
-        unreachable!();
+        return elevate::ensure_elevated(&argv);
     }
 
     let n = match opts.disk {

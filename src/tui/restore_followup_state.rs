@@ -178,12 +178,7 @@ impl AppState {
         {
             return;
         }
-        let mut bytes = wizard.secret_input.as_bytes().to_vec();
-        let mut encoded = [0u8; 4];
-        bytes.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
-        wizard.secret_input = crate::provision::SecretBytes::new(&bytes);
-        bytes.fill(0);
-        encoded.fill(0);
+        wizard.secret_input.push_char(ch);
         wizard.message = None;
     }
 
@@ -199,16 +194,7 @@ impl AppState {
         ) {
             return;
         }
-        let mut bytes = wizard.secret_input.as_bytes().to_vec();
-        if !bytes.is_empty() {
-            let mut cut = bytes.len() - 1;
-            while cut > 0 && (bytes[cut] & 0b1100_0000) == 0b1000_0000 {
-                cut -= 1;
-            }
-            bytes.truncate(cut);
-        }
-        wizard.secret_input = crate::provision::SecretBytes::new(&bytes);
-        bytes.fill(0);
+        wizard.secret_input.pop_char();
         wizard.message = None;
     }
 

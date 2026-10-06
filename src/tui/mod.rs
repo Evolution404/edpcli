@@ -119,11 +119,11 @@ fn startup_elevation_argv(argv: &[String], elevated: bool) -> Option<Vec<String>
     }
 }
 
-fn ensure_elevated_before_tui(argv: &[String]) {
+fn ensure_elevated_before_tui(argv: &[String]) -> Option<i32> {
     if let Some(elevation_argv) = startup_elevation_argv(argv, crate::elevate::is_root()) {
-        crate::elevate::ensure_elevated(&elevation_argv);
-        unreachable!();
+        return Some(crate::elevate::ensure_elevated(&elevation_argv));
     }
+    None
 }
 
 enum LoopExit {
@@ -268,7 +268,9 @@ pub fn run() -> i32 {
     // 在进入 raw mode / alternate screen 之前获取管理员权限。这样 macOS/Linux
     // 直接在普通终端显示 sudo 密码提示，Windows 直接走 UAC；授权后一次进入
     // 完整能力 TUI，不再等到写盘确认时退出界面再重启。
-    ensure_elevated_before_tui(&argv);
+    if let Some(code) = ensure_elevated_before_tui(&argv) {
+        return code;
+    }
 
     let resume = match parse_resume_args(&argv) {
         Ok(value) => value,
@@ -282,8 +284,7 @@ pub fn run() -> i32 {
         Ok(LoopExit::Done) => EXIT_OK,
         Ok(LoopExit::Elevate(intent)) => {
             let argv = resume_argv(&intent);
-            crate::elevate::ensure_elevated(&argv);
-            unreachable!()
+            crate::elevate::ensure_elevated(&argv)
         }
         Err(error) => {
             eprintln!("错误: TUI 终端初始化或事件循环失败: {error}");

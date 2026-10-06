@@ -270,7 +270,7 @@ fn print_provision_summary(prepared: &crate::application::provision::PreparedPro
 
 pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
     match action {
-        ProvisionAction::Plan(opts) => {
+        ProvisionAction::Plan(mut opts) => {
             if let Some(disk) = opts.disk {
                 if let Err(error) = guard_usb_disk(runner, disk) {
                     return finish(Err(error));
@@ -282,10 +282,9 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                     Ok(value) => value,
                     Err(error) => return finish(Err(error)),
                 };
-                let mut argv: Vec<String> = std::env::args().skip(1).collect();
+                let mut argv = SecretArgv(std::env::args().skip(1).collect());
                 DeviceSelector::new(opts.disk).pin_argv(&mut argv, disk);
-                elevate::ensure_elevated(&argv);
-                unreachable!();
+                return elevate::ensure_elevated(&argv);
             }
 
             let mut prompt = StdPrompter;
@@ -293,6 +292,9 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                 Ok(value) => value,
                 Err(error) => return finish(Err(error)),
             };
+            if let Err(error) = prompt_provision_passwords(&mut opts, &mut prompt) {
+                return finish(Err(error));
+            }
             let request = provision_request(&opts);
             match crate::application::provision::prepare_provision_on_disk(runner, disk, &request) {
                 Ok(prepared) => {
@@ -302,7 +304,7 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                 Err(error) => finish(Err(error)),
             }
         }
-        ProvisionAction::Image { opts, out } => {
+        ProvisionAction::Image { mut opts, out } => {
             if let Some(disk) = opts.disk {
                 if let Err(error) = guard_usb_disk(runner, disk) {
                     return finish(Err(error));
@@ -314,10 +316,9 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                     Ok(value) => value,
                     Err(error) => return finish(Err(error)),
                 };
-                let mut argv: Vec<String> = std::env::args().skip(1).collect();
+                let mut argv = SecretArgv(std::env::args().skip(1).collect());
                 DeviceSelector::new(opts.disk).pin_argv(&mut argv, disk);
-                elevate::ensure_elevated(&argv);
-                unreachable!();
+                return elevate::ensure_elevated(&argv);
             }
 
             let mut prompt = StdPrompter;
@@ -325,6 +326,9 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                 Ok(value) => value,
                 Err(error) => return finish(Err(error)),
             };
+            if let Err(error) = prompt_provision_passwords(&mut opts, &mut prompt) {
+                return finish(Err(error));
+            }
             let request = provision_request(&opts);
             let prepared = match crate::application::provision::prepare_provision_on_disk(
                 runner, disk, &request,
@@ -343,7 +347,7 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
             }
         }
         ProvisionAction::Write {
-            opts,
+            mut opts,
             yes,
             backup_dir,
         } => {
@@ -358,10 +362,10 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                     Ok(value) => value,
                     Err(error) => return finish(Err(error)),
                 };
-                let mut argv = argv_with_backup_dir_for_elevation(backup_dir.as_deref());
+                let mut argv =
+                    SecretArgv(argv_with_backup_dir_for_elevation(backup_dir.as_deref()));
                 DeviceSelector::new(opts.disk).pin_argv(&mut argv, disk);
-                elevate::ensure_elevated(&argv);
-                unreachable!();
+                return elevate::ensure_elevated(&argv);
             }
 
             let mut prompt = StdPrompter;
@@ -369,6 +373,9 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                 Ok(value) => value,
                 Err(error) => return finish(Err(error)),
             };
+            if let Err(error) = prompt_provision_passwords(&mut opts, &mut prompt) {
+                return finish(Err(error));
+            }
             let request = provision_request(&opts);
             let prepared = match crate::application::provision::prepare_provision_on_disk(
                 runner, disk, &request,
@@ -454,4 +461,32 @@ fn provision_write_summary_lines(
         );
     }
     lines
+}
+
+fn prompt_provision_passwords(
+    opts: &mut ProvisionNewOpts,
+    prompt: &mut dyn Prompter,
+) -> EdpCliResult<()> {
+    if !opts.prompt_passwords {
+        return Ok(());
+    }
+    fn read(
+        prompt: &mut dyn Prompter,
+        label: &str,
+        required: bool,
+    ) -> EdpCliResult<crate::domain::secret::SecretText> {
+        let bytes = prompt.prompt_secret(label);
+        if required && bytes.is_empty() {
+            return Err(EdpCliError::new(EXIT_CANCELLED, "密码输入已取消或为空"));
+        }
+        std::str::from_utf8(bytes.as_bytes())
+            .map_err(|_| EdpCliError::new(EXIT_USAGE, "密码必须是 UTF-8 文本"))?;
+        // SAFETY: bytes validated above; transfer allocation directly to the secret text owner.
+        Ok(unsafe { String::from_utf8_unchecked(bytes.into_vec()) }.into())
+    }
+    opts.share_source_password = read(prompt, "共享区原密码（无则留空）: ", false)?;
+    opts.share_target_password = read(prompt, "共享区目标密码: ", true)?;
+    opts.encrypt_source_password = read(prompt, "加密区原密码（无则留空）: ", false)?;
+    opts.encrypt_target_password = read(prompt, "加密区目标密码: ", true)?;
+    Ok(())
 }

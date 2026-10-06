@@ -53,6 +53,7 @@ fn print_topic_help(topic: &str) {
             println!("    文件系统: --boot-fs fat16|fat32|exfat --share-fs fat16|fat32|exfat --encrypt-fs fat16|fat32|exfat");
             println!("    各区卷标: --boot-label LABEL --share-label LABEL --encrypt-label LABEL");
             println!("新盘身份参数: [--label-id ID] --user USER --dept DEPT [--label LABEL]");
+            println!("    --prompt-passwords：提权后依次读取共享原/目标、加密原/目标密码；原密码可留空，目标密码必填。支持交互或四行标准输入。");
             println!(
                 "密码域: [--share-source-password PASSWORD] [--share-target-password PASSWORD]"
             );

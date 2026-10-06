@@ -8,21 +8,21 @@ pub fn is_root() -> bool {
     crate::platform::is_elevated()
 }
 
-/// 权限不足时：打印提示并通过平台层重执行自身，以子进程退出码结束进程。
+/// 权限不足时：打印提示并通过平台层重执行自身，返回子进程退出码，让调用方清理持有的秘密。
 /// 已带哨兵却仍未提权 → 拒绝，避免循环。
-pub fn ensure_elevated(argv: &[String]) {
+pub fn ensure_elevated(argv: &[String]) -> i32 {
     if is_root() {
-        return;
+        return crate::common::EXIT_OK;
     }
     if argv.contains(&ELEVATED_FLAG.to_string()) {
         eprintln!("错误: 管理员权限未生效，终止以避免循环。请检查本平台的提权配置。");
-        std::process::exit(crate::common::EXIT_IO);
+        return crate::common::EXIT_IO;
     }
     let exe = match std::env::current_exe() {
         Ok(p) => p,
         Err(e) => {
             eprintln!("错误: 无法定位自身可执行文件: {}", e);
-            std::process::exit(crate::common::EXIT_IO);
+            return crate::common::EXIT_IO;
         }
     };
     println!(
@@ -33,10 +33,10 @@ pub fn ensure_elevated(argv: &[String]) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("错误: 无法获取管理员权限: {}", e);
-            std::process::exit(crate::common::EXIT_IO);
+            return crate::common::EXIT_IO;
         }
     };
-    std::process::exit(code);
+    code
 }
 
 /// 构建重执行 argv(测试用): 原参数 + 哨兵, 不含已在其中的哨兵重复。
