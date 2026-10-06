@@ -451,9 +451,58 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
         internal_separator_x("保密区起点LBA"),
         "partition layout separator must align across rows"
     );
+    let formatting_separator_pair = |needle: &str| {
+        let positions = cells
+            .chunks(width as usize)
+            .find(|row| {
+                row.iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .replace(' ', "")
+                    .contains(needle)
+            })
+            .map(|row| {
+                row.iter()
+                    .enumerate()
+                    .filter(|(x, cell)| {
+                        *x > 8
+                            && *x < 80
+                            && cell.symbol() == "│"
+                            && cell.style().bg != Some(palette.selection)
+                    })
+                    .map(|(x, _)| x)
+                    .take(2)
+                    .collect::<Vec<_>>()
+            })
+            .expect("formatting row");
+        assert_eq!(positions.len(), 2, "{needle}: {positions:?}");
+        (positions[0], positions[1])
+    };
+    for region in ["启动区", "交换区", "保密区"] {
+        let row = compact_rows
+            .iter()
+            .find(|row| {
+                row.contains(&format!("{region}格式化"))
+                    && row.contains("文件系统")
+                    && row.contains("卷标")
+            })
+            .expect("compact formatting row");
+        assert_eq!(
+            row.matches(region).count(),
+            1,
+            "partition name should be rendered once before three formatting fields: {row}"
+        );
+    }
     let format_separator = internal_separator_x("启动区格式化");
     assert_eq!(format_separator, internal_separator_x("交换区格式化"));
     assert_eq!(format_separator, internal_separator_x("保密区格式化"));
+    let format_pairs = [
+        formatting_separator_pair("启动区格式化"),
+        formatting_separator_pair("交换区格式化"),
+        formatting_separator_pair("保密区格式化"),
+    ];
+    assert_eq!(format_pairs[0], format_pairs[1]);
+    assert_eq!(format_pairs[0], format_pairs[2]);
     let password_separator = internal_separator_x("首次改密");
     assert_eq!(password_separator, internal_separator_x("交换区错误上限"));
     let distinct = [
@@ -513,6 +562,18 @@ fn mode1_partition_layout_renders_combined_region_with_start_and_capacity_on_one
         .expect("mode1 combined partition layout row");
     assert_eq!(combined.matches("二合一区").count(), 1, "{combined}");
     assert!(!combined.contains("交换区"), "{combined}");
+
+    let formatting = rows
+        .iter()
+        .find(|row| {
+            row.contains("二合一区格式化")
+                && row.contains("文件系统")
+                && row.contains("卷标")
+        })
+        .expect("mode1 combined formatting row");
+    assert_eq!(formatting.matches("二合一区").count(), 1, "{formatting}");
+    assert!(!formatting.contains("启动/交换区"), "{formatting}");
+    assert!(!formatting.contains("交换区格式化"), "{formatting}");
 
     let separator_x = |needle: &str| {
         cells
