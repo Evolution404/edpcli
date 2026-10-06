@@ -566,9 +566,7 @@ fn mode1_partition_layout_renders_combined_region_with_start_and_capacity_on_one
     let formatting = rows
         .iter()
         .find(|row| {
-            row.contains("二合一区格式化")
-                && row.contains("文件系统")
-                && row.contains("卷标")
+            row.contains("二合一区格式化") && row.contains("文件系统") && row.contains("卷标")
         })
         .expect("mode1 combined formatting row");
     assert_eq!(formatting.matches("二合一区").count(), 1, "{formatting}");
