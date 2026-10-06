@@ -86,6 +86,7 @@ impl AppState {
         }
         match id {
             ProvisionFieldId::AdvancedSection => None,
+            ProvisionFieldId::LabelId => Some("Space 生成随机新标识".into()),
             ProvisionFieldId::Lba8Identity(_) => Some("高级身份字段".into()),
             ProvisionFieldId::Capacity(_) => Some(format!(
                 "Space 切换 {} / {} / sector · f 最大可用容量",
@@ -203,5 +204,35 @@ mod tests {
                 .copied()
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn mode1_partition_layout_uses_combined_region_pair() {
+        let mut state = AppState::new();
+        state.provision_mut().kind = ProvisionKind::Mode1;
+
+        let fields = state.provision_visible_fields();
+        let rows = state.provision_field_rows_for_width(68);
+        let combined_row = rows
+            .iter()
+            .find(|(section, indexes)| {
+                *section == ProvisionFieldSection::PartitionLayout
+                    && indexes
+                        .iter()
+                        .any(|index| fields[*index].0.starts_with("二合一区起点"))
+            })
+            .expect("combined partition row");
+        let labels = combined_row
+            .1
+            .iter()
+            .map(|index| fields[*index].0.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[0], "二合一区起点 LBA");
+        assert!(labels[1].starts_with("二合一区容量"));
+        assert!(!fields.iter().any(|(label, _, _)| {
+            label.starts_with("交换区起点") || label.starts_with("交换区容量")
+        }));
     }
 }

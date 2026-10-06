@@ -391,11 +391,14 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
         text.contains("尾") && text.contains("区") && text.contains("域"),
         "{text}"
     );
-    assert!(
-        compact_rows
-            .iter()
-            .any(|row| row.contains("交换区容量") && row.contains("交换区起点LBA")),
-        "{text}"
+    let share_layout_row = compact_rows
+        .iter()
+        .find(|row| row.contains("交换区") && row.contains("起点LBA") && row.contains("容量"))
+        .expect("shared partition layout row");
+    assert_eq!(
+        share_layout_row.matches("交换区").count(),
+        1,
+        "partition name should be rendered once before the paired inputs: {share_layout_row}"
     );
 
     let palette = edpcli::tui::theme::current().palette();
@@ -437,8 +440,9 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
         "{text}"
     );
     assert!(!compact_text.contains("来源状态"), "{text}");
-    for row_name in ["启动区容量", "交换区容量", "保密区容量"] {
-        let separator = internal_separator_x(row_name);
+    for region in ["启动区", "交换区", "保密区"] {
+        let row_name = format!("{region}起点LBA");
+        let separator = internal_separator_x(&row_name);
         assert!(separator > 8 && separator < 80, "{row_name}");
     }
     let format_separator = internal_separator_x("启动区格式化");
@@ -448,7 +452,7 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     assert_eq!(password_separator, internal_separator_x("交换区错误上限"));
     let distinct = [
         identity_separator,
-        internal_separator_x("启动区容量"),
+        internal_separator_x("启动区起点LBA"),
         format_separator,
         password_separator,
     ]
@@ -476,6 +480,35 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
     assert!(capacity_row
         .iter()
         .any(|cell| cell.style().bg == encrypt_bg));
+}
+
+#[test]
+fn mode1_partition_layout_renders_combined_region_with_start_and_capacity_on_one_row() {
+    let mut state = edpcli::tui::demo::build_scene("provision-form").unwrap();
+    state.provision_mut().kind = ProvisionKind::Mode1;
+
+    let width = 160u16;
+    let mut terminal = Terminal::new(TestBackend::new(width, 50)).unwrap();
+    terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let rows = terminal
+        .backend()
+        .buffer()
+        .content()
+        .chunks(width as usize)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .replace(' ', "")
+        })
+        .collect::<Vec<_>>();
+
+    let combined = rows
+        .iter()
+        .find(|row| row.contains("二合一区") && row.contains("起点LBA") && row.contains("容量"))
+        .expect("mode1 combined partition layout row");
+    assert_eq!(combined.matches("二合一区").count(), 1, "{combined}");
+    assert!(!combined.contains("交换区"), "{combined}");
 }
 
 #[test]

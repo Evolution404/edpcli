@@ -158,17 +158,22 @@ impl AppState {
         if matches!(mode, 0 | 1 | 3) {
             let exact =
                 self.provision.form.share_input_mode == crate::provision::CapacityInputMode::Exact;
+            let region = if mode == 1 {
+                "二合一区"
+            } else {
+                "交换区"
+            };
             out.push((
-                "交换区起点 LBA".into(),
+                format!("{region}起点 LBA"),
                 self.provision.form.share_start_lba.as_str(),
                 false,
             ));
             out.push((
                 (if exact {
-                    "交换区容量 (sector)".into()
+                    format!("{region}容量 (sector)")
                 } else {
                     format!(
-                        "交换区容量 ({})",
+                        "{region}容量 ({})",
                         ProvisionForm::quick_unit_label(self.provision.form.share_quick_unit)
                     )
                 }),

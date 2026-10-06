@@ -119,7 +119,7 @@ impl AppState {
                 ProvisionFieldSection::Identity,
                 true,
                 false,
-                false,
+                matches!(id, ProvisionFieldId::LabelId),
                 false,
             ));
         }

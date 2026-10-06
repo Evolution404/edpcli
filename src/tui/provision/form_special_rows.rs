@@ -126,168 +126,239 @@ fn masked_value(value: &str, secret: bool) -> String {
     }
 }
 
-pub(super) fn password_domain_row(
+pub(super) fn paired_region_row(
     state: &AppState,
+    section: ProvisionFieldSection,
     indexes: &[usize],
     fields: &[(String, &str, bool)],
     content_width: usize,
     parameters_focused: bool,
-    metrics: (usize, usize, usize, usize),
 ) -> Option<Line<'static>> {
     if indexes.len() != 2 {
         return None;
     }
     let provision = state.provision();
-    let source_index = indexes[0];
-    let target_index = indexes[1];
-    let domain = match state.provision_field_id(source_index) {
-        Some(ProvisionFieldId::SourcePassword(domain)) => domain,
+    let left_index = indexes[0];
+    let right_index = indexes[1];
+    let left_id = state.provision_field_id(left_index)?;
+    let right_id = state.provision_field_id(right_index)?;
+
+    let (
+        region,
+        left_label,
+        right_label,
+        left_value,
+        left_secret,
+        right_value,
+        right_secret,
+        status,
+        status_style,
+    ) = match (section, left_id, right_id) {
+        (
+            ProvisionFieldSection::PasswordDomain,
+            ProvisionFieldId::SourcePassword(domain),
+            ProvisionFieldId::TargetPassword(target_domain),
+        ) if domain == target_domain => {
+            let region = match domain {
+                crate::provision::KeyDomainRole::Share if provision.kind.mode() == Some(1) => {
+                    "二合一区"
+                }
+                crate::provision::KeyDomainRole::Share => "交换区",
+                crate::provision::KeyDomainRole::Encrypt => "保密区",
+            };
+            let source_not_applicable = state.provision_source_password_not_applicable(domain);
+            let verification = match domain {
+                crate::provision::KeyDomainRole::Share => provision.share_source_verification,
+                crate::provision::KeyDomainRole::Encrypt => provision.encrypt_source_verification,
+            };
+            let knowledge = match domain {
+                crate::provision::KeyDomainRole::Share => provision.form.share_source_knowledge,
+                crate::provision::KeyDomainRole::Encrypt => provision.form.encrypt_source_knowledge,
+            };
+            let (status, status_style) = if source_not_applicable {
+                (String::new(), muted())
+            } else {
+                match verification {
+                    ProvisionPasswordVerificationState::Verifying => (
+                        crate::tui::animation::spinner_glyph(state.animation_frame()).to_string(),
+                        secondary(),
+                    ),
+                    ProvisionPasswordVerificationState::Failed => ("✗".into(), danger()),
+                    ProvisionPasswordVerificationState::Idle
+                        if knowledge != crate::provision::SourcePasswordKnowledge::Unknown =>
+                    {
+                        ("✓".into(), success())
+                    }
+                    ProvisionPasswordVerificationState::Idle => ("—".into(), muted()),
+                }
+            };
+            let (_, source_value, source_secret) = &fields[left_index];
+            let (source_value, source_secret) = if source_not_applicable {
+                ("— 不涉及", false)
+            } else {
+                (*source_value, *source_secret)
+            };
+            let (target_value, target_secret) =
+                if state.provision_target_password_is_passthrough(domain) {
+                    ("透传", false)
+                } else {
+                    match domain {
+                        crate::provision::KeyDomainRole::Share => {
+                            (provision.form.share_target_password.as_str(), true)
+                        }
+                        crate::provision::KeyDomainRole::Encrypt => {
+                            (provision.form.encrypt_target_password.as_str(), true)
+                        }
+                    }
+                };
+            (
+                region,
+                "原密码".to_string(),
+                "新密码".to_string(),
+                source_value,
+                source_secret,
+                target_value,
+                target_secret,
+                status,
+                status_style,
+            )
+        }
+        (
+            ProvisionFieldSection::PartitionLayout,
+            ProvisionFieldId::StartLba(role),
+            ProvisionFieldId::Capacity(capacity_role),
+        ) if role == capacity_role => {
+            let region = crate::disk_layout::DiskRegionKind::from_partition_role(role).label();
+            let (left_field_label, left_value, left_secret) = &fields[left_index];
+            let (right_field_label, right_value, right_secret) = &fields[right_index];
+            let compact_pair_label = |label: &str| {
+                let compact = compact_field_label(label);
+                compact
+                    .strip_prefix(region)
+                    .unwrap_or(compact.as_ref())
+                    .trim_start()
+                    .to_string()
+            };
+            (
+                region,
+                compact_pair_label(left_field_label),
+                compact_pair_label(right_field_label),
+                *left_value,
+                *left_secret,
+                *right_value,
+                *right_secret,
+                String::new(),
+                muted(),
+            )
+        }
         _ => return None,
     };
-    let region = match domain {
-        crate::provision::KeyDomainRole::Share if provision.kind.mode() == Some(1) => "二合一区",
-        crate::provision::KeyDomainRole::Share => "交换区",
-        crate::provision::KeyDomainRole::Encrypt => "保密区",
-    };
-    let source_not_applicable = state.provision_source_password_not_applicable(domain);
-    let verification = match domain {
-        crate::provision::KeyDomainRole::Share => provision.share_source_verification,
-        crate::provision::KeyDomainRole::Encrypt => provision.encrypt_source_verification,
-    };
-    let knowledge = match domain {
-        crate::provision::KeyDomainRole::Share => provision.form.share_source_knowledge,
-        crate::provision::KeyDomainRole::Encrypt => provision.form.encrypt_source_knowledge,
-    };
-    let (status, status_style) = if source_not_applicable {
-        (String::new(), muted())
-    } else {
-        match verification {
-            ProvisionPasswordVerificationState::Verifying => (
-                crate::tui::animation::spinner_glyph(state.animation_frame()).to_string(),
-                secondary(),
-            ),
-            ProvisionPasswordVerificationState::Failed => ("✗".into(), danger()),
-            ProvisionPasswordVerificationState::Idle
-                if knowledge != crate::provision::SourcePasswordKnowledge::Unknown =>
-            {
-                ("✓".into(), success())
-            }
-            ProvisionPasswordVerificationState::Idle => ("—".into(), muted()),
-        }
-    };
 
+    const REGION_WIDTH: usize = 8;
     let separator = " │ ";
     let separator_width = crate::ui::disp_width(separator);
-    const PASSWORD_VALUE_WIDTH: usize = 10;
-    const PASSWORD_STATUS_SLOT_WIDTH: usize = 2;
+    let desired_value_width = |value: &str, secret: bool| {
+        if value.is_empty() {
+            crate::ui::disp_width("〈请输入〉")
+        } else if secret {
+            value.chars().count()
+        } else {
+            crate::ui::disp_width(&safe(value))
+        }
+        .saturating_add(2)
+        .clamp(8, 26)
+    };
+    let status_slot_width = if status.is_empty() {
+        0
+    } else {
+        1 + crate::ui::disp_width(&status)
+    };
     let adjusted_metrics = (
-        8 + metrics.0,
-        metrics.1,
-        PASSWORD_VALUE_WIDTH + PASSWORD_STATUS_SLOT_WIDTH,
-        PASSWORD_VALUE_WIDTH,
+        REGION_WIDTH + crate::ui::disp_width(&left_label),
+        crate::ui::disp_width(&right_label),
+        desired_value_width(left_value, left_secret) + status_slot_width,
+        desired_value_width(right_value, right_secret),
     );
     let (left_width, right_width) =
         two_column_widths(content_width, separator_width, adjusted_metrics);
-    let source_active = provision.field_selected == source_index;
-    let target_active = provision.field_selected == target_index;
-    let source_editing = source_active
+
+    let left_active = provision.field_selected == left_index;
+    let right_active = provision.field_selected == right_index;
+    let left_editing = left_active
         && parameters_focused
         && state.input_mode() == InputMode::Insert
         && state.provision_selected_field_is_editable();
-    let target_editing = target_active
+    let right_editing = right_active
         && parameters_focused
         && state.input_mode() == InputMode::Insert
         && state.provision_selected_field_is_editable();
 
-    let (_, field_source_value, field_source_secret) = &fields[source_index];
-    let (source_value, source_secret) = if source_not_applicable {
-        ("— 不涉及", false)
-    } else {
-        (*field_source_value, *field_source_secret)
-    };
-    let (target_value, target_secret) = if state.provision_target_password_is_passthrough(domain) {
-        ("透传", false)
-    } else {
-        match domain {
-            crate::provision::KeyDomainRole::Share => {
-                (provision.form.share_target_password.as_str(), true)
-            }
-            crate::provision::KeyDomainRole::Encrypt => {
-                (provision.form.encrypt_target_password.as_str(), true)
-            }
-        }
-    };
-    let source_prefix_width = 2 + 8 + metrics.0 + 1;
-    let source_status_width = 1 + crate::ui::disp_width(&status);
-    let source_value_width = left_width
-        .saturating_sub(source_prefix_width + source_status_width)
+    let left_prefix_width = 2 + REGION_WIDTH + crate::ui::disp_width(&left_label) + 1;
+    let left_value_width = left_width
+        .saturating_sub(left_prefix_width + status_slot_width)
         .max(4);
-    let target_prefix_width = 2 + metrics.1 + 1;
-    let target_value_width = right_width.saturating_sub(target_prefix_width).max(4);
+    let right_prefix_width = 2 + crate::ui::disp_width(&right_label) + 1;
+    let right_value_width = right_width.saturating_sub(right_prefix_width).max(4);
 
-    let source_shown = if source_editing {
+    let left_shown = if left_editing {
         input_value_window(
-            source_value,
+            left_value,
             state.provision_field_cursor(),
-            source_value_width.saturating_sub(2),
-            source_secret,
+            left_value_width.saturating_sub(2),
+            left_secret,
         )
     } else {
-        fit_display_width(
-            &masked_value(source_value, source_secret),
-            source_value_width,
-        )
-        .trim_end()
-        .to_string()
+        fit_display_width(&masked_value(left_value, left_secret), left_value_width)
+            .trim_end()
+            .to_string()
     };
-    let target_shown = if target_editing {
+    let right_shown = if right_editing {
         input_value_window(
-            target_value,
+            right_value,
             state.provision_field_cursor(),
-            target_value_width.saturating_sub(2),
-            target_secret,
+            right_value_width.saturating_sub(2),
+            right_secret,
         )
     } else {
-        fit_display_width(
-            &masked_value(target_value, target_secret),
-            target_value_width,
-        )
-        .trim_end()
-        .to_string()
+        fit_display_width(&masked_value(right_value, right_secret), right_value_width)
+            .trim_end()
+            .to_string()
     };
 
     let mut left = vec![
         Span::styled(
-            if source_active && parameters_focused {
+            if left_active && parameters_focused {
                 "▌ "
             } else {
                 "  "
             },
-            if source_active && parameters_focused {
+            if left_active && parameters_focused {
                 selection_marker()
             } else {
                 Style::default()
             },
         ),
-        Span::styled(crate::ui::pad_to(region, 8), secondary()),
-        Span::styled("原密码 ", muted()),
+        Span::styled(crate::ui::pad_to(region, REGION_WIDTH), secondary()),
+        Span::styled(format!("{left_label} "), muted()),
     ];
-    if source_editing {
+    if left_editing {
         left.push(Span::styled("[", accent()));
-        left.push(Span::styled(source_shown, input_focused()));
+        left.push(Span::styled(left_shown, input_focused()));
         left.push(Span::styled("]", accent()));
     } else {
         left.push(Span::styled(
-            source_shown,
-            if source_active && parameters_focused {
+            left_shown,
+            if left_active && parameters_focused {
                 accent().add_modifier(Modifier::BOLD)
             } else {
                 crate::tui::theme::current().secondary_text()
             },
         ));
     }
-    left.push(Span::raw(" "));
-    left.push(Span::styled(status, status_style));
+    if !status.is_empty() {
+        left.push(Span::raw(" "));
+        left.push(Span::styled(status, status_style));
+    }
     let left_used = left
         .iter()
         .map(|span| crate::ui::disp_width(span.content.as_ref()))
@@ -299,26 +370,26 @@ pub(super) fn password_domain_row(
     let mut spans = left;
     spans.push(Span::styled(separator, muted()));
     spans.push(Span::styled(
-        if target_active && parameters_focused {
+        if right_active && parameters_focused {
             "▌ "
         } else {
             "  "
         },
-        if target_active && parameters_focused {
+        if right_active && parameters_focused {
             selection_marker()
         } else {
             Style::default()
         },
     ));
-    spans.push(Span::styled("新密码 ", muted()));
-    if target_editing {
+    spans.push(Span::styled(format!("{right_label} "), muted()));
+    if right_editing {
         spans.push(Span::styled("[", accent()));
-        spans.push(Span::styled(target_shown, input_focused()));
+        spans.push(Span::styled(right_shown, input_focused()));
         spans.push(Span::styled("]", accent()));
     } else {
         spans.push(Span::styled(
-            target_shown,
-            if target_active && parameters_focused {
+            right_shown,
+            if right_active && parameters_focused {
                 accent().add_modifier(Modifier::BOLD)
             } else {
                 crate::tui::theme::current().secondary_text()

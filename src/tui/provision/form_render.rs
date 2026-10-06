@@ -6,7 +6,7 @@ use crate::tui::state::{
 #[path = "form_special_rows.rs"]
 mod form_special_rows;
 use form_special_rows::{
-    advanced_settings_row, compact_field_label, password_domain_row, single_column_field,
+    advanced_settings_row, compact_field_label, paired_region_row, single_column_field,
     two_column_widths,
 };
 
@@ -68,21 +68,21 @@ pub(super) fn draw_provision_form(
             form_lines.push(advanced_settings_row(state, indexes[0], parameters_focused));
             continue;
         }
-        if section == ProvisionFieldSection::PasswordDomain && indexes.len() == 2 {
+        if matches!(
+            section,
+            ProvisionFieldSection::PasswordDomain | ProvisionFieldSection::PartitionLayout
+        ) && indexes.len() == 2
+        {
             if indexes.contains(&provision.field_selected) {
                 selected_line = form_lines.len();
             }
-            let metrics = section_metrics
-                .get(&section)
-                .copied()
-                .unwrap_or((0, 0, 8, 8));
-            if let Some(line) = password_domain_row(
+            if let Some(line) = paired_region_row(
                 state,
+                section,
                 &indexes,
                 &fields,
                 content_width,
                 parameters_focused,
-                metrics,
             ) {
                 form_lines.push(line);
                 continue;

@@ -33,6 +33,19 @@ impl AppState {
             }
         }
         match selected_id {
+            Some(ProvisionFieldId::LabelId) => {
+                match crate::provision::OnlyId::random_candidate() {
+                    Ok(value) => {
+                        self.provision.form.label_id = value.text().to_string();
+                        self.provision.message = None;
+                        self.provision_sync_cursor_to_end();
+                    }
+                    Err(message) => {
+                        self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
+                    }
+                }
+                true
+            }
             Some(ProvisionFieldId::Capacity(role)) => {
                 match self.provision.form.toggle_capacity_input(role) {
                     Ok(()) => {

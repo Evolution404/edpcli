@@ -2276,6 +2276,29 @@ fn provision_capacity_hints_match_each_partition() {
 }
 
 #[test]
+fn provision_label_id_toggle_generates_random_candidate() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+
+    let label_id = state
+        .provision_visible_fields()
+        .iter()
+        .position(|(label, _, _)| label == "标签标识")
+        .expect("label id field");
+    state.provision_mut().field_selected = label_id;
+    state.provision_mut().form.label_id = "0".into();
+
+    assert_eq!(
+        state.provision_field_hint(label_id).as_deref(),
+        Some("Space 生成随机新标识")
+    );
+    assert!(state.provision_toggle_selected_option());
+    assert_ne!(state.provision().form.label_id, "0");
+    assert!(edpcli::provision::OnlyId::parse(&state.provision().form.label_id).is_ok());
+}
+
+#[test]
 fn provision_input_policy_filters_invalid_characters_and_ranges() {
     use edpcli::provision::CapacityInputMode;
 
@@ -2794,7 +2817,7 @@ fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
     let share_index = state
         .provision_visible_fields()
         .iter()
-        .position(|(label, _, _)| label.starts_with("交换区容量"))
+        .position(|(label, _, _)| label.starts_with("二合一区容量"))
         .expect("share capacity");
     state.provision_mut().field_selected = share_index;
     let max_share = encrypt_start - 63;

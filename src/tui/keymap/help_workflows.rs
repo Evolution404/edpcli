@@ -28,7 +28,7 @@ pub const PROVISION_HELP: &[HelpBinding] = &[
     },
     HelpBinding {
         keys: "Space",
-        label: "切换当前选项 / 容量单位 / 新密码透传",
+        label: "切换当前选项 / 容量单位 / 新密码透传 / 生成随机标识",
         action: TuiAction::Toggle,
     },
     HelpBinding {
