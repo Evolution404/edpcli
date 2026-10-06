@@ -133,6 +133,7 @@ pub(super) fn paired_region_row(
     fields: &[(String, &str, bool)],
     content_width: usize,
     parameters_focused: bool,
+    metrics: (usize, usize, usize, usize),
 ) -> Option<Line<'static>> {
     if indexes.len() != 2 {
         return None;
@@ -255,29 +256,21 @@ pub(super) fn paired_region_row(
     };
 
     const REGION_WIDTH: usize = 8;
+    const PASSWORD_STATUS_SLOT_WIDTH: usize = 2;
     let separator = " │ ";
     let separator_width = crate::ui::disp_width(separator);
-    let desired_value_width = |value: &str, secret: bool| {
-        if value.is_empty() {
-            crate::ui::disp_width("〈请输入〉")
-        } else if secret {
-            value.chars().count()
-        } else {
-            crate::ui::disp_width(&safe(value))
-        }
-        .saturating_add(2)
-        .clamp(8, 26)
-    };
-    let status_slot_width = if status.is_empty() {
-        0
+    let status_slot_width = if section == ProvisionFieldSection::PasswordDomain {
+        PASSWORD_STATUS_SLOT_WIDTH
     } else {
-        1 + crate::ui::disp_width(&status)
+        0
     };
+    let left_label_width = metrics.0.max(crate::ui::disp_width(&left_label));
+    let right_label_width = metrics.1.max(crate::ui::disp_width(&right_label));
     let adjusted_metrics = (
-        REGION_WIDTH + crate::ui::disp_width(&left_label),
-        crate::ui::disp_width(&right_label),
-        desired_value_width(left_value, left_secret) + status_slot_width,
-        desired_value_width(right_value, right_secret),
+        REGION_WIDTH + left_label_width,
+        right_label_width,
+        metrics.2.saturating_add(status_slot_width),
+        metrics.3,
     );
     let (left_width, right_width) =
         two_column_widths(content_width, separator_width, adjusted_metrics);
@@ -293,11 +286,11 @@ pub(super) fn paired_region_row(
         && state.input_mode() == InputMode::Insert
         && state.provision_selected_field_is_editable();
 
-    let left_prefix_width = 2 + REGION_WIDTH + crate::ui::disp_width(&left_label) + 1;
+    let left_prefix_width = 2 + REGION_WIDTH + left_label_width + 1;
     let left_value_width = left_width
         .saturating_sub(left_prefix_width + status_slot_width)
         .max(4);
-    let right_prefix_width = 2 + crate::ui::disp_width(&right_label) + 1;
+    let right_prefix_width = 2 + right_label_width + 1;
     let right_value_width = right_width.saturating_sub(right_prefix_width).max(4);
 
     let left_shown = if left_editing {
@@ -339,7 +332,10 @@ pub(super) fn paired_region_row(
             },
         ),
         Span::styled(crate::ui::pad_to(region, REGION_WIDTH), secondary()),
-        Span::styled(format!("{left_label} "), muted()),
+        Span::styled(
+            format!("{} ", crate::ui::pad_to(&left_label, left_label_width)),
+            muted(),
+        ),
     ];
     if left_editing {
         left.push(Span::styled("[", accent()));
@@ -381,7 +377,10 @@ pub(super) fn paired_region_row(
             Style::default()
         },
     ));
-    spans.push(Span::styled(format!("{right_label} "), muted()));
+    spans.push(Span::styled(
+        format!("{} ", crate::ui::pad_to(&right_label, right_label_width)),
+        muted(),
+    ));
     if right_editing {
         spans.push(Span::styled("[", accent()));
         spans.push(Span::styled(right_shown, input_focused()));
@@ -400,6 +399,7 @@ pub(super) fn paired_region_row(
 }
 
 pub(super) fn section_metrics(
+    state: &AppState,
     fields: &[(String, &str, bool)],
     rows: &[(ProvisionFieldSection, Vec<usize>)],
 ) -> std::collections::HashMap<ProvisionFieldSection, (usize, usize, usize, usize)> {
@@ -413,6 +413,24 @@ pub(super) fn section_metrics(
         for (position, index) in indexes.iter().copied().enumerate() {
             let (label, value, secret) = &fields[index];
             let display_label = compact_field_label(label);
+            let display_label = if indexes.len() == 2
+                && *section == ProvisionFieldSection::PartitionLayout
+            {
+                match state.provision_field_id(index) {
+                    Some(ProvisionFieldId::StartLba(role) | ProvisionFieldId::Capacity(role)) => {
+                        let region =
+                            crate::disk_layout::DiskRegionKind::from_partition_role(role).label();
+                        display_label
+                            .strip_prefix(region)
+                            .unwrap_or(display_label.as_ref())
+                            .trim_start()
+                            .into()
+                    }
+                    _ => display_label,
+                }
+            } else {
+                display_label
+            };
             let label_width = crate::ui::disp_width(display_label.as_ref());
             let shown_width = if value.is_empty() {
                 crate::ui::disp_width("〈请输入〉")

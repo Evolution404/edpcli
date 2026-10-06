@@ -39,7 +39,7 @@ pub(super) fn draw_provision_form(
 
     let fields = state.provision_visible_fields();
     let rows = state.provision_field_rows_for_width(content_width);
-    let section_metrics = form_special_rows::section_metrics(&fields, &rows);
+    let section_metrics = form_special_rows::section_metrics(state, &fields, &rows);
 
     let mut form_lines = vec![Line::from(vec![
         Span::styled(
@@ -76,6 +76,10 @@ pub(super) fn draw_provision_form(
             if indexes.contains(&provision.field_selected) {
                 selected_line = form_lines.len();
             }
+            let metrics = section_metrics
+                .get(&section)
+                .copied()
+                .unwrap_or((0, 0, 8, 8));
             if let Some(line) = paired_region_row(
                 state,
                 section,
@@ -83,6 +87,7 @@ pub(super) fn draw_provision_form(
                 &fields,
                 content_width,
                 parameters_focused,
+                metrics,
             ) {
                 form_lines.push(line);
                 continue;

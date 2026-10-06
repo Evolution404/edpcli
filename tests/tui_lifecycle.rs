@@ -440,11 +440,17 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
         "{text}"
     );
     assert!(!compact_text.contains("来源状态"), "{text}");
-    for region in ["启动区", "交换区", "保密区"] {
-        let row_name = format!("{region}起点LBA");
-        let separator = internal_separator_x(&row_name);
-        assert!(separator > 8 && separator < 80, "{row_name}");
-    }
+    let partition_separator = internal_separator_x("启动区起点LBA");
+    assert_eq!(
+        partition_separator,
+        internal_separator_x("交换区起点LBA"),
+        "partition layout separator must align across rows"
+    );
+    assert_eq!(
+        partition_separator,
+        internal_separator_x("保密区起点LBA"),
+        "partition layout separator must align across rows"
+    );
     let format_separator = internal_separator_x("启动区格式化");
     assert_eq!(format_separator, internal_separator_x("交换区格式化"));
     assert_eq!(format_separator, internal_separator_x("保密区格式化"));
@@ -490,10 +496,8 @@ fn mode1_partition_layout_renders_combined_region_with_start_and_capacity_on_one
     let width = 160u16;
     let mut terminal = Terminal::new(TestBackend::new(width, 50)).unwrap();
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
-    let rows = terminal
-        .backend()
-        .buffer()
-        .content()
+    let cells = terminal.backend().buffer().content();
+    let rows = cells
         .chunks(width as usize)
         .map(|row| {
             row.iter()
@@ -509,6 +513,30 @@ fn mode1_partition_layout_renders_combined_region_with_start_and_capacity_on_one
         .expect("mode1 combined partition layout row");
     assert_eq!(combined.matches("二合一区").count(), 1, "{combined}");
     assert!(!combined.contains("交换区"), "{combined}");
+
+    let separator_x = |needle: &str| {
+        cells
+            .chunks(width as usize)
+            .find(|row| {
+                row.iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .replace(' ', "")
+                    .contains(needle)
+            })
+            .and_then(|row| {
+                row.iter()
+                    .enumerate()
+                    .find(|(_, cell)| cell.symbol() == "│")
+                    .map(|(x, _)| x)
+            })
+            .expect("partition row separator")
+    };
+    assert_eq!(
+        separator_x("二合一区起点LBA"),
+        separator_x("保密区起点LBA"),
+        "mode1 partition layout separator must align"
+    );
 }
 
 #[test]
