@@ -44,3 +44,34 @@ fn migrated_edpb_read_semantics_remain_supported() {
         "already-migrated EDPB manifests must remain deserializable"
     );
 }
+
+#[test]
+fn development_compatibility_shims_and_fixture_writers_do_not_return() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for removed in [
+        "src/application/ports.rs",
+        "src/tui/event.rs",
+        "src/diskio/backup_catalog.rs",
+        "src/diskio/backup_create.rs",
+        "src/diskio/backup_config.rs",
+        "src/crypto.rs",
+        "src/sectors.rs",
+        "src/sysinfo.rs",
+    ] {
+        assert!(
+            !root.join(removed).exists(),
+            "obsolete module returned: {removed}"
+        );
+    }
+    for path in ["src/edpb/write.rs", "src/edpb/legacy.rs"] {
+        assert!(
+            !source(path).contains("fn write_legacy_"),
+            "historical fixture writer returned to production: {path}"
+        );
+    }
+    assert!(!source("src/infrastructure/backup_store/catalog.rs").contains("fn parse_backup_name("));
+    assert!(!source("src/infrastructure/backup_store/create.rs").contains("fn create_backup("));
+    assert!(!source("src/diskio/device.rs").contains("fn read_lba("));
+    assert!(!source("src/identify.rs").contains("fn detect_transport("));
+    assert!(!source("src/tui/clipboard.rs").contains("fn copy_text("));
+}

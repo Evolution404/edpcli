@@ -23,8 +23,8 @@ use crate::elevate::{self, ELEVATED_FLAG};
 mod commands;
 use crate::inspect_cli::inspect_flow;
 use crate::metainfo_cli::info_flow;
+use crate::platform::system::{ReadProbeCache, SysRunner};
 use crate::selectors::DeviceSelector;
-use crate::sysinfo::{ReadProbeCache, SysRunner};
 use commands::{backup_create_real_flow, list_flow, provision_flow, real_flow};
 #[cfg(test)]
 use commands::{list_needs_elevation, target_plan_summary_lines};

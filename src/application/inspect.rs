@@ -6,7 +6,7 @@ pub use super::evidence::SectorReader;
 use super::evidence::{EvidenceError, EvidenceSource};
 use crate::common::{METADATA_SECTOR_COUNT, SECTOR};
 use crate::inspect_adapter::{self as inspect, InspectMeta};
-use crate::sysinfo::CmdRunner;
+use crate::ports::CmdRunner;
 
 mod decode;
 mod export;

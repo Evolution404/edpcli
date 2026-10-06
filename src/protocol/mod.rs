@@ -2,14 +2,8 @@
 //! Profile axes stay orthogonal; unidentified states remain Unknown.
 
 /// 稳定 protocol 门面下的协议密码学原语。
-pub mod crypto {
-    pub use crate::crypto::*;
-}
+pub mod crypto;
 
-/// 稳定 protocol 门面下的协议扇区兼容解析。
-pub mod sectors {
-    pub use crate::sectors::*;
-}
 pub mod edpf;
 pub mod iir;
 pub mod image;
@@ -26,6 +20,8 @@ pub mod lba5;
 pub mod lba7_compat;
 pub mod profile;
 pub mod profile_detector;
+/// 稳定 protocol 门面下的协议扇区兼容解析。
+pub mod sectors;
 pub mod semantic;
 pub mod types;
 

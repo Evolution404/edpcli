@@ -79,7 +79,8 @@ fn plain_export_is_available_in_tui_review_flow() {
     let controller = source("src/tui/controller/provision.rs");
 
     assert!(
-        !execution.contains("ProvisionPrepared::Plain(_) => return None"),
+        !execution
+            .contains("edpcli::application::provision::PreparedProvision::Plain(_) => return None"),
         "Plain export must not be blocked by TUI state"
     );
     assert!(keymap.contains("KeyCode::Char('e') => Some(TuiAction::Export)"));

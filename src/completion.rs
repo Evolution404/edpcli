@@ -3,8 +3,8 @@
 //! v2 只动态提供物理盘、全局备份编号、备份文件名与 LBA0-12。用户级 onlyid/index
 //! 已退出 CLI grammar，补全层不得重新暴露。
 
-use crate::diskio;
-use crate::sysinfo::{self, CmdRunner};
+use crate::platform::system;
+use crate::ports::CmdRunner;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shell {
@@ -32,18 +32,20 @@ pub fn dynamic_values(
 ) -> Vec<String> {
     match kind {
         "backup-number" => {
-            let dir = diskio::resolve_backup_dir(backup_dir_flag);
-            let count = diskio::scan_backup_names(&dir).len();
+            let dir =
+                crate::infrastructure::backup_store::config::resolve_backup_dir(backup_dir_flag);
+            let count = crate::infrastructure::backup_store::catalog::scan_backup_names(&dir).len();
             (1..=count).map(|n| n.to_string()).collect()
         }
         "backup-file" => {
-            let dir = diskio::resolve_backup_dir(backup_dir_flag);
-            diskio::scan_backup_names(&dir)
+            let dir =
+                crate::infrastructure::backup_store::config::resolve_backup_dir(backup_dir_flag);
+            crate::infrastructure::backup_store::catalog::scan_backup_names(&dir)
                 .into_iter()
                 .filter_map(|path| path.file_name()?.to_str().map(str::to_string))
                 .collect()
         }
-        "disk" => sysinfo::list_usb_disks(runner)
+        "disk" => system::list_usb_disks(runner)
             .into_iter()
             .map(|disk| crate::platform::disk_selector_value(disk.n))
             .collect(),

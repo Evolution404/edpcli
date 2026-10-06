@@ -760,7 +760,7 @@ fn backup_confirm_is_overlay_and_escape_preserves_device_selection() {
     let identity = row
         .identity_pin
         .as_ref()
-        .map(edpcli::tui::state::ExpectedIdentity::from_pin)
+        .map(edpcli::application::media_identity::MediaIdentityResumePin::from_pin)
         .expect("test device identity pin");
     state.replace_devices(vec![row]);
     assert_eq!(state.selected_device_disk(), Some(6));

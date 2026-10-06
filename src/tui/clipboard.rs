@@ -21,10 +21,6 @@ pub fn copy_with(backend: &mut dyn ClipboardBackend, content: &str) -> Clipboard
     backend.copy(content)
 }
 
-pub fn copy_text(content: &str) -> ClipboardOutcome {
-    copy_with(&mut ClipboardService, content)
-}
-
 pub fn outcome_message(outcome: &ClipboardOutcome, whole_row: bool) -> String {
     match outcome {
         ClipboardOutcome::Confirmed if whole_row => "已复制当前整行。".into(),

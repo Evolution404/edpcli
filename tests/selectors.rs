@@ -8,7 +8,7 @@ use edpcli::application::media_identity::{
 };
 use edpcli::application::{BackupSelector, DeviceSelector};
 use edpcli::cli::Prompter;
-use edpcli::platform::system::ExtDisk;
+use edpcli::platform::ExtDisk;
 
 struct Prompt {
     answers: Vec<String>,
@@ -104,7 +104,7 @@ fn copied_backups() -> Option<(TmpDir, Vec<String>)> {
         let (name, _) = fixture(key)?;
         let bytes = fs::read(src).expect("read protocol fixture");
         let name = format!("{}.edpb", name.strip_suffix(".bin").unwrap());
-        let meta = edpcli::diskio::parse_backup_name(&name).unwrap();
+        let meta = crate::gold_name::parse_fixture_backup_name(&name).unwrap();
         edpcli::edpb::write_core_backup(
             &tmp.0.join(&name),
             &edpcli::edpb::CoreCapture {

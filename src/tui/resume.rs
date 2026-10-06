@@ -90,8 +90,9 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
                 }
                 saw_resume = true;
                 let raw = take(RESUME_IDENTITY_PIN_FLAG)?;
-                let pin: state::ExpectedIdentity = serde_json::from_str(&raw)
-                    .map_err(|error| format!("错误: TUI resume identity pin 无效: {error}"))?;
+                let pin: crate::application::media_identity::MediaIdentityResumePin =
+                    serde_json::from_str(&raw)
+                        .map_err(|error| format!("错误: TUI resume identity pin 无效: {error}"))?;
                 pin.validate().map_err(|error| format!("错误: {error}"))?;
                 identity_pin = Some(pin);
             }

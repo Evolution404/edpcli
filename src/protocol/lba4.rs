@@ -1,6 +1,6 @@
 //! SAFE6 restore node. Writer provenance is explicit; identity shape never selects encoding.
 use super::{layout, profile::*, types::*};
-use crate::crypto::xor_rolling;
+use crate::protocol::crypto::xor_rolling;
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Lba4Context {
     pub encoding: Lba4Encoding,

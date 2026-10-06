@@ -2,7 +2,8 @@
 
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO, EXIT_TARGET};
 use crate::diskio::{raw_path, FileDev};
-use crate::sysinfo::{self, CmdRunner};
+use crate::platform::system;
+use crate::ports::CmdRunner;
 
 pub fn guard_system_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<()> {
     if crate::platform::is_system_disk(runner, disk) {
@@ -16,7 +17,7 @@ pub fn guard_system_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<()> 
 
 pub fn guard_usb_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<()> {
     guard_system_disk(runner, disk)?;
-    if sysinfo::usb_disk(runner, disk).is_some() {
+    if system::usb_disk(runner, disk).is_some() {
         return Ok(());
     }
     Err(EdpCliError::new(

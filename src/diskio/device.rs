@@ -4,8 +4,6 @@ pub fn raw_path(disk: u32) -> String {
     crate::platform::raw_disk_path(disk)
 }
 
-pub use crate::ports::SectorDev;
-
 /// 只读展示/诊断路径的扇区缓存。
 ///
 /// `info` / `inspect` 可能先读取身份扇区，再由摘要/渲染阶段请求同一 LBA。
@@ -206,11 +204,6 @@ impl SectorDev for FileDev {
             self.file.sync_all()
         }
     }
-}
-
-/// 单扇区便捷读(Python read_lba_disk 等价: 每次独立打开)。
-pub fn read_lba(path: &str, lba: u32) -> io::Result<Vec<u8>> {
-    FileDev::open_rdonly(path)?.read_sector(lba)
 }
 
 // ══════════════════════════════════════════════════════════════════

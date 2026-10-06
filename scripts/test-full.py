@@ -192,7 +192,7 @@ def suites_for_paths(paths: Iterable[str]) -> set[str]:
             selected.add("backup_suite")
         elif path.startswith("src/application/inspect") or path == "src/metainfo.rs":
             selected.add("inspect_suite")
-        elif path.startswith("src/platform") or path == "src/sysinfo.rs":
+        elif path.startswith("src/platform"):
             selected.add("platform_suite")
         elif path == "src/diskio.rs":
             selected.update(

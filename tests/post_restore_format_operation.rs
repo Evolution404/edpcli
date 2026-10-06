@@ -12,8 +12,8 @@ use edpcli::application::post_restore::{
 use edpcli::application::progress::{FormatStep, OperationKind, ProgressEvent, Severity, Step};
 use edpcli::application::support::SECTOR;
 use edpcli::application::Prompter;
-use edpcli::diskio::SectorDev;
 use edpcli::edpb::ManifestPartition;
+use edpcli::ports::SectorDev;
 use std::collections::BTreeMap;
 use std::io;
 use std::time::Duration;

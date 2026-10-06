@@ -62,7 +62,7 @@ pub(super) fn commit_plain_provision_with_progress(
         .hardware_probe(prepared.disk)
         .or_else(|| crate::platform::fallback_hardware_probe(runner, prepared.disk))
         .ok_or_else(|| err(EXIT_TARGET, "错误: 重开后无法复核目标硬件身份"))?;
-    let fresh_total = sysinfo::disk_total_sectors(runner, prepared.disk)
+    let fresh_total = system::disk_total_sectors(runner, prepared.disk)
         .ok_or_else(|| err(EXIT_TARGET, "错误: 重开后无法复核目标容量"))?;
     if fresh_probe != prepared.expected_probe || fresh_total != prepared.plan.total_sectors {
         return Err(err(
@@ -214,7 +214,7 @@ pub(super) fn commit_new_provision_with_progress(
         .hardware_probe(prepared.disk)
         .or_else(|| crate::platform::fallback_hardware_probe(runner, prepared.disk))
         .ok_or_else(|| err(EXIT_TARGET, "错误: 重开后无法复核目标硬件身份"))?;
-    let fresh_total = sysinfo::disk_total_sectors(runner, prepared.disk)
+    let fresh_total = system::disk_total_sectors(runner, prepared.disk)
         .ok_or_else(|| err(EXIT_TARGET, "错误: 重开后无法复核目标容量"))?;
     if fresh_probe != prepared.expected_probe || fresh_total != prepared.write_image.total_sectors {
         return Err(err(
@@ -384,7 +384,9 @@ pub(super) fn verify_protocol_readback(
             "错误: 格式化前 LBA0–12 与本次制盘计划不一致",
         ));
     }
-    let onlyid = diskio::lba4_label_id_from(&raw[4 * SECTOR..5 * SECTOR]);
+    let onlyid = crate::infrastructure::backup_store::catalog::lba4_label_id_from(
+        &raw[4 * SECTOR..5 * SECTOR],
+    );
     if onlyid.as_deref() != Some(&prepared.expected_onlyid) {
         return Err(err(
             EXIT_TARGET,
@@ -518,7 +520,7 @@ pub(super) fn verify_lce_readback(
         .start_lba
         .checked_mul(SECTOR as u64)
         .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化前 LCE 物理字节偏移溢出"))?;
-    let plaintext = crate::crypto::a6b0_full_offset(&ciphertext, &[0u8; 8], physical_offset);
+    let plaintext = crate::protocol::crypto::a6b0_full(&ciphertext, &[0u8; 8], physical_offset);
     if plaintext.as_slice() != crate::provision::lce_plaintext() {
         return Err(err(
             EXIT_TARGET,

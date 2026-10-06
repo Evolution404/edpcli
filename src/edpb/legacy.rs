@@ -1,27 +1,5 @@
 use super::*;
 
-/// Explicit compatibility writer used only to construct/read historical v1 fixtures.
-/// Normal backup creation must use the current v3 writers.
-#[doc(hidden)]
-pub fn write_legacy_v1_core_backup_with_notes(
-    path: &Path,
-    capture: &CoreCapture<'_>,
-    notes: &[String],
-) -> Result<Manifest, String> {
-    write_container(
-        path,
-        capture,
-        CaptureLevel::Core,
-        &[],
-        &[],
-        &[],
-        &[],
-        notes,
-        None,
-        "edpb.manifest.v1",
-    )
-}
-
 pub(super) const LEGACY_HARDWARE_SERIAL_NOTE_PREFIX: &str = "hardware_serial_sha256=";
 
 pub(super) fn valid_sha256_hex(value: &str) -> bool {

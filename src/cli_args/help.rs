@@ -45,7 +45,7 @@ fn print_topic_help(topic: &str) {
         }
         "provision" => {
             println!("目标: --target mode0|mode1|mode2|mode3|plain");
-            println!("    兼容输入: --mode 0|1|2|3；Plain 不是 mode4，--mode 4 永远非法。");
+            println!("    Plain 不是 mode4；它是独立的普通盘目标。");
             println!("    Plain 分区: 可重复 --partition START:SIZE:fat16|fat32|exfat[:LABEL]；SIZE 支持 sectors/MiB/GiB/fill。");
             println!("    Plain 未指定 --partition 时默认 P1 从 LBA2048 占满至盘尾。");
             println!("    mode1 若识别到现有 mode0，将保留原 type4 位置/密钥并让 type2 扩满前部。");

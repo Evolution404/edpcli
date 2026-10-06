@@ -6,10 +6,10 @@ use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::time::Duration;
 
-pub use crate::platform::ExtDisk;
+use crate::platform::ExtDisk;
 use crate::platform::HardwareProbe;
 
-pub use crate::ports::CmdRunner;
+use crate::ports::CmdRunner;
 
 pub struct SysRunner;
 

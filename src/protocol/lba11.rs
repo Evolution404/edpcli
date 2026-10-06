@@ -1,5 +1,5 @@
 use super::{profile::Lba11Capacity, types::*};
-use crate::crypto::{a6b0_full, a7f0_full, crc32_bare};
+use crate::protocol::crypto::{a6b0_full, a7f0_full, crc32_bare};
 
 const CHS_UNIT: u64 = 255 * 63 * 512;
 

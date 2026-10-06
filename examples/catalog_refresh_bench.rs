@@ -1,7 +1,7 @@
 //! Host-only read benchmark. Creates synthetic backup files, never opens raw devices.
 use edpcli::{
-    diskio::scan_backup_dir_display,
     edpb::{self, CoreCapture},
+    infrastructure::backup_store::display_catalog::scan_backup_dir_display,
     ports::ReadControl,
 };
 use std::{

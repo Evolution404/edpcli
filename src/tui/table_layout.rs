@@ -654,8 +654,6 @@ pub(crate) fn content_widths(headings: &[&str], rows: &[Vec<String>]) -> Vec<usi
     widths
 }
 
-pub type HorizontalScrollState = TableInteractionState;
-
 pub fn table_heading(heading: &str, index: usize, interaction: TableInteractionState) -> String {
     let marker = interaction
         .sort()

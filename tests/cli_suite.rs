@@ -1,3 +1,10 @@
+#[path = "support/gold_name.rs"]
+pub mod gold_name;
+
+#[path = "support/historical_edpb.rs"]
+#[cfg(target_os = "macos")]
+mod historical_edpb;
+
 #[path = "common/mod.rs"]
 pub mod common;
 

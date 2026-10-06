@@ -7,8 +7,8 @@ use std::io;
 use std::path::Path;
 
 use crate::common::SECTOR;
-use crate::crypto::crc32_bare;
-use crate::diskio::{self, BackupEntry};
+use crate::infrastructure::backup_store::catalog::BackupEntry;
+use crate::protocol::crypto::crc32_bare;
 use crate::protocol::semantic::{self, SemanticContext, SemanticContextSource};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -63,7 +63,9 @@ impl MetaInfoSummary {
     }
 }
 
-fn context_from_backup_meta(meta: &diskio::BackupMeta) -> SemanticContext {
+fn context_from_backup_meta(
+    meta: &crate::infrastructure::backup_store::catalog::BackupMeta,
+) -> SemanticContext {
     SemanticContext {
         device_id: Some(meta.device_id.clone()),
         vid: Some(meta.vid.clone()),
@@ -137,7 +139,8 @@ where
     let lba6 = semantic::lba6_view(&raw6);
     let ownership = semantic::ownership_from_lba8(&raw8, &base).unwrap_or_default();
 
-    let onlyid = diskio::lba4_label_id_from(&raw4).or_else(|| base.onlyid.clone());
+    let onlyid = crate::infrastructure::backup_store::catalog::lba4_label_id_from(&raw4)
+        .or_else(|| base.onlyid.clone());
     let device_crc32 = base
         .device_id
         .as_deref()
@@ -174,7 +177,7 @@ where
         safe6_serial: semantic::safe6_gserial(&raw6),
         safe6_register: None,
         safe6_checksum: lba6.as_ref().map(|view| {
-            let calculated = crate::crypto::lba6_checksum(&raw6[..0x1fc]);
+            let calculated = crate::protocol::crypto::lba6_checksum(&raw6[..0x1fc]);
             if view.checksum == calculated {
                 format!("0x{:08X} / 计算 0x{:08X} ✓", view.checksum, calculated)
             } else if view.checksum == calculated.wrapping_mul(2) {

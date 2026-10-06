@@ -49,7 +49,7 @@ impl TaskHub {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
-                let runner = SysRunner;
+                let runner = system_runner();
                 crate::application::provision::probe_provision_key_domains_on_disk(
                     &runner,
                     context.disk,
@@ -120,7 +120,7 @@ impl TaskHub {
             } = request;
             let result = catch_unwind(AssertUnwindSafe(|| {
                 crate::application::provision::verify_provision_source_password_on_disk(
-                    &SysRunner,
+                    &system_runner(),
                     disk,
                     domain,
                     password.as_bytes(),
@@ -152,7 +152,7 @@ impl TaskHub {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
-                let runner = SysRunner;
+                let runner = system_runner();
                 crate::application::provision::prepare_provision_on_disk(&runner, disk, &request)
                     .map_err(crate::application::error::OperationError::from)
             }))
@@ -197,7 +197,7 @@ impl TaskHub {
 
     pub fn request_provision_write(
         &mut self,
-        prepared: crate::tui::state::ProvisionPrepared,
+        prepared: crate::application::provision::PreparedProvision,
         backup_dir: PathBuf,
     ) -> Result<OperationId, &'static str> {
         let operation_id = self.begin_operation()?;
@@ -205,7 +205,7 @@ impl TaskHub {
         let progress = ProgressPublisher::new(self, operation_id, ProgressKind::Provision);
         self.critical_worker = Some(std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
-                let runner = SysRunner;
+                let runner = system_runner();
                 struct ProvisionWritePrompter;
                 impl crate::application::write::Prompter for ProvisionWritePrompter {
                     fn prompt_line(&mut self, _msg: &str) -> String {

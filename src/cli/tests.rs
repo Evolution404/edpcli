@@ -1,5 +1,5 @@
 use super::*;
-use crate::sectors::EdpfPartition;
+use crate::protocol::sectors::EdpfPartition;
 
 #[test]
 fn yes_flag_does_not_bypass_independent_key_domain_confirmation() {
@@ -693,7 +693,7 @@ fn disk_table_rendering() {
 
 #[test]
 fn menus_are_numbered() {
-    use crate::sysinfo::ExtDisk;
+    use crate::platform::ExtDisk;
     let disks = vec![
         ExtDisk {
             n: 4,

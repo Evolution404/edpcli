@@ -1,5 +1,5 @@
 use super::*;
-use crate::diskio::BackupMeta;
+use crate::infrastructure::backup_store::catalog::BackupMeta;
 
 impl InspectMeta {
     pub fn from_backup_meta(meta: &BackupMeta) -> Self {

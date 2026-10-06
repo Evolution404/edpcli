@@ -107,8 +107,6 @@ pub enum ProvisionStage {
     Result,
 }
 
-pub type ProvisionPrepared = crate::application::provision::PreparedProvision;
-
 #[path = "advanced_identity.rs"]
 mod advanced_identity;
 #[path = "editor.rs"]
@@ -204,7 +202,7 @@ pub struct ProvisionState {
     pub(super) target_password_modes: password_verification::TargetPasswordModeState,
     pub form: ProvisionForm,
     pub plain_form: PlainProvisionForm,
-    pub prepared: Option<ProvisionPrepared>,
+    pub prepared: Option<crate::application::provision::PreparedProvision>,
     pub(crate) review_projection: Option<ProvisionConfirmationViewModel>,
     pub confirmation: String,
     pub export_path: String,

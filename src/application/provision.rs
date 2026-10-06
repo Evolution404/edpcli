@@ -15,9 +15,11 @@ use crate::common::{
     EdpCliError, EdpCliResult, EXIT_INTERMEDIATE, EXIT_IO, EXIT_OK, EXIT_ROLLED_BACK, EXIT_TARGET,
     SECTOR,
 };
-use crate::diskio::{self, SectorDev};
+use crate::diskio;
 use crate::filesystem::analysis::{analyze_partition, AnalysisStatus, PartitionReader};
 use crate::filesystem::{FilesystemKind, SparseFilesystemImage};
+use crate::platform::system;
+use crate::ports::{CmdRunner, SectorDev};
 use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use crate::provision::{
     apply_target_geometry_overrides, build_official_partition_filesystem,
@@ -33,7 +35,6 @@ use crate::provision::{
     TargetGeometryOverrides, TargetIdentity, TargetPasswordPolicy, TargetProvisionPlan,
     DEFAULT_KEY_DOMAIN_PASSWORD, DEFAULT_MODE0_BOOT_SECTORS,
 };
-use crate::sysinfo::{self, CmdRunner};
 
 use super::device::open_readonly_usb_disk;
 use super::media_identity::MediaIdentityPin;
@@ -325,7 +326,7 @@ pub enum ProvisionCommitOutcome {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProvisionWriteOutcome {
-    pub backup: super::write::BackupReport,
+    pub backup: super::post_restore::MetadataBackupReport,
     pub commit: ProvisionCommitOutcome,
     pub warnings: Vec<ProvisionWarning>,
 }
@@ -563,7 +564,7 @@ impl PreparedProvision {
         let lba4 = source
             .get(4 * SECTOR..5 * SECTOR)
             .ok_or_else(|| err(EXIT_TARGET, "错误: 来源快照缺少 LBA4，无法绑定强制备份身份"))?;
-        Ok(diskio::lba4_label_id_from(lba4))
+        Ok(crate::infrastructure::backup_store::catalog::lba4_label_id_from(lba4))
     }
 }
 
@@ -702,7 +703,7 @@ pub fn commit_provision_on_disk(
 /// ```
 pub struct BackedUpPreparedProvision<'a> {
     prepared: &'a PreparedProvision,
-    backup: super::write::BackupReport,
+    backup: super::post_restore::MetadataBackupReport,
     sha256: String,
 }
 
@@ -710,7 +711,7 @@ impl BackedUpPreparedProvision<'_> {
     pub fn prepared(&self) -> &PreparedProvision {
         self.prepared
     }
-    pub fn backup(&self) -> &super::write::BackupReport {
+    pub fn backup(&self) -> &super::post_restore::MetadataBackupReport {
         &self.backup
     }
 }
@@ -767,7 +768,7 @@ fn run_mandatory_backup_before_commit<B, C>(
     commit: C,
 ) -> EdpCliResult<ProvisionWriteOutcome>
 where
-    B: FnOnce() -> EdpCliResult<super::write::BackupReport>,
+    B: FnOnce() -> EdpCliResult<super::post_restore::MetadataBackupReport>,
     C: FnOnce() -> EdpCliResult<ProvisionCommitOutcome>,
 {
     let backup = backup()?;
@@ -780,7 +781,7 @@ where
 }
 
 fn verify_mandatory_backup_pin(
-    report: &super::write::BackupReport,
+    report: &super::post_restore::MetadataBackupReport,
     pin: &MediaIdentityPin,
     source_metadata: &[u8],
 ) -> EdpCliResult<String> {
@@ -835,7 +836,7 @@ fn record_lineage_after_commit(
     runner: &dyn CmdRunner,
     prepared: &PreparedProvision,
     backup_dir: &Path,
-    backup: &super::write::BackupReport,
+    backup: &super::post_restore::MetadataBackupReport,
     backup_sha256: String,
 ) -> Result<PathBuf, ProvisionWarning> {
     let mut dev = open_readonly_usb_disk(runner, prepared.disk())

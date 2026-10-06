@@ -2,9 +2,7 @@ use edpcli::application::backup::parse_partition_geometry;
 use edpcli::application::filesystem::FilesystemKind;
 use edpcli::application::support::SECTOR;
 use edpcli::inspect::{InspectDiskContext, PhysicalDataState, SectorRegion};
-use edpcli::protocol::crypto::{
-    a6b0_full, a6b0_full_offset, a7f0_full, crc32_bare, sm4_encrypt_block,
-};
+use edpcli::protocol::crypto::{a6b0_full, a7f0_full, crc32_bare, sm4_encrypt_block};
 use edpcli::provision::default_file_key;
 
 const LEXAR_DEVICE_ID: &str = "disk&ven_lexar&prod_usb_flash_drive";
@@ -118,7 +116,7 @@ fn lce_u64_physical_offset_decrypts_real_3072_bytes_bit_exact() {
         offset > u32::MAX as u64,
         "fixture must exercise the 64-bit tweak"
     );
-    let plain = a6b0_full_offset(LEXAR_LCE_CIPHER, &[0u8; 8], offset);
+    let plain = a6b0_full(LEXAR_LCE_CIPHER, &[0u8; 8], offset);
     assert_eq!(plain.as_slice(), LCE_PLAIN);
 }
 

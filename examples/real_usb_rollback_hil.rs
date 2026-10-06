@@ -19,11 +19,12 @@ mod macos {
     use edpcli::application::device::guard_usb_disk;
     use edpcli::application::support::{EXIT_ROLLED_BACK, SECTOR};
     use edpcli::diskio::{
-        execute_write_transaction, raw_path, FileDev, SectorDev, SectorWriteStage,
-        WriteTransactionPlan,
+        execute_write_transaction, raw_path, FileDev, SectorWriteStage, WriteTransactionPlan,
     };
     use edpcli::platform::identity::{generate_candidates, identify};
-    use edpcli::platform::system::{disk_total_sectors, CmdRunner, SysRunner};
+    use edpcli::platform::system::{disk_total_sectors, SysRunner};
+    use edpcli::ports::CmdRunner;
+    use edpcli::ports::SectorDev;
 
     struct FailOnceDev {
         inner: FileDev,
@@ -160,8 +161,10 @@ mod macos {
         } else {
             None
         };
-        let lba4_tag = edpcli::diskio::lba4_tag16_from(&metadata[4 * SECTOR..5 * SECTOR])
-            .ok_or_else(|| "LBA4 缺少身份标签范围".to_string())?;
+        let lba4_tag = edpcli::infrastructure::backup_store::catalog::lba4_tag16_from(
+            &metadata[4 * SECTOR..5 * SECTOR],
+        )
+        .ok_or_else(|| "LBA4 缺少身份标签范围".to_string())?;
         let partitions = match parse_partition_geometry(&metadata, &device_id, total_before) {
             Ok(partitions) => partitions,
             Err(error) if lba4_tag.iter().any(|&byte| byte != 0) => {

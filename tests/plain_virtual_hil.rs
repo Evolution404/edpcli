@@ -6,7 +6,8 @@ use edpcli::{
     application::filesystem::analysis::{analyze_partition, AnalysisStatus, PartitionReader},
     application::filesystem::FilesystemKind,
     application::support::SECTOR,
-    diskio::{execute_write_transaction, SectorDev, WriteTransactionPlan},
+    diskio::{execute_write_transaction, WriteTransactionPlan},
+    ports::SectorDev,
     provision::{
         build_plain_provision_write_plan, DiskProvisionKind, PlainCleanupExtent,
         PlainPartitionSpec, PlainProvisionPlan,

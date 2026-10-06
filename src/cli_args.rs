@@ -102,7 +102,6 @@ pub struct ProvisionNewOpts {
     pub share_target_password: String,
     pub encrypt_source_password: String,
     pub encrypt_target_password: String,
-    pub volume_label: String,
     pub format_boot: bool,
     pub format_share: bool,
     pub format_encrypt: bool,

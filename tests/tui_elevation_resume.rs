@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
+use edpcli::application::media_identity::MediaIdentityResumePin;
 use edpcli::application::media_identity::SerialQuality;
 use edpcli::application::pin_disk_selector;
-use edpcli::tui::state::{ExpectedIdentity, WriteIntent, WriteKind};
+use edpcli::tui::state::{WriteIntent, WriteKind};
 use edpcli::tui::{parse_resume_args, resume_argv};
 
 fn resume_disk_value(argv: &[String]) -> &str {
@@ -13,8 +14,8 @@ fn resume_disk_value(argv: &[String]) -> &str {
     argv.get(index + 1).expect("resume disk value")
 }
 
-fn expected_identity() -> ExpectedIdentity {
-    ExpectedIdentity {
+fn expected_identity() -> MediaIdentityResumePin {
+    MediaIdentityResumePin {
         serial_sha256: Some("a".repeat(64)),
         serial_quality: SerialQuality::Usable,
         vid: Some(0x0dd8),

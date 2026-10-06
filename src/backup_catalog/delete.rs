@@ -1,6 +1,6 @@
 //! Isolate the directory entry before checking/deleting it. A replacement at
 //! the original name is never the target of the final unlink.
-use crate::diskio::BackupEntry;
+use crate::infrastructure::backup_store::catalog::BackupEntry;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -133,7 +133,7 @@ fn delete_with_hook(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diskio::{BackupEntry, BackupIntegrityStatus};
+    use crate::infrastructure::backup_store::catalog::{BackupEntry, BackupIntegrityStatus};
     fn fixture() -> (PathBuf, BackupEntry) {
         let mut nonce = [0u8; 16];
         getrandom::fill(&mut nonce).unwrap();

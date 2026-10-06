@@ -41,8 +41,10 @@ pub(super) enum ProvisionWorkerResult {
     },
     Plan {
         generation: u64,
-        result:
-            Result<crate::tui::state::ProvisionPrepared, crate::application::error::OperationError>,
+        result: Result<
+            crate::application::provision::PreparedProvision,
+            crate::application::error::OperationError,
+        >,
     },
     Progress {
         operation_id: OperationId,
@@ -79,7 +81,10 @@ pub struct ProvisionUpdates {
         >,
     )>,
     pub plan: Option<
-        Result<crate::tui::state::ProvisionPrepared, crate::application::error::OperationError>,
+        Result<
+            crate::application::provision::PreparedProvision,
+            crate::application::error::OperationError,
+        >,
     >,
     pub progress: Vec<(OperationId, crate::application::progress::ProgressEvent)>,
     pub write: Option<(

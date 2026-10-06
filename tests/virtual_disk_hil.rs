@@ -9,8 +9,9 @@ use std::time::Duration;
 
 use edpcli::application::filesystem::FilesystemKind;
 use edpcli::application::support::{METADATA_SECTOR_COUNT, SECTOR};
-use edpcli::diskio::{atomic_write_sectors, FileDev, SectorDev};
+use edpcli::diskio::{atomic_write_sectors, FileDev};
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
+use edpcli::ports::SectorDev;
 use edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity;
 use edpcli::provision::{
     generate_official_image, parse_existing_provision, prefill_for_target_mode,

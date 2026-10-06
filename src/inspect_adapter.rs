@@ -4,7 +4,7 @@
 use encoding_rs::GBK;
 
 use crate::common::SECTOR;
-use crate::crypto::{crc32_bare, lba6_checksum};
+use crate::protocol::crypto::{crc32_bare, lba6_checksum};
 use crate::protocol::{
     edpf::{EdpfEntry64, EdpfEntry96, PassInfo},
     lba0, lba1, lba10, lba11, lba12, lba2, lba3, lba4, lba5, lba6, lba7, lba8, lba9,

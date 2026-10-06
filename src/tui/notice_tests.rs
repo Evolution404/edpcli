@@ -43,7 +43,7 @@ fn complete_error_remains_reachable_after_resize_and_new_notice() {
 #[test]
 fn message_keys_do_not_submit_confirmation_and_quit_stays_deferred() {
     use crate::tui::{
-        event::KeyMapper,
+        keymap::KeyMapper,
         runtime_input::{handle_key, KeyOutcome},
         task::TaskHub,
     };

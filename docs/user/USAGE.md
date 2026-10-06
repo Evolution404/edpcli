@@ -209,9 +209,8 @@ edpcli provision plan --disk 4 --target mode1 \
 ```
 
 
-CLI 的正式目标参数是 `--target mode0|mode1|mode2|mode3|plain`；原有
-`--mode 0|1|2|3` 继续作为四种官方模式的兼容输入。**Plain 是独立目标，不是 mode4，
-`--mode 4` 与 `--target mode4` 都会拒绝。**
+CLI 的目标参数是 `--target mode0|mode1|mode2|mode3|plain`。**Plain 是独立目标，不是 mode4，`--target mode4` 会拒绝。**
+开发期兼容参数 `--mode`、`--volume-label` 已移除；卷标分别使用 `--boot-label`、`--share-label` 和 `--encrypt-label`。
 
 恢复普通盘时，未指定分区默认建立 P1：从 LBA2048 占满到盘尾、exFAT、卷标“普通卷”。
 也可以重复使用 `--partition START:SIZE:FS[:LABEL]` 建立 1～4 个 MBR 主分区；
@@ -232,7 +231,7 @@ Plain 镜像同样保留目标盘原始 LBA3。
 
 
 CLI 未指定 `--share-target-password` / `--encrypt-target-password` 时，各目标密码域使用
-`0000aaaa`；未指定 `--volume-label` 时使用“启动区”。这些值都可以显式覆盖。
+`0000aaaa`；未指定 `--boot-label` / `--share-label` / `--encrypt-label` 时分别使用“启动区” / “交换区” / “保密区”。这些值都可以显式覆盖。
 
 模式 0 的启动区按扇区精确建模：默认从 LBA63 开始占用 **20417 扇区**，因此下一分区
 从 LBA20480 开始。TUI 直接显示并允许编辑“启动区扇区”；CLI 可用
@@ -279,7 +278,7 @@ edpcli provision write --disk 4 --target mode1 \
   --user USER06 --dept '江苏省电力有限公司'
 ```
 
-`write --target mode1` 会先只读识别现有布局（`--mode 1` 仍兼容）。若源盘为 mode0，计划器会对各区域分别选择保留、重新包装、重建或丢弃。可兼容的 type4 可以保持原起点、大小和密钥材料；启动区、交换区与目标二合一区的语义或几何无法原地兼容时，目标区域必须明确重建并由用户授权格式化。Provision 不读取或搬运来源文件，因此重建区域中的原文件不会被复制到目标区域。
+`write --target mode1` 会先只读识别现有布局。若源盘为 mode0，计划器会对各区域分别选择保留、重新包装、重建或丢弃。可兼容的 type4 可以保持原起点、大小和密钥材料；启动区、交换区与目标二合一区的语义或几何无法原地兼容时，目标区域必须明确重建并由用户授权格式化。Provision 不读取或搬运来源文件，因此重建区域中的原文件不会被复制到目标区域。
 
 ### 2.7 管理备份
 

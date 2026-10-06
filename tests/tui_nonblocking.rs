@@ -14,10 +14,10 @@ fn stale_background_results_are_rejected_by_generation() {
 #[test]
 fn redraw_path_never_performs_device_or_backup_scans() {
     let render = include_str!("../src/tui/render.rs");
-    let event = include_str!("../src/tui/event.rs");
+    let keymap = include_str!("../src/tui/keymap.rs");
     let state = include_str!("../src/tui/state.rs");
 
-    for source in [render, event, state] {
+    for source in [render, keymap, state] {
         for forbidden in [
             "scan_device_dashboard",
             "scan_backup_dir",
@@ -27,7 +27,7 @@ fn redraw_path_never_performs_device_or_backup_scans() {
         ] {
             assert!(
                 !source.contains(forbidden),
-                "redraw/event/state path must stay I/O-free: found {forbidden}"
+                "redraw/keymap/state path must stay I/O-free: found {forbidden}"
             );
         }
     }

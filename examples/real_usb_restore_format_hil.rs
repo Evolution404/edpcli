@@ -5,7 +5,8 @@ use edpcli::application::post_restore::{self, PartitionFormatRequest};
 use edpcli::application::progress::{FormatStep, ProgressEvent, Step};
 use edpcli::application::write::restore_on_disk_typed;
 use edpcli::application::Prompter;
-use edpcli::platform::system::{CmdRunner, SysRunner};
+use edpcli::platform::system::SysRunner;
+use edpcli::ports::CmdRunner;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -62,7 +63,8 @@ fn invalidate_filesystems(
 ) -> Result<(), String> {
     use edpcli::application::support::{EdpCliError, EXIT_TARGET, SECTOR};
     use edpcli::application::target_session::{ReadOnly, TargetSession};
-    use edpcli::diskio::{raw_path, FileDev, SectorDev, SectorWriteStage, WriteTransactionPlan};
+    use edpcli::diskio::{raw_path, FileDev, SectorWriteStage, WriteTransactionPlan};
+    use edpcli::ports::SectorDev;
     use std::time::Duration;
     pin(runner, disk, expected)?;
     let verified = edpcli::edpb::VerifiedBackupReader::open(backup)?;

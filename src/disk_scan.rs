@@ -8,13 +8,13 @@ use std::io;
 use std::path::Path;
 
 use crate::common::SECTOR;
-use crate::diskio;
 use crate::identify::identify;
 use crate::metainfo;
+use crate::platform::system;
+use crate::ports::CmdRunner;
+use crate::protocol::sectors::{parse_lba12, EdpfPartition};
 use crate::protocol::semantic::SemanticContext;
 use crate::provision::{DiskProvisionKind, ExistingPartition, ExistingProvisionProfile};
-use crate::sectors::{parse_lba12, EdpfPartition};
-use crate::sysinfo::{self, CmdRunner};
 
 struct ScanPartitionReader<'a> {
     disk: u32,
@@ -232,19 +232,22 @@ pub fn scan_disks(
     read_disk: &dyn Fn(u32, u32) -> io::Result<Vec<u8>>,
 ) -> Vec<Row> {
     scan_disks_with_catalog(runner, read_disk, || {
-        diskio::scan_backup_dir_checked(backup_dir)
+        crate::infrastructure::backup_store::catalog::scan_backup_dir_checked(backup_dir)
     })
 }
 
 pub(crate) fn scan_disks_with_catalog(
     runner: &dyn CmdRunner,
     read_disk: &dyn Fn(u32, u32) -> io::Result<Vec<u8>>,
-    load_catalog: impl FnOnce() -> Result<Vec<diskio::BackupEntry>, String>,
+    load_catalog: impl FnOnce() -> Result<
+        Vec<crate::infrastructure::backup_store::catalog::BackupEntry>,
+        String,
+    >,
 ) -> Vec<Row> {
     let mut rows = Vec::new();
     let catalog = std::cell::OnceCell::new();
     let mut load_catalog = Some(load_catalog);
-    for d in sysinfo::list_external_disks(runner) {
+    for d in system::list_external_disks(runner) {
         let mut row = Row {
             disk: d.n,
             size: d.size,
@@ -300,7 +303,8 @@ pub(crate) fn scan_disks_with_catalog(
                 let id = identify(runner, d.n, &lba7);
                 row.device_id = id.device_id.clone();
                 let lba4 = read_exact(4)?;
-                row.onlyid = diskio::lba4_label_id_from(&lba4);
+                row.onlyid =
+                    crate::infrastructure::backup_store::catalog::lba4_label_id_from(&lba4);
                 if let Some(did) = &id.device_id {
                     let meta = SemanticContext {
                         device_id: Some(did.clone()),
@@ -428,7 +432,9 @@ pub(crate) fn scan_disks_with_catalog(
                 let entries = entries
                     .as_ref()
                     .map_err(|error| io::Error::other(error.clone()))?;
-                let matches = diskio::match_backup_entries(entries, &identity);
+                let matches = crate::infrastructure::backup_store::create::match_backup_entries(
+                    entries, &identity,
+                );
                 row.identity_pin = Some(crate::media_identity::MediaIdentityPin::new(
                     identity,
                     &protocol_image,

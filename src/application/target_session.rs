@@ -10,9 +10,9 @@ use std::io;
 use std::time::Duration;
 
 use crate::common::{EdpCliError, EdpCliResult, EXIT_TARGET};
-use crate::diskio::SectorDev;
+use crate::platform::system;
 use crate::platform::{HardwareProbe, WriteGuard};
-use crate::sysinfo::{self, CmdRunner};
+use crate::ports::{CmdRunner, SectorDev};
 
 use super::device::guard_usb_disk;
 
@@ -74,20 +74,20 @@ impl<'a> TargetSession<'a, ReadOnly> {
             runner,
             disk,
             state: ReadOnly,
-            geometry: sysinfo::device_geometry(runner, disk),
+            geometry: system::device_geometry(runner, disk),
         })
     }
 
     pub fn prepare_write(self) -> io::Result<TargetSession<'a, PreparedWrite>> {
         self.writable_geometry()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.msg))?;
-        if sysinfo::device_geometry(self.runner, self.disk) != self.geometry {
+        if system::device_geometry(self.runner, self.disk) != self.geometry {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "写准备前设备几何发生变化",
             ));
         }
-        let guard = sysinfo::prepare_write(self.runner, self.disk)?;
+        let guard = system::prepare_write(self.runner, self.disk)?;
         Ok(TargetSession {
             runner: self.runner,
             disk: self.disk,
@@ -106,7 +106,7 @@ impl<'a> TargetSession<'a, PreparedWrite> {
     ) -> Result<TargetSession<'a, WriteLocked<'d>>, ReopenAndVerifyError<E>> {
         dev.reopen_rdwr(wait)
             .map_err(ReopenAndVerifyError::Reopen)?;
-        if sysinfo::device_geometry(self.runner, self.disk) != self.geometry {
+        if system::device_geometry(self.runner, self.disk) != self.geometry {
             return Err(ReopenAndVerifyError::Geometry(EdpCliError::new(
                 EXIT_TARGET,
                 "重开后设备几何发生变化，禁止写入",
@@ -140,7 +140,7 @@ impl<State> TargetSession<'_, State> {
     }
 
     pub fn total_sectors(&self) -> Option<u64> {
-        sysinfo::disk_total_sectors(self.runner, self.disk)
+        system::disk_total_sectors(self.runner, self.disk)
     }
 
     pub fn hardware_probe(&self) -> Option<HardwareProbe> {

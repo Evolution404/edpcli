@@ -24,18 +24,13 @@ mod write;
 pub use crate::sha256::{sha256_hex, sha256_reader_hex};
 use codec::*;
 pub use identity::{canonical_media_identity, manifest_identity_from_snapshot};
-use identity::{
-    inferred_manifest_identity, manifest_identity_from_snapshot_v2, validate_manifest_identity,
-};
-pub use legacy::write_legacy_v1_core_backup_with_notes;
+use identity::{inferred_manifest_identity, validate_manifest_identity};
 use legacy::{legacy_hardware_serial_digest, valid_sha256_hex};
 pub use model::*;
 use model::{CHUNK_MAGIC, FILE_MAGIC, FOOTER_MAGIC};
 pub use read::{read_artifact, read_raw_protocol, verify_file, VerifiedBackupReader};
 use validate::validate_manifest_graph;
-use write::write_container;
 pub use write::{
     write_core_backup, write_core_backup_with_identity, write_core_backup_with_notes,
-    write_legacy_v2_core_backup_with_identity, write_metadata_backup,
-    write_metadata_backup_with_identity,
+    write_metadata_backup, write_metadata_backup_with_identity,
 };

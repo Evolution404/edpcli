@@ -11,8 +11,10 @@ use crate::application::device::guard_usb_disk;
 use crate::application::Prompter;
 use crate::backup_catalog::{self, BackupCatalog};
 use crate::common::{EdpCliError, EdpCliResult, EXIT_CANCELLED, EXIT_TARGET};
-use crate::diskio::{self, BackupEntry};
-use crate::sysinfo::{self, CmdRunner, ExtDisk};
+use crate::infrastructure::backup_store::catalog::BackupEntry;
+use crate::platform::system;
+use crate::platform::ExtDisk;
+use crate::ports::CmdRunner;
 use crate::ui::disk_menu_str;
 
 #[derive(Debug, Clone, Copy)]
@@ -30,7 +32,7 @@ impl DeviceSelector {
             guard_usb_disk(runner, disk)?;
             return Ok(disk);
         }
-        let disks: Vec<_> = sysinfo::list_usb_disks(runner)
+        let disks: Vec<_> = system::list_usb_disks(runner)
             .into_iter()
             .filter(|disk| !crate::platform::is_system_disk(runner, disk.n))
             .collect();
@@ -146,7 +148,7 @@ impl BackupSelector {
 fn numbered_entries(entries: &[BackupEntry]) -> Vec<&BackupEntry> {
     let mut visible: Vec<_> = entries.iter().collect();
     visible.sort_by(|a, b| {
-        diskio::cmp_backup_newest_first(a, b)
+        crate::infrastructure::backup_store::catalog::cmp_backup_newest_first(a, b)
             .then_with(|| backup_catalog::file_name(a).cmp(backup_catalog::file_name(b)))
     });
     visible

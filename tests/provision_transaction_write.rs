@@ -6,9 +6,10 @@ use edpcli::{
     application::support::{EXIT_IO, EXIT_ROLLED_BACK, SECTOR},
     diskio::{
         atomic_write_official_provision_sectors, execute_write_transaction,
-        execute_write_transaction_observed, SectorDev, SectorWriteStage, TransactionActivityPhase,
+        execute_write_transaction_observed, SectorWriteStage, TransactionActivityPhase,
         WriteTransactionPlan,
     },
+    ports::SectorDev,
     provision::{
         build_plain_provision_write_plan, PlainCleanupExtent, PlainPartitionSpec,
         PlainProvisionPlan,

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use edpcli::application::BackupWorkspaceItem;
 use edpcli::cli::Row;
-use edpcli::diskio::BackupIntegrityStatus;
+use edpcli::infrastructure::backup_store::catalog::BackupIntegrityStatus;
 use edpcli::tui::{
     render,
     state::{AppState, NavCommand},

@@ -21,7 +21,6 @@ pub mod inspect_tree;
 pub mod media_identity;
 pub mod media_identity_observer;
 pub mod partition_table;
-pub mod ports;
 pub mod post_restore;
 pub mod progress;
 pub mod provision;
@@ -43,7 +42,9 @@ pub mod filesystem {
 pub mod metadata {
     pub use crate::metainfo::*;
 }
-pub use crate::diskio::{BackupHealth, BackupIntegrityStatus};
+pub use crate::infrastructure::backup_store::catalog::{BackupHealth, BackupIntegrityStatus};
+/// Partition values carried by device-dashboard presentation rows.
+pub use crate::protocol::sectors::EdpfPartition;
 pub use crate::selectors::{BackupSelector, DeviceSelector};
 pub use backup::delete_backup_exact;
 use std::cell::RefCell;
@@ -53,7 +54,8 @@ pub use write::WriteEvent;
 
 use crate::disk_scan::Row;
 use crate::diskio::{self, raw_path, FileDev};
-use crate::sysinfo::{CmdRunner, ReadProbeCache};
+use crate::platform::system::ReadProbeCache;
+use crate::ports::CmdRunner;
 
 /// Frontend interaction boundary shared by CLI selectors and write services.
 pub trait Prompter {
@@ -94,7 +96,14 @@ pub trait Prompter {
 /// additionally caches individual LBAs. No write preparation or write-capable reopen is reachable
 /// from this service.
 pub fn scan_device_dashboard(runner: &dyn CmdRunner, backup_dir: &Path) -> Vec<Row> {
-    scan_dashboard_catalog(runner, || diskio::scan_backup_dir_checked(backup_dir))
+    scan_dashboard_catalog(runner, || {
+        crate::infrastructure::backup_store::catalog::scan_backup_dir_checked(backup_dir)
+    })
+}
+
+/// Construct the runtime capability used by application workers.
+pub(crate) fn system_runner() -> impl crate::ports::CmdRunner {
+    crate::platform::system::SysRunner
 }
 
 pub(crate) fn scan_dashboard_snapshot(
@@ -112,7 +121,8 @@ pub(crate) fn scan_dashboard_snapshot(
 
 fn scan_dashboard_catalog(
     runner: &dyn CmdRunner,
-    load: impl FnOnce() -> Result<Vec<diskio::BackupEntry>, String>,
+    load: impl FnOnce()
+        -> Result<Vec<crate::infrastructure::backup_store::catalog::BackupEntry>, String>,
 ) -> Vec<Row> {
     let devices = RefCell::new(diskio::ReadOnlyDiskPool::new(|disk| {
         FileDev::open_rdonly(&raw_path(disk))
@@ -166,15 +176,15 @@ pub fn load_backup_selector(root: &Path) -> crate::selectors::BackupSelector {
 }
 
 pub fn resolve_backup_dir(flag: Option<&str>) -> std::path::PathBuf {
-    crate::diskio::resolve_backup_dir(flag)
+    crate::infrastructure::backup_store::config::resolve_backup_dir(flag)
 }
 
 pub fn has_configured_backup_dir() -> bool {
-    crate::diskio::conf_backup_dir().is_some()
+    crate::infrastructure::backup_store::config::conf_backup_dir().is_some()
 }
 
 pub fn backup_dir_argv_suffix(env_val: Option<String>) -> Vec<String> {
-    crate::diskio::backup_dir_argv_suffix(env_val)
+    crate::infrastructure::backup_store::config::backup_dir_argv_suffix(env_val)
 }
 
 impl BackupWorkspaceItem {
@@ -187,16 +197,8 @@ impl BackupWorkspaceItem {
     }
 }
 
-/// Build the backup-workspace rows from the exact same global numbering used by CLI restore,
-/// verify and delete. No frontend invents its own index.
-pub fn scan_backup_workspace(root: &Path) -> Vec<BackupWorkspaceItem> {
-    let selector = load_backup_selector(root);
-    workspace_from_selector(&selector)
-}
-
-pub(crate) fn scan_backup_workspace_checked(
-    root: &Path,
-) -> Result<Vec<BackupWorkspaceItem>, String> {
+/// Build globally numbered workspace rows, reporting scan failures without partial results.
+pub fn scan_backup_workspace_checked(root: &Path) -> Result<Vec<BackupWorkspaceItem>, String> {
     let selector = load_backup_selector(root);
     if let Some(error) = selector.catalog().scan_error() {
         return Err(error.to_string());
@@ -234,7 +236,10 @@ fn workspace_from_selector(
                     .and_then(|name| name.to_str())
                     .unwrap_or("<无效文件名>")
                     .to_string(),
-                display_time: crate::diskio::backup_display_time(&entry.path, entry.mtime),
+                display_time: crate::infrastructure::backup_store::catalog::backup_display_time(
+                    &entry.path,
+                    entry.mtime,
+                ),
                 size_bytes: entry
                     .meta
                     .as_ref()
@@ -291,7 +296,7 @@ pub fn verify_backup_exact(root: &Path, path: &Path) -> Result<(), String> {
             canonical_path.display()
         ));
     }
-    let entry = crate::diskio::scan_backup_file(&canonical_path)
+    let entry = crate::infrastructure::backup_store::catalog::scan_backup_file(&canonical_path)
         .ok_or_else(|| format!("目标不是可读取的 .edpb 备份: {}", canonical_path.display()))?;
     if crate::backup_catalog::is_healthy(&entry) {
         Ok(())

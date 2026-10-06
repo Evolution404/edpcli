@@ -150,7 +150,7 @@ fn format_faults_preserve_transaction_state_and_never_write_later_partitions() {
                 .all(|sector| sector == &vec![0; SECTOR]));
         }
         let outcome = ProvisionWriteOutcome {
-            backup: super::super::super::write::BackupReport {
+            backup: super::super::super::post_restore::MetadataBackupReport {
                 path: "memory-only.edpb".into(),
                 partition_count: 3,
                 edp_protocol_saved: true,
@@ -192,7 +192,7 @@ fn unknown_state_and_prewrite_rejection_stop_the_format_chain() {
             .iter()
             .all(|format| format.result.as_ref().unwrap_err().is_skipped()));
         let outcome = ProvisionWriteOutcome {
-            backup: super::super::super::write::BackupReport {
+            backup: super::super::super::post_restore::MetadataBackupReport {
                 path: "memory-only.edpb".into(),
                 partition_count: 3,
                 edp_protocol_saved: true,

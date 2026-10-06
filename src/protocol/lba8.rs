@@ -1,5 +1,5 @@
 use super::{profile::*, types::*};
-use crate::crypto::{a6b0_full, a7f0_full};
+use crate::protocol::crypto::{a6b0_full, a7f0_full};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Lba8Context {

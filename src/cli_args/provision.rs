@@ -1,24 +1,12 @@
 use super::*;
 
-fn parse_provision_mode(s: &str) -> Result<crate::provision::ProvisionTarget, String> {
-    let mode = match s {
-        "0" => 0,
-        "1" => 1,
-        "2" => 2,
-        "3" => 3,
-        _ => return Err(format!("错误: --mode 只接受 0/1/2/3，得到 {s}")),
-    };
-    crate::provision::ProvisionTarget::from_mode_number(mode)
-        .ok_or_else(|| format!("错误: 无效官方模式 {mode}"))
-}
-
 fn parse_provision_target(s: &str) -> Result<crate::provision::ProvisionTarget, String> {
     match s.to_ascii_lowercase().as_str() {
         "plain" => Ok(crate::provision::ProvisionTarget::Plain),
-        "mode0" => parse_provision_mode("0"),
-        "mode1" => parse_provision_mode("1"),
-        "mode2" => parse_provision_mode("2"),
-        "mode3" => parse_provision_mode("3"),
+        "mode0" => Ok(crate::provision::ProvisionTarget::OFFICIAL[0]),
+        "mode1" => Ok(crate::provision::ProvisionTarget::OFFICIAL[1]),
+        "mode2" => Ok(crate::provision::ProvisionTarget::OFFICIAL[2]),
+        "mode3" => Ok(crate::provision::ProvisionTarget::OFFICIAL[3]),
         _ => Err(format!(
             "错误: --target 只接受 mode0/mode1/mode2/mode3/plain，得到 {s}"
         )),
@@ -87,9 +75,8 @@ fn parse_plain_partition(
     })
 }
 
-fn parse_new_provision_opts(
+fn parse_provision_opts(
     rest: &[String],
-    allow_prefill: bool,
 ) -> Result<(ProvisionNewOpts, Option<String>, bool, Option<String>), String> {
     let mut disk = None;
     let mut target = None;
@@ -111,7 +98,6 @@ fn parse_new_provision_opts(
     let mut share_target_password = None;
     let mut encrypt_source_password = None;
     let mut encrypt_target_password = None;
-    let mut volume_label = None;
     let mut format_boot = false;
     let mut format_share = false;
     let mut format_encrypt = false;
@@ -135,21 +121,9 @@ fn parse_new_provision_opts(
                 let value = take_value(rest, &mut i, "--disk")?;
                 set_once(&mut disk, parse_disk_spec(&value)?, "--disk")?;
             }
-            "--mode" => {
-                let value = take_value(rest, &mut i, "--mode")?;
-                set_once(
-                    &mut target,
-                    parse_provision_mode(&value)?,
-                    "--target/--mode",
-                )?;
-            }
             "--target" => {
                 let value = take_value(rest, &mut i, "--target")?;
-                set_once(
-                    &mut target,
-                    parse_provision_target(&value)?,
-                    "--target/--mode",
-                )?;
+                set_once(&mut target, parse_provision_target(&value)?, "--target")?;
             }
             "--partition" => {
                 let value = take_value(rest, &mut i, "--partition")?;
@@ -273,10 +247,6 @@ fn parse_new_provision_opts(
                     "--encrypt-target-password",
                 )?;
             }
-            "--volume-label" => {
-                let value = take_value(rest, &mut i, "--volume-label")?;
-                set_once(&mut volume_label, value, "--volume-label")?;
-            }
             "--format-boot" => set_switch(&mut format_boot, &rest[i], "--format-boot")?,
             "--format-share" => set_switch(&mut format_share, &rest[i], "--format-share")?,
             "--format-encrypt" => set_switch(&mut format_encrypt, &rest[i], "--format-encrypt")?,
@@ -394,9 +364,7 @@ fn parse_new_provision_opts(
         i += 1;
     }
 
-    let target = target.ok_or(
-        "错误: provision 必须指定 --target mode0|mode1|mode2|mode3|plain（兼容 --mode 0|1|2|3）",
-    )?;
+    let target = target.ok_or("错误: provision 必须指定 --target mode0|mode1|mode2|mode3|plain")?;
     if target == crate::provision::ProvisionTarget::Plain {
         let has_official_only = boot_mib.is_some()
             || boot_start_lba.is_some()
@@ -415,7 +383,6 @@ fn parse_new_provision_opts(
             || share_target_password.is_some()
             || encrypt_source_password.is_some()
             || encrypt_target_password.is_some()
-            || volume_label.is_some()
             || format_boot
             || format_share
             || format_encrypt
@@ -457,7 +424,6 @@ fn parse_new_provision_opts(
                 share_target_password: String::new(),
                 encrypt_source_password: String::new(),
                 encrypt_target_password: String::new(),
-                volume_label: String::new(),
                 format_boot: false,
                 format_share: false,
                 format_encrypt: false,
@@ -480,9 +446,6 @@ fn parse_new_provision_opts(
     if !plain_partitions.is_empty() {
         return Err("错误: --partition 仅用于 --target plain".into());
     }
-    let mode = target
-        .mode_number()
-        .expect("non-Plain target always has an official mode number");
     if boot_mib.is_some() && boot_sectors.is_some() {
         return Err("错误: --boot-mib 与 --boot-sectors 不能同时指定".into());
     }
@@ -492,50 +455,10 @@ fn parse_new_provision_opts(
     if encrypt_mib.is_some() && encrypt_sectors.is_some() {
         return Err("错误: --encrypt-mib 与 --encrypt-sectors 不能同时指定".into());
     }
-    match mode {
-        0 => {
-            if !allow_prefill && share_mib.is_none() && share_sectors.is_none() {
-                return Err("错误: mode0 必须指定 --share-mib 或 --share-sectors".into());
-            }
-            if !allow_prefill && encrypt_mib.is_none() && encrypt_sectors.is_none() {
-                return Err("错误: mode0 必须指定 --encrypt-mib 或 --encrypt-sectors".into());
-            }
-            if !allow_prefill && boot_mib.is_none() && boot_sectors.is_none() {
-                boot_sectors = Some(crate::provision::DEFAULT_MODE0_BOOT_SECTORS);
-            }
-        }
-        1 => {
-            if boot_sectors.is_some() {
-                return Err("错误: --boot-sectors 仅用于 mode0".into());
-            }
-            if !allow_prefill && share_mib.is_none() && share_sectors.is_none() {
-                return Err("错误: mode1 必须指定 --share-mib 或 --share-sectors".into());
-            }
-            if !allow_prefill && encrypt_mib.is_none() && encrypt_sectors.is_none() {
-                return Err("错误: mode1 必须指定 --encrypt-mib 或 --encrypt-sectors".into());
-            }
-        }
-        2 => {
-            if boot_sectors.is_some() {
-                return Err("错误: --boot-sectors 仅用于 mode0".into());
-            }
-            if !allow_prefill && encrypt_mib.is_none() && encrypt_sectors.is_none() {
-                return Err("错误: mode2 必须指定 --encrypt-mib 或 --encrypt-sectors".into());
-            }
-        }
-        3 => {
-            if !allow_prefill && boot_mib.is_none() && boot_sectors.is_none() {
-                return Err("错误: mode3 必须指定 --boot-mib 或 --boot-sectors".into());
-            }
-            if !allow_prefill && share_mib.is_none() && share_sectors.is_none() {
-                return Err("错误: mode3 必须指定 --share-mib 或 --share-sectors".into());
-            }
-        }
-        _ => unreachable!(),
+    if matches!(target.mode_number(), Some(1 | 2)) && boot_sectors.is_some() {
+        return Err("错误: --boot-sectors 仅用于 mode0".into());
     }
 
-    let shared_label = volume_label.clone();
-    let volume_label = volume_label.unwrap_or_else(|| "启动区".into());
     Ok((
         ProvisionNewOpts {
             disk,
@@ -550,45 +473,22 @@ fn parse_new_provision_opts(
             share_sectors,
             encrypt_mib,
             encrypt_sectors,
-            label_id: match label_id {
-                Some(value) => value,
-                None if allow_prefill => String::new(),
-                None => crate::provision::OnlyId::random_candidate()?
-                    .text()
-                    .to_string(),
-            },
-            user: if allow_prefill {
-                user.unwrap_or_default()
-            } else {
-                user.ok_or("错误: provision 新盘操作必须指定 --user")?
-            },
-            dept: if allow_prefill {
-                dept.unwrap_or_default()
-            } else {
-                dept.ok_or("错误: provision 新盘操作必须指定 --dept")?
-            },
-            label: label.unwrap_or_else(|| {
-                if allow_prefill {
-                    String::new()
-                } else {
-                    crate::provision::DEFAULT_SAFE6_LABEL.into()
-                }
-            }),
+            label_id: label_id.unwrap_or_default(),
+            user: user.unwrap_or_default(),
+            dept: dept.unwrap_or_default(),
+            label: label.unwrap_or_default(),
             share_source_password: share_source_password.unwrap_or_default(),
             share_target_password: share_target_password
                 .unwrap_or_else(|| crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.into()),
             encrypt_source_password: encrypt_source_password.unwrap_or_default(),
             encrypt_target_password: encrypt_target_password
                 .unwrap_or_else(|| crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.into()),
-            volume_label: volume_label.clone(),
             format_boot,
             format_share,
             format_encrypt,
-            boot_label: boot_label.unwrap_or(volume_label),
-            share_label: share_label
-                .unwrap_or_else(|| shared_label.clone().unwrap_or_else(|| "交换区".into())),
-            encrypt_label: encrypt_label
-                .unwrap_or_else(|| shared_label.unwrap_or_else(|| "保密区".into())),
+            boot_label: boot_label.unwrap_or_else(|| "启动区".into()),
+            share_label: share_label.unwrap_or_else(|| "交换区".into()),
+            encrypt_label: encrypt_label.unwrap_or_else(|| "保密区".into()),
             boot_fs: boot_fs.unwrap_or(crate::filesystem::FilesystemKind::Fat16),
             share_fs: share_fs.unwrap_or(crate::filesystem::FilesystemKind::ExFat),
             encrypt_fs: encrypt_fs.unwrap_or(crate::filesystem::FilesystemKind::ExFat),
@@ -615,7 +515,7 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
     let tail = &rest[1..];
     match action {
         "plan" | "image" | "write" => {
-            let (opts, out, yes, backup_dir) = parse_new_provision_opts(tail, true)?;
+            let (opts, out, yes, backup_dir) = parse_provision_opts(tail)?;
             match action {
                 "plan" => {
                     if out.is_some() || yes || backup_dir.is_some() {

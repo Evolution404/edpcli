@@ -1,5 +1,5 @@
-//! Side-effect implementations. Application-facing facades keep existing API paths stable.
-pub(crate) mod backup_store;
+//! Side-effect implementations. Each implementation has a single canonical module path.
+pub mod backup_store;
 pub(crate) mod process;
 
-pub(crate) mod clock;
+pub mod clock;

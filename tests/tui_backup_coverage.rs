@@ -148,7 +148,8 @@ fn state() -> AppState {
         user: Some("张三".into()),
         dept: Some("输电运检中心".into()),
         provision_kind: Some(edpcli::provision::DiskProvisionKind::Mode0),
-        integrity_status: edpcli::diskio::BackupIntegrityStatus::Verified,
+        integrity_status:
+            edpcli::infrastructure::backup_store::catalog::BackupIntegrityStatus::Verified,
         size_ok: true,
         verification_error: None,
         content_sha256: Some("a".repeat(64)),

@@ -7,6 +7,7 @@ use crate::application::partition_table::{
     PartitionSource, PartitionTableExtent, PartitionTableKind, PartitionTableSnapshot,
     PhysicalPartition,
 };
+use crate::application::EdpfPartition;
 use crate::application::{BackupIntegrityStatus, BackupWorkspaceItem};
 use crate::backup_metadata::{Lba7CompatibilityGeometry, PartitionGeometry};
 use crate::common::{METADATA_IMAGE_LEN, SECTOR};
@@ -16,7 +17,6 @@ use crate::filesystem::FilesystemKind;
 use crate::provision::{
     DiskProvisionKind, OfficialPartitionMode, PartitionRole, ProvisionTarget, RegionDisposition,
 };
-use crate::sectors::EdpfPartition;
 use crate::tui::state::{
     ProvisionConfirmationAction, ProvisionConfirmationDataEffect,
     ProvisionConfirmationFilesystemEffect, ProvisionConfirmationOverall,
@@ -612,7 +612,7 @@ pub(super) fn hydrate_result(state: &mut crate::tui::state::AppState, scene: &st
         })
         .collect();
     let outcome = ProvisionWriteOutcome {
-        backup: crate::application::write::BackupReport {
+        backup: crate::application::post_restore::MetadataBackupReport {
             path: "DEMO-before-provision.edpb".into(),
             partition_count: plan.partitions.len(),
             edp_protocol_saved: true,

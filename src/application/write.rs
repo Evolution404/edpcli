@@ -13,9 +13,8 @@ pub use backup::{backup_create_flow, backup_create_on_disk, backup_create_on_dis
 #[path = "write/restore.rs"]
 mod restore;
 pub use restore::{
-    resolve_restore_backup_path, restore_flow, restore_flow_typed, restore_metadata_on_device,
-    restore_on_disk, restore_on_disk_typed, restore_on_disk_typed_with_pin,
-    restore_on_disk_with_pin, RestoreMetadataRequest,
+    resolve_restore_backup_path, restore_flow_typed, restore_metadata_on_device,
+    restore_on_disk_typed, restore_on_disk_typed_with_pin, RestoreMetadataRequest,
 };
 
 use std::path::PathBuf;
@@ -28,10 +27,13 @@ use super::media_identity::{
 use super::media_identity_observer::observe_media_identity_readonly;
 use super::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use crate::common::*;
-use crate::diskio::{self, raw_path, Clock, DiskFacts, SectorDev, SystemClock};
+use crate::diskio::{self, raw_path};
 use crate::identify::{generate_candidates, identify};
+use crate::infrastructure::backup_store::catalog::DiskFacts;
+use crate::infrastructure::clock::SystemClock;
+use crate::platform::system;
+use crate::ports::{Clock, CmdRunner, SectorDev};
 use crate::selectors::{BackupSelector, DeviceSelector};
-use crate::sysinfo::{self, CmdRunner};
 
 use super::device::open_readonly_usb_disk;
 pub use super::device::{guard_system_disk, guard_usb_disk};
@@ -74,8 +76,6 @@ pub enum WriteEvent {
         assessment: super::post_restore::PostRestoreAssessment,
     },
 }
-
-pub type BackupReport = super::post_restore::MetadataBackupReport;
 
 pub struct Ctx<'a> {
     pub runner: &'a dyn CmdRunner,
@@ -244,9 +244,11 @@ pub(crate) fn verify_reopened_snapshot(
         if actual != before {
             if lba == 4 {
                 let expected_id =
-                    diskio::lba4_label_id_from(before).unwrap_or_else(|| "未知".into());
+                    crate::infrastructure::backup_store::catalog::lba4_label_id_from(before)
+                        .unwrap_or_else(|| "未知".into());
                 let actual_id =
-                    diskio::lba4_label_id_from(&actual).unwrap_or_else(|| "未知".into());
+                    crate::infrastructure::backup_store::catalog::lba4_label_id_from(&actual)
+                        .unwrap_or_else(|| "未知".into());
                 return Err(err(
                     EXIT_TARGET,
                     format!(
@@ -276,7 +278,7 @@ fn protocol_image_confirms_plain(protocol_image: &[u8], total_sectors: u64) -> b
         return false;
     }
     let lba4 = &protocol_image[4 * SECTOR..5 * SECTOR];
-    diskio::lba4_label_id_from(lba4).is_none()
+    crate::infrastructure::backup_store::catalog::lba4_label_id_from(lba4).is_none()
         && crate::partition_table::confirmed_plain_protocol_prefix(protocol_image, total_sectors)
 }
 
@@ -297,7 +299,7 @@ pub fn verify_expected_identity(
                 format!("错误: 身份复核 LBA4 读取 {}B，预期 {SECTOR}B", raw.len()),
             ));
         }
-        let actual = diskio::lba4_label_id_from(&raw);
+        let actual = crate::infrastructure::backup_store::catalog::lba4_label_id_from(&raw);
         if actual.as_deref() != Some(expected) {
             return Err(err(
                 EXIT_TARGET,
@@ -356,9 +358,9 @@ pub fn verify_expected_identity(
                     ),
                 ));
             }
-            let tag = diskio::lba4_tag16_from(&lba4)
+            let tag = crate::infrastructure::backup_store::catalog::lba4_tag16_from(&lba4)
                 .ok_or_else(|| err(EXIT_IO, "错误: Plain 身份复核无法读取 LBA4 身份标签"))?;
-            if diskio::lba4_label_id_from(&lba4).is_some() {
+            if crate::infrastructure::backup_store::catalog::lba4_label_id_from(&lba4).is_some() {
                 return Err(err(
                     EXIT_TARGET,
                     "错误: LBA7 无法识别但 LBA4 仍含有效 EDP onlyid；疑似损坏 EDP，拒绝按 Plain 硬件身份继续",
@@ -366,7 +368,7 @@ pub fn verify_expected_identity(
             }
             if tag.iter().any(|&byte| byte != 0) {
                 let image = read_image(dev)?;
-                let total_sectors = sysinfo::disk_total_sectors(runner, disk).ok_or_else(|| {
+                let total_sectors = system::disk_total_sectors(runner, disk).ok_or_else(|| {
                     err(
                         EXIT_TARGET,
                         "错误: Plain 身份复核无法取得物理总扇区数，拒绝按硬件身份继续",

@@ -10,7 +10,8 @@ use common::*;
 use edpcli::application::support::{
     EXIT_INTERMEDIATE, EXIT_ROLLED_BACK, METADATA_IMAGE_LEN, METADATA_LAST_LBA, SECTOR,
 };
-use edpcli::diskio::{atomic_write_sectors, pwrite_loop, FileDev, SectorDev};
+use edpcli::diskio::{atomic_write_sectors, pwrite_loop, FileDev};
+use edpcli::ports::SectorDev;
 
 struct Image {
     #[allow(dead_code)] // 仅为 Drop 清理保留

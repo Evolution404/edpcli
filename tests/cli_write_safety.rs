@@ -16,12 +16,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::*;
-use edpcli::application::support::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, EXIT_TARGET, SECTOR};
-use edpcli::application::write::{backup_create_flow, restore_flow, Ctx};
+use edpcli::application::support::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_TARGET, SECTOR};
+use edpcli::application::write::{backup_create_flow, restore_flow_typed, Ctx};
 use edpcli::diskio::FileDev;
-use edpcli::diskio::SectorDev;
 use edpcli::edpb::{self, CoreCapture};
-use edpcli::platform::system::CmdRunner;
+use edpcli::ports::CmdRunner;
+use edpcli::ports::SectorDev;
 
 // ══════════════════════════════════════════════════════════════════
 // 子进程测试(真二进制)
@@ -91,7 +91,7 @@ fn ctx<'a>(
 }
 
 struct FixedClockForCli;
-impl edpcli::diskio::Clock for FixedClockForCli {
+impl edpcli::ports::Clock for FixedClockForCli {
     fn now_epoch(&self) -> i64 {
         1789603200
     }
@@ -133,7 +133,9 @@ fn write_test_edpb_with_notes(
     state_and_notes: (&str, Vec<String>),
 ) {
     let (state, notes) = state_and_notes;
-    let onlyid = edpcli::diskio::lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR]);
+    let onlyid = edpcli::infrastructure::backup_store::catalog::lba4_label_id_from(
+        &data[4 * SECTOR..5 * SECTOR],
+    );
     let capture = CoreCapture {
         snapshot_id: path.file_name().unwrap().to_string_lossy().into_owned(),
         created_epoch: 1_789_603_200,
@@ -152,7 +154,7 @@ fn write_test_edpb_with_notes(
         edpb::write_core_backup(path, &capture).unwrap();
     } else {
         // Free-text identity evidence is valid only as a historical manifest-v1 fixture.
-        edpb::write_legacy_v1_core_backup_with_notes(path, &capture, &notes).unwrap();
+        crate::historical_edpb::v1_core_with_notes(path, &capture, &notes).unwrap();
     }
 }
 
@@ -453,7 +455,7 @@ fn restore_clone_with_same_edp_identity_but_different_usb_serial_is_rejected_bef
     let mut prompt = ScriptPrompter::yes();
     let mut dev = SwapOnReopenDev::new(original.clone(), original);
 
-    let error = restore_flow(
+    let error = restore_flow_typed(
         Some(backup.to_string_lossy().into_owned()),
         6,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -492,7 +494,7 @@ fn restore_numeric_selector_cannot_bypass_serial_authorization() {
     let runner = netac_serial_runner(6, "CLONED-USB-SERIAL-002");
     let mut prompt = ScriptPrompter::yes();
     let mut dev = SwapOnReopenDev::new(original.clone(), original);
-    let error = restore_flow(
+    let error = restore_flow_typed(
         Some("1".into()),
         6,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -523,7 +525,7 @@ fn restore_weak_backup_cannot_authorize_destructive_write() {
     let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
     let mut prompt = ScriptPrompter::yes();
     let mut dev = SwapOnReopenDev::new(original.clone(), original);
-    let error = restore_flow(
+    let error = restore_flow_typed(
         Some(backup.to_string_lossy().into_owned()),
         6,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -554,7 +556,7 @@ fn restore_geometry_conflict_rejected_before_write() {
     let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
     let mut prompt = ScriptPrompter::yes();
     let mut dev = SwapOnReopenDev::new(original.clone(), original);
-    let error = restore_flow(
+    let error = restore_flow_typed(
         Some(backup.to_string_lossy().into_owned()),
         6,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -582,7 +584,7 @@ fn restore_vid_pid_hard_conflict_rejected_before_write() {
         };
         let mut prompt = ScriptPrompter::yes();
         let mut dev = SwapOnReopenDev::new(original.clone(), original.clone());
-        let error = restore_flow(
+        let error = restore_flow_typed(
             Some(backup.to_string_lossy().into_owned()),
             6,
             &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -621,7 +623,7 @@ fn restore_same_protocol_clone_swapped_after_reopen_has_zero_writes() {
         reopened: Arc::clone(&reopened),
     };
     let mut prompt = ScriptPrompter::yes();
-    let error = restore_flow(
+    let error = restore_flow_typed(
         Some(backup.to_string_lossy().into_owned()),
         6,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -666,14 +668,16 @@ fn restore_v1_and_v2_canonical_identity_share_hard_conflict_authorization() {
         vid: "0dd8".into(),
         pid: "2005".into(),
         device_id: "disk&ven_netac&prod_onlydisk".into(),
-        onlyid: edpcli::diskio::lba4_label_id_from(&original[4 * SECTOR..5 * SECTOR]),
+        onlyid: edpcli::infrastructure::backup_store::catalog::lba4_label_id_from(
+            &original[4 * SECTOR..5 * SECTOR],
+        ),
         total_sectors: Some(122_880_000),
         logical_sector_size: SECTOR as u32,
         edpcli_version: env!("CARGO_PKG_VERSION").into(),
         device_state: "edp".into(),
         lba0_12: &original,
     };
-    edpb::write_legacy_v2_core_backup_with_identity(&v2, &capture, &identity).unwrap();
+    crate::historical_edpb::v2_core_with_identity(&v2, &capture, &identity).unwrap();
     assert_eq!(
         edpb::verify_file(&v1).unwrap().manifest.schema,
         "edpb.manifest.v1"
@@ -687,7 +691,7 @@ fn restore_v1_and_v2_canonical_identity_share_hard_conflict_authorization() {
     for path in [v1, v2] {
         let mut prompt = ScriptPrompter::yes();
         let mut dev = SwapOnReopenDev::new(original.clone(), original.clone());
-        let error = restore_flow(
+        let error = restore_flow_typed(
             Some(path.to_string_lossy().into_owned()),
             6,
             &mut ctx(&target_runner, &mut prompt, &tmp.0),
@@ -713,7 +717,7 @@ fn restore_corrupt_edp_with_nonzero_lba4_does_not_fallback_plain() {
     let runner = netac_serial_runner(6, "NETAC-HIL-SERIAL-001");
     let mut prompt = ScriptPrompter::yes();
     let mut dev = SwapOnReopenDev::new(corrupt.clone(), corrupt);
-    let error = restore_flow(
+    let error = restore_flow_typed(
         Some(backup.to_string_lossy().into_owned()),
         6,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -749,7 +753,7 @@ fn restore_numeric_target_uses_backup_selector_and_current_disk_identity() {
         idx: 0,
     };
     let mut dev = SwapOnReopenDev::new(orig.clone(), orig);
-    let error = restore_flow(
+    let error = restore_flow_typed(
         Some("1".into()),
         6,
         &mut ctx(&runner, &mut prompt, &backup_dir),
@@ -796,7 +800,7 @@ fn restore_rejects_legacy_bin_when_device_id_is_unavailable() {
     )
     .unwrap();
 
-    let e = restore_flow(
+    let e = restore_flow_typed(
         Some(bakfile.to_string_lossy().into_owned()),
         26,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -832,7 +836,7 @@ fn restore_refuses_when_current_disk_identity_tag_is_zero() {
     )
     .unwrap();
 
-    let e = restore_flow(
+    let e = restore_flow_typed(
         Some(bakfile.to_string_lossy().into_owned()),
         26,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -908,7 +912,7 @@ fn restore_allows_plain_lba4_zero_only_with_matching_hardware_binding() {
     )
     .unwrap();
 
-    let code = restore_flow(
+    let code = restore_flow_typed(
         Some(bakfile.to_string_lossy().into_owned()),
         26,
         &mut Ctx {
@@ -921,7 +925,8 @@ fn restore_allows_plain_lba4_zero_only_with_matching_hardware_binding() {
     )
     .unwrap();
 
-    assert_eq!(code, EXIT_OK);
+    assert!(code.report.metadata_restored);
+    assert!(code.report.readback_verified);
     assert_eq!(fs::read(&img_path).unwrap(), original);
 }
 
@@ -954,7 +959,7 @@ fn restore_plain_lba4_zero_rejects_wrong_hardware_serial() {
     )
     .unwrap();
 
-    let error = restore_flow(
+    let error = restore_flow_typed(
         Some(bakfile.to_string_lossy().into_owned()),
         26,
         &mut Ctx {
@@ -1138,7 +1143,7 @@ fn chapter_18_b4_plain_v3_restore_writes_partition_metadata_without_protocol_cor
     )
     .unwrap();
     let mut restore_prompt = ScriptPrompter::yes();
-    let code = restore_flow(
+    let code = restore_flow_typed(
         Some(report.path.to_string_lossy().into_owned()),
         26,
         &mut Ctx {
@@ -1151,7 +1156,8 @@ fn chapter_18_b4_plain_v3_restore_writes_partition_metadata_without_protocol_cor
     )
     .unwrap();
 
-    assert_eq!(code, EXIT_OK);
+    assert!(code.report.metadata_restored);
+    assert!(code.report.readback_verified);
     let restored = fs::read(&target_path).unwrap();
     assert_eq!(
         &restored[..SECTOR],
@@ -1219,8 +1225,10 @@ fn restore_picker_selects_newest_and_writes() {
         std::time::Duration::from_secs(1),
     )
     .unwrap();
-    let code = restore_flow(None, 26, &mut ctx(&runner, &mut prompt, &bak), &mut dev).unwrap();
-    assert_eq!(code, EXIT_OK);
+    let code =
+        restore_flow_typed(None, 26, &mut ctx(&runner, &mut prompt, &bak), &mut dev).unwrap();
+    assert!(code.report.metadata_restored);
+    assert!(code.report.readback_verified);
     assert_eq!(fs::read(&img_path).unwrap(), conv);
 
     // 选择 2（较旧备份）+ YES → 正常恢复原盘协议镜像。
@@ -1233,8 +1241,10 @@ fn restore_picker_selects_newest_and_writes() {
         std::time::Duration::from_secs(1),
     )
     .unwrap();
-    let code2 = restore_flow(None, 26, &mut ctx(&runner, &mut prompt2, &bak), &mut dev2).unwrap();
-    assert_eq!(code2, EXIT_OK);
+    let code2 =
+        restore_flow_typed(None, 26, &mut ctx(&runner, &mut prompt2, &bak), &mut dev2).unwrap();
+    assert!(code2.report.metadata_restored);
+    assert!(code2.report.readback_verified);
     assert_eq!(fs::read(&img_path).unwrap(), orig);
 }
 
@@ -1261,7 +1271,7 @@ fn restore_edpb_payload_hash_mismatch_rejected() {
         std::time::Duration::from_secs(1),
     )
     .unwrap();
-    let e = restore_flow(
+    let e = restore_flow_typed(
         Some(bakfile.to_string_lossy().into_owned()),
         26,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -1294,14 +1304,15 @@ fn restore_valid_edpb_needs_no_external_sidecar() {
     )
     .unwrap();
 
-    let code = restore_flow(
+    let code = restore_flow_typed(
         Some(bakfile.to_string_lossy().into_owned()),
         26,
         &mut ctx(&runner, &mut prompt, &tmp.0),
         &mut dev,
     )
     .unwrap();
-    assert_eq!(code, EXIT_OK);
+    assert!(code.report.metadata_restored);
+    assert!(code.report.readback_verified);
     assert_eq!(fs::read(&img_path).unwrap(), orig);
 }
 
@@ -1326,7 +1337,7 @@ fn restore_truncated_edpb_is_rejected() {
         std::time::Duration::from_secs(1),
     )
     .unwrap();
-    let err = restore_flow(
+    let err = restore_flow_typed(
         Some(bakfile.to_string_lossy().into_owned()),
         26,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -1357,7 +1368,7 @@ fn restore_explicit_backup_from_other_disk_is_rejected() {
         std::time::Duration::from_secs(1),
     )
     .unwrap();
-    let err = restore_flow(
+    let err = restore_flow_typed(
         Some(bakfile.to_string_lossy().into_owned()),
         26,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -1396,7 +1407,7 @@ fn restore_no_backup_found() {
         std::time::Duration::from_secs(1),
     )
     .unwrap();
-    let e = restore_flow(
+    let e = restore_flow_typed(
         None,
         26,
         &mut ctx(&runner, &mut prompt, &empty_bak),
@@ -1422,7 +1433,7 @@ fn restore_refuses_if_disk_identity_changes_after_reopen() {
     let mut prompt = ScriptPrompter::yes();
     let mut dev = SwapOnReopenDev::new(netac, lexar);
 
-    let e = restore_flow(
+    let e = restore_flow_typed(
         Some(backup.to_string_lossy().into_owned()),
         6,
         &mut ctx(&runner, &mut prompt, &tmp.0),
@@ -1543,7 +1554,9 @@ fn restore_metadata_edpb_restores_lba0_12_and_validated_lce_together() {
             vid: "0dd8".into(),
             pid: "2005".into(),
             device_id: device_id.into(),
-            onlyid: edpcli::diskio::lba4_label_id_from(&original[4 * SECTOR..5 * SECTOR]),
+            onlyid: edpcli::infrastructure::backup_store::catalog::lba4_label_id_from(
+                &original[4 * SECTOR..5 * SECTOR],
+            ),
             total_sectors: Some(total_sectors),
             logical_sector_size: SECTOR as u32,
             edpcli_version: env!("CARGO_PKG_VERSION").into(),
@@ -1644,14 +1657,15 @@ fn restore_metadata_edpb_restores_lba0_12_and_validated_lce_together() {
         sectors: current_lce,
         writes: 0,
     };
-    let code = restore_flow(
+    let code = restore_flow_typed(
         Some(backup.to_string_lossy().into_owned()),
         6,
         &mut ctx(&runner, &mut prompt, &tmp.0),
         &mut dev,
     )
     .unwrap();
-    assert_eq!(code, EXIT_OK);
+    assert!(code.report.metadata_restored);
+    assert!(code.report.readback_verified);
     assert_eq!(dev.metadata, original);
     assert_eq!(
         dev.writes,

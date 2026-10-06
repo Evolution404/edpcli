@@ -4,7 +4,7 @@ use crate::filesystem::FilesystemKind;
 use crate::protocol::edpf::EdpPartitionType;
 use crate::{
     common::SECTOR,
-    crypto::{a6b0_full, crc32_bare, xor_rolling},
+    protocol::crypto::{a6b0_full, crc32_bare, xor_rolling},
     protocol::edpf::{EdpfEntry64, EdpfEntry96, PassInfo},
 };
 

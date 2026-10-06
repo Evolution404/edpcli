@@ -8,9 +8,8 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use crate::application::BackupWorkspaceItem;
+use crate::application::{system_runner, BackupWorkspaceItem};
 use crate::disk_scan::Row;
-use crate::sysinfo::SysRunner;
 
 #[path = "task_gate.rs"]
 mod task_gate;
@@ -367,7 +366,7 @@ impl TaskHub {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let outcome = catch_unwind(AssertUnwindSafe(|| {
-                let runner = SysRunner;
+                let runner = system_runner();
                 if let Some(snapshot) = request.snapshot {
                     crate::application::scan_dashboard_snapshot(&runner, &snapshot)
                 } else {

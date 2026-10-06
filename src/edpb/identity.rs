@@ -47,29 +47,12 @@ pub(super) fn manifest_provision_kind(
 pub fn manifest_identity_from_snapshot(
     snapshot: &crate::media_identity::MediaIdentitySnapshot,
 ) -> ManifestIdentity {
-    manifest_identity_from_snapshot_for_schema(snapshot, false)
-}
-
-pub(super) fn manifest_identity_from_snapshot_v2(
-    snapshot: &crate::media_identity::MediaIdentitySnapshot,
-) -> ManifestIdentity {
-    manifest_identity_from_snapshot_for_schema(snapshot, true)
-}
-
-fn manifest_identity_from_snapshot_for_schema(
-    snapshot: &crate::media_identity::MediaIdentitySnapshot,
-    legacy_v2: bool,
-) -> ManifestIdentity {
     ManifestIdentity {
         hardware: ManifestHardwareIdentity {
             vid: snapshot.hardware.vid,
             pid: snapshot.hardware.pid,
-            serial: (!legacy_v2)
-                .then(|| snapshot.hardware.serial.clone())
-                .flatten(),
-            serial_sha256: legacy_v2
-                .then(|| snapshot.hardware.serial_sha256.clone())
-                .flatten(),
+            serial: snapshot.hardware.serial.clone(),
+            serial_sha256: None,
             serial_quality: manifest_serial_quality(snapshot.hardware.serial_quality),
             vendor: snapshot.hardware.vendor.clone(),
             product: snapshot.hardware.product.clone(),

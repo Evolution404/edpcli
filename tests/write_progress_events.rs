@@ -138,7 +138,7 @@ fn tag(event: &WriteEvent) -> &'static str {
 struct FixedClock;
 
 #[cfg(target_os = "macos")]
-impl edpcli::diskio::Clock for FixedClock {
+impl edpcli::ports::Clock for FixedClock {
     fn now_epoch(&self) -> i64 {
         1789603200
     }
@@ -156,7 +156,7 @@ struct SerialRunner {
 }
 
 #[cfg(target_os = "macos")]
-impl edpcli::platform::system::CmdRunner for SerialRunner {
+impl edpcli::ports::CmdRunner for SerialRunner {
     fn check_output(&self, cmd: &[&str], timeout: std::time::Duration) -> std::io::Result<String> {
         self.inner.check_output(cmd, timeout)
     }

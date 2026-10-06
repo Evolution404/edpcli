@@ -1,3 +1,6 @@
+#[path = "support/historical_edpb.rs"]
+mod historical_edpb;
+
 #[path = "common/mod.rs"]
 pub mod common;
 #[path = "support/gold_name.rs"]

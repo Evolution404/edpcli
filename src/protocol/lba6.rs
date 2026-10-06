@@ -1,5 +1,5 @@
 use super::{layout, profile::DeptLayout, types::*};
-use crate::crypto::{lba6_checksum, lba6_decode, xor_rolling, LBA6_K0};
+use crate::protocol::crypto::{lba6_checksum, lba6_decode, xor_rolling, LBA6_K0};
 
 #[derive(Clone, Debug)]
 pub enum DeptInline {

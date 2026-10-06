@@ -243,7 +243,7 @@ pub fn prepare_target_provision(
     let source_onlyid = source.as_ref().and_then(|_| {
         source_metadata
             .get(4 * SECTOR..5 * SECTOR)
-            .and_then(diskio::lba4_label_id_from)
+            .and_then(crate::infrastructure::backup_store::catalog::lba4_label_id_from)
     });
     let onlyid = if request.label_id.trim().is_empty() {
         match source_onlyid {
@@ -520,7 +520,7 @@ pub fn prepare_provision(
             Ok(PreparedProvision::Official(Box::new(prepared)))
         }
         ProvisionRequest::Plain(request) => {
-            let total_sectors = sysinfo::disk_total_sectors(runner, disk)
+            let total_sectors = system::disk_total_sectors(runner, disk)
                 .ok_or_else(|| err(EXIT_TARGET, "错误: 无法取得目标盘总扇区数"))?;
             let plan = request.resolve_typed(total_sectors).map_err(|error| {
                 err(

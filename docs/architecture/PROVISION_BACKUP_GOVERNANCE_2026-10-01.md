@@ -261,7 +261,7 @@ verify_lce_readback() 必须独立执行以下检查：
 当前 `Inspect` 已使用：
 
 ```text
-a6b0_full_offset(raw, &[0u8; 8], physical_offset)
+a6b0_full(raw, &[0u8; 8], physical_offset)
 ```
 
 所以读回验收应复用同一协议事实，不新增第二套 LCE 解密实现。
@@ -1219,7 +1219,7 @@ P0 LCE：
 
 - src/application/provision/commit.rs
 - src/application/provision/tests.rs
-- 必要时 src/provision/lce.rs 增加只读 decode helper，但优先复用 crypto::a6b0_full_offset
+- 必要时 src/provision/lce.rs 增加只读 decode helper，但优先复用 crypto::a6b0_full
 - Virtual Disk HIL / 对应测试 `fixture`
 
 P1 卷标与兼容区：

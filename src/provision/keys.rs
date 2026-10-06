@@ -2,7 +2,7 @@
 
 use super::key_domain::DEFAULT_KEY_DOMAIN_PASSWORD;
 
-use crate::crypto::{
+use crate::protocol::crypto::{
     a6b0_decrypt, a7f0_encrypt, aes128_ecb_decrypt_block, aes128_ecb_encrypt_block, crc32_bare,
     sm4_decrypt_block, sm4_encrypt_block,
 };
@@ -404,7 +404,7 @@ pub fn default_file_key_checked(
     device_id: &str,
     index: usize,
 ) -> Result<[u8; 16], DefaultFileKeyError> {
-    use crate::crypto::{a6b0_full, crc32_bare};
+    use crate::protocol::crypto::{a6b0_full, crc32_bare};
     use crate::protocol::edpf::{EdpfEntry96, PassInfo};
 
     if image.len() != 13 * 512 || index >= 3 {

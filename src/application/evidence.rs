@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::common::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
 use crate::diskio::{self, FileDev};
 use crate::edpb::Manifest;
-use crate::sysinfo::CmdRunner;
+use crate::ports::CmdRunner;
 
 use super::target_session::{ReadOnly, TargetSession};
 

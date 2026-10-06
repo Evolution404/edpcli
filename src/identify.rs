@@ -1,8 +1,8 @@
 //! device_id 识别（平台硬件探测 + LBA7 EDPF magic 判真）。
 
-use crate::crypto::{crc32_bare, xor_rolling};
 use crate::platform::{HardwareProbe, InquiryInfo, NativeTransport};
-use crate::sysinfo::CmdRunner;
+use crate::ports::CmdRunner;
+use crate::protocol::crypto::{crc32_bare, xor_rolling};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transport {
@@ -150,19 +150,6 @@ fn transport_from_native(probe: &HardwareProbe) -> Transport {
         NativeTransport::Bot => Transport::Bot,
         NativeTransport::Unknown => Transport::Unknown,
     }
-}
-
-pub fn detect_transport(runner: &dyn CmdRunner, disk: u32) -> Transport {
-    if let Some(probe) = runner.hardware_probe(disk) {
-        let transport = transport_from_native(&probe);
-        if transport != Transport::Unknown {
-            return transport;
-        }
-    }
-    crate::platform::fallback_hardware_probe(runner, disk)
-        .as_ref()
-        .map(transport_from_native)
-        .unwrap_or(Transport::Unknown)
 }
 
 fn push_candidate(cs: &mut Vec<String>, candidate: String) {

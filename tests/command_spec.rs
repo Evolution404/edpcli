@@ -39,8 +39,8 @@ fn command_schema_is_the_public_surface_catalog() {
         assert!(options.contains(&"--disk"), "{action} missing --disk");
         assert!(options.contains(&"--target"), "{action} missing --target");
         assert!(
-            options.contains(&"--mode"),
-            "{action} missing legacy --mode"
+            !options.contains(&"--mode"),
+            "{action} exposes removed --mode"
         );
         assert!(
             options.contains(&"--partition"),

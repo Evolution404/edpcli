@@ -3,7 +3,7 @@ use super::{
     profile::{Lba7EntryCount, Lba7PassinfoVersion},
     types::*,
 };
-use crate::crypto::xor_rolling;
+use crate::protocol::crypto::xor_rolling;
 
 /// Partition-mode selector emitted by the first-party label tool.
 ///

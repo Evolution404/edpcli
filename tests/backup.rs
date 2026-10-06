@@ -2,6 +2,7 @@
 //! 全部纯文件系统操作 + 注入 DiskFacts/FixedClock, 不碰真盘。
 
 use crate::common;
+use crate::gold_name::parse_fixture_backup_name;
 
 use std::fs;
 
@@ -12,15 +13,15 @@ use edpcli::application::media_identity::{
 };
 use edpcli::application::support::{METADATA_IMAGE_LEN, SECTOR};
 use edpcli::cli::{backup_delete, backup_list, backup_prune, backup_verify};
-use edpcli::diskio::Clock;
-use edpcli::diskio::{
-    create_backup, find_backups, parse_backup_name, prune_candidates, scan_backup_dir, BackupEntry,
-    BackupIntegrityStatus, BackupMeta, DiskFacts,
-};
 use edpcli::edpb::{
     self, ArtifactCompleteness, ArtifactInput, CoreCapture, Extent, ManifestPartition,
     MetadataCapture, Region, RestorePolicy, SemanticStatus,
 };
+use edpcli::infrastructure::backup_store::catalog::{
+    prune_candidates, scan_backup_dir, BackupEntry, BackupIntegrityStatus, BackupMeta, DiskFacts,
+};
+use edpcli::infrastructure::backup_store::create::{create_metadata_backup, find_backups};
+use edpcli::ports::Clock;
 
 struct FixedClock;
 impl Clock for FixedClock {
@@ -62,7 +63,9 @@ fn current_identity(data: &[u8], device_id: &str) -> MediaIdentitySnapshot {
         },
         protocol: ProtocolIdentityEvidence {
             device_id: Some(device_id.to_string()),
-            onlyid: edpcli::diskio::lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR]),
+            onlyid: edpcli::infrastructure::backup_store::catalog::lba4_label_id_from(
+                &data[4 * SECTOR..5 * SECTOR],
+            ),
             provision_kind: edpcli::provision::DiskProvisionKind::from_metadata(data, device_id),
             lba4_identity_digest: None,
         },
@@ -71,10 +74,30 @@ fn current_identity(data: &[u8], device_id: &str) -> MediaIdentitySnapshot {
     }
 }
 
+fn create_test_metadata_backup(
+    facts: &DiskFacts,
+    data: &[u8],
+    device_id: &str,
+    root: &std::path::Path,
+    clock: &dyn Clock,
+) -> Result<std::path::PathBuf, edpcli::application::support::EdpCliError> {
+    create_metadata_backup(
+        facts,
+        data,
+        device_id,
+        Default::default(),
+        &current_identity(data, device_id),
+        root,
+        clock,
+    )
+}
+
 fn write_backup(dir: &std::path::Path, name: &str, data: &[u8]) -> std::path::PathBuf {
     let p = dir.join(name);
-    let meta = parse_backup_name(name).expect("测试 EDPB 文件名必须可解析");
-    let onlyid = edpcli::diskio::lba4_label_id_from(&data[4 * SECTOR..5 * SECTOR]);
+    let meta = parse_fixture_backup_name(name).expect("测试 EDPB 文件名必须可解析");
+    let onlyid = edpcli::infrastructure::backup_store::catalog::lba4_label_id_from(
+        &data[4 * SECTOR..5 * SECTOR],
+    );
     let capture = CoreCapture {
         snapshot_id: format!("test-{name}"),
         created_epoch: 1_789_000_000,
@@ -180,7 +203,10 @@ fn edpb_backup_label_id_comes_from_raw_lba4() {
     );
     let raw = edpb::read_raw_protocol(&path).unwrap();
     assert_eq!(
-        edpcli::diskio::lba4_label_id_from(&raw[4 * SECTOR..5 * SECTOR]).as_deref(),
+        edpcli::infrastructure::backup_store::catalog::lba4_label_id_from(
+            &raw[4 * SECTOR..5 * SECTOR]
+        )
+        .as_deref(),
         Some("1402259934")
     );
 }
@@ -227,7 +253,7 @@ fn backup_written_as_single_edpb_with_internal_hashes_and_onlyid() {
         return;
     };
     let tmp = TmpDir::new("backup");
-    let path = create_backup(
+    let path = create_test_metadata_backup(
         &netac_facts(),
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -260,7 +286,7 @@ fn backup_rejects_incomplete_lba_image_before_creating_files() {
     };
     data.pop();
     let tmp = TmpDir::new("backup_short_image");
-    let result = create_backup(
+    let result = create_test_metadata_backup(
         &netac_facts(),
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -283,7 +309,7 @@ fn backup_filename_onlyid_is_derived_from_lba4_content() {
     let tmp = TmpDir::new("backup_content_onlyid");
     let mut facts = netac_facts();
     facts.label_id = Some("999999999".into());
-    let path = create_backup(
+    let path = create_test_metadata_backup(
         &facts,
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -355,7 +381,7 @@ fn backup_rejects_device_id_with_path_separators_before_creating_files() {
     fs::create_dir_all(&bak).unwrap();
     // 旧实现会把 device_id 原样拼进文件名。预建第一层目录后，`/../../` 可逃出 bak。
     fs::create_dir_all(bak.join("disk99_122880000_vid0dd8_pid2005_disk&ven_bad")).unwrap();
-    let result = create_backup(
+    let result = create_test_metadata_backup(
         &netac_facts(),
         &data,
         "disk&ven_bad/../../escaped",
@@ -386,7 +412,7 @@ fn creating_new_backup_does_not_rename_existing_history() {
     let legacy_sha256 = std::path::PathBuf::from(format!("{}.sha256", legacy.display()));
     fs::write(&legacy_sha256, format!("{}\n", sha256(&data))).unwrap();
 
-    let new_path = create_backup(
+    let new_path = create_test_metadata_backup(
         &netac_facts(),
         &data,
         "disk&ven_netac&prod_onlydisk",
@@ -411,7 +437,7 @@ fn backup_collision_never_overwrites_existing_file() {
         return;
     };
     let tmp = TmpDir::new("backup_collision");
-    let path = create_backup(
+    let path = create_test_metadata_backup(
         &netac_facts(),
         &original,
         "disk&ven_netac&prod_onlydisk",
@@ -424,7 +450,7 @@ fn backup_collision_never_overwrites_existing_file() {
     // 保持同一时间戳和同一“加密原盘”状态，只改一个与识别无关的保留扇区字节。
     let mut second = original.clone();
     second[2 * 512 + 17] ^= 0x5A;
-    let err = create_backup(
+    let err = create_test_metadata_backup(
         &netac_facts(),
         &second,
         "disk&ven_netac&prod_onlydisk",
@@ -469,9 +495,10 @@ fn plain_v3_metadata_opens_as_evidence_without_protocol_core() {
 }
 
 #[test]
-fn current_plain_backup_filename_is_a_supported_tool_name() {
+fn plain_fixture_filename_supplies_fixture_metadata() {
     let name = "disk5_245760000_vid2bdf_pid0300_plain_20260929_073104.edpb";
-    let meta = parse_backup_name(name).expect("current Plain writer filename must be parseable");
+    let meta =
+        parse_fixture_backup_name(name).expect("current Plain writer filename must be parseable");
     assert_eq!(meta.disk, 5);
     assert_eq!(meta.secs, Some(245_760_000));
     assert_eq!(meta.vid, "2bdf");
@@ -513,7 +540,7 @@ fn plain_v3_metadata_without_protocol_core_is_healthy_and_keeps_plain_kind() {
         Some(edpcli::provision::DiskProvisionKind::Plain)
     );
 
-    let rows = edpcli::application::scan_backup_workspace(&tmp.0);
+    let rows = edpcli::application::scan_backup_workspace_checked(&tmp.0).unwrap();
     let identity = edpcli::application::identity::WorkspaceIdentity::from_backup(&rows[0]);
     assert_eq!(
         identity.provision_kind,
@@ -521,11 +548,11 @@ fn plain_v3_metadata_without_protocol_core_is_healthy_and_keeps_plain_kind() {
         "verified Plain v3 row must show 普通盘"
     );
     assert!(
-        edpcli::diskio::backup_group_key(entry).is_none(),
+        edpcli::infrastructure::backup_store::catalog::backup_group_key(entry).is_none(),
         "weak Plain identity must remain excluded from destructive prune grouping"
     );
     assert!(
-        edpcli::diskio::backup_list_group_key(entry).is_some(),
+        edpcli::infrastructure::backup_store::catalog::backup_list_group_key(entry).is_some(),
         "healthy tool-owned Plain v3 must still be recognized by non-destructive list grouping"
     );
 }

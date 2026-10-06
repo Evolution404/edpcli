@@ -4,7 +4,7 @@
 //! LBA12 EDPF 解析；写入语义只由统一 provisioning 模块负责。
 
 use crate::common::SECTOR;
-use crate::crypto::{a6b0_full, crc32_bare};
+use crate::protocol::crypto::{a6b0_full, crc32_bare};
 
 pub const EDPF_TABLE_LEN: usize = 0x170;
 pub const E12: usize = 0x60;

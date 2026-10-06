@@ -28,7 +28,7 @@ pub struct ShellState {
     pub(super) disk_layout_selected: usize,
     pub(super) horizontal_scroll: std::collections::BTreeMap<
         crate::tui::table_layout::TableKind,
-        crate::tui::table_layout::HorizontalScrollState,
+        crate::tui::table_layout::TableInteractionState,
     >,
     pub(super) table_column_order:
         std::collections::BTreeMap<crate::tui::table_layout::TableKind, Vec<usize>>,

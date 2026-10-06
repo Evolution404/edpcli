@@ -7,14 +7,16 @@ use crate::cli::{
     argv_with_backup_dir_for_elevation, auto_pick_disk, guard_usb_disk, InfoOpts, StdPrompter,
 };
 use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, SECTOR};
-use crate::diskio::{self, find_backups, raw_path, FileDev, SectorReadCache};
+use crate::diskio::{raw_path, FileDev, SectorReadCache};
 use crate::elevate;
 use crate::identify::identify;
+use crate::infrastructure::backup_store::create::find_backups;
 use crate::inspect_cli::resolve_inspect_file;
 use crate::metainfo;
+use crate::platform::system;
+use crate::ports::CmdRunner;
 use crate::protocol::semantic::SemanticContext;
 use crate::selectors::DeviceSelector;
-use crate::sysinfo::{self, CmdRunner};
 
 enum BackupSummary<'a> {
     File(&'a std::path::Path),
@@ -43,7 +45,10 @@ fn print_summary(source: &str, summary: &metainfo::MetaInfoSummary, backups: Bac
                 println!(
                     "  {}  {}",
                     crate::ui::dim(&crate::ui::pad_to("最新备份", 18)),
-                    diskio::backup_display_time(latest, diskio::mtime_epoch(latest))
+                    crate::infrastructure::backup_store::catalog::backup_display_time(
+                        latest,
+                        crate::infrastructure::backup_store::create::mtime_epoch(latest)
+                    )
                 );
             }
         }
@@ -51,7 +56,8 @@ fn print_summary(source: &str, summary: &metainfo::MetaInfoSummary, backups: Bac
 }
 
 fn backup_flow(opts: InfoOpts) -> i32 {
-    let bak = diskio::resolve_backup_dir(opts.backup_dir.as_deref());
+    let bak =
+        crate::infrastructure::backup_store::config::resolve_backup_dir(opts.backup_dir.as_deref());
     let Some(target) = opts.backup.as_deref() else {
         eprintln!("{}", crate::ui::red("错误: info 缺少备份来源"));
         return EXIT_BACKUP;
@@ -194,11 +200,13 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
         .as_deref()
         .and_then(|raw| identify(runner, n, raw).device_id);
     let device_id = opts.device_id.clone().or(auto_device_id);
-    let (vid, pid) = sysinfo::usb_vid_pid(runner, n);
-    let total_sectors = sysinfo::disk_total_sectors(runner, n);
+    let (vid, pid) = system::usb_vid_pid(runner, n);
+    let total_sectors = system::disk_total_sectors(runner, n);
     let size_bytes = total_sectors.and_then(|s| s.checked_mul(SECTOR as u64));
     let raw4 = reader.read_sector(4).ok();
-    let onlyid = raw4.as_deref().and_then(diskio::lba4_label_id_from);
+    let onlyid = raw4
+        .as_deref()
+        .and_then(crate::infrastructure::backup_store::catalog::lba4_label_id_from);
     let inspect_meta = SemanticContext {
         device_id: device_id.clone(),
         vid: (vid != "xxxx").then_some(vid.clone()),
@@ -264,7 +272,8 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
                 }
             }
         };
-    let backup_dir = diskio::resolve_backup_dir(opts.backup_dir.as_deref());
+    let backup_dir =
+        crate::infrastructure::backup_store::config::resolve_backup_dir(opts.backup_dir.as_deref());
     let backup_matches = find_backups(&backup_dir, &identity);
     let backups = backup_matches.confirmed;
     print_summary(

@@ -35,14 +35,12 @@ pub enum PostRestoreLabelTarget {
     Reinitialize,
 }
 
-pub type ExpectedIdentity = crate::application::media_identity::MediaIdentityResumePin;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriteIntent {
     pub kind: WriteKind,
     pub disk: u32,
     pub backup: Option<std::path::PathBuf>,
-    pub expected_identity: Option<ExpectedIdentity>,
+    pub expected_identity: Option<crate::application::media_identity::MediaIdentityResumePin>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,7 +75,7 @@ pub struct WizardState {
     pub kind: WriteKind,
     pub disk: u32,
     pub backup: Option<std::path::PathBuf>,
-    pub expected_identity: Option<ExpectedIdentity>,
+    pub expected_identity: Option<crate::application::media_identity::MediaIdentityResumePin>,
     pub confirmation: String,
     pub message: Option<crate::tui::ui::UiMessage>,
     pub restore_outcome: Option<crate::application::post_restore::MetadataRestoreOutcome>,

@@ -3,26 +3,16 @@ use super::*;
 pub(super) fn base_manifest(
     capture: &CoreCapture<'_>,
     identity: Option<&crate::media_identity::MediaIdentitySnapshot>,
-    schema: &str,
 ) -> Manifest {
     let capacity_bytes = capture
         .total_sectors
         .and_then(|sectors| sectors.checked_mul(capture.logical_sector_size as u64));
-    let typed_identity = matches!(schema, "edpb.manifest.v2" | "edpb.manifest.v3").then(|| {
-        identity
-            .map(|snapshot| {
-                if schema == "edpb.manifest.v2" {
-                    manifest_identity_from_snapshot_v2(snapshot)
-                } else {
-                    manifest_identity_from_snapshot(snapshot)
-                }
-            })
-            .unwrap_or_else(|| inferred_manifest_identity(capture))
-    });
-    let manifest_v3 = schema == "edpb.manifest.v3";
+    let typed_identity = identity
+        .map(manifest_identity_from_snapshot)
+        .unwrap_or_else(|| inferred_manifest_identity(capture));
     let restores_edp_protocol = !capture.device_state.eq_ignore_ascii_case("plain");
     Manifest {
-        schema: schema.into(),
+        schema: "edpb.manifest.v3".into(),
         container_version: ContainerVersion {
             major: FORMAT_MAJOR,
             minor: FORMAT_MINOR,
@@ -33,16 +23,15 @@ pub(super) fn base_manifest(
             capture_level: CaptureLevel::Core,
             device_state: capture.device_state.clone(),
         },
-        backup_purpose: manifest_v3.then_some(BackupPurpose::MetadataOnly),
-        restore_contract: manifest_v3
-            .then(|| RestoreContract::metadata_only(restores_edp_protocol)),
+        backup_purpose: Some(BackupPurpose::MetadataOnly),
+        restore_contract: Some(RestoreContract::metadata_only(restores_edp_protocol)),
         device: DeviceIdentity {
             vid: capture.vid.clone(),
             pid: capture.pid.clone(),
             device_id: capture.device_id.clone(),
             onlyid: capture.onlyid.clone(),
         },
-        identity: typed_identity,
+        identity: Some(typed_identity),
         geometry: DeviceGeometry {
             logical_sector_size: capture.logical_sector_size,
             physical_sector_size: None,
@@ -107,7 +96,6 @@ pub(super) fn write_container(
     extra_artifacts: &[ArtifactInput],
     extra_notes: &[String],
     identity: Option<&crate::media_identity::MediaIdentitySnapshot>,
-    schema: &str,
 ) -> Result<Manifest, String> {
     validate_core_capture(capture)?;
     if path.extension().and_then(|v| v.to_str()) != Some(EXTENSION) {
@@ -128,13 +116,12 @@ pub(super) fn write_container(
         file.write_all(&[0u8; HEADER_SIZE])
             .map_err(|e| format!("write EDPB header failed: {e}"))?;
 
-        let mut manifest = base_manifest(capture, identity, schema);
+        let mut manifest = base_manifest(capture, identity);
         manifest.snapshot.capture_level = capture_level;
         manifest.partitions.extend_from_slice(extra_partitions);
-        let plain_metadata_v3 = schema == "edpb.manifest.v3"
-            && capture.device_state.eq_ignore_ascii_case("plain")
+        let plain_metadata = capture.device_state.eq_ignore_ascii_case("plain")
             && capture_level == CaptureLevel::Metadata;
-        if plain_metadata_v3 {
+        if plain_metadata {
             manifest.regions.clear();
             manifest.extents.clear();
         }
@@ -142,9 +129,8 @@ pub(super) fn write_container(
         manifest.extents.extend_from_slice(extra_extents);
         manifest.provenance.notes.extend_from_slice(extra_notes);
 
-        let mut inputs =
-            Vec::with_capacity(extra_artifacts.len() + usize::from(!plain_metadata_v3));
-        if !plain_metadata_v3 {
+        let mut inputs = Vec::with_capacity(extra_artifacts.len() + usize::from(!plain_metadata));
+        if !plain_metadata {
             inputs.push(ArtifactInput {
                 id: RAW_PROTOCOL_ARTIFACT_ID.into(),
                 kind: "raw_sectors".into(),
@@ -240,7 +226,6 @@ pub fn write_core_backup(path: &Path, capture: &CoreCapture<'_>) -> Result<Manif
         &[],
         &[],
         None,
-        "edpb.manifest.v3",
     )
 }
 
@@ -259,27 +244,6 @@ pub fn write_core_backup_with_identity(
         &[],
         &[],
         Some(identity),
-        "edpb.manifest.v3",
-    )
-}
-
-#[doc(hidden)]
-pub fn write_legacy_v2_core_backup_with_identity(
-    path: &Path,
-    capture: &CoreCapture<'_>,
-    identity: &crate::media_identity::MediaIdentitySnapshot,
-) -> Result<Manifest, String> {
-    write_container(
-        path,
-        capture,
-        CaptureLevel::Core,
-        &[],
-        &[],
-        &[],
-        &[],
-        &[],
-        Some(identity),
-        "edpb.manifest.v2",
     )
 }
 
@@ -298,7 +262,6 @@ pub fn write_core_backup_with_notes(
         &[],
         notes,
         None,
-        "edpb.manifest.v3",
     )
 }
 
@@ -316,7 +279,6 @@ pub fn write_metadata_backup(
         &capture.artifacts,
         &capture.notes,
         None,
-        "edpb.manifest.v3",
     )
 }
 
@@ -335,6 +297,5 @@ pub fn write_metadata_backup_with_identity(
         &capture.artifacts,
         &capture.notes,
         Some(identity),
-        "edpb.manifest.v3",
     )
 }

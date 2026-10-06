@@ -169,7 +169,7 @@ pub struct FakeRunner {
     pub canned: HashMap<String, String>,
 }
 
-impl edpcli::platform::system::CmdRunner for FakeRunner {
+impl edpcli::ports::CmdRunner for FakeRunner {
     fn check_output(&self, cmd: &[&str], _t: Duration) -> std::io::Result<String> {
         self.canned
             .get(&cmd.join(" "))

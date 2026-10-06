@@ -53,8 +53,8 @@ fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
     let common = [
         "--disk",
         "4",
-        "--mode",
-        "1",
+        "--target",
+        "mode1",
         "--share-mib",
         "64",
         "--encrypt-mib",
@@ -82,7 +82,7 @@ fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
         Parsed::Provision(ProvisionAction::Plan(opts)) => {
             assert_eq!(opts.target.mode_number(), Some(1));
             assert_eq!(opts.disk, Some(4));
-            assert_eq!(opts.volume_label, "启动区");
+            assert_eq!(opts.boot_label, "启动区");
         }
         _ => panic!("expected provision plan"),
     }
@@ -116,7 +116,7 @@ fn provision_parses_all_four_product_actions_and_rejects_ambiguous_flags() {
     assert!(removed.contains("plan / image / write"), "{removed}");
     assert!(parse_args(&args(&["provision", "plan", "--onlyid", "1"])).is_err());
     assert!(parse_args(&args(&["provision", "convert", "--yes"])).is_err());
-    assert!(parse_args(&args(&["provision", "plan", "--mode", "4"])).is_err());
+    assert!(parse_args(&args(&["provision", "plan", "--target", "mode4"])).is_err());
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn provision_plain_is_a_typed_target_and_never_mode4() {
 
     for invalid in [
         vec!["provision", "plan", "--disk", "4", "--target", "mode4"],
-        vec!["provision", "plan", "--disk", "4", "--mode", "4"],
+        vec!["provision", "plan", "--disk", "4", "--target", "mode4"],
         vec![
             "provision",
             "plan",
@@ -227,8 +227,8 @@ fn provision_plain_is_a_typed_target_and_never_mode4() {
             "4",
             "--target",
             "plain",
-            "--mode",
-            "1",
+            "--target",
+            "mode1",
         ],
     ] {
         assert!(parse_args(&args(&invalid)).is_err(), "{invalid:?}");
@@ -267,8 +267,8 @@ fn provision_label_prefills_from_target_unless_cli_overrides_it() {
         "plan",
         "--disk",
         "4",
-        "--mode",
-        "1",
+        "--target",
+        "mode1",
         "--share-mib",
         "64",
         "--encrypt-mib",
@@ -330,7 +330,7 @@ fn provision_label_prefills_from_target_unless_cli_overrides_it() {
 
 #[test]
 fn provision_parses_complete_pass_info_policy_overrides() {
-    let base = ["provision", "plan", "--disk", "4", "--mode", "1"];
+    let base = ["provision", "plan", "--disk", "4", "--target", "mode1"];
     let mut values = base.to_vec();
     values.extend([
         "--force-change-password",
@@ -372,8 +372,8 @@ fn provision_password_and_volume_label_have_product_defaults() {
         "plan",
         "--disk",
         "4",
-        "--mode",
-        "1",
+        "--target",
+        "mode1",
         "--share-mib",
         "64",
         "--encrypt-mib",
@@ -391,7 +391,7 @@ fn provision_password_and_volume_label_have_product_defaults() {
             assert_eq!(opts.share_target_password, "0000aaaa");
             assert!(opts.encrypt_source_password.is_empty());
             assert_eq!(opts.encrypt_target_password, "0000aaaa");
-            assert_eq!(opts.volume_label, "启动区");
+            assert_eq!(opts.boot_label, "启动区");
             assert!(!opts.format_boot && !opts.format_share && !opts.format_encrypt);
             assert_eq!(
                 opts.boot_fs,
@@ -412,8 +412,15 @@ fn provision_password_and_volume_label_have_product_defaults() {
 
 #[test]
 fn provision_actions_allow_capacity_and_identity_prefill() {
-    let plan = parse_args(&args(&["provision", "plan", "--disk", "4", "--mode", "1"]))
-        .expect("plan should allow source/system prefill");
+    let plan = parse_args(&args(&[
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--target",
+        "mode1",
+    ]))
+    .expect("plan should allow source/system prefill");
     let Parsed::Provision(ProvisionAction::Plan(plan_opts)) = plan else {
         panic!("expected provision plan");
     };
@@ -423,8 +430,8 @@ fn provision_actions_allow_capacity_and_identity_prefill() {
         "image",
         "--disk",
         "4",
-        "--mode",
-        "1",
+        "--target",
+        "mode1",
         "--out",
         "/tmp/edp.img",
     ]))
@@ -441,8 +448,8 @@ fn provision_actions_allow_capacity_and_identity_prefill() {
         "write",
         "--disk",
         "4",
-        "--mode",
-        "1",
+        "--target",
+        "mode1",
         "--share-start-sector",
         "63",
         "--encrypt-start-sector",
@@ -481,8 +488,8 @@ fn provision_format_flags_and_independent_labels_parse() {
         "write",
         "--disk",
         "4",
-        "--mode",
-        "0",
+        "--target",
+        "mode0",
         "--share-mib",
         "64",
         "--encrypt-mib",
@@ -543,8 +550,8 @@ fn provision_cli_rejects_filesystems_without_a_writer() {
         "plan",
         "--disk",
         "4",
-        "--mode",
-        "0",
+        "--target",
+        "mode0",
         "--share-mib",
         "64",
         "--encrypt-mib",
@@ -562,14 +569,14 @@ fn provision_cli_rejects_filesystems_without_a_writer() {
 }
 
 #[test]
-fn legacy_volume_label_is_a_fallback_for_each_partition_label() {
+fn partition_labels_are_independent_with_explicit_overrides() {
     let parsed = parse_args(&args(&[
         "provision",
         "plan",
         "--disk",
         "4",
-        "--mode",
-        "0",
+        "--target",
+        "mode0",
         "--share-mib",
         "64",
         "--encrypt-mib",
@@ -578,8 +585,8 @@ fn legacy_volume_label_is_a_fallback_for_each_partition_label() {
         "USER06",
         "--dept",
         "江苏省电力有限公司",
-        "--volume-label",
-        "共同卷标",
+        "--boot-label",
+        "独立启动",
         "--share-label",
         "独立交换",
     ]))
@@ -587,9 +594,9 @@ fn legacy_volume_label_is_a_fallback_for_each_partition_label() {
     let Parsed::Provision(ProvisionAction::Plan(opts)) = parsed else {
         panic!("expected provision plan");
     };
-    assert_eq!(opts.boot_label, "共同卷标");
+    assert_eq!(opts.boot_label, "独立启动");
     assert_eq!(opts.share_label, "独立交换");
-    assert_eq!(opts.encrypt_label, "共同卷标");
+    assert_eq!(opts.encrypt_label, "保密区");
 }
 
 #[test]
@@ -599,8 +606,8 @@ fn mode0_parser_leaves_boot_and_identity_for_target_prefill() {
         "plan",
         "--disk",
         "4",
-        "--mode",
-        "0",
+        "--target",
+        "mode0",
         "--share-mib",
         "64",
         "--encrypt-mib",
@@ -803,5 +810,30 @@ fn v2_help_names_only_the_new_top_level_commands() {
             !help.contains(removed),
             "legacy command leaked into help: {removed}\n{help}"
         );
+    }
+}
+
+#[test]
+fn development_provision_options_are_rejected_and_not_advertised() {
+    let spec = edpcli::command_spec::command("provision").unwrap();
+    for action in ["plan", "image", "write"] {
+        for (option, value) in [
+            ("--mode", "1"),
+            ("--volume-label", "old label"),
+            ("--password", "old password"),
+        ] {
+            let error = parse_args(&args(&[
+                "provision",
+                action,
+                "--target",
+                "mode1",
+                option,
+                value,
+            ]))
+            .err()
+            .expect("removed development option must be rejected");
+            assert!(error.contains(option), "{error}");
+            assert!(!spec.option_names(Some(action)).contains(&option));
+        }
     }
 }

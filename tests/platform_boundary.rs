@@ -10,7 +10,7 @@ const BUSINESS_SOURCES: &[&str] = &[
     "src/cli_args/help.rs",
     "src/cli_args/parse_support.rs",
     "src/completion.rs",
-    "src/crypto.rs",
+    "src/protocol/crypto.rs",
     "src/disk_scan.rs",
     "src/diskio.rs",
     "src/elevate.rs",
@@ -29,7 +29,7 @@ const BUSINESS_SOURCES: &[&str] = &[
     "src/inspect_cli.rs",
     "src/metainfo.rs",
     "src/metainfo_cli.rs",
-    "src/sectors.rs",
+    "src/protocol/sectors.rs",
 ];
 
 const FORBIDDEN_OS_DETAILS: &[&str] = &[

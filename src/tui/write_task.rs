@@ -50,7 +50,7 @@ impl TaskHub {
                     }
                 }
 
-                let runner = SysRunner;
+                let runner = system_runner();
                 let expected = intent.expected_identity.as_ref().ok_or_else(|| {
                     crate::application::error::OperationError::from("写操作缺少介质身份校验信息")
                         .in_phase("恢复")
@@ -97,7 +97,7 @@ impl TaskHub {
         let tx = self.tx.clone();
         let progress = ProgressPublisher::new(self, operation_id, ProgressKind::Format);
         self.critical_worker = Some(std::thread::spawn(move || {
-            let runner = SysRunner;
+            let runner = system_runner();
             let result = catch_unwind(AssertUnwindSafe(|| {
                 let mut prompt = FormatPrompter {
                     progress: progress.clone(),
@@ -146,7 +146,7 @@ impl TaskHub {
         let tx = self.tx.clone();
         let progress = ProgressPublisher::new(self, operation_id, ProgressKind::Format);
         self.critical_worker = Some(std::thread::spawn(move || {
-            let runner = SysRunner;
+            let runner = system_runner();
             let result = catch_unwind(AssertUnwindSafe(|| {
                 let mut prompt = FormatPrompter {
                     progress: progress.clone(),
@@ -206,7 +206,7 @@ impl TaskHub {
                 }
             }
 
-            let runner = SysRunner;
+            let runner = system_runner();
             let result = catch_unwind(AssertUnwindSafe(|| {
                 let mut prompt = ConfirmedPrompter;
                 crate::application::post_restore::reinitialize_encrypted_partition_after_restore_on_disk(

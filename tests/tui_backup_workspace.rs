@@ -1,6 +1,6 @@
 use crate::common;
 
-use edpcli::application::scan_backup_workspace;
+use edpcli::application::scan_backup_workspace_checked;
 use edpcli::tui::{
     render,
     state::{AppState, NavCommand, Workspace},
@@ -9,7 +9,7 @@ use ratatui::{backend::TestBackend, style::Modifier, Terminal};
 
 #[test]
 fn backup_workspace_uses_one_based_global_selector_indices() {
-    let rows = scan_backup_workspace(std::path::Path::new(common::FIXTURE_DIR));
+    let rows = scan_backup_workspace_checked(std::path::Path::new(common::FIXTURE_DIR)).unwrap();
     for (offset, row) in rows.iter().enumerate() {
         assert_eq!(row.index, offset + 1);
     }

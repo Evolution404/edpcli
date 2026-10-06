@@ -6,7 +6,8 @@ use crate::application::progress::FormatStep;
 use crate::application::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use crate::application::Prompter;
 use crate::common::{EdpCliError, EXIT_TARGET};
-use crate::sysinfo::{self, CmdRunner};
+use crate::platform::system;
+use crate::ports::CmdRunner;
 use std::time::Duration;
 
 pub(super) const REOPEN_WAIT: Duration = Duration::from_secs(10);
@@ -39,7 +40,8 @@ pub fn format_partition_after_restore_on_disk_assessed(
     volume_label: &str,
 ) -> AssessedPostRestoreFormatResult {
     format_progress::emit(prompt, format_progress::stage(FormatStep::VerifyTarget));
-    let volume_serial = crate::diskio::Clock::now_epoch(&crate::diskio::SystemClock) as u32;
+    let volume_serial =
+        crate::ports::Clock::now_epoch(&crate::infrastructure::clock::SystemClock) as u32;
     let mut assessment = None;
     let result = (|| -> Result<(), PostRestoreFormatError> {
         let expected = outcome
@@ -190,7 +192,7 @@ pub fn format_encrypted_partition_after_restore_on_disk(
             request,
             password,
             volume_label,
-            crate::diskio::Clock::now_epoch(&crate::diskio::SystemClock) as u32,
+            crate::ports::Clock::now_epoch(&crate::infrastructure::clock::SystemClock) as u32,
         )
         .result
     })();
@@ -228,7 +230,7 @@ pub(super) fn verify_current_target(
     expected
         .verify(&observed.snapshot, &observed.protocol_image)
         .map_err(PostRestoreFormatError::TargetIdentity)?;
-    if sysinfo::disk_total_sectors(runner, disk) != Some(total_sectors)
+    if system::disk_total_sectors(runner, disk) != Some(total_sectors)
         || observed.snapshot.hardware.total_sectors != Some(total_sectors)
         || observed.snapshot.hardware.logical_sector_size != Some(SECTOR as u32)
     {
@@ -312,7 +314,7 @@ pub(super) fn verify_current_target(
                 if !current.physically_encrypted
                     || record.lba12.need_encrypt == 0
                     || record.lba12.encrypt_mode != FileKeyWrapMode::Sm4.raw()
-                    || crate::crypto::crc32_bare(key) != record.lba12.file_key_crc
+                    || crate::protocol::crypto::crc32_bare(key) != record.lba12.file_key_crc
                 {
                     return Err(PostRestoreFormatError::Operation(
                         "当前密钥域与已验证原 FileKey 不一致".into(),

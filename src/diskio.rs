@@ -1,12 +1,14 @@
-//! 真盘 IO、原子写入、备份/还原与快照读取。
+//! 真盘 IO、原子事务写入与快照读取。
 //! 扇区设备抽象为 SectorDev — 这就是 Python 版 `_raw_path` 的 mock 点(升为参数)。
 
+use crate::ports::SectorDev;
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 #[cfg(test)]
@@ -16,26 +18,18 @@ use crate::common::{
     EdpCliError, EdpCliResult, EXIT_INTERMEDIATE, EXIT_IO, EXIT_ROLLED_BACK, SECTOR,
 };
 
-mod backup_catalog;
-mod backup_config;
-mod backup_create;
 mod device;
 mod transaction;
 
-pub use backup_catalog::*;
-pub use backup_config::*;
-pub use backup_create::*;
 pub use device::*;
 pub use transaction::*;
 
 #[cfg(test)]
-fn utc_parts(epoch: i64) -> (i64, u32, u32, u32, u32, u32) {
-    backup_config::utc_parts(epoch)
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infrastructure::backup_store::{catalog::lba4_label_id_from, config::*};
+    use crate::infrastructure::clock::{utc_parts, SystemClock};
+    use crate::ports::Clock;
 
     struct CountingSectorDev {
         reads: usize,

@@ -7,13 +7,13 @@
 use std::path::PathBuf;
 
 use crate::common::SECTOR;
-use crate::diskio::SectorDev;
 use crate::edpb::ManifestPartition;
 use crate::filesystem::{
     build_empty_filesystem_typed, validate_writable_filesystem, FilesystemError, FilesystemKind,
     SparseFilesystemImage,
 };
 use crate::partition_transform::{decrypt_mode2, EdpSm4Transform};
+use crate::ports::SectorDev;
 use crate::provision::{
     parse_existing_provision, ExistingFileKeyError, FileKeyWrapMode, ProvisionImage, SecretBytes,
 };

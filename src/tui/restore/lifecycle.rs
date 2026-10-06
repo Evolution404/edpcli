@@ -1,4 +1,4 @@
-//! Pure workflow transitions; existing AppState methods remain compatibility entry points.
+//! Pure restore workflow transitions on AppState.
 use crate::tui::state::*;
 impl AppState {
     pub fn wizard(&self) -> Option<&WizardState> {
@@ -19,7 +19,7 @@ impl AppState {
         kind: WriteKind,
         disk: u32,
         backup: Option<std::path::PathBuf>,
-        expected_identity: Option<ExpectedIdentity>,
+        expected_identity: Option<crate::application::media_identity::MediaIdentityResumePin>,
     ) -> bool {
         if self.shell.critical_operation {
             self.set_warning_notice("关键操作仍在执行，完成前不能启动其他任务。".to_string());

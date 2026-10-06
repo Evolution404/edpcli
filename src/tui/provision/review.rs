@@ -172,7 +172,9 @@ pub(crate) struct ProvisionConfirmationViewModel {
 }
 
 impl ProvisionConfirmationViewModel {
-    pub(crate) fn from_prepared(prepared: &ProvisionPrepared) -> Result<Self, String> {
+    pub(crate) fn from_prepared(
+        prepared: &crate::application::provision::PreparedProvision,
+    ) -> Result<Self, String> {
         use crate::tui::disk_layout::{
             DiskCapacitySelection, DiskLayoutModel, DiskLayoutSegment, DiskRegionKind,
         };
@@ -189,7 +191,7 @@ impl ProvisionConfirmationViewModel {
         };
 
         let (layout, regions, geometry_note) = match prepared {
-            ProvisionPrepared::Official(official) => {
+            crate::application::provision::PreparedProvision::Official(official) => {
                 let target_plan = official
                     .target_plan
                     .as_ref()
@@ -429,7 +431,7 @@ impl ProvisionConfirmationViewModel {
                 let regions = merge_all_regions(&layout, regions)?;
                 (layout, regions, geometry_note)
             }
-            ProvisionPrepared::Plain(plain) => {
+            crate::application::provision::PreparedProvision::Plain(plain) => {
                 let partition_segments = plain
                     .plan
                     .partitions

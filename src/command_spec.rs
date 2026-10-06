@@ -129,7 +129,6 @@ const BACKUP_ACTIONS: &[ActionSpec] = &[
 const PROVISION_COMMON_OPTIONS: &[OptionSpec] = &[
     value("--disk"),
     value("--target"),
-    value("--mode"),
     value("--partition"),
     value("--boot-mib"),
     value("--boot-sectors"),
@@ -144,8 +143,6 @@ const PROVISION_COMMON_OPTIONS: &[OptionSpec] = &[
     value("--user"),
     value("--dept"),
     value("--label"),
-    value("--password"),
-    value("--volume-label"),
     switch("--format-boot"),
     switch("--format-share"),
     switch("--format-encrypt"),

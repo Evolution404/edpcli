@@ -40,7 +40,7 @@ fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::
                             Some(opts.encrypt_target_password.as_bytes()),
                         ),
                     ),
-                    volume_label: opts.volume_label.clone(),
+                    volume_label: opts.boot_label.clone(),
                     format: crate::application::provision::FormatOptions {
                         boot: opts.format_boot,
                         share: opts.format_share,

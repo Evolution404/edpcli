@@ -13,11 +13,10 @@ use crate::application::inspect::{
 use crate::cli::StdPrompter;
 use crate::cli_args::{InspectMode, InspectOpts};
 use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, EXIT_TARGET, EXIT_USAGE, SECTOR};
-use crate::diskio;
 use crate::elevate;
 use crate::inspect::InspectMeta;
+use crate::ports::CmdRunner;
 use crate::selectors::DeviceSelector;
-use crate::sysinfo::CmdRunner;
 
 pub(crate) fn resolve_inspect_file(backup_dir: &Path, target: &str) -> Result<PathBuf, String> {
     let raw = Path::new(target);
@@ -253,7 +252,8 @@ fn render_workspace(workspace: &AdvancedInspectWorkspace) -> i32 {
 }
 
 fn inspect_backup_flow(opts: InspectOpts) -> i32 {
-    let bak = diskio::resolve_backup_dir(opts.backup_dir.as_deref());
+    let bak =
+        crate::infrastructure::backup_store::config::resolve_backup_dir(opts.backup_dir.as_deref());
     let Some(target) = opts.backup.as_deref() else {
         eprintln!("{}", crate::ui::red("错误: inspect 缺少备份文件来源"));
         return EXIT_USAGE;

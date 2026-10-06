@@ -1,3 +1,4 @@
+use crate::historical_edpb::{v1_core_with_notes, v2_core_with_identity};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -8,8 +9,7 @@ use edpcli::application::media_identity::{
 };
 use edpcli::edpb::{
     canonical_media_identity, read_raw_protocol, verify_file, write_core_backup,
-    write_core_backup_with_identity, write_legacy_v1_core_backup_with_notes,
-    write_legacy_v2_core_backup_with_identity, CaptureLevel, CoreCapture, RestorePolicy,
+    write_core_backup_with_identity, CaptureLevel, CoreCapture, RestorePolicy,
     RAW_PROTOCOL_ARTIFACT_ID,
 };
 use edpcli::provision::DiskProvisionKind;
@@ -211,7 +211,7 @@ fn v1_encrypted_and_mode1_backups_remain_readable() {
         let path = tmp.0.join(format!("{state}.edpb"));
         let mut legacy = capture(&data);
         legacy.device_state = state.into();
-        write_legacy_v1_core_backup_with_notes(&path, &legacy, &[]).unwrap();
+        v1_core_with_notes(&path, &legacy, &[]).unwrap();
 
         let before = fs::read(&path).unwrap();
         let verified = verify_file(&path).unwrap();
@@ -238,7 +238,7 @@ fn v1_plain_device_id_is_legacy_derived_candidate_not_observed_protocol_id() {
     let mut legacy = capture(&data);
     legacy.device_state = "plain".into();
     legacy.onlyid = None;
-    write_legacy_v1_core_backup_with_notes(&path, &legacy, &[]).unwrap();
+    v1_core_with_notes(&path, &legacy, &[]).unwrap();
 
     let verified = verify_file(&path).unwrap();
     let identity = canonical_media_identity(&verified.manifest).unwrap();
@@ -261,7 +261,7 @@ fn v1_hardware_serial_note_is_legacy_fallback_only() {
     let data = vec![0x42; 13 * 512];
     let digest = "ab".repeat(32);
     let note = format!("hardware_serial_sha256={digest}");
-    write_legacy_v1_core_backup_with_notes(&path, &capture(&data), &[note]).unwrap();
+    v1_core_with_notes(&path, &capture(&data), &[note]).unwrap();
 
     let verified = verify_file(&path).unwrap();
     let identity = canonical_media_identity(&verified.manifest).unwrap();
@@ -285,7 +285,7 @@ fn v2_round_trips_missing_suspicious_and_usable_serial_evidence() {
     for (index, (quality, digest)) in cases.into_iter().enumerate() {
         let path = tmp.0.join(format!("{index}.edpb"));
         let identity = typed_identity(quality, digest.as_deref());
-        write_legacy_v2_core_backup_with_identity(&path, &capture(&data), &identity).unwrap();
+        v2_core_with_identity(&path, &capture(&data), &identity).unwrap();
         let verified = verify_file(&path).unwrap();
         assert_eq!(verified.manifest.schema, "edpb.manifest.v2");
         let decoded = canonical_media_identity(&verified.manifest).unwrap();
@@ -310,7 +310,7 @@ fn typed_and_legacy_serial_conflict_is_invalid_fail_closed() {
     let path = tmp.0.join("sample.edpb");
     let data = vec![0x61; 13 * 512];
     let identity = typed_identity(SerialQuality::Usable, Some(&"11".repeat(32)));
-    write_legacy_v2_core_backup_with_identity(&path, &capture(&data), &identity).unwrap();
+    v2_core_with_identity(&path, &capture(&data), &identity).unwrap();
 
     let mut verified = verify_file(&path).unwrap();
     verified

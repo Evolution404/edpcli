@@ -266,7 +266,7 @@ pub fn rekey_existing_partition_image(
     plain12[base12 + 0x58] = current.encrypt_mode.raw();
     bytes[7 * SECTOR..8 * SECTOR]
         .copy_from_slice(&xor_rolling(&plain7, (crc & 0xffff) ^ (crc >> 16)));
-    bytes[12 * SECTOR..13 * SECTOR].copy_from_slice(&crate::crypto::a7f0_full(
+    bytes[12 * SECTOR..13 * SECTOR].copy_from_slice(&crate::protocol::crypto::a7f0_full(
         &plain12,
         &crc.to_le_bytes(),
         0,

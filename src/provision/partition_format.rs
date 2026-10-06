@@ -4,9 +4,9 @@
 //! EDP-specific FileKeyCRC / EncryptMode validation and selects the physical
 //! partition transform.
 
-use crate::crypto::crc32_bare;
 use crate::filesystem::{build_empty_filesystem, FilesystemKind, SparseFilesystemImage};
 use crate::partition_transform::EdpSm4Transform;
+use crate::protocol::crypto::crc32_bare;
 
 use super::{
     layout::{OfficialPartitionGeometry, OfficialProvisionPlan, PartitionFormatTarget},

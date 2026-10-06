@@ -15,7 +15,7 @@ use super::{
     profile::*,
     types::*,
 };
-use crate::crypto::crc32_bare;
+use crate::protocol::crypto::crc32_bare;
 
 pub const PROTOCOL_IMAGE_BYTES: usize = 13 * 512;
 

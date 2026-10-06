@@ -15,7 +15,7 @@ impl TaskHub {
             let result = catch_unwind(AssertUnwindSafe(|| {
                 match source {
                     crate::tui::state::AdvancedInspectSource::Disk(disk) => {
-                        let runner = SysRunner;
+                        let runner = system_runner();
                         crate::application::inspect::load_disk_advanced_inspect(
                             &runner, disk, &request,
                         )
@@ -83,7 +83,7 @@ impl TaskHub {
             let result = catch_unwind(AssertUnwindSafe(|| {
                 let workspace = match source {
                     crate::tui::state::AdvancedInspectSource::Disk(disk) => {
-                        let runner = SysRunner;
+                        let runner = system_runner();
                         crate::application::inspect::load_disk_advanced_inspect(
                             &runner, disk, &request,
                         )

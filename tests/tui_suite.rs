@@ -1,3 +1,6 @@
+#[path = "support/gold_name.rs"]
+pub mod gold_name;
+
 #[path = "common/mod.rs"]
 pub mod common;
 

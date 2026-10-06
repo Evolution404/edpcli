@@ -3,8 +3,8 @@ use std::io;
 use encoding_rs::GBK;
 
 use crate::common::SECTOR;
-use crate::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
 use crate::metainfo::{ownership_from_lba8, summarize};
+use crate::protocol::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
 use crate::protocol::{
     lba4,
     semantic::{self, SemanticContext},

@@ -228,7 +228,7 @@ impl WorkspaceIdentity {
             user: backup.user.clone(),
             dept: backup.dept.clone(),
             provision_kind: (backup.integrity_status
-                == crate::diskio::BackupIntegrityStatus::Verified
+                == crate::infrastructure::backup_store::catalog::BackupIntegrityStatus::Verified
                 && backup.size_ok)
                 .then_some(backup.provision_kind)
                 .flatten(),

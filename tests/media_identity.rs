@@ -11,9 +11,9 @@ use edpcli::application::media_identity::{
 #[cfg(target_os = "macos")]
 use edpcli::application::media_identity_observer::media_identity_from_protocol_image;
 use edpcli::application::media_identity_observer::observe_media_identity_readonly;
-use edpcli::diskio::SectorDev;
-use edpcli::platform::system::CmdRunner;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
+use edpcli::ports::CmdRunner;
+use edpcli::ports::SectorDev;
 use edpcli::provision::DiskProvisionKind;
 
 fn hardware(serial: Option<&str>, vid: u16, pid: u16, sectors: u64) -> HardwareIdentityEvidence {

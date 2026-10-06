@@ -4,7 +4,7 @@
 //! protocol/key-domain policy. Callers must resolve and validate any FileKey
 //! before constructing a transform.
 
-use crate::crypto::{sm4_decrypt_block, sm4_encrypt_block};
+use crate::protocol::crypto::{sm4_decrypt_block, sm4_encrypt_block};
 
 pub const TRANSFORM_SECTOR_SIZE: usize = 512;
 

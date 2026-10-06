@@ -5,8 +5,9 @@
 //! provisioning and post-restore formatting cannot drift into separate writers.
 
 use crate::common::{EdpCliError, EdpCliResult, EXIT_TARGET};
-use crate::diskio::{self, SectorDev, SectorWriteStage, WriteTransactionPlan};
+use crate::diskio::{self, SectorWriteStage, WriteTransactionPlan};
 use crate::filesystem::SparseFilesystemImage;
+use crate::ports::SectorDev;
 
 pub(crate) fn write_sparse_filesystem_image(
     dev: &mut dyn SectorDev,

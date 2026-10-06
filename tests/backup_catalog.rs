@@ -98,11 +98,12 @@ fn directory_projection_preserves_preview_without_retaining_full_manifest() {
     assert!(!catalog.entries().is_empty());
     for entry in catalog.entries() {
         assert!(entry.manifest.is_none());
-        let exact = edpcli::diskio::scan_backup_file(&entry.path).unwrap();
+        let exact =
+            edpcli::infrastructure::backup_store::catalog::scan_backup_file(&entry.path).unwrap();
         assert!(exact.manifest.is_some());
         assert_eq!(entry.restore_preview, exact.restore_preview);
     }
-    let rows = edpcli::application::scan_backup_workspace(&tmp.0);
+    let rows = edpcli::application::scan_backup_workspace_checked(&tmp.0).unwrap();
     assert!(rows.iter().all(|row| row.restore_preview.is_some()));
 }
 
@@ -111,7 +112,7 @@ fn exact_verification_preserves_reason_and_rejects_directory_escape() {
     let tmp = TmpDir::new("verify_diagnostics");
     let path = tmp.0.join("broken.edpb");
     fs::write(&path, b"bad").unwrap();
-    let entry = edpcli::diskio::scan_backup_file(&path).unwrap();
+    let entry = edpcli::infrastructure::backup_store::catalog::scan_backup_file(&path).unwrap();
     let error = edpcli::application::verify_backup_exact(&tmp.0, &path).unwrap_err();
     assert!(
         error.contains(entry.verification_error.as_deref().unwrap()),
@@ -175,7 +176,9 @@ fn backup_affinity_policy_confirms_a_b_c_and_keeps_d_possible_only() {
 
 #[test]
 fn v3_raw_serial_can_form_strong_group_without_persisted_serial_digest() {
-    use edpcli::diskio::{backup_group_key, BackupEntry, BackupIntegrityStatus, BackupMeta};
+    use edpcli::infrastructure::backup_store::catalog::{
+        backup_group_key, BackupEntry, BackupIntegrityStatus, BackupMeta,
+    };
 
     let mut first = identity(None, None, None, DiskProvisionKind::Plain);
     first.hardware.serial = Some("RAW-SERIAL-123".into());
@@ -343,7 +346,7 @@ fn damaged_backup_keeps_shared_number_and_verification_reason() {
     let selector = edpcli::application::load_backup_selector(&tmp.0);
     assert_eq!(selector.numbered_with_indices().len(), 1);
     assert_eq!(selector.resolve_one("1").unwrap().path, path);
-    let rows = edpcli::application::scan_backup_workspace(&tmp.0);
+    let rows = edpcli::application::scan_backup_workspace_checked(&tmp.0).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].index, 1);
     assert!(rows[0]
@@ -360,8 +363,10 @@ fn catalog_and_workspace_share_health_and_fail_closed_on_verification_errors() {
     let tmp = TmpDir::new("health-verdict");
     let path = tmp.0.join("sample.edpb");
     fs::write(&path, b"not a container").unwrap();
-    let mut entry = edpcli::diskio::scan_backup_file(&path).unwrap();
-    let mut row = edpcli::application::scan_backup_workspace(&tmp.0).remove(0);
+    let mut entry = edpcli::infrastructure::backup_store::catalog::scan_backup_file(&path).unwrap();
+    let mut row = edpcli::application::scan_backup_workspace_checked(&tmp.0)
+        .unwrap()
+        .remove(0);
     for (integrity, size_ok, failed, expected) in [
         (
             BackupIntegrityStatus::Verified,

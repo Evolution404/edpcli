@@ -7,11 +7,11 @@
 use crate::common::{
     EdpCliError, EdpCliResult, EXIT_IO, METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR,
 };
-use crate::diskio::{self, SectorDev};
 use crate::identify::{generate_candidates, identify};
+use crate::platform::system;
 use crate::platform::{HardwareProbe, NativeTransport};
+use crate::ports::{CmdRunner, SectorDev};
 use crate::provision::DiskProvisionKind;
-use crate::sysinfo::{self, CmdRunner};
 
 use super::media_identity::{
     serial_digest_evidence, DerivedProtocolEvidence, HardwareIdentityEvidence, IdentityObservation,
@@ -180,7 +180,7 @@ pub fn media_identity_from_protocol_image(
     let retained_raw_serial = (serial.quality != super::media_identity::SerialQuality::Missing)
         .then_some(raw_serial)
         .flatten();
-    let total_sectors = sysinfo::disk_total_sectors(runner, disk);
+    let total_sectors = system::disk_total_sectors(runner, disk);
     let hardware = HardwareIdentityEvidence {
         vid: probe.as_ref().and_then(|value| value.vid),
         pid: probe.as_ref().and_then(|value| value.pid),
@@ -204,13 +204,13 @@ pub fn media_identity_from_protocol_image(
             .filter(|value| !value.is_empty()),
         transport: probe.as_ref().map(|value| value.transport),
         total_sectors,
-        logical_sector_size: sysinfo::device_geometry(runner, disk)
+        logical_sector_size: system::device_geometry(runner, disk)
             .and_then(|geometry| geometry.logical_sector_bytes),
     };
 
     let candidates = generate_candidates(runner, disk);
     let identified = identify(runner, disk, lba7);
-    let onlyid = diskio::lba4_label_id_from(lba4);
+    let onlyid = crate::infrastructure::backup_store::catalog::lba4_label_id_from(lba4);
     let lba4_identity_digest = lba4_digest(lba4);
     let derived = DerivedProtocolEvidence {
         device_id_candidates: candidates,

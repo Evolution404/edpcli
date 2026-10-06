@@ -136,8 +136,8 @@ fn provision_rejects_nonexistent_explicit_disk_on_every_platform() {
         "plan",
         "--disk",
         "4294967295",
-        "--mode",
-        "0",
+        "--target",
+        "mode0",
     ]);
 }
 

@@ -255,7 +255,7 @@ impl TaskHub {
                     }
                 }
 
-                let runner = SysRunner;
+                let runner = system_runner();
                 let expected = intent.expected_identity.as_ref().ok_or_else(|| {
                     crate::application::error::OperationError::from(
                         "TUI 备份缺少 typed 介质身份 pin",

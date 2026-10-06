@@ -3,7 +3,7 @@ use super::{
     profile::Lba12Mode,
     types::*,
 };
-use crate::crypto::{a6b0_full, a7f0_full};
+use crate::protocol::crypto::{a6b0_full, a7f0_full};
 
 #[derive(Clone, Debug)]
 pub struct Lba12View {

@@ -92,7 +92,7 @@ fn mandatory_backup_must_match_prepared_canonical_pin() {
     .unwrap();
     let verified = crate::edpb::verify_file(&path).unwrap();
     let identity = crate::edpb::canonical_media_identity(&verified.manifest).unwrap();
-    let report = super::super::write::BackupReport {
+    let report = super::super::post_restore::MetadataBackupReport {
         path,
         partition_count: 0,
         edp_protocol_saved: true,
@@ -185,7 +185,7 @@ fn mandatory_plain_backup_verifies_mbr_without_edp_protocol_artifact() {
     crate::edpb::write_metadata_backup(&path, &capture).unwrap();
     let verified = crate::edpb::verify_file(&path).unwrap();
     let identity = crate::edpb::canonical_media_identity(&verified.manifest).unwrap();
-    let report = super::super::write::BackupReport {
+    let report = super::super::post_restore::MetadataBackupReport {
         path,
         partition_count: 1,
         edp_protocol_saved: false,
@@ -255,7 +255,7 @@ fn mandatory_backup_success_runs_commit_after_backup() {
     let report = run_mandatory_backup_before_commit(
         || {
             order.borrow_mut().push("backup");
-            Ok(super::super::write::BackupReport {
+            Ok(super::super::post_restore::MetadataBackupReport {
                 path: std::path::PathBuf::from("test.edpb"),
                 partition_count: 0,
                 edp_protocol_saved: false,
@@ -277,7 +277,7 @@ fn mandatory_backup_success_runs_commit_after_backup() {
 
 #[test]
 fn typed_execution_status_is_shared_across_cli_and_tui() {
-    let backup = super::super::write::BackupReport {
+    let backup = super::super::post_restore::MetadataBackupReport {
         path: std::path::PathBuf::from("test.edpb"),
         partition_count: 0,
         edp_protocol_saved: false,

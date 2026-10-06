@@ -185,7 +185,7 @@ CLI 正式目标参数为：
 --target mode0|mode1|mode2|mode3|plain
 ```
 
-兼容参数 `--mode` 只接受 0～3，不存在 mode4。
+CLI 使用 `--target mode0|mode1|mode2|mode3|plain`；`--mode` 已移除，不存在 mode4。
 
 主要命令：
 

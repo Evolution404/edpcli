@@ -6,9 +6,9 @@ use crate::application::media_identity::MediaIdentityResumePin;
 use crate::application::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use crate::application::Prompter;
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO};
-use crate::diskio::{self, SectorDev, SectorWriteStage, WriteTransactionPlan};
+use crate::diskio::{self, SectorWriteStage, WriteTransactionPlan};
+use crate::ports::{CmdRunner, SectorDev};
 use crate::provision::{rekey_existing_partition_image, wrap_file_key, wrap_legacy_lba7_file_key};
-use crate::sysinfo::CmdRunner;
 
 use super::format_operation::{failure, verify_current_target, KeyCheck, REOPEN_WAIT};
 
@@ -76,7 +76,7 @@ pub fn reinitialize_encrypted_partition_on_disk(
             .records
             .get(index)
             .ok_or_else(|| failure("EDP 分区索引不存在"))?;
-        let password_crc = crate::crypto::crc32_bare(request.password());
+        let password_crc = crate::protocol::crypto::crc32_bare(request.password());
         if record.lba12.user_key_crc == password_crc || record.lba7.user_key_crc == password_crc {
             return Err(failure("新密码不能与当前分区原密码相同"));
         }
@@ -233,7 +233,7 @@ pub fn reinitialize_encrypted_partition_after_restore_on_disk(
             request,
             filesystem,
             volume_label,
-            diskio::Clock::now_epoch(&diskio::SystemClock) as u32,
+            crate::ports::Clock::now_epoch(&crate::infrastructure::clock::SystemClock) as u32,
         )
         .result)
     })();

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use crate::backup_catalog::{self, canonical_entry_path};
 pub use crate::backup_catalog::{is_healthy as backup_entry_is_healthy, BackupCatalog};
 pub use crate::backup_metadata::*;
-use crate::diskio::{self, BackupEntry};
+use crate::infrastructure::backup_store::catalog::BackupEntry;
 use crate::selectors::BackupSelector;
 
 /// 一次扫描会话。目录不存在时沿用 BackupCatalog 的空目录语义；
@@ -179,7 +179,8 @@ impl DeleteSession {
     /// prune_candidates 自带“无原盘组至少留 1”规则，底线复核仅作纵深防御。
     pub fn plan_prune(&self, keep: usize) -> Result<DeletePlan, DeletePlanError> {
         let all: Vec<BackupEntry> = self.entries().to_vec();
-        let candidate_paths = diskio::prune_candidates(&all, keep);
+        let candidate_paths =
+            crate::infrastructure::backup_store::catalog::prune_candidates(&all, keep);
         // 按 prune_candidates 给出的候选顺序(最旧→较新)组装，与旧 CLI 预览顺序一致。
         let targets: Vec<BackupEntry> = candidate_paths
             .iter()
@@ -193,7 +194,9 @@ impl DeleteSession {
             .unwrap_or_default();
         let managed_backups = all
             .iter()
-            .filter(|entry| diskio::backup_group_key(entry).is_some())
+            .filter(|entry| {
+                crate::infrastructure::backup_store::catalog::backup_group_key(entry).is_some()
+            })
             .count();
         let plan = DeletePlan {
             targets,
@@ -255,7 +258,7 @@ fn enforce_retention_floor(
     let mut total_per_group: BTreeMap<String, usize> = BTreeMap::new();
     let mut deleting_per_group: BTreeMap<String, usize> = BTreeMap::new();
     for entry in all {
-        if let Some(key) = diskio::backup_group_key(entry) {
+        if let Some(key) = crate::infrastructure::backup_store::catalog::backup_group_key(entry) {
             *total_per_group.entry(key.clone()).or_default() += 1;
             if deleting.contains(&canonical_entry_path(&entry.path)) {
                 *deleting_per_group.entry(key).or_default() += 1;
@@ -271,7 +274,7 @@ fn enforce_retention_floor(
     Ok(())
 }
 
-/// TUI 单删入口的兼容薄封装：一次新鲜扫描 → plan_exact → execute。
+/// TUI 单删用例：一次新鲜扫描 → plan_exact → execute。
 pub fn delete_backup_exact(
     root: &Path,
     path: &Path,
@@ -291,7 +294,7 @@ pub fn delete_backup_exact(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diskio::{BackupIntegrityStatus, BackupMeta};
+    use crate::infrastructure::backup_store::catalog::{BackupIntegrityStatus, BackupMeta};
 
     fn identity(onlyid: &str) -> crate::application::media_identity::MediaIdentitySnapshot {
         use crate::application::media_identity::{

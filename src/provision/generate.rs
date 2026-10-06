@@ -1,7 +1,7 @@
 use encoding_rs::GBK;
 
 use crate::common::SECTOR;
-use crate::crypto::{a7f0_full, crc32_bare, lba6_checksum, xor_rolling, LBA6_K0};
+use crate::protocol::crypto::{a7f0_full, crc32_bare, lba6_checksum, xor_rolling, LBA6_K0};
 
 use super::{
     OfficialPartitionGeometry, OfficialProvisionPlan, ProvisionImage, ProvisionSpec,

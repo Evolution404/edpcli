@@ -70,7 +70,7 @@ pub(super) fn dispatch_nav_command(
                 let identity = row
                     .identity_pin
                     .as_ref()
-                    .map(state::ExpectedIdentity::from_pin);
+                    .map(crate::application::media_identity::MediaIdentityResumePin::from_pin);
                 if let Some(identity) = identity {
                     state.begin_write_wizard_for_identity(
                         state::WriteKind::Restore,
@@ -92,7 +92,7 @@ pub(super) fn dispatch_nav_command(
                 let identity = row
                     .identity_pin
                     .as_ref()
-                    .map(state::ExpectedIdentity::from_pin);
+                    .map(crate::application::media_identity::MediaIdentityResumePin::from_pin);
                 if let Some(identity) = identity {
                     state.begin_write_wizard_for_identity(
                         state::WriteKind::BackupCreate,

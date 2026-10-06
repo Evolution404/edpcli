@@ -13,10 +13,10 @@ use edpcli::application::backup::{
 };
 use edpcli::application::filesystem::{build_empty_exfat, build_empty_fat16, build_empty_fat32};
 use edpcli::application::support::SECTOR;
-use edpcli::diskio::SectorDev;
 use edpcli::edpb::{
     self, CaptureLevel, CoreCapture, MetadataCapture, RestorePolicy, SemanticStatus,
 };
+use edpcli::ports::SectorDev;
 use edpcli::protocol::crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling};
 
 const NETAC_DEVICE_ID: &str = "disk&ven_netac&prod_onlydisk";

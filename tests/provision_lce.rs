@@ -1,5 +1,5 @@
 use edpcli::{
-    protocol::crypto::a6b0_full_offset,
+    protocol::crypto::a6b0_full,
     protocol::lba7_compat::{
         locate_lba7_compatibility_extent_from_geometry, LBA7_COMPAT_EXTENT_TOTAL_SIZE,
     },
@@ -18,7 +18,7 @@ fn lce_builder_reproduces_real_lexar_ciphertext_byte_for_byte() {
     let generated = build_lce_ciphertext(layout).unwrap();
     assert_eq!(&generated, LEXAR_LCE_CIPHER);
     assert_eq!(
-        a6b0_full_offset(&generated, &[0u8; 8], layout.start_byte_offset),
+        a6b0_full(&generated, &[0u8; 8], layout.start_byte_offset),
         lce_plaintext().as_slice()
     );
 }
@@ -29,7 +29,7 @@ fn lce_builder_uses_the_full_64_bit_physical_byte_offset() {
     assert!(layout.start_byte_offset > u32::MAX as u64);
     let generated = build_lce_ciphertext(layout).unwrap();
     assert_eq!(
-        a6b0_full_offset(&generated, &[0u8; 8], layout.start_byte_offset),
+        a6b0_full(&generated, &[0u8; 8], layout.start_byte_offset),
         lce_plaintext().as_slice()
     );
 }

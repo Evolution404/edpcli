@@ -11,8 +11,8 @@ use std::{collections::HashSet, fs};
 use common::FIXTURE_DIR;
 use edpcli::application::metadata::ownership_from_lba8;
 use edpcli::application::support::{METADATA_IMAGE_LEN, SECTOR};
-use edpcli::diskio::BackupMeta;
 use edpcli::edpb::sha256_hex;
+use edpcli::infrastructure::backup_store::catalog::BackupMeta;
 use edpcli::inspect::InspectMeta;
 use edpcli::protocol::crypto::{
     a6b0_decrypt, a6b0_full, a7f0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling, RCON,

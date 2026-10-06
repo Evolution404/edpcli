@@ -5,7 +5,7 @@
 //! with the physical byte offset as the 64-bit tweak seed.
 
 use crate::{
-    crypto::a7f0_full_offset,
+    protocol::crypto::a7f0_full,
     protocol::lba7_compat::{Lba7CompatibilityExtentLayout, LBA7_COMPAT_EXTENT_TOTAL_SIZE},
 };
 
@@ -29,7 +29,7 @@ pub fn build_lce_ciphertext(
     if layout.start_byte_offset != layout.start_lba.saturating_mul(512) {
         return Err("LCE layout is not a 512-byte-sector physical byte-offset mapping".into());
     }
-    a7f0_full_offset(LCE_PLAINTEXT, &ZERO8, layout.start_byte_offset)
+    a7f0_full(LCE_PLAINTEXT, &ZERO8, layout.start_byte_offset)
         .try_into()
         .map_err(|_| "LCE ciphertext length mismatch".into())
 }

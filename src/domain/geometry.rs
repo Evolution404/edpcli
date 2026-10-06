@@ -1,6 +1,6 @@
 //! Pure protocol geometry and filesystem observations; no acquisition or storage.
 use crate::common::SECTOR;
-use crate::crypto::{a6b0_full, crc32_bare, xor_rolling};
+use crate::protocol::crypto::{a6b0_full, crc32_bare, xor_rolling};
 use crate::protocol::{
     edpf::{EdpPartitionType, EdpfEntry64, EdpfEntry96},
     lba7::Lba7PartitionMode,

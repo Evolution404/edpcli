@@ -321,7 +321,7 @@ pub fn backup_menu_str(entries: &[String]) -> String {
 }
 
 /// 多 USB 盘选单。
-pub fn disk_menu_str(disks: &[crate::sysinfo::ExtDisk]) -> String {
+pub fn disk_menu_str(disks: &[crate::platform::ExtDisk]) -> String {
     let rows = disks
         .iter()
         .enumerate()

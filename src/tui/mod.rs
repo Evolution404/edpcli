@@ -14,7 +14,6 @@ pub mod demo;
 pub mod disk_layout;
 mod disk_region_list;
 mod dispatch;
-pub mod event;
 pub mod execution;
 mod help_context;
 mod help_overlay;
@@ -59,7 +58,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::common::{EXIT_IO, EXIT_OK, EXIT_USAGE};
 use dispatch::*;
-use event::KeyMapper;
+use keymap::KeyMapper;
 use runtime_updates::apply_task_updates;
 use state::{AppState, NavCommand, StateEffect};
 use task::TaskHub;
@@ -217,7 +216,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
             redraw_requested = true;
             match ct_event::read()? {
                 ct_event::Event::Key(key) => {
-                    if !event::is_actionable_key(&key) {
+                    if !keymap::is_actionable_key(&key) {
                         continue;
                     }
                     let terminal_size = session.terminal.size()?;

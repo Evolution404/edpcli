@@ -1,5 +1,5 @@
 use super::{profile::Lba10Eesi, types::*};
-use crate::crypto::{a6b0_full, a7f0_full};
+use crate::protocol::crypto::{a6b0_full, a7f0_full};
 
 // The expanded variant intentionally keeps all decoded bytes beside the exact
 // wire sector so reconstruct/reencode remains a lossless protocol view.

@@ -11,7 +11,7 @@ pub fn backup_create_flow(
     disk: u32,
     ctx: &mut Ctx,
     dev: &mut dyn SectorDev,
-) -> EdpCliResult<BackupReport> {
+) -> EdpCliResult<crate::application::post_restore::MetadataBackupReport> {
     guard_usb_disk(ctx.runner, disk)?;
     let observed = observe_media_identity_readonly(ctx.runner, disk, dev)?;
     let img = observed.protocol_image;
@@ -53,7 +53,7 @@ pub fn backup_create_flow(
                         format!("错误: Metadata 级备份采集失败: {message}"),
                     )
                 })?;
-        diskio::create_metadata_backup(
+        crate::infrastructure::backup_store::create::create_metadata_backup(
             &facts,
             &img,
             &device_id,
@@ -105,7 +105,7 @@ pub fn backup_create_flow(
                 )
             },
         )?;
-        diskio::create_plain_backup(
+        crate::infrastructure::backup_store::create::create_plain_backup(
             &facts,
             &img,
             &legacy_candidate,
@@ -121,7 +121,7 @@ pub fn backup_create_flow(
             format!("错误: 新创建的 EDPB 未通过完整性检查: {message}"),
         )
     })?;
-    let report = BackupReport {
+    let report = crate::application::post_restore::MetadataBackupReport {
         path,
         partition_count: verified.manifest.partitions.len(),
         edp_protocol_saved: verified
@@ -143,7 +143,7 @@ pub fn backup_create_on_disk(
     prompt: &mut dyn Prompter,
     expected_onlyid: Option<&str>,
     expected_device_id: Option<&str>,
-) -> EdpCliResult<BackupReport> {
+) -> EdpCliResult<crate::application::post_restore::MetadataBackupReport> {
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     verify_expected_identity(runner, disk, expected_onlyid, expected_device_id, &mut dev)?;
     let mut ctx = Ctx {
@@ -161,7 +161,7 @@ pub fn backup_create_on_disk_with_pin(
     backup_dir: PathBuf,
     prompt: &mut dyn Prompter,
     expected: &MediaIdentityResumePin,
-) -> EdpCliResult<BackupReport> {
+) -> EdpCliResult<crate::application::post_restore::MetadataBackupReport> {
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     verify_resume_identity_pin(runner, disk, expected, &mut dev)?;
     let mut ctx = Ctx {

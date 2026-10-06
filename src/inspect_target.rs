@@ -9,9 +9,9 @@ use crate::backup_metadata::{
     TAIL_METADATA_MIRROR_SECTORS,
 };
 use crate::common::{METADATA_LAST_LBA, SECTOR};
-use crate::crypto::a6b0_full_offset;
 use crate::filesystem::FilesystemKind;
 use crate::partition_transform::decrypt_mode2;
+use crate::protocol::crypto::a6b0_full;
 use crate::protocol::edpf::EdpPartitionType;
 use crate::provision::{
     default_file_key, default_file_key_checked, official_partition_semantics, DefaultFileKeyError,
@@ -157,7 +157,7 @@ impl InspectDiskContext {
             None => {
                 let onlyid = protocol_image
                     .get(4 * SECTOR..5 * SECTOR)
-                    .and_then(crate::diskio::lba4_label_id_from);
+                    .and_then(crate::infrastructure::backup_store::catalog::lba4_label_id_from);
                 (onlyid.is_none()
                     && crate::partition_table::confirmed_plain_protocol_prefix(
                         &protocol_image,
@@ -565,7 +565,7 @@ impl InspectDiskContext {
                 let physical_offset = lba
                     .checked_mul(SECTOR as u64)
                     .ok_or_else(|| "LCE 物理字节偏移溢出".to_string())?;
-                let plain = a6b0_full_offset(raw, &[0u8; 8], physical_offset);
+                let plain = a6b0_full(raw, &[0u8; 8], physical_offset);
                 return Ok((
                     plain,
                     format!(

@@ -3,7 +3,7 @@ use crate::common;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use edpcli::application::{delete_backup_exact, scan_backup_workspace};
+use edpcli::application::{delete_backup_exact, scan_backup_workspace_checked};
 use edpcli::edpb::{self, CoreCapture};
 
 const ORIGINAL: &str =
@@ -20,8 +20,9 @@ fn copy_fixture_as(root: &Path, source_name: &str, target_name: &str) -> PathBuf
     );
     let target = root.join(target_name).with_extension("edpb");
     let bytes = fs::read(&source).expect("read protocol fixture");
-    let meta = edpcli::diskio::parse_backup_name(target.file_name().unwrap().to_str().unwrap())
-        .expect("EDPB name");
+    let meta =
+        crate::gold_name::parse_fixture_backup_name(target.file_name().unwrap().to_str().unwrap())
+            .expect("EDPB name");
     edpb::write_core_backup(
         &target,
         &CoreCapture {
@@ -48,7 +49,8 @@ fn copy_fixture(root: &Path, name: &str) -> PathBuf {
 }
 
 fn expected_sha256(root: &Path, path: &Path) -> String {
-    scan_backup_workspace(root)
+    scan_backup_workspace_checked(root)
+        .unwrap()
         .into_iter()
         .find(|row| row.path == path)
         .and_then(|row| row.content_sha256)

@@ -92,7 +92,9 @@ impl AppState {
         }
     }
 
-    pub fn provision_take_for_write(&mut self) -> Option<ProvisionPrepared> {
+    pub fn provision_take_for_write(
+        &mut self,
+    ) -> Option<crate::application::provision::PreparedProvision> {
         if !self.write_confirmation_ready() {
             return None;
         }

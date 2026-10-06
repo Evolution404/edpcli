@@ -19,8 +19,10 @@ mod macos {
     };
     use edpcli::application::support::SECTOR;
     use edpcli::application::Prompter;
-    use edpcli::diskio::{raw_path, FileDev, SectorDev};
-    use edpcli::platform::system::{disk_total_sectors, CmdRunner, SysRunner};
+    use edpcli::diskio::{raw_path, FileDev};
+    use edpcli::platform::system::{disk_total_sectors, SysRunner};
+    use edpcli::ports::CmdRunner;
+    use edpcli::ports::SectorDev;
     use edpcli::provision::{
         parse_existing_provision, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
         OfficialPartitionMode, PartitionAction, PartitionRole, ProvisionImage, ProvisionTarget,

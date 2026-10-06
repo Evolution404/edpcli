@@ -106,22 +106,6 @@ fn prepare_backup_capture_with_state<'a>(
     Ok((path, capture))
 }
 
-/// 创建自包含 EDPB Core 备份。
-/// 仅供明确需要 Core 级快照的内部路径/测试使用；用户正常备份走 Metadata 级路径。
-pub fn create_backup(
-    facts: &DiskFacts,
-    data: &[u8],
-    device_id: &str,
-    bak_dir: &Path,
-    clock: &dyn Clock,
-) -> EdpCliResult<PathBuf> {
-    let (path, capture) = prepare_backup_capture(facts, data, device_id, bak_dir, clock)?;
-    crate::edpb::write_core_backup(&path, &capture)
-        .map_err(|error| EdpCliError::new(EXIT_BACKUP, format!("错误: {error}")))?;
-    sync_dir(bak_dir)?;
-    Ok(path)
-}
-
 pub fn create_plain_backup(
     facts: &DiskFacts,
     data: &[u8],

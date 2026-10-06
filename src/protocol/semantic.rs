@@ -41,7 +41,7 @@ impl SemanticContext {
     pub fn device_crc(&self) -> Option<u32> {
         self.device_id
             .as_deref()
-            .map(|value| crate::crypto::crc32_bare(value.as_bytes()))
+            .map(|value| crate::protocol::crypto::crc32_bare(value.as_bytes()))
     }
 
     pub fn onlyid_bits(&self) -> Option<u32> {
@@ -144,7 +144,7 @@ pub fn lba10_volume_labels(raw: &[u8], device_id: &str) -> (Option<String>, Opti
     } else {
         Lba10Eesi::EesiEnabled
     };
-    let device_crc = crate::crypto::crc32_bare(device_id.as_bytes());
+    let device_crc = crate::protocol::crypto::crc32_bare(device_id.as_bytes());
     match lba10::parse_lba10(raw, device_crc, profile) {
         Ok(lba10::Lba10View::Enabled {
             share_label,

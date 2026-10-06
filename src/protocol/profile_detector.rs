@@ -9,7 +9,7 @@ use super::{
     image::PROTOCOL_IMAGE_BYTES, lba0, lba1, lba10, lba11, lba12, lba2, lba3, lba4, lba6, lba7,
     lba8, lba9, profile::*,
 };
-use crate::crypto::crc32_bare;
+use crate::protocol::crypto::crc32_bare;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProfileDetectorKind {

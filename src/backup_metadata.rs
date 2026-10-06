@@ -8,12 +8,12 @@ use crate::protocol::{edpf::EdpPartitionType, lba7::Lba7PartitionMode};
 use serde::Serialize;
 
 use crate::common::SECTOR;
-use crate::diskio::SectorDev;
 use crate::edpb::{
     ArtifactCompleteness, ArtifactInput, Derivation, Extent, ManifestPartition, Region,
     RestorePolicy, SemanticStatus,
 };
 use crate::partition_table::{PartitionSource, PartitionTableKind};
+use crate::ports::SectorDev;
 
 pub use crate::domain::geometry::{
     LBA7_COMPAT_CHS_BACKOFF_SECTORS, LBA7_COMPAT_CHS_TRACK_SECTORS, LBA7_COMPAT_EXTENT_BYTES,

@@ -18,9 +18,7 @@ pub mod identity {
 }
 
 /// 稳定平台门面下的只读系统探测与命令执行抽象。
-pub mod system {
-    pub use crate::sysinfo::*;
-}
+pub mod system;
 
 pub struct WriteGuard {
     _inner: imp::WriteGuard,

@@ -2,16 +2,6 @@
 
 use super::*;
 
-/// restore 主流程: bin=None 时交互列出本盘备份并选择。
-pub fn restore_flow(
-    bin: Option<String>,
-    disk: u32,
-    ctx: &mut Ctx,
-    dev: &mut dyn SectorDev,
-) -> EdpCliResult<i32> {
-    restore_flow_typed(bin, disk, ctx, dev).map(|_| EXIT_OK)
-}
-
 /// Restore only the metadata transaction and return its verified result.
 /// The subsequent read-only assessment is reported independently via WriteEvent.
 pub fn restore_flow_typed(
@@ -61,7 +51,10 @@ pub fn restore_flow_typed(
             for (index, entry) in &choices {
                 ctx.prompt.write_event(WriteEvent::RestoreMatchRow {
                     index: *index,
-                    time: diskio::backup_display_time(&entry.path, entry.mtime),
+                    time: crate::infrastructure::backup_store::catalog::backup_display_time(
+                        &entry.path,
+                        entry.mtime,
+                    ),
                     file_name: entry
                         .path
                         .file_name()
@@ -203,8 +196,8 @@ pub fn restore_metadata_on_device(
     let target_identity = observed.snapshot;
     let raw_target_device_id = identify(runner, disk, &img[7 * SECTOR..8 * SECTOR]).device_id;
     let lba4 = &img[4 * SECTOR..5 * SECTOR];
-    let tag16 =
-        diskio::lba4_tag16_from(lba4).ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少身份标签"))?;
+    let tag16 = crate::infrastructure::backup_store::catalog::lba4_tag16_from(lba4)
+        .ok_or_else(|| err(EXIT_IO, "错误: LBA4 缺少身份标签"))?;
     let target_lba4_nonzero = lba4.iter().any(|byte| *byte != 0);
     // One verified snapshot binds the manifest and all bytes consumed by restore.
     let reader = crate::edpb::VerifiedBackupReader::open(&path).map_err(|message| {
@@ -227,9 +220,9 @@ pub fn restore_metadata_on_device(
 
     // Protocol tag remains a separate consistency check for EDP backups only; it
     // cannot override the strong physical-media + exact-geometry write grant.
-    let backup_tag16 = backup_protocol
-        .as_deref()
-        .and_then(|data| diskio::lba4_tag16_from(&data[4 * SECTOR..5 * SECTOR]));
+    let backup_tag16 = backup_protocol.as_deref().and_then(|data| {
+        crate::infrastructure::backup_store::catalog::lba4_tag16_from(&data[4 * SECTOR..5 * SECTOR])
+    });
     let backup_identity = backup_identity(&verified.manifest)?;
     let observed_geometry = target_session.writable_geometry()?;
     let current_total_sectors = observed_geometry
@@ -366,27 +359,6 @@ pub fn restore_on_disk_typed(
     restore_flow_typed(bin, disk, &mut ctx, &mut dev)
 }
 
-pub fn restore_on_disk(
-    runner: &dyn CmdRunner,
-    bin: Option<String>,
-    disk: u32,
-    backup_dir: PathBuf,
-    prompt: &mut dyn Prompter,
-    expected_onlyid: Option<&str>,
-    expected_device_id: Option<&str>,
-) -> EdpCliResult<i32> {
-    restore_on_disk_typed(
-        runner,
-        bin,
-        disk,
-        backup_dir,
-        prompt,
-        expected_onlyid,
-        expected_device_id,
-    )
-    .map(|_| EXIT_OK)
-}
-
 pub fn restore_on_disk_typed_with_pin(
     runner: &dyn CmdRunner,
     bin: Option<String>,
@@ -404,15 +376,4 @@ pub fn restore_on_disk_typed_with_pin(
         backup_dir,
     };
     restore_flow_typed(bin, disk, &mut ctx, &mut dev)
-}
-
-pub fn restore_on_disk_with_pin(
-    runner: &dyn CmdRunner,
-    bin: Option<String>,
-    disk: u32,
-    backup_dir: PathBuf,
-    prompt: &mut dyn Prompter,
-    expected: &MediaIdentityResumePin,
-) -> EdpCliResult<i32> {
-    restore_on_disk_typed_with_pin(runner, bin, disk, backup_dir, prompt, expected).map(|_| EXIT_OK)
 }

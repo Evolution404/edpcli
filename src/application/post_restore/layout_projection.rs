@@ -5,8 +5,8 @@
 //! successfully verified metadata transaction as failed.
 
 use crate::application::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
-use crate::diskio::SectorDev;
 use crate::edpb::ManifestPartition;
+use crate::ports::SectorDev;
 use crate::provision::{parse_existing_provision, ProvisionImage};
 
 fn plain_layout(

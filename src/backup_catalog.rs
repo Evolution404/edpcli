@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::diskio::{self, BackupEntry};
+use crate::infrastructure::backup_store::catalog::BackupEntry;
 
 #[derive(Debug, Clone)]
 pub struct BackupCatalog {
@@ -18,10 +18,11 @@ pub struct BackupCatalog {
 impl BackupCatalog {
     /// 扫描备份目录。目录不存在时保留空目录语义，具体命令可自行决定返回 0/5。
     pub fn load(root: &Path) -> Self {
-        let (entries, scan_error) = match diskio::scan_backup_dir_checked(root) {
-            Ok(entries) => (entries, None),
-            Err(error) => (Vec::new(), Some(error)),
-        };
+        let (entries, scan_error) =
+            match crate::infrastructure::backup_store::catalog::scan_backup_dir_checked(root) {
+                Ok(entries) => (entries, None),
+                Err(error) => (Vec::new(), Some(error)),
+            };
         Self {
             root: root.to_path_buf(),
             entries,
@@ -30,10 +31,13 @@ impl BackupCatalog {
     }
 
     pub(crate) fn load_for_display(root: &Path, control: &crate::ports::ReadControl) -> Self {
-        let (entries, scan_error) = match diskio::scan_backup_dir_display(root, control) {
-            Ok(scan) => (scan.entries, None),
-            Err(error) => (Vec::new(), Some(error)),
-        };
+        let (entries, scan_error) =
+            match crate::infrastructure::backup_store::display_catalog::scan_backup_dir_display(
+                root, control,
+            ) {
+                Ok(scan) => (scan.entries, None),
+                Err(error) => (Vec::new(), Some(error)),
+            };
         Self {
             root: root.to_owned(),
             entries,
@@ -84,7 +88,9 @@ impl BackupCatalog {
 }
 
 pub fn sort_newest_first(entries: &mut Vec<&BackupEntry>) {
-    entries.sort_by(|a, b| diskio::cmp_backup_newest_first(a, b));
+    entries.sort_by(|a, b| {
+        crate::infrastructure::backup_store::catalog::cmp_backup_newest_first(a, b)
+    });
 }
 
 pub fn canonical_entry_path(path: &Path) -> PathBuf {

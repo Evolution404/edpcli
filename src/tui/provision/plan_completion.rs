@@ -6,7 +6,10 @@ impl AppState {
         self.provision_transition_begin_planning();
     }
 
-    pub fn provision_finish_plan(&mut self, result: Result<ProvisionPrepared, String>) {
+    pub fn provision_finish_plan(
+        &mut self,
+        result: Result<crate::application::provision::PreparedProvision, String>,
+    ) {
         match result {
             Ok(prepared) => {
                 let projection = match ProvisionConfirmationViewModel::from_prepared(&prepared) {
@@ -18,7 +21,9 @@ impl AppState {
                         return;
                     }
                 };
-                if let ProvisionPrepared::Official(official) = &prepared {
+                if let crate::application::provision::PreparedProvision::Official(official) =
+                    &prepared
+                {
                     if let Some(target_plan) = &official.target_plan {
                         for part in &target_plan.partitions {
                             match crate::provision::KeyDomainRole::from_partition_role(

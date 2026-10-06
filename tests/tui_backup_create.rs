@@ -2,8 +2,8 @@ use edpcli::tui::command::{parse_command, PaletteAction};
 use edpcli::tui::state::{WriteIntent, WriteKind};
 use edpcli::tui::{parse_resume_args, resume_argv};
 
-fn pin() -> edpcli::tui::state::ExpectedIdentity {
-    edpcli::tui::state::ExpectedIdentity {
+fn pin() -> edpcli::application::media_identity::MediaIdentityResumePin {
+    edpcli::application::media_identity::MediaIdentityResumePin {
         serial_sha256: Some("a".repeat(64)),
         serial_quality: edpcli::application::media_identity::SerialQuality::Usable,
         vid: Some(0x0dd8),

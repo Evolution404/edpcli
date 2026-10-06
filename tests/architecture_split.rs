@@ -307,7 +307,6 @@ fn library_root_exposes_stable_interfaces_only() {
         "backup_metadata",
         "build_info",
         "common",
-        "crypto",
         "disk_scan",
         "elevate",
         "filesystem",
@@ -317,10 +316,8 @@ fn library_root_exposes_stable_interfaces_only() {
         "metainfo",
         "partition_transform",
         "plist",
-        "sectors",
         "selectors",
         "sha256",
-        "sysinfo",
         "ui",
     ] {
         assert!(
@@ -336,6 +333,7 @@ fn library_root_exposes_stable_interfaces_only() {
         "completion",
         "diskio",
         "edpb",
+        "infrastructure",
         "inspect",
         "platform",
         "ports",
@@ -363,6 +361,7 @@ fn library_root_exposes_stable_interfaces_only() {
             "completion",
             "diskio",
             "edpb",
+            "infrastructure",
             "inspect",
             "platform",
             "ports",
@@ -387,7 +386,7 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/application/provision/progress_projection.rs",
         "src/diskio/device.rs",
         "src/diskio/transaction.rs",
-        "src/diskio/backup_config.rs",
+        "src/infrastructure/backup_store/config.rs",
         "src/infrastructure/backup_store/catalog.rs",
         "src/infrastructure/backup_store/create.rs",
         "src/tui/provision/state.rs",
@@ -862,7 +861,7 @@ fn raw_write_flows_use_target_session_for_safety_transition() {
         root.join("src/application/write.rs"),
     ];
     sources.extend(rust_sources_under("src/application/write"));
-    assert_sources_exclude(sources, &["sysinfo::prepare_write", ".reopen_rdwr("]);
+    assert_sources_exclude(sources, &["system::prepare_write", ".reopen_rdwr("]);
 }
 
 #[test]
@@ -1514,7 +1513,7 @@ fn chapter_15_identity_write_boundaries_remain_separate() {
     assert!(!backup_writer.contains("hardware_serial_sha256="));
     assert!(edpb_legacy.contains("fn legacy_hardware_serial_digest("));
     assert!(edpb_writer.contains("edpb.manifest.v3"));
-    assert!(edpb_writer.contains("write_legacy_v2_core_backup_with_identity"));
+    assert!(!edpb_writer.contains("write_legacy_"));
 
     for forbidden in ["prepare_write(", "reopen_rdwr(", "write_sector("] {
         assert!(

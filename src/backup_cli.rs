@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::backup_catalog;
 use crate::cli::Prompter;
 use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, SECTOR};
-use crate::diskio::{self, BackupEntry, BackupHealth, BackupMeta};
+use crate::infrastructure::backup_store::catalog::{BackupEntry, BackupHealth, BackupMeta};
 use crate::metainfo;
 
 fn backup_model_name(meta: &BackupMeta) -> String {
@@ -98,7 +98,10 @@ fn print_global_numbered_backup_entries(
         else {
             continue;
         };
-        let time = diskio::backup_display_time(&entry.path, entry.mtime);
+        let time = crate::infrastructure::backup_store::catalog::backup_display_time(
+            &entry.path,
+            entry.mtime,
+        );
         println!(
             "  [{}] {}   {}   {}",
             crate::ui::pad_left(&index.to_string(), width),
@@ -141,7 +144,9 @@ pub fn backup_list(backup_dir: &Path) -> i32 {
     let mut groups: BTreeMap<String, Vec<&BackupEntry>> = BTreeMap::new();
     let mut unknown = Vec::new();
     for entry in selected {
-        if let Some(key) = diskio::backup_list_group_key(entry) {
+        if let Some(key) =
+            crate::infrastructure::backup_store::catalog::backup_list_group_key(entry)
+        {
             groups.entry(key).or_default().push(entry);
         } else {
             unknown.push(entry);
@@ -152,7 +157,9 @@ pub fn backup_list(backup_dir: &Path) -> i32 {
         backup_catalog::sort_newest_first(group);
     }
     grouped.sort_by(|a, b| match (a.first(), b.first()) {
-        (Some(ae), Some(be)) => diskio::cmp_backup_newest_first(ae, be),
+        (Some(ae), Some(be)) => {
+            crate::infrastructure::backup_store::catalog::cmp_backup_newest_first(ae, be)
+        }
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => std::cmp::Ordering::Equal,
@@ -381,7 +388,10 @@ pub fn backup_delete(
             .and_then(|n| n.to_str())
             .unwrap_or("<无效文件名>");
         let idx = numbered_index.get(path).copied().unwrap_or(0);
-        let time = diskio::backup_display_time(&entry.path, entry.mtime);
+        let time = crate::infrastructure::backup_store::catalog::backup_display_time(
+            &entry.path,
+            entry.mtime,
+        );
         println!(
             "  [{}] {}   {}   {}",
             idx,

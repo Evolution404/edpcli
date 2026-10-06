@@ -6,21 +6,21 @@
 
 `CLI / TUI -> application -> domain + stable protocol/provision/filesystem facades -> infrastructure + platform`
 
-当前仍是单个 crate，但已经按责任建立内部边界；旧公开模块先作为兼容门面保留，不一次性搬目录或破坏外部调用。
+当前仍是单个 crate，但已经按责任建立内部边界；能力使用单一实现归属路径；开发期遗留导入别名和无人调用的包装不作为兼容要求保留。EDP 介质协议与历史 EDPB 读取兼容单独维护。
 
 - `src/cli*.rs`：CLI 参数解析与文本入口；公开命令目录统一由 `src/command_spec.rs` 描述，并供帮助与补全功能共用。
 - `src/tui/`：交互式前端。`AppState` 只保留 `shell` 与设备、检查、备份、制盘、恢复五个功能状态；`TaskHub` 负责刷新代次、单任务并发控制、关键写入任务与进度运输。帮助、页内动作提示和可用性描述通过 `ActionSpec` 与键位表共用语义；前端不实现裸盘安全策略。
-- `src/application/`：CLI/TUI 共用用例与安全会话。制盘按准备、提交、导出三个职责分离；写服务根模块保留共享事件与身份/安全校验，备份创建、恢复事务、恢复计划分别位于 `write/backup`、`write/restore`、`write/restore_plan`；`TargetSession` 统一写盘状态转换；`CatalogSnapshot` 让同一刷新批次复用一次备份目录只读快照；`OperationError` 在后台任务边界保留错误码与阶段，进入 UI 状态时才映射为展示文本；`application::ports` 再导出根 `ports` 定义的中性能力接口。
-- `src/ports.rs`：中性 CmdRunner、SectorDev、Clock、CommandOutcome 与只读 ReadControl 定义；旧门面再导出这些类型。
+- `src/application/`：CLI/TUI 共用用例与安全会话。制盘按准备、提交、导出三个职责分离；写服务根模块保留共享事件与身份/安全校验，备份创建、恢复事务、恢复计划分别位于 `write/backup`、`write/restore`、`write/restore_plan`；`TargetSession` 统一写盘状态转换；`CatalogSnapshot` 让同一刷新批次复用一次备份目录只读快照；`OperationError` 在后台任务边界保留错误码与阶段，进入 UI 状态时才映射为展示文本。
+- `src/ports.rs`：中性 CmdRunner、SectorDev、Clock、CommandOutcome 与只读 ReadControl 定义；能力接口从 `ports` 导入。
 - `src/domain/`：逐步收拢纯值类型和不变量，目前包含 `geometry`、`hardware`、`secret`；不得执行平台命令、文件生命周期或 TUI/CLI 逻辑。历史稳定路径继续通过原模块门面暴露。
-- `src/infrastructure/`：副作用实现。目前 `backup_store` 负责目录扫描、预算和容器创建适配，`process` 负责带统一截止时间与输出预算的子进程执行；应用层通过稳定接口使用这些实现。
+- `src/infrastructure/`：副作用实现。`backup_store::{catalog,display_catalog,create,config}` 负责目录校验、展示缓存、容器创建适配和备份路径配置，`clock` 实现时钟，`process` 负责带统一截止时间与输出预算的子进程执行；应用层直接使用各实现的归属路径。
 - `src/media_identity.rs`、`src/partition_table.rs`、`src/disk_layout.rs`、`src/backup_coverage.rs`：仍是与前端无关的稳定门面和读模型；迁移期间不得让 `diskio`、`edpb`、`disk_scan` 反向依赖应用层。
 - `src/media_identity_observer.rs`：只读身份观察服务，可读取协议镜像和硬件探测但没有任何写盘状态转换入口。
 - `src/provision/`：纯内存制盘领域模型与验证器；Plain 与官方 mode0～3 都通过统一 `ProvisionRequest` 进入应用层。准备阶段的来源画像和密钥域探测分别位于 `prepare/source_profile`、`prepare/key_probe`，提交阶段的分区格式化和纯验证分别位于 `commit/partition_format`、`commit/validation`；事务顺序保持不变。
 - `src/filesystem/`：统一文件系统驱动领域；FAT12/FAT16/FAT32/exFAT/NTFS 共享识别和元信息接口。FAT16/FAT32/exFAT 具备格式化与读回能力，FAT12/FAT16/FAT32/exFAT 具备只读文件级分析；NTFS 暂保留识别与元信息。
-- `src/protocol/`：LBA0～12、IIR、LCE 的类型化协议模型；`protocol::semantic` 提供跨业务语义，不包含 UI 字段名、颜色或渲染结构。
-- `src/diskio/` / `src/edpb/`：保留块设备、事务与容器底层门面；新的备份目录扫描与创建实现逐步收拢到 `infrastructure`，公开路径继续兼容。
-- `src/platform/`：macOS/Linux/Windows 的设备、锁定、卸载和平台探测边界；macOS/Linux 共用的 Unix 辅助逻辑位于 `platform/unix_support.rs`。
+- `src/protocol/`：LBA0～12、IIR、LCE 的类型化协议模型，密码学和扇区解析实现直接位于 `protocol::{crypto,sectors}`；`protocol::semantic` 提供跨业务语义，不包含 UI 字段名、颜色或渲染结构。
+- `src/diskio/` / `src/edpb/`：分别负责块设备/原子事务与容器编解码；备份目录、创建适配和时钟不再经 `diskio` 转发。
+- `src/platform/`：macOS/Linux/Windows 的设备、锁定、卸载和平台探测边界；系统探测与缓存实现直接位于 `platform/system.rs`，macOS/Linux 共用的 Unix 辅助逻辑位于 `platform/unix_support.rs`。
 - `src/tui/operation_progress_render.rs` 与 `operation_progress_status.rs`：备份、恢复、制盘共用的长操作进度页面；业务百分比和阶段计数来自应用事件，前端只渲染。
 - `src/disk_scan.rs` 只负责设备只读扫描；同一设备刷新复用备份目录快照做展示匹配，写入/删除授权仍重新验证。CLI 列表排版位于 `src/disk_scan_render.rs`。
 
@@ -44,7 +44,7 @@ LBA0～12 的类型化解析器、配置类型轴和跨 LBA 语义位于 `src/pr
 
 当前正式备份格式是自包含、自校验 `.edpb`。运行时不再读取或生成旧 `.bin/.md5/.sha256` 备份链；已经迁移成 EDPB 的历史快照仍可按 `LegacyMigrated` 清单语义只读解析。
 
-备份统一使用 v3 `metadata_only` 合约。Plain MBR/GPT 保存分区表原始元数据和类型化几何；EDP 保存 LBA0～12、LBA7 指向的 LCE 与已确认盘尾协议对象。备份不采集文件系统、目录或用户文件；可用 USB 序列号原文保存在 v3 容器中，历史 v1/v2 序列号摘要保持读取兼容。旧版深度备份格式已移除，不再创建、读取、校验或检查。元数据恢复只写回 `restorable` 原始工件并返回类型化报告；后续评估、格式化与密钥域重建分别走独立服务与安全链。
+备份统一使用 v3 `metadata_only` 合约。Plain MBR/GPT 保存分区表原始元数据和类型化几何；EDP 保存 LBA0～12、LBA7 指向的 LCE 与已确认盘尾协议对象。备份不采集文件系统、目录或用户文件；可用 USB 序列号原文保存在 v3 容器中，历史 v1/v2 序列号摘要保持读取兼容。生产代码只写 v3；v1/v2 容器夹具生成位于 `tests/support/historical_edpb.rs`，旧文件名身份解析只位于测试夹具支持代码，运行时从容器内容读取身份。旧版深度备份格式已移除，不再创建、读取、校验或检查。元数据恢复只写回 `restorable` 原始工件并返回类型化报告；后续评估、格式化与密钥域重建分别走独立服务与安全链。
 
 展示目录缓存按文件身份、长度和修改信息复用校验结果并标注缓存来源，最多 4096 条 / 64MiB 展示数据；只读刷新具有读取循环取消和累计内容预算（TUI 默认 1GiB / 20 秒）。取消/超预算不发布部分编号。恢复、删除与提交重新验证具体文件，不能使用展示缓存授权。
 
@@ -62,7 +62,7 @@ LBA0～12 的类型化解析器、配置类型轴和跨 LBA 语义位于 `src/pr
 
 官方制盘的协议事务先提交，随后逐分区格式化；首个格式化失败后，剩余所选分区标记为未执行。格式化错误保留退出码、阶段及本次事务触及范围的介质状态：已回滚仅表示失败分区回到该次格式化前状态，不表示之前已提交的协议或分区已撤销。回滚失败或写后状态未知均要求停止后续写入和重新检查设备。恢复后格式化/密钥域重建发生这两类失败时，TUI 清除原格式化 pin 并阻止沿用旧评估继续写入；元数据恢复的已完成事实继续保留。CLI 恢复后任一格式化/重建失败即结束后续操作并返回失败码。
 
-分层导入门禁使用 Rust AST 自动扫描完整源树及逻辑模块路径，解析别名、嵌套 use、重导出、super、内联模块和 #[path]；兼容 platform::system 再导出仍保留，门禁不宣称整个 crate 已成为完全无环 DAG。
+分层导入门禁使用 Rust AST 自动扫描完整源树及逻辑模块路径，解析别名、嵌套 use、重导出、super、内联模块和 #[path]；`platform::system`、协议密码学与备份存储使用直接实现模块，门禁不宣称整个 crate 已成为完全无环 DAG。
 
 默认值以 `scripts/test-budgets.json` 为事实源，fast/full 读取该配置，行为测试校验文档及 CI 的默认值一致。
 
