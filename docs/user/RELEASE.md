@@ -92,7 +92,7 @@ Linux arm64、Linux x86_64、Windows arm64、Windows x86_64。新增/删除正�
 1. `main` 工作区干净，`HEAD == origin/main`；
 2. `Cargo.toml` 版本已经按本规范递增，`Cargo.lock` 同步；
 3. `cargo fmt --all -- --check` 通过；
-4. `cargo test --all-targets --locked` 通过；
+4. `python3 scripts/test-full.py --profile full` 通过（虚拟/真实 HIL 独立）；
 5. `cargo clippy --all-targets --locked -- -D warnings` 通过；
 6. 固定版本执行器的 macOS / Linux / Windows arm64 + x86_64 六架构持续集成全绿；
 7. Linux / Windows arm64 + x86_64 虚拟磁盘轻量硬件在环门禁全绿；
@@ -179,3 +179,16 @@ GitHub 托管执行器没有真实 EDP USB 硬件，因此不能声称完成真�
 
 不得在持续集成尚未验证时先创建正式发布，也不得手工上传一个平台成功、另一个平台缺失的
 半成品正式版本。
+
+## 自动发布验证关系
+
+固定平台与打包格式由 `.github/release-platforms.json` 定义，工具链由 `rust-toolchain.toml` 定义。
+CI、原生发布、虚拟 HIL、基准工作流及元数据生成器共用这些事实；未来兼容性工作流仍主动使用 stable/latest。
+正式构建使用提交时间作为 `SOURCE_DATE_EPOCH`，这消除了构建时间戳漂移，不代表所有打包字节已证明可复现。
+
+发布预检要求标签提交等于当时的 `origin/main`，并等待该准确提交的 main push CI 成功；缺失、等待中、失败、取消和其他提交的绿色结果不能通过。
+发布 DAG 额外依赖同一提交的可复用虚拟 HIL、格式/协议金标/依赖审计，以及六个原生构建与通用包任务。
+发布清单先验证七套产物及各自 SHA-256 旁挂文件，再复核 SBOM 提交/版本/工具链、Cargo 元数据、lockfile 和编译器记录；缺失、多余、空文件或符号链接均拒绝发布。
+
+本地安装在目标目录生成并验证候选，检查交互式命令解析后原子替换；替换后验证失败自动恢复旧版本。
+安装锁阻止并发替换；回滚本身失败时保留旧文件并报告可恢复路径。macOS 继续以 `zsh -lic` 与 `~/.local/bin/edpcli` 为准。

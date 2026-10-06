@@ -155,7 +155,8 @@ fn local_install_has_one_repository_owned_entrypoint() {
     assert!(install.contains("scripts/install-local.sh"));
     assert!(!install.contains("cargo install --path"));
     assert!(installer.contains(".local/bin/edpcli"));
-    assert!(installer.contains("SHA-256 mismatch after install"));
+    assert!(installer.contains("candidate SHA-256 mismatch"));
+    assert!(installer.contains("rolling back"));
     assert!(installer.contains("command -v edpcli"));
 }
 
@@ -206,12 +207,21 @@ fn daily_ci_splits_primary_runtime_coverage_from_secondary_arch_compile_coverage
     let ci = read(".github/workflows/ci.yml").replace("\r\n", "\n");
     assert!(ci.contains("quality-primary:"));
     assert!(ci.contains("quality-secondary:"));
-    assert!(ci.contains("macos-arm64"));
-    assert!(ci.contains("linux-x86_64"));
-    assert!(ci.contains("windows-x86_64"));
-    assert!(ci.contains("macos-x86_64"));
-    assert!(ci.contains("linux-arm64"));
-    assert!(ci.contains("windows-arm64"));
+    let facts: serde_json::Value =
+        serde_json::from_str(&read(".github/release-platforms.json")).unwrap();
+    assert_eq!(facts.as_object().unwrap().len(), 7);
+    for key in ["macos_arm64", "linux_x86_64", "windows_x86_64"] {
+        assert_eq!(facts[key]["group"], "primary");
+        assert_eq!(
+            facts[key]["workers"].as_u64().unwrap() * facts[key]["test_threads"].as_u64().unwrap(),
+            8
+        );
+    }
+    for key in ["macos_x86_64", "linux_arm64", "windows_arm64"] {
+        assert_eq!(facts[key]["group"], "secondary");
+    }
+    assert!(ci.contains("fromJSON(needs.changes.outputs.primary)"));
+    assert!(ci.contains("fromJSON(needs.changes.outputs.secondary)"));
     assert_eq!(
         ci.matches("name: Rustfmt").count(),
         1,
@@ -222,11 +232,6 @@ fn daily_ci_splits_primary_runtime_coverage_from_secondary_arch_compile_coverage
     assert!(!ci.contains("cargo build --release --locked"));
     assert!(ci.contains("repository-audit:"));
     assert!(ci.contains("classify changes"));
-    assert!(ci.contains("label: macos-arm64\n            workers: 4\n            test_threads: 2"));
-    assert!(ci.contains("label: linux-x86_64\n            workers: 4\n            test_threads: 2"));
-    assert!(
-        ci.contains("label: windows-x86_64\n            workers: 2\n            test_threads: 4")
-    );
     assert!(ci.contains("EDPCLI_TEST_WORKERS: ${{ matrix.workers }}"));
     assert!(ci.contains("EDPCLI_TEST_THREADS: ${{ matrix.test_threads }}"));
 }
@@ -242,7 +247,9 @@ fn virtual_disk_hil_is_path_filtered_and_has_periodic_full_coverage() {
     assert!(hil.contains("workflow_dispatch:"));
     assert!(hil.contains("schedule:"));
     assert!(hil.contains("cron:"));
-    assert!(hil.contains("runs-on: macos-15"));
+    assert!(hil.contains("fromJSON(needs.build_facts.outputs.platforms).macos_arm64.runner"));
+    assert!(hil.contains("workflow_call:"));
+    assert!(hil.contains("ref: ${{ inputs.ref || github.sha }}"));
     assert!(hil.contains("bash scripts/ci/macos-virtual-disk-hil.sh"));
     assert!(hil.contains("bash scripts/ci/macos-plain-virtual-disk-hil.sh"));
 }
@@ -308,9 +315,13 @@ fn test_profile_benchmark_reuses_repository_runner_and_reports_distribution() {
 
     let workflow = read(".github/workflows/test-runner-benchmark.yml");
     assert!(workflow.contains("perf/test-runner-*"));
-    assert!(workflow.contains("linux-x86_64"));
-    assert!(workflow.contains("macos-arm64"));
-    assert!(workflow.contains("windows-x86_64"));
+    assert!(workflow.contains("steps.build.outputs.primary"));
+    assert!(workflow.contains("fromJSON(needs.build_facts.outputs.matrix)"));
+    let config: serde_json::Value =
+        serde_json::from_str(&read(".github/release-platforms.json")).unwrap();
+    for platform in ["linux_x86_64", "macos_arm64", "windows_x86_64"] {
+        assert_eq!(config[platform]["group"], "primary");
+    }
     assert!(workflow.contains("--workers 1 --test-threads 4"));
     assert!(workflow.contains("--workers 2 --test-threads 2"));
     assert!(workflow.contains("--workers 2 --test-threads 4"));
@@ -332,4 +343,19 @@ fn timing_regression_gate_is_explicit_and_overrideable() {
 
     let ci = read(".github/workflows/ci.yml");
     assert!(ci.contains("EDPCLI_TEST_MAX_SECONDS: \"180\""));
+}
+
+#[test]
+fn release_publication_requires_same_commit_ci_hil_and_exact_assets() {
+    let release = read(".github/workflows/release.yml");
+    let publish = release.split("  publish:").nth(1).unwrap();
+    assert!(publish.contains("      - quality"));
+    assert!(publish.contains("      - virtual_hil"));
+    assert!(release.contains("uses: ./.github/workflows/virtual-disk-hil.yml"));
+    assert!(release.contains("ref: ${{ github.sha }}"));
+    assert!(release.contains("verify-release-ci.py --commit"));
+    assert!(release.contains("git rev-parse origin/main"));
+    assert!(release.contains("scripts/protocol/audit_baseline.py"));
+    assert!(release.contains("cargo deny check"));
+    assert!(publish.contains("generate-release-manifest.py"));
 }

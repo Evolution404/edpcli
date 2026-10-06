@@ -9,24 +9,21 @@ permissions:
   contents: read
 
 jobs:
+  build_facts:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.build.outputs.compatibility }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: build
+        run: python3 scripts/ci/build_config.py
+
   latest:
     name: ${{ matrix.label }} / latest stable Rust
+    needs: build_facts
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            label: macos-arm64
-          - os: macos-15-intel
-            label: macos-x86_64
-          - os: ubuntu-24.04-arm
-            label: linux-arm64
-          - os: ubuntu-latest
-            label: linux-x86_64
-          - os: windows-11-vs2026-arm
-            label: windows-arm64
-          - os: windows-latest
-            label: windows-x86_64
+      matrix: ${{ fromJSON(needs.build_facts.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

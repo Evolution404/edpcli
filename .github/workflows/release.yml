@@ -6,18 +6,31 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+  actions: read
 
 jobs:
   version:
     name: Verify release version
+    outputs:
+      platforms: ${{ steps.build.outputs.platforms }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load build facts
+        id: build
+        run: python scripts/ci/build_config.py
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: 1.98.1
+          toolchain: ${{ env.EDPCLI_RUST_TOOLCHAIN }}
+      - name: Require tag at clean origin/main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test -z "$(git status --porcelain)"
       - name: Require tag to match Cargo.toml
         shell: bash
         run: |
@@ -32,13 +45,15 @@ jobs:
   macos_arm64:
     name: macOS arm64
     needs: version
-    runs-on: macos-15
+    runs-on: ${{ fromJSON(needs.version.outputs.platforms).macos_arm64.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load build facts
+        run: python scripts/ci/build_config.py
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: 1.98.1
+          toolchain: ${{ env.EDPCLI_RUST_TOOLCHAIN }}
           components: clippy
       - name: Test and lint
         run: |
@@ -67,13 +82,15 @@ jobs:
   macos_x86_64:
     name: macOS x86_64
     needs: version
-    runs-on: macos-15-intel
+    runs-on: ${{ fromJSON(needs.version.outputs.platforms).macos_x86_64.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load build facts
+        run: python scripts/ci/build_config.py
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: 1.98.1
+          toolchain: ${{ env.EDPCLI_RUST_TOOLCHAIN }}
           components: clippy
       - name: Test and lint
         run: |
@@ -102,9 +119,10 @@ jobs:
   macos_universal:
     name: macOS universal
     needs:
+      - version
       - macos_arm64
       - macos_x86_64
-    runs-on: macos-15
+    runs-on: ${{ fromJSON(needs.version.outputs.platforms).macos_universal.runner }}
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -138,13 +156,15 @@ jobs:
   linux_arm64:
     name: Linux arm64
     needs: version
-    runs-on: ubuntu-24.04-arm
+    runs-on: ${{ fromJSON(needs.version.outputs.platforms).linux_arm64.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load build facts
+        run: python scripts/ci/build_config.py
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: 1.98.1
+          toolchain: ${{ env.EDPCLI_RUST_TOOLCHAIN }}
           components: clippy
       - name: Test and lint
         run: |
@@ -173,13 +193,15 @@ jobs:
   linux_x86_64:
     name: Linux x86_64
     needs: version
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(needs.version.outputs.platforms).linux_x86_64.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load build facts
+        run: python scripts/ci/build_config.py
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: 1.98.1
+          toolchain: ${{ env.EDPCLI_RUST_TOOLCHAIN }}
           components: clippy
       - name: Test and lint
         run: |
@@ -208,13 +230,15 @@ jobs:
   windows_arm64:
     name: Windows arm64
     needs: version
-    runs-on: windows-11-vs2026-arm
+    runs-on: ${{ fromJSON(needs.version.outputs.platforms).windows_arm64.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load build facts
+        run: python scripts/ci/build_config.py
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: 1.98.1
+          toolchain: ${{ env.EDPCLI_RUST_TOOLCHAIN }}
           components: clippy
       - name: Test and lint
         run: |
@@ -250,13 +274,15 @@ jobs:
   windows_x86_64:
     name: Windows x86_64
     needs: version
-    runs-on: windows-2025
+    runs-on: ${{ fromJSON(needs.version.outputs.platforms).windows_x86_64.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load build facts
+        run: python scripts/ci/build_config.py
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: 1.98.1
+          toolchain: ${{ env.EDPCLI_RUST_TOOLCHAIN }}
           components: clippy
       - name: Test and lint
         run: |
@@ -295,10 +321,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load build facts
+        run: python scripts/ci/build_config.py
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: 1.98.1
+          toolchain: ${{ env.EDPCLI_RUST_TOOLCHAIN }}
       - name: Generate SBOM and dependency metadata
         shell: bash
         run: |
@@ -318,8 +346,42 @@ jobs:
           path: package/*
           if-no-files-found: error
 
+  quality:
+    name: Verify same-commit main CI and release policy
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load build facts
+        run: python scripts/ci/build_config.py
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: ${{ env.EDPCLI_RUST_TOOLCHAIN }}
+          components: rustfmt
+      - name: Wait for same-commit main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/verify-release-ci.py --commit "${{ github.sha }}" --repo "${{ github.repository }}"
+      - name: Verify formatting and historical protocol gold
+        run: |
+          cargo fmt --all -- --check
+          python3 scripts/protocol/audit_baseline.py
+      - name: Install pinned cargo-deny and check dependencies
+        run: |
+          cargo install cargo-deny --locked --version 0.20.2
+          cargo deny check
+
+  virtual_hil:
+    needs: version
+    uses: ./.github/workflows/virtual-disk-hil.yml
+    with:
+      ref: ${{ github.sha }}
+
   publish:
     name: Publish GitHub Release
+    permissions:
+      contents: write
     needs:
       - macos_arm64
       - macos_x86_64
@@ -329,6 +391,8 @@ jobs:
       - windows_arm64
       - windows_x86_64
       - metadata
+      - quality
+      - virtual_hil
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

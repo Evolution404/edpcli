@@ -1,0 +1,9 @@
+{
+  "macos_arm64": {"runner": "macos-15", "label": "macos-arm64", "group": "primary", "workers": 4, "test_threads": 2, "archive": "tar.gz"},
+  "macos_x86_64": {"runner": "macos-15-intel", "label": "macos-x86_64", "group": "secondary", "archive": "tar.gz"},
+  "macos_universal": {"runner": "macos-15", "label": "macos-universal", "group": "merge", "archive": "tar.gz"},
+  "linux_arm64": {"runner": "ubuntu-24.04-arm", "label": "linux-arm64", "group": "secondary", "archive": "tar.gz"},
+  "linux_x86_64": {"runner": "ubuntu-24.04", "label": "linux-x86_64", "group": "primary", "workers": 4, "test_threads": 2, "archive": "tar.gz"},
+  "windows_arm64": {"runner": "windows-11-vs2026-arm", "label": "windows-arm64", "group": "secondary", "archive": "zip"},
+  "windows_x86_64": {"runner": "windows-2025", "label": "windows-x86_64", "group": "primary", "workers": 2, "test_threads": 4, "archive": "zip"}
+}

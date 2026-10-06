@@ -50,13 +50,47 @@ fn build_timestamp() -> String {
 }
 
 fn main() {
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=src");
-    println!("cargo:rerun-if-changed=Cargo.toml");
-    println!("cargo:rerun-if-changed=Cargo.lock");
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    if let Some(symbolic_ref) = command_output("git", &["symbolic-ref", "-q", "HEAD"]) {
-        println!("cargo:rerun-if-changed=.git/{symbolic_ref}");
+    // Git resolves linked worktrees, detached HEAD and packed refs correctly.
+    // Watch parents too: refs/files can be removed or packed after this build.
+    let mut watched = std::collections::BTreeSet::new();
+    for name in ["HEAD", "index", "packed-refs", "refs"] {
+        if let Some(path) = command_output("git", &["rev-parse", "--git-path", name]) {
+            let path = std::path::PathBuf::from(path);
+            if path.exists() {
+                watched.insert(path.clone());
+            }
+            if let Some(parent) = path.parent().filter(|p| p.exists()) {
+                watched.insert(parent.to_path_buf());
+            }
+        }
+    }
+    if let Some(path) = command_output("git", &["symbolic-ref", "-q", "HEAD"])
+        .and_then(|reference| command_output("git", &["rev-parse", "--git-path", &reference]))
+    {
+        let path = std::path::PathBuf::from(path);
+        if path.exists() {
+            watched.insert(path.clone());
+        }
+        if let Some(parent) = path.parent().filter(|p| p.exists()) {
+            watched.insert(parent.to_path_buf());
+        }
+    }
+    if let Some(paths) = command_output("git", &["ls-files", "-z"]) {
+        for name in paths.split('\0').filter(|name| !name.is_empty()) {
+            let path = std::path::PathBuf::from(name);
+            if path.exists() {
+                watched.insert(path.clone());
+            }
+            if let Some(parent) = path.parent().filter(|p| p.exists()) {
+                watched.insert(parent.to_path_buf());
+            }
+        }
+    } else {
+        // Source archives do not contain Git metadata.
+        watched.extend(["build.rs", "src", "Cargo.toml", "Cargo.lock"].map(Into::into));
+    }
+    for path in watched {
+        println!("cargo:rerun-if-changed={}", path.display());
     }
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
 
@@ -66,8 +100,16 @@ fn main() {
     let profile = env::var("PROFILE").unwrap_or_else(|_| "unknown".into());
     let git_commit = command_output("git", &["rev-parse", "--short=12", "HEAD"])
         .unwrap_or_else(|| "unknown".into());
-    let git_dirty = command_output("git", &["status", "--porcelain", "--untracked-files=no"])
-        .is_some_and(|output| !output.is_empty());
+    let git_dirty = command_output(
+        "git",
+        &[
+            "--no-optional-locks",
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+        ],
+    )
+    .is_some_and(|output| !output.is_empty());
     let rustc = env::var("RUSTC")
         .ok()
         .and_then(|rustc| command_output(&rustc, &["--version"]))

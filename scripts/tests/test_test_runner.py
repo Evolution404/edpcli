@@ -53,10 +53,10 @@ class GateTests(unittest.TestCase):
 class DeadlineTests(unittest.TestCase):
     def test_budget_contract_matches_documentation_and_ci(self):
         from test_gate import BUDGETS
-        doc = (ROOT / "docs/architecture/ARCHITECTURE.md").read_text()
+        doc = (ROOT / "docs/architecture/ARCHITECTURE.md").read_text(encoding="utf-8")
         for key, value in BUDGETS.items():
             self.assertIn(f"| `{key}` | {value} |", doc)
-        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn(f'EDPCLI_TEST_MAX_SECONDS: "{BUDGETS["ci_max_seconds"]}"', ci)
 
     def test_doctest_timeout_remains_typed(self):
@@ -79,7 +79,7 @@ class DeadlineTests(unittest.TestCase):
                 self.assertEqual(result, 124)
                 self.assertLess(time.monotonic() - started, deadline + 3)
                 self.assertTrue(pid_file.exists(), "fixture must start before timeout")
-                pid = int(pid_file.read_text())
+                pid = int(pid_file.read_text(encoding="utf-8"))
                 if os.name == "posix":
                     status = subprocess.run(["ps", "-p", str(pid), "-o", "stat="], capture_output=True, text=True).stdout.strip()
                     self.assertTrue(not status or status.startswith("Z"), status)

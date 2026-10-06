@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from build_config import toolchain
+
 import argparse
 import json
 import subprocess
@@ -106,7 +108,7 @@ def main() -> None:
             "component": root_component,
             "properties": [
                 {"name": "git:commit", "value": args.commit},
-                {"name": "build:rust-toolchain", "value": "1.98.1"},
+                {"name": "build:rust-toolchain", "value": toolchain()},
             ],
         },
         "components": sorted(

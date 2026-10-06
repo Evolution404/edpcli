@@ -468,6 +468,12 @@ def main() -> int:
         print(f"[fast] selected suites: {', '.join(suites)}")
 
     started = time.monotonic()
+    engineering_checks = run_text([sys.executable, "scripts/tests/test_engineering.py"])
+    if engineering_checks.returncode:
+        print(engineering_checks.stdout, end="")
+        print(engineering_checks.stderr, end="", file=sys.stderr)
+        return engineering_checks.returncode
+    print("[PASS] build/release/install behavior checks", flush=True)
     runner_checks = run_text([sys.executable, "scripts/tests/test_test_runner.py"])
     if runner_checks.returncode:
         print(runner_checks.stdout, end="")

@@ -7,7 +7,7 @@ import sys
 
 PROTOCOL = ("audit/protocol/*", "scripts/protocol/*", "docs/protocol/*", "docs/EDP_PROTOCOL*", "src/protocol/*", "tests/protocol*", "tests/fixtures/protocol/*", "backup/*")
 RUST = ("docs/ui/*", "docs/backup/*","src/*", "tests/*", "scripts/*", "Cargo.toml", "Cargo.lock", "rust-toolchain*", ".cargo/*", ".github/workflows/*", "build.rs", "backup/*")
-DEPS = ("Cargo.toml", "Cargo.lock", "deny.toml", ".github/dependabot.yml", ".github/workflows/*")
+DEPS = (".github/release-platforms.json", "Cargo.toml", "Cargo.lock", "deny.toml", ".github/dependabot.yml", ".github/workflows/*")
 
 def matches(path: str, patterns: tuple[str, ...]) -> bool:
     return any(fnmatchcase(path, pattern) for pattern in patterns)
