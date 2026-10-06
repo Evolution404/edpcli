@@ -1,22 +1,9 @@
-//! Read-only Inspect presentation facade. Protocol adaptation lives in
-//! `inspect_adapter`; UI text and hex rendering stay downstream of application.
+//! Read-only Inspect protocol model facade. Decoding lives in `inspect_adapter`;
+//! current text export and TUI rendering are owned by their respective layers.
 
-pub fn render_fields(view: &SectorView) -> String {
-    crate::application::inspect_text::render_fields_with(
-        view,
-        crate::application::inspect_text::InspectTextTheme {
-            paint: render::paint,
-            emphasize: crate::ui::bold_cyan,
-            dim: crate::ui::dim,
-        },
-    )
-}
 pub use crate::inspect_adapter::{
     analyze_sector_with_context, DecodeRange, FieldChild, FieldStyle, FieldTransform,
     InspectDiagnostic, InspectDiagnosticCode, InspectFieldKey, InspectMeta, InspectParseState,
     SectorField, SectorFieldStatus, SectorView,
 };
 pub use crate::inspect_target::{InspectDiskContext, PhysicalDataState, SectorRegion};
-
-mod render;
-pub use render::{overview_line, render_hex};

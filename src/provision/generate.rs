@@ -8,10 +8,6 @@ use super::{
     PROVISION_IMAGE_LEN,
 };
 
-const LBA12_TABLE_LEN: usize = 0x170;
-const SHARE_START: u64 = 63;
-const TYPE4_SECTORS: u64 = 6;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProvisionEntropy {
     lba11_random252: [u8; 252],
@@ -25,29 +21,6 @@ impl ProvisionEntropy {
     pub fn lba11_random252(&self) -> &[u8; 252] {
         &self.lba11_random252
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct Layout {
-    share_sectors: u64,
-    type4_start: u64,
-}
-
-fn layout(spec: &ProvisionSpec) -> Result<Layout, String> {
-    let total = spec.target().total_sectors();
-    let type4_start = total
-        .checked_sub(TYPE4_SECTORS)
-        .ok_or("target is too small for type4 reserve")?;
-    let share_sectors = type4_start
-        .checked_sub(SHARE_START)
-        .ok_or("target is too small for Share@63")?;
-    if share_sectors > u32::MAX as u64 {
-        return Err("target exceeds MBR 32-bit sector-count capacity".into());
-    }
-    Ok(Layout {
-        share_sectors,
-        type4_start,
-    })
 }
 
 fn put_u32(dst: &mut [u8], offset: usize, value: u32) {
@@ -66,16 +39,6 @@ fn gbk(value: &str) -> Result<Vec<u8>, String> {
         ));
     }
     Ok(bytes.into_owned())
-}
-
-fn build_lba0(layout: Layout) -> [u8; SECTOR] {
-    let mut out = [0u8; SECTOR];
-    let entry = 0x1be;
-    out[entry + 4] = 0x07;
-    put_u32(&mut out, entry + 8, SHARE_START as u32);
-    put_u32(&mut out, entry + 12, layout.share_sectors as u32);
-    out[0x1fe..0x200].copy_from_slice(&[0x55, 0xaa]);
-    out
 }
 
 fn build_lba4(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
@@ -199,10 +162,6 @@ fn build_lba6_lba9(spec: &ProvisionSpec) -> Result<([u8; SECTOR], [u8; SECTOR]),
     lba6[..0x1fc].copy_from_slice(&encrypted);
     lba6[0x1fc..].copy_from_slice(&checksum.to_le_bytes());
     Ok((lba6, lba9))
-}
-
-fn edpf_entry(stride: usize, ptype: u32, start: u64, size_bytes: u64, material: &[u8]) -> Vec<u8> {
-    edpf_entry_with_flags(stride, 2, ptype, 1, 1, start, size_bytes, material, 2)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -377,30 +336,6 @@ fn build_official_lba12(
         .expect("LBA12 sector length"))
 }
 
-fn build_lba7(spec: &ProvisionSpec, layout: Layout) -> [u8; SECTOR] {
-    let mut plain = [0u8; SECTOR];
-    let share = edpf_entry(
-        0x40,
-        2,
-        SHARE_START,
-        layout.share_sectors * SECTOR as u64,
-        spec.profile().lba7_material(),
-    );
-    let type4 = edpf_entry(
-        0x40,
-        4,
-        layout.type4_start,
-        TYPE4_SECTORS * SECTOR as u64,
-        spec.profile().lba7_material(),
-    );
-    plain[..0x40].copy_from_slice(&share);
-    plain[0x40..0x80].copy_from_slice(&type4);
-    plain[0xc0..0xce].copy_from_slice(&spec.profile().lba7_pass_info());
-    let crc = crc32_bare(spec.target().device_id().as_bytes());
-    let k0 = (crc & 0xffff) ^ (crc >> 16);
-    xor_rolling(&plain, k0).try_into().expect("sector length")
-}
-
 fn build_lba8(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
     let mut plain = [0u8; SECTOR];
     plain[..4].copy_from_slice(b"LLGB");
@@ -451,57 +386,6 @@ fn build_lba11(spec: &ProvisionSpec, entropy: &ProvisionEntropy) -> Result<[u8; 
     out[..256].copy_from_slice(&drkb);
     out[256..].copy_from_slice(&encrypted);
     Ok(out)
-}
-
-fn build_lba12(spec: &ProvisionSpec, layout: Layout) -> [u8; SECTOR] {
-    let mut plain = [0u8; SECTOR];
-    let share = edpf_entry(
-        0x60,
-        2,
-        SHARE_START,
-        layout.share_sectors * SECTOR as u64,
-        spec.profile().lba12_material(),
-    );
-    let type4 = edpf_entry(
-        0x60,
-        4,
-        layout.type4_start,
-        TYPE4_SECTORS * SECTOR as u64,
-        spec.profile().lba12_material(),
-    );
-    plain[..0x60].copy_from_slice(&share);
-    plain[0x60..0xc0].copy_from_slice(&type4);
-    plain[0x120..0x12e].copy_from_slice(&spec.profile().lba12_pass_info());
-
-    let crc = crc32_bare(spec.target().device_id().as_bytes());
-    let key = crc.to_le_bytes();
-    debug_assert!(plain[LBA12_TABLE_LEN..].iter().all(|byte| *byte == 0));
-    a7f0_full(&plain, &key, 0)
-        .try_into()
-        .expect("LBA12 sector length")
-}
-
-pub fn generate_image(
-    spec: &ProvisionSpec,
-    entropy: &ProvisionEntropy,
-) -> Result<ProvisionImage, String> {
-    let layout = layout(spec)?;
-    let mut image = vec![0u8; PROVISION_IMAGE_LEN];
-    let (lba6, lba9) = build_lba6_lba9(spec)?;
-    let sectors = [
-        (0usize, build_lba0(layout).to_vec()),
-        (4, build_lba4(spec)?.to_vec()),
-        (6, lba6.to_vec()),
-        (7, build_lba7(spec, layout).to_vec()),
-        (8, build_lba8(spec)?.to_vec()),
-        (9, lba9.to_vec()),
-        (11, build_lba11(spec, entropy)?.to_vec()),
-        (12, build_lba12(spec, layout).to_vec()),
-    ];
-    for (lba, data) in sectors {
-        image[lba * SECTOR..(lba + 1) * SECTOR].copy_from_slice(&data);
-    }
-    ProvisionImage::from_bytes(image)
 }
 
 /// Generate the current first-party SAFE6 metadata shape for one of the four

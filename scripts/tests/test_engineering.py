@@ -24,6 +24,78 @@ def load_script(name):
     return module
 
 
+_audit_spec = importlib.util.spec_from_file_location("redundancy_audit", ROOT / "scripts/audit-redundancy.py")
+redundancy_audit = importlib.util.module_from_spec(_audit_spec)
+_audit_spec.loader.exec_module(redundancy_audit)
+
+
+class RedundancyAuditTests(unittest.TestCase):
+    def findings(self, root, files, facts, texts, tests=()):
+        rules = json.loads((ROOT / "scripts/audit/redundancy-rules.json").read_text())["rules"]
+        return redundancy_audit.evaluate(root, files, facts, texts, set(tests), rules)
+
+    def test_all_modules_are_scanned_and_candidates_are_not_deletion_proofs(self):
+        facts = dict(registered=["src/lib.rs"], missing_modules=[], references=[
+            dict(path="tests/b.rs", name="test_helper", test_only=True),
+            dict(path="src/main.rs", name="current", test_only=False),
+        ], functions=[dict(path=path, name=name, owner="", public=True, test_only=False,
+                           trait_impl=False, ignored_parameters=ignored, forwards_to=forward)
+                      for path, name, ignored, forward in [
+                          ("src/a.rs", "unused_a", [], None),
+                          ("src/b.rs", "unused_b", ["_old_flag"], "current"),
+                          ("src/c.rs", "test_helper", [], None),
+                          ("src/current.rs", "current", [], None),
+                      ]])
+        found = self.findings(ROOT, ["src/lib.rs", "src/a.rs", "src/b.rs", "src/orphan.rs"], facts, {})
+        unused = {f['subject'] for f in found if f['rule'] == 'unreferenced_api'}
+        self.assertEqual(unused, {'unused_a', 'unused_b'})
+        self.assertTrue(any(f['rule'] == 'test_only_api' and f['subject'] == 'test_helper' for f in found))
+        self.assertTrue(any(f['rule'] == 'ignored_parameter' for f in found))
+        self.assertTrue(any(f['rule'] == 'forwarding_api' for f in found))
+        self.assertTrue(any(f['rule'] == 'unregistered_rust' and f['path'] == 'src/orphan.rs' for f in found))
+        self.assertTrue(all(f['certainty'] == 'candidate' for f in found))
+
+    def test_document_links_test_targets_duplicates_and_script_consumers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); (root / 'docs').mkdir(); (root / 'docs/exists file.md').touch()
+            document = '[ok](<exists%20file.md>) [bad](missing.md) [web](https://example.org) [anchor](#title)\n'
+            document += '```sh\ncargo test --test retired_suite\n```\n' + 'text ' * 50
+            texts = {'docs/a.md': document, 'docs/b.md': document,
+                     'scripts/manual.py': 'print(1)', 'scripts/active.py': 'print(2)',
+                     'README.md': 'python3 scripts/active.py'}
+            found = self.findings(root, list(texts), dict(functions=[], references=[], registered=[], missing_modules=[]), texts, ['repository_suite'])
+            broken = [f for f in found if f['rule'] == 'broken_document_link']
+            self.assertEqual({f['subject'] for f in broken}, {'missing.md'})
+            self.assertEqual(len(broken), 2)
+            self.assertTrue(any(f['rule'] == 'obsolete_test_target' for f in found))
+            self.assertEqual(len([f for f in found if f['rule'] == 'duplicate_document']), 1)
+            self.assertEqual({f['path'] for f in found if f['rule'] == 'unreferenced_script'}, {'scripts/manual.py'})
+
+    def test_test_only_module_excludes_live_types_and_trait_dispatch(self):
+        functions = [dict(path=path, name=name, owner='', public=True, test_only=False,
+                          trait_impl=trait, ignored_parameters=[], forwards_to=None)
+                     for path, name, trait in [('src/old.rs', 'old', False), ('src/live.rs', 'live', False), ('src/trait.rs', 'callback', True), ('src/barrel.rs', 'facade', False), ('src/inline_old.rs', 'inline_old', False)]]
+        references = [dict(path='tests/test.rs', name=name, test_only=True) for name in ['old', 'live', 'callback', 'facade', 'OldType']]
+        references += [dict(path='src/main.rs', name='LiveType', test_only=False), dict(path='src/inline_old.rs', name='inline_old', test_only=True)]
+        facts = dict(functions=functions, references=references, registered=[], missing_modules=[],
+                     declared_symbols=[dict(path='src/live.rs', name='LiveType', test_only=False, public=True), dict(path='src/type_only.rs', name='OldType', test_only=False, public=True)], reexport_files=['src/barrel.rs'])
+        found = self.findings(ROOT, [], facts, {})
+        self.assertEqual({f['path'] for f in found if f['rule'] == 'test_only_module'}, {'src/old.rs', 'src/type_only.rs', 'src/inline_old.rs'})
+
+    def test_new_unknown_rule_fails_instead_of_silently_skipping(self):
+        with self.assertRaisesRegex(ValueError, 'Unimplemented'):
+            redundancy_audit.evaluate(ROOT, [], dict(functions=[], references=[], registered=[], missing_modules=[]), {}, set(), [{'id': 'new', 'kind': 'new'}])
+
+    def test_retired_symbols_and_missing_modules_are_confirmed(self):
+        facts = dict(functions=[], registered=[], missing_modules=['src/missing.rs'],
+                     declared_symbols=[dict(path='src/c.rs', name='ProvisionValidator', test_only=False)],
+                     references=[dict(path='src/b.rs', name='generate_image', test_only=False)])
+        found = self.findings(ROOT, [], facts, {})
+        self.assertEqual({f['rule'] for f in found}, {'missing_module', 'retired_symbol'})
+        self.assertTrue(any(f['subject'] == 'ProvisionValidator' for f in found))
+        self.assertTrue(all(f['certainty'] == 'confirmed' for f in found))
+
+
 class ReleaseTests(unittest.TestCase):
     def test_ci_identity_and_latest_run(self):
         verifier = load_script("verify-release-ci.py")

@@ -47,8 +47,8 @@ python3 scripts/protocol/query_byte_ledger.py --image <6656-byte-image> --lba 10
 
 ```text
 python3 scripts/protocol/audit_baseline.py
-cargo test --test protocol_byte_ledger
-cargo test --test protocol_documentation_contract
+cargo test --locked --test protocol_suite protocol_byte_ledger
+cargo test --locked --test protocol_suite protocol_documentation_contract
 ```
 
 基线审计全程只读，不打开原始磁盘设备，也不写入任何金标采集。

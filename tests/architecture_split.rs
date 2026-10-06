@@ -466,12 +466,10 @@ fn large_modules_are_split_by_domain_boundary() {
         "src/inspect_adapter.rs",
         "src/application/inspect_text.rs",
         "src/inspect/metadata.rs",
-        "src/inspect/catalog.rs",
         "src/inspect/lba_adapter.rs",
         "src/inspect/lba_early.rs",
         "src/inspect/lba_middle.rs",
         "src/inspect/lba_late.rs",
-        "src/inspect/render.rs",
     ] {
         exists(path);
     }
@@ -509,7 +507,6 @@ fn cli_entry_is_split_by_command_domain() {
 fn application_inspect_is_split_by_read_responsibility() {
     for path in [
         "src/application/inspect/model.rs",
-        "src/application/inspect/request.rs",
         "src/application/inspect/decode.rs",
         "src/application/inspect/source.rs",
         "src/application/inspect/export.rs",
@@ -826,7 +823,13 @@ fn critical_io_paths_have_no_panicking_shortcuts() {
     assert!(length_guard < first_boot_access);
     let validator = fs::read_to_string(root.join("src/provision/validate.rs"))
         .expect("read provision validator source");
-    assert!(validator.contains("checked_sector(bytes, lba as usize)"));
+    // The current validator only accepts the fixed-size ProvisionImage type;
+    // arbitrary-length byte slices cannot reach its sector indexing.
+    assert!(validator.contains("image: &ProvisionImage"));
+    assert!(!validator.contains("fn validate_bytes("));
+    let image_model =
+        fs::read_to_string(root.join("src/provision/mod.rs")).expect("read provision image model");
+    assert!(image_model.contains("pub struct ProvisionImage([u8; PROVISION_IMAGE_LEN]);"));
     let plist = fs::read_to_string(root.join("src/plist.rs")).expect("read plist source");
     let production = plist.split("#[cfg(test)]").next().expect("plist parser");
     assert!(!production.contains(".unwrap("));

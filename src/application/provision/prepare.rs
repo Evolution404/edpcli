@@ -32,7 +32,6 @@ fn override_capacity(
 }
 
 pub(super) fn target_encrypt_capacity_override(
-    _mode: OfficialPartitionMode,
     mib: Option<u64>,
     sectors: Option<u64>,
 ) -> EdpCliResult<Option<CapacityInput>> {
@@ -160,11 +159,8 @@ pub fn prepare_target_provision(
             format!("错误: 无法生成目标模式默认布局: {message}"),
         )
     })?;
-    let encrypt_override = target_encrypt_capacity_override(
-        selected_mode,
-        request.encrypt_mib,
-        request.encrypt_sectors,
-    )?;
+    let encrypt_override =
+        target_encrypt_capacity_override(request.encrypt_mib, request.encrypt_sectors)?;
     let prefill = apply_target_geometry_overrides(
         prefill,
         source.as_ref().map(|source| &source.profile),

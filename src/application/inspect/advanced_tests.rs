@@ -220,30 +220,6 @@ fn inspect_reader_boundary_is_read_only_and_reads_only_requested_raw_sectors() {
 }
 
 #[test]
-fn advanced_lba_parser_matches_cli_list_range_and_count_semantics() {
-    assert_eq!(
-        parse_advanced_lbas("", "").unwrap(),
-        (0u64..13).collect::<Vec<_>>()
-    );
-    assert_eq!(
-        parse_advanced_lbas("7,12,20-22", "").unwrap(),
-        vec![7, 12, 20, 21, 22]
-    );
-    assert_eq!(
-        parse_advanced_lbas("100", "3").unwrap(),
-        vec![100, 101, 102]
-    );
-    assert!(parse_advanced_lbas("7,12", "2").is_err());
-    assert!(parse_advanced_lbas("22-20", "").is_err());
-    assert!(parse_advanced_lbas("", "2").is_err());
-    assert!(parse_advanced_lbas("0", "0").is_err());
-    assert_eq!(
-        parse_advanced_lbas("", "2").unwrap_err().kind(),
-        InspectErrorKind::InvalidRequest
-    );
-}
-
-#[test]
 fn advanced_mode_cycles_without_hidden_state() {
     assert_eq!(AdvancedInspectMode::Raw.next(), AdvancedInspectMode::Decode);
     assert_eq!(

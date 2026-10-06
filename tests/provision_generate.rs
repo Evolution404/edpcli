@@ -1,3 +1,4 @@
+use crate::common::official_metadata_plan;
 use edpcli::application::metadata::ownership_from_lba8;
 use edpcli::inspect::{analyze_sector_with_context, InspectMeta};
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
@@ -7,8 +8,8 @@ use edpcli::protocol::{
     lba9::{parse_lba9, reconstruct_dept, reconstruct_user},
 };
 use edpcli::provision::{
-    generate_image, OnlyId, PassInfoPolicy, ProvisionEntropy, ProvisionMetadata, ProvisionProfile,
-    ProvisionSpec, TargetIdentity,
+    generate_official_image, OnlyId, PassInfoPolicy, ProvisionEntropy, ProvisionMetadata,
+    ProvisionProfile, ProvisionSpec, TargetIdentity,
 };
 use encoding_rs::GBK;
 
@@ -90,7 +91,7 @@ fn generated_pass_info_carries_all_user_configurable_policy_fields() {
         max_encrypt_password_errors: 9,
     };
     let spec = spec_with_policy("1402259934", policy);
-    let image = generate_image(&spec, &entropy()).unwrap();
+    let image = generate_official_image(&spec, &entropy(), &official_metadata_plan(&spec)).unwrap();
     let meta = InspectMeta {
         device_id: Some(spec.target().device_id().into()),
         vid: None,
@@ -121,7 +122,7 @@ fn generated_pass_info_carries_all_user_configurable_policy_fields() {
 #[test]
 fn generated_image_is_structurally_complete_metadata() {
     let spec = spec("1402259934");
-    let image = generate_image(&spec, &entropy()).unwrap();
+    let image = generate_official_image(&spec, &entropy(), &official_metadata_plan(&spec)).unwrap();
     let bytes = image.as_bytes();
 
     for lba in [1usize, 2, 3, 5, 9, 10] {
@@ -264,7 +265,7 @@ fn generated_image_is_structurally_complete_metadata() {
 #[test]
 fn force_change_password_option_sets_both_pass_info_copies() {
     let spec = spec_with_force_change("1402259934", true);
-    let image = generate_image(&spec, &entropy()).unwrap();
+    let image = generate_official_image(&spec, &entropy(), &official_metadata_plan(&spec)).unwrap();
     let bytes = image.as_bytes();
     let meta = InspectMeta {
         device_id: Some(spec.target().device_id().into()),
@@ -294,7 +295,7 @@ fn lba8_writer_length_excludes_nul_but_encrypts_the_following_block() {
     )
     .unwrap();
     let spec = ProvisionSpec::new(target(), metadata, ProvisionProfile::canonical_v1()).unwrap();
-    let image = generate_image(&spec, &entropy()).unwrap();
+    let image = generate_official_image(&spec, &entropy(), &official_metadata_plan(&spec)).unwrap();
     let raw = sector(image.as_bytes(), 8);
     let crc = crc32_bare(spec.target().device_id().as_bytes());
     let plain = edpcli::protocol::crypto::a6b0_full(&raw[..0x190], &crc.to_le_bytes(), 0);
@@ -322,7 +323,7 @@ fn one_byte_user_is_valid_and_round_trips_through_safe6() {
     )
     .unwrap();
     let spec = ProvisionSpec::new(target(), metadata, ProvisionProfile::canonical_v1()).unwrap();
-    let image = generate_image(&spec, &entropy()).unwrap();
+    let image = generate_official_image(&spec, &entropy(), &official_metadata_plan(&spec)).unwrap();
     let raw6: &[u8; 512] = sector(image.as_bytes(), 6).try_into().unwrap();
     let raw9: &[u8; 512] = sector(image.as_bytes(), 9).try_into().unwrap();
     let six = parse_lba6(raw6).unwrap();
@@ -356,7 +357,7 @@ fn current_writer_long_dept_uses_join60_and_lba9_continuation() {
     )
     .unwrap();
     let spec = ProvisionSpec::new(target(), metadata, ProvisionProfile::canonical_v1()).unwrap();
-    let image = generate_image(&spec, &entropy()).unwrap();
+    let image = generate_official_image(&spec, &entropy(), &official_metadata_plan(&spec)).unwrap();
     let raw6: &[u8; 512] = sector(image.as_bytes(), 6).try_into().unwrap();
     let raw9: &[u8; 512] = sector(image.as_bytes(), 9).try_into().unwrap();
     let six = parse_lba6(raw6).unwrap();
@@ -387,7 +388,7 @@ fn current_writer_max_long_user_uses_full_lba9_continuation_slot() {
     )
     .unwrap();
     let spec = ProvisionSpec::new(target(), metadata, ProvisionProfile::canonical_v1()).unwrap();
-    let image = generate_image(&spec, &entropy()).unwrap();
+    let image = generate_official_image(&spec, &entropy(), &official_metadata_plan(&spec)).unwrap();
     let raw6: &[u8; 512] = sector(image.as_bytes(), 6).try_into().unwrap();
     let raw9: &[u8; 512] = sector(image.as_bytes(), 9).try_into().unwrap();
     let six = parse_lba6(raw6).unwrap();
@@ -401,7 +402,7 @@ fn current_writer_max_long_user_uses_full_lba9_continuation_slot() {
 #[test]
 fn signed_onlyid_round_trips_through_generated_lba4() {
     let spec = spec("-1833210541");
-    let image = generate_image(&spec, &entropy()).unwrap();
+    let image = generate_official_image(&spec, &entropy(), &official_metadata_plan(&spec)).unwrap();
     let meta = InspectMeta {
         device_id: Some(spec.target().device_id().into()),
         vid: Some(spec.target().vid_hex()),

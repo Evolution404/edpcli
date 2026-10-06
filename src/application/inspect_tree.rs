@@ -19,7 +19,7 @@ pub use model::{
     format_lba_closed_range, DiskRegionSemantic, InspectChildren, InspectLazySectorLocation,
     InspectNode, InspectNodeKind, InspectNodeRange, InspectTopology,
 };
-pub use search::{find_sector_structured_path, find_sector_structured_paths};
+pub use search::find_sector_structured_paths;
 pub use topology::build_inspect_topology;
 #[cfg(test)]
 mod tests;

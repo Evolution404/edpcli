@@ -325,8 +325,7 @@ pub(crate) fn scan_disks_with_catalog(
                         row.provision_kind = kind;
                         row.partitions = parse_lba12(&lba12, did);
                         let lba6 = read_exact(6)?;
-                        row.label =
-                            metainfo::safe6_label_from_lba6(&lba6, &meta).or(row.label.take());
+                        row.label = metainfo::safe6_label_from_lba6(&lba6).or(row.label.take());
                         if let Some(policy) =
                             crate::provision::pass_info_policy_from_sectors(&lba7, &lba12, did)
                         {

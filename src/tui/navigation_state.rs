@@ -226,7 +226,7 @@ impl AppState {
                     .horizontal_scroll
                     .entry(kind)
                     .or_default()
-                    .set_offset(offset, &crate::tui::table_layout::layout_for(kind));
+                    .set_offset(offset);
             }
         } else {
             self.switch_workspace(Workspace::Devices);

@@ -131,7 +131,7 @@ fn collect(path: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 // Discover logical module paths, including relocated #[path] sources and inline scopes.
-// Every physical source is still scanned below, even if it is not reachable in this crate.
+// Source registration and layer direction are checked separately below.
 fn module_paths(entry: &Path) -> BTreeMap<PathBuf, Vec<String>> {
     fn walk(
         path: &Path,
@@ -203,6 +203,23 @@ fn module_paths(entry: &Path) -> BTreeMap<PathBuf, Vec<String>> {
     walk(entry, Vec::new(), false, &mut out);
     out
 }
+#[test]
+fn all_production_sources_are_registered_in_the_module_graph() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    // Walk all cfg branches, including other platforms and internal test modules.
+    let mut registered = module_paths(&root.join("src/lib.rs"));
+    registered.extend(module_paths(&root.join("src/main.rs")));
+    let mut files = Vec::new();
+    collect(&root.join("src"), &mut files);
+    for path in files {
+        assert!(
+            registered.contains_key(&path.canonicalize().unwrap()),
+            "unregistered production source: {}",
+            path.strip_prefix(root).unwrap().display()
+        );
+    }
+}
+
 #[test]
 fn all_domain_ports_infrastructure_and_container_modules_obey_layer_direction() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));

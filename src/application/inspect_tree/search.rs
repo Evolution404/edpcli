@@ -1,17 +1,5 @@
 use super::*;
 
-pub fn find_sector_structured_path(
-    lba: u64,
-    decoder: Option<InspectDecoderKind>,
-    status: SemanticStatus,
-    fields: &[InspectField],
-    query: &str,
-) -> Option<Vec<String>> {
-    find_sector_structured_paths(lba, decoder, status, fields, query)
-        .into_iter()
-        .next()
-}
-
 pub fn find_sector_structured_paths(
     lba: u64,
     decoder: Option<InspectDecoderKind>,

@@ -53,17 +53,6 @@ fn insert_sector(
     Ok(())
 }
 
-pub fn build_official_provision_write_image(
-    spec: &ProvisionSpec,
-    entropy: &ProvisionEntropy,
-    plan: &OfficialProvisionPlan,
-    _file_key: &[u8; 16],
-    _volume_label: &str,
-    _volume_serials: &[u32],
-) -> Result<OfficialProvisionWriteImage, String> {
-    build_official_provision_protocol_image(spec, entropy, plan)
-}
-
 /// The physical provision phase writes only protocol metadata and LCE. Filesystems
 /// are a separately authorized, independently reported post-provision phase.
 pub fn build_official_provision_protocol_image(

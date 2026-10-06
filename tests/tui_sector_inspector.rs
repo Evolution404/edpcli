@@ -1597,7 +1597,7 @@ fn inspect_field_table_sort_preserves_selected_field_identity() {
     let key = (before.field_index, before.child_index, before.range);
 
     for _ in 0..3 {
-        assert!(state.move_table_column(TableKind::InspectFields, false));
+        assert!(state.move_table_column_for_viewport(TableKind::InspectFields, false, 80, 24));
     }
     assert_eq!(state.table_active_column(TableKind::InspectFields), 3);
 

@@ -33,8 +33,6 @@ pub struct ProvisionProfile {
     safe6_beizhu: &'static str,
     safe6_encrypt: bool,
     lba4_profile_word: [u8; 4],
-    lba7_material: [u8; 16],
-    lba12_material: [u8; 24],
     pass_info_policy: PassInfoPolicy,
 }
 
@@ -49,21 +47,8 @@ impl ProvisionProfile {
             safe6_beizhu: "",
             safe6_encrypt: true,
             lba4_profile_word: [0x78, 0xad, 0x17, 0xa0],
-            lba7_material: [
-                0x5d, 0x73, 0x29, 0x04, 0x97, 0xbc, 0x69, 0xf1, 0xec, 0x0f, 0x75, 0x79, 0xe4, 0xdb,
-                0x45, 0xa9,
-            ],
-            lba12_material: [
-                0x5d, 0x73, 0x29, 0x04, 0xcf, 0x18, 0x96, 0xfe, 0xee, 0xf4, 0x08, 0x82, 0x9e, 0xc2,
-                0xd5, 0xf5, 0x40, 0x66, 0x0f, 0x21, 0x3e, 0x70, 0x95, 0x2e,
-            ],
             pass_info_policy: PassInfoPolicy::default(),
         }
-    }
-
-    pub fn with_force_change_password(mut self, enabled: bool) -> Self {
-        self.pass_info_policy.force_change_password = enabled;
-        self
     }
 
     pub fn with_pass_info_policy(mut self, policy: PassInfoPolicy) -> Self {
@@ -109,14 +94,6 @@ impl ProvisionProfile {
 
     pub(crate) fn lba4_profile_word(&self) -> [u8; 4] {
         self.lba4_profile_word
-    }
-
-    pub(crate) fn lba7_material(&self) -> &[u8; 16] {
-        &self.lba7_material
-    }
-
-    pub(crate) fn lba12_material(&self) -> &[u8; 24] {
-        &self.lba12_material
     }
 
     fn pass_info(&self, version: u16) -> PassInfo {

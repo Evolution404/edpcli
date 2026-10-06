@@ -1533,12 +1533,9 @@ fn ch16_business_layouts_do_not_use_legacy_animation_or_workspace_sidebars() {
 
 #[test]
 fn ch16_design_primitives_share_theme_and_render_at_compact_size() {
-    use edpcli::tui::ui::{
-        card, data_table, notice_banner, panel, status_badge, BadgeTone, BannerTone,
-    };
+    use edpcli::tui::ui::{card, data_table, panel, status_badge, BadgeTone};
     use ratatui::{
         layout::Constraint,
-        text::Line,
         widgets::{Paragraph, Row},
     };
 
@@ -1560,10 +1557,6 @@ fn ch16_design_primitives_share_theme_and_render_at_compact_size() {
                 ratatui::layout::Rect::new(20, 0, 20, 4),
             );
             frame.render_widget(
-                notice_banner(Line::from("扫描完成"), BannerTone::Info),
-                ratatui::layout::Rect::new(0, 4, 40, 1),
-            );
-            frame.render_widget(
                 Paragraph::new("动态状态").block(panel("状态", false)),
                 ratatui::layout::Rect::new(0, 5, 40, 4),
             );
@@ -1574,7 +1567,7 @@ fn ch16_design_primitives_share_theme_and_render_at_compact_size() {
         .map(|position| terminal.backend().buffer()[position].symbol().to_owned())
         .collect::<String>()
         .replace(' ', "");
-    for value in ["设备", "正常", "disk4", "扫描完成", "动态状态"] {
+    for value in ["设备", "正常", "disk4", "动态状态"] {
         assert!(text.contains(value), "missing {value}");
     }
 }

@@ -2,7 +2,9 @@ use crate::common;
 
 use std::path::PathBuf;
 
-use edpcli::application::inspect::load_backup_inspect;
+use edpcli::application::inspect::{
+    load_backup_advanced_inspect, AdvancedInspectMode, AdvancedInspectRequest,
+};
 use edpcli::application::support::{METADATA_IMAGE_LEN, METADATA_SECTOR_COUNT, SECTOR};
 use edpcli::edpb::{self, CoreCapture};
 use edpcli::tui::{
@@ -11,6 +13,16 @@ use edpcli::tui::{
     state::{AdvancedInspectSource, AppState},
 };
 use ratatui::{backend::TestBackend, Terminal};
+
+fn protocol_request() -> AdvancedInspectRequest {
+    AdvancedInspectRequest {
+        mode: AdvancedInspectMode::Decode,
+        lbas: (0..METADATA_SECTOR_COUNT as u64).collect(),
+        export_dir: None,
+        device_id_override: None,
+        fail_soft_decode: false,
+    }
+}
 
 fn netac_edpb(tag: &str) -> Option<(common::TmpDir, PathBuf)> {
     let data = common::load_disk_image("netac");
@@ -109,7 +121,8 @@ fn plain_sparse_edpb(tag: &str) -> (common::TmpDir, PathBuf) {
 #[test]
 fn plain_metadata_only_backup_inspect_is_sparse_and_fail_soft() {
     let (_tmp, path) = plain_sparse_edpb("plain_sparse_inspect");
-    let workspace = load_backup_inspect(&path).expect("sparse Plain backup Inspect");
+    let workspace = load_backup_advanced_inspect(&path, &protocol_request())
+        .expect("sparse Plain backup Inspect");
     assert_eq!(
         workspace
             .items
@@ -132,7 +145,8 @@ fn backup_inspect_reuses_domain_analyzer_for_all_metadata_lbas() {
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let workspace = load_backup_inspect(&path).expect("inspect backup");
+    let workspace =
+        load_backup_advanced_inspect(&path, &protocol_request()).expect("inspect backup");
     assert_eq!(workspace.items.len(), METADATA_SECTOR_COUNT);
     let manifest = workspace
         .backup_manifest
@@ -156,7 +170,8 @@ fn backup_inspect_renders_manifest_technical_evidence_outside_backup_main_page()
         eprintln!("跳过: 真实备份不可用");
         return;
     };
-    let workspace = load_backup_inspect(&path).expect("inspect backup");
+    let workspace =
+        load_backup_advanced_inspect(&path, &protocol_request()).expect("inspect backup");
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Backup(path)));
     state.advanced_inspect_finish(Ok(workspace));
@@ -201,6 +216,7 @@ fn backup_inspect_rejects_legacy_bin_images() {
     let path = tmp.0.join("legacy-lba0-13.bin");
     std::fs::write(&path, vec![0u8; METADATA_IMAGE_LEN + SECTOR]).unwrap();
 
-    let err = load_backup_inspect(&path).expect_err("legacy .bin must be rejected");
+    let err = load_backup_advanced_inspect(&path, &protocol_request())
+        .expect_err("legacy .bin must be rejected");
     assert!(err.message().contains(".edpb"), "{err}");
 }

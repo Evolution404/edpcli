@@ -5,10 +5,10 @@ use edpcli::{
         locate_lba7_compatibility_extent_from_verified_usb_capacity, Lba7CompatibilityExtentLayout,
     },
     provision::{
-        build_official_provision_protocol_image, build_official_provision_write_image,
-        wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode, OfficialPartitionMode,
-        OfficialPartitionSizes, OfficialProvisionPlan, OnlyId, ProvisionEntropy, ProvisionMetadata,
-        ProvisionProfile, ProvisionSpec, TargetIdentity,
+        build_official_provision_protocol_image, wrap_file_key, wrap_legacy_lba7_file_key,
+        FileKeyWrapMode, OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan,
+        OnlyId, ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
+        TargetIdentity,
     },
 };
 
@@ -87,14 +87,7 @@ fn all_four_modes_build_one_bounded_write_image() {
         OfficialPartitionMode::IntranetExtranetDualPartition,
     ] {
         let plan = plan(mode, total);
-        let logical_count = plan.logical_partitions(512).unwrap().len();
-        let serials = (0..logical_count)
-            .map(|i| 0x1234_0000u32 + i as u32)
-            .collect::<Vec<_>>();
-        let image = build_official_provision_write_image(
-            &spec, &entropy, &plan, &FILE_KEY, "SAFE6", &serials,
-        )
-        .unwrap();
+        let image = build_official_provision_protocol_image(&spec, &entropy, &plan).unwrap();
 
         for lba in 0..13u32 {
             assert!(
@@ -157,14 +150,8 @@ fn write_image_rejects_lce_overlap_with_a_filesystem() {
         size_bytes: 0xC00,
         size_sectors: 6,
     };
-    let err = build_official_provision_write_image(
-        &spec,
-        &ProvisionEntropy::new([0x5a; 252]),
-        &bad,
-        &FILE_KEY,
-        "SAFE6",
-        &[1, 2, 3],
-    )
-    .unwrap_err();
+    let err =
+        build_official_provision_protocol_image(&spec, &ProvisionEntropy::new([0x5a; 252]), &bad)
+            .unwrap_err();
     assert!(err.contains("overlaps") || err.contains("LCE"), "{err}");
 }

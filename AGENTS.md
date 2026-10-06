@@ -31,3 +31,10 @@
 - Use concise factual tags such as `[START]`, `[WORK]`, `[FOUND]`, `[DECISION]`, `[PASS]`, `[FAIL]`, `[VALIDATION]`, `[GIT]`, `[REVIEW]`, `[NEXT]`, `[BLOCKED]`, and `[DONE]`.
 - Record only observable actions, verified findings, validation results, Git state, blockers, and next steps. Do not write hidden chain-of-thought or speculative reasoning into the progress log.
 - Runtime `.log` files are intentionally Git-ignored. The durable format and behavior contract is documented in `audit/ai-progress/README.md` and must remain tracked.
+
+## Repository redundancy audit
+
+- Run `python3 scripts/audit-redundancy.py --check` for a whole-repository code/documentation redundancy audit. It executes every rule in `scripts/audit/redundancy-rules.json` against every tracked/non-ignored file and writes reports under `target/redundancy-audit/`.
+- Whenever a new redundancy category is found, extend the rule registry and detector, add a behavioral regression, then rerun the entire audit. Do not limit a new rule to the originally found file or changed files.
+- Review all matching candidates and record the disposition. Unreferenced/public/test-only APIs, forwarding wrappers, manual scripts and historical protocol evidence are candidates, not automatic deletion authorization.
+- Confirmed broken references, missing modules and recurrence of recorded retired symbols must be resolved before considering the cleanup complete. Keep retired symbol entries scoped to their original purpose when naming conflicts exist.

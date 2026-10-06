@@ -2386,7 +2386,13 @@ fn lba4_server_flag_wire_representation_is_not_inferred_from_identity_shape() {
         let physical_flags = &raw[0x45..0x47];
         let generic_flags = &generic[0x2d..0x2f];
 
-        let inspect_meta = InspectMeta::from_backup_meta(&meta);
+        let inspect_meta = InspectMeta {
+            device_id: Some(meta.device_id.clone()),
+            vid: Some(meta.vid.clone()),
+            pid: Some(meta.pid.clone()),
+            size_bytes: meta.secs.and_then(|s| s.checked_mul(SECTOR as u64)),
+            onlyid: meta.onlyid.clone(),
+        };
         let view = edpcli::inspect::analyze_sector_with_context(4, raw, &inspect_meta, None);
         assert_eq!(
             &view.decoded[0x45..0x47],

@@ -10,8 +10,9 @@ use edpcli::application::support::SECTOR;
 use edpcli::edpb::sha256_hex;
 use edpcli::platform::{HardwareProbe, InquiryInfo, NativeTransport};
 use edpcli::provision::{
-    generate_image, OnlyId, ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-    TargetIdentity,
+    generate_official_image, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
+    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId, ProvisionEntropy,
+    ProvisionImage, ProvisionMetadata, ProvisionProfile, ProvisionSpec, TargetIdentity,
 };
 
 pub const FIXTURE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/protocol");
@@ -86,8 +87,109 @@ pub fn read_fn_of(
     move |lba| Ok(data[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
 }
 
-/// 用当前正式 provisioning builder 合成一张结构完整的 mode1 元数据镜像。
-/// 这类样本供 mode1 协议识别、备份与恢复测试使用。
+/// Current official mode1 plan shared by metadata generation/validation tests.
+pub fn official_metadata_plan(spec: &ProvisionSpec) -> OfficialProvisionPlan {
+    let extent =
+        edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity(
+            spec.target().total_sectors(),
+            SECTOR as u32,
+        )
+        .expect("verified fixture capacity");
+    OfficialProvisionPlan::new(
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionSizes::new(1, 1, 1),
+        extent,
+        wrap_legacy_lba7_file_key(b"0000aaaa", [0x31; 8]),
+        wrap_file_key(b"FixturePass1!", [0x42; 16], FileKeyWrapMode::Sm4),
+    )
+    .expect("official fixture plan")
+}
+
+/// Historical fixture layout, deliberately outside the production writer.
+/// Reuse current identity sectors and password policy, but replace only the old
+/// MBR/EDPF geometry and frozen key material needed by historical-reader tests.
+fn legacy_mode1_fixture(
+    spec: &ProvisionSpec,
+    entropy: &ProvisionEntropy,
+) -> Result<ProvisionImage, String> {
+    use edpcli::protocol::crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling};
+    const SHARE_START: u64 = 63;
+    const TYPE4_SECTORS: u64 = 6;
+    const LBA7_MATERIAL: [u8; 16] = [
+        0x5d, 0x73, 0x29, 0x04, 0x97, 0xbc, 0x69, 0xf1, 0xec, 0x0f, 0x75, 0x79, 0xe4, 0xdb, 0x45,
+        0xa9,
+    ];
+    const LBA12_MATERIAL: [u8; 24] = [
+        0x5d, 0x73, 0x29, 0x04, 0xcf, 0x18, 0x96, 0xfe, 0xee, 0xf4, 0x08, 0x82, 0x9e, 0xc2, 0xd5,
+        0xf5, 0x40, 0x66, 0x0f, 0x21, 0x3e, 0x70, 0x95, 0x2e,
+    ];
+    let type4_start = spec
+        .target()
+        .total_sectors()
+        .checked_sub(TYPE4_SECTORS)
+        .ok_or("fixture reserve")?;
+    let share_sectors = type4_start
+        .checked_sub(SHARE_START)
+        .ok_or("fixture Share@63")?;
+    let share_u32 = u32::try_from(share_sectors).map_err(|_| "fixture MBR sector count")?;
+    let mut image = generate_official_image(spec, entropy, &official_metadata_plan(spec))?
+        .into_bytes()
+        .to_vec();
+    let mbr = &mut image[..SECTOR];
+    mbr.fill(0);
+    mbr[0x1be + 4] = 0x07;
+    mbr[0x1be + 8..0x1be + 12].copy_from_slice(&(SHARE_START as u32).to_le_bytes());
+    mbr[0x1be + 12..0x1be + 16].copy_from_slice(&share_u32.to_le_bytes());
+    mbr[0x1fe..0x200].copy_from_slice(&[0x55, 0xaa]);
+    let crc = crc32_bare(spec.target().device_id().as_bytes());
+    let k0 = (crc & 0xffff) ^ (crc >> 16);
+    for (lba, stride, material) in [
+        (7usize, 0x40usize, LBA7_MATERIAL.as_slice()),
+        (12, 0x60, LBA12_MATERIAL.as_slice()),
+    ] {
+        let sector = &mut image[lba * SECTOR..(lba + 1) * SECTOR];
+        let mut plain = if lba == 7 {
+            xor_rolling(sector, k0)
+        } else {
+            a6b0_full(sector, &crc.to_le_bytes(), 0)
+        };
+        plain[..3 * stride].fill(0);
+        for (index, (ptype, start, count)) in [
+            (2u32, SHARE_START, share_sectors),
+            (4, type4_start, TYPE4_SECTORS),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let entry = &mut plain[index * stride..(index + 1) * stride];
+            entry[..4].copy_from_slice(b"EDPF");
+            for (offset, value) in [(8, 2u32), (12, ptype), (16, 1), (20, 1)] {
+                entry[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            for (offset, value) in [
+                (24, start),
+                (32, SECTOR as u64),
+                (40, count * SECTOR as u64),
+            ] {
+                entry[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+            }
+            entry[0x30..0x30 + material.len()].copy_from_slice(material);
+            if lba == 12 {
+                entry[0x58] = 2;
+            }
+        }
+        let wire = if lba == 7 {
+            xor_rolling(&plain, k0)
+        } else {
+            a7f0_full(&plain, &crc.to_le_bytes(), 0)
+        };
+        sector.copy_from_slice(&wire);
+    }
+    ProvisionImage::from_bytes(image)
+}
+
+/// 合成固定旧布局的 mode1 样本，仅供历史介质识别、备份与恢复回归使用。
+/// 生产制盘只使用官方四模式布局。
 pub fn mode1_fixture_image(key: &str) -> Option<(Vec<u8>, String)> {
     let (vid, pid, total_sectors, transport, vendor, product, revision, onlyid) = match key {
         "netac" => (
@@ -145,10 +247,13 @@ pub fn mode1_fixture_image(key: &str) -> Option<(Vec<u8>, String)> {
     let spec = ProvisionSpec::new(
         target,
         metadata,
-        ProvisionProfile::canonical_v1().with_force_change_password(true),
+        ProvisionProfile::canonical_v1().with_pass_info_policy(edpcli::provision::PassInfoPolicy {
+            force_change_password: true,
+            ..Default::default()
+        }),
     )
     .ok()?;
-    let image = generate_image(&spec, &ProvisionEntropy::new([0u8; 252])).ok()?;
+    let image = legacy_mode1_fixture(&spec, &ProvisionEntropy::new([0u8; 252])).ok()?;
     Some((image.into_bytes().to_vec(), device_id))
 }
 

@@ -5,22 +5,55 @@ use edpcli::{
     protocol::edpf::EdpPartitionType,
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
     provision::{
-        apply_target_geometry_overrides, decide_partition_action, generate_official_image,
-        parse_existing_provision, prefill_for_target_mode, wrap_file_key,
-        wrap_legacy_lba7_file_key, CapacityInput, CapacityInputMode, CapacitySource,
-        DiskProvisionKind, ExistingFileKeyError, ExistingPartition, ExistingProvisionProfile,
-        FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
-        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId,
-        PartitionAction, PartitionRole, PassInfoPolicy, PassthroughBasis, PasswordDisposition,
-        PlainSourceExtent, ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-        ProvisionTarget, QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge,
-        TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
+        apply_target_geometry_overrides, generate_official_image, parse_existing_provision,
+        prefill_for_target_mode, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
+        CapacityInputMode, CapacitySource, DiskProvisionKind, ExistingFileKeyError,
+        ExistingPartition, ExistingProvisionProfile, FileKeyWrapMode, KeyDomainRole,
+        KeyDomainSecretPair, KeyDomainSecrets, OfficialPartitionMode, OfficialPartitionSizes,
+        OfficialProvisionPlan, OnlyId, PartitionRole, PassInfoPolicy, PassthroughBasis,
+        PasswordDisposition, PlainSourceExtent, ProvisionEntropy, ProvisionMetadata,
+        ProvisionProfile, ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
+        SourcePasswordKnowledge, TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
         OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
 const SECTOR_SIZE: u64 = 512;
 const MIB_SECTORS: u64 = 2048;
+
+// Geometry-only scenarios have no source key record. Use the same canonical
+// compatibility engine as production with both key profiles explicitly absent.
+fn geometry_preserve_candidate(
+    source: Option<&ExistingPartition>,
+    target: &edpcli::provision::TargetPartitionGeometry,
+) -> bool {
+    use edpcli::provision::{
+        preserve_compatibility, Extent, FilesystemProfile, PhysicalCryptoProfile, SourceRegion,
+        TargetRegion,
+    };
+    let Some(source) = source else { return false };
+    let source = SourceRegion {
+        role: source.role,
+        partition_type: source.partition_type.raw(),
+        extent: Extent {
+            start_lba: source.start_lba,
+            sector_count: source.sector_count,
+        },
+        physical_crypto: if source.physically_encrypted {
+            PhysicalCryptoProfile::SectorEncrypted
+        } else {
+            PhysicalCryptoProfile::Plain
+        },
+        filesystem: source
+            .filesystem
+            .map(FilesystemProfile::Known)
+            .unwrap_or(FilesystemProfile::Unknown),
+        key_profile: None,
+    };
+    let mut target = TargetRegion::from_target(*target);
+    target.key_profile = None;
+    preserve_compatibility(source, target).is_ok()
+}
 
 fn domain_secrets(source: Option<&[u8]>, target: &[u8]) -> KeyDomainSecrets {
     KeyDomainSecrets::new(
@@ -197,31 +230,19 @@ fn preserve_exact_requires_identical_semantics_geometry_and_physical_state() {
         true,
     );
     let same = source.as_target();
-    assert_eq!(
-        decide_partition_action(Some(&source), &same),
-        PartitionAction::PreserveExact
-    );
+    assert!(geometry_preserve_candidate(Some(&source), &same));
 
     let mut moved = same;
     moved.start_lba += 1;
-    assert_eq!(
-        decide_partition_action(Some(&source), &moved),
-        PartitionAction::Rebuild
-    );
+    assert!(!geometry_preserve_candidate(Some(&source), &moved));
 
     let mut resized = same;
     resized.sector_count += 1;
-    assert_eq!(
-        decide_partition_action(Some(&source), &resized),
-        PartitionAction::Rebuild
-    );
+    assert!(!geometry_preserve_candidate(Some(&source), &resized));
 
     let mut different_role = same;
     different_role.role = PartitionRole::Share;
-    assert_eq!(
-        decide_partition_action(Some(&source), &different_role),
-        PartitionAction::Rebuild
-    );
+    assert!(!geometry_preserve_candidate(Some(&source), &different_role));
 }
 
 #[test]
@@ -404,9 +425,8 @@ fn prefill_matrix_covers_plain_and_all_four_by_four_transitions() {
                     "{} {role:?} size",
                     case.name
                 );
-                assert_eq!(
-                    decide_partition_action(Some(old), target),
-                    PartitionAction::PreserveExact,
+                assert!(
+                    geometry_preserve_candidate(Some(old), target),
                     "{} {role:?} preserve",
                     case.name
                 );
@@ -424,10 +444,10 @@ fn prefill_matrix_covers_plain_and_all_four_by_four_transitions() {
                 .find(|target| target.role == PartitionRole::Encrypt)
                 .unwrap();
             assert_ne!(target_encrypt.start_lba, old_encrypt.start_lba);
-            assert_eq!(
-                decide_partition_action(Some(old_encrypt), target_encrypt),
-                PartitionAction::Rebuild
-            );
+            assert!(!geometry_preserve_candidate(
+                Some(old_encrypt),
+                target_encrypt
+            ));
         }
     }
 }
@@ -697,10 +717,10 @@ fn mode0_to_mode1_prefill_preserves_exact_encrypt_geometry_even_when_not_whole_m
     let source_encrypt = source.partition(PartitionRole::Encrypt).unwrap();
     assert_eq!(target_encrypt.start_lba, source_encrypt.start_lba);
     assert_eq!(target_encrypt.sector_count, source_encrypt.sector_count);
-    assert_eq!(
-        decide_partition_action(Some(source_encrypt), target_encrypt),
-        PartitionAction::PreserveExact
-    );
+    assert!(geometry_preserve_candidate(
+        Some(source_encrypt),
+        target_encrypt
+    ));
 }
 
 #[test]
@@ -1181,14 +1201,14 @@ fn target_plan_matrix_matches_geometry_for_all_sixteen_edp_transitions() {
 
             for (target, planned) in targets.iter().zip(&plan.partitions) {
                 let expected =
-                    decide_partition_action(source.profile.partition(target.role), target);
+                    geometry_preserve_candidate(source.profile.partition(target.role), target);
                 assert_eq!(
                     planned.disposition.preserves_extent(),
-                    expected == PartitionAction::PreserveExact,
+                    expected,
                     "{source_mode:?} -> {target_mode:?} {:?}",
                     target.role
                 );
-                if expected == PartitionAction::Rebuild {
+                if !expected {
                     assert_eq!(planned.disposition, RegionDisposition::Rebuild);
                 } else {
                     assert!(
@@ -1723,10 +1743,10 @@ fn shrinking_combined_keeps_encrypt_anchor_and_gap_but_overlap_fails_closed() {
         edpcli::provision::validate_target_geometry(&targets, prefill.usable_end_lba).unwrap(),
         10 + (9_000_000 - anchored - 2_097_000)
     );
-    assert_eq!(
-        decide_partition_action(source.partition(PartitionRole::Encrypt), &targets[1]),
-        PartitionAction::PreserveExact
-    );
+    assert!(geometry_preserve_candidate(
+        source.partition(PartitionRole::Encrypt),
+        &targets[1]
+    ));
     prefill.share =
         Some(CapacityInput::from_exact(anchored - 63 + 1, CapacitySource::UserEdited).unwrap());
     assert!(prefill
@@ -1810,13 +1830,10 @@ fn plain_and_four_registered_sources_prefill_every_target_mode() {
             {
                 for target in &partitions {
                     if target.role != PartitionRole::CompatibilityReserve {
-                        assert_eq!(
-                            decide_partition_action(
-                                source.as_ref().unwrap().partition(target.role),
-                                target
-                            ),
-                            PartitionAction::PreserveExact
-                        );
+                        assert!(geometry_preserve_candidate(
+                            source.as_ref().unwrap().partition(target.role),
+                            target
+                        ));
                     }
                 }
             }
@@ -1856,13 +1873,13 @@ fn mode3_to_mode0_shrinks_share_only_when_new_encrypt_does_not_fit_in_gap() {
     .unwrap();
     let targets = prefill.target_partitions(512).unwrap();
     assert_eq!(targets[0].sector_count, 20_417);
-    assert_eq!(
-        decide_partition_action(source.partition(PartitionRole::Boot), &targets[0]),
-        PartitionAction::PreserveExact
-    );
+    assert!(geometry_preserve_candidate(
+        source.partition(PartitionRole::Boot),
+        &targets[0]
+    ));
     assert_eq!(targets[1].sector_count, 8_000_000 - 20_480 - 2_097_152);
-    assert_eq!(
-        decide_partition_action(source.partition(PartitionRole::Share), &targets[1]),
-        PartitionAction::Rebuild
-    );
+    assert!(!geometry_preserve_candidate(
+        source.partition(PartitionRole::Share),
+        &targets[1]
+    ));
 }

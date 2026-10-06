@@ -285,10 +285,10 @@ fn unified_table_state_separates_column_focus_cell_viewport_and_sort() {
         "0 returns to the first column and left edge"
     );
 
-    state.toggle_sort();
+    state.toggle_sort_for(state.active_column());
     assert_eq!(state.sort().unwrap().column, 0);
     assert_eq!(state.sort().unwrap().direction, SortDirection::Ascending);
-    state.toggle_sort();
+    state.toggle_sort_for(state.active_column());
     assert_eq!(state.sort().unwrap().direction, SortDirection::Descending);
     assert!(state.clear_sort());
     assert_eq!(state.sort(), None);
@@ -657,8 +657,7 @@ fn table_position_label_no_longer_exposes_numeric_horizontal_offset() {
         AdaptiveTableLayout::new(vec![spec(8, 12, 20, 50, false), spec(8, 12, 20, 50, false)]);
     let mut interaction = TableInteractionState::default();
     assert!(interaction.move_active(&layout, &[20, 20], 20, false));
-    let viewport = layout.layout_with_active(20, &[20, 20], 7, Some(interaction.active_column()));
-    let label = table_position_label(&layout, interaction, &viewport);
+    let label = table_position_label(&layout, interaction);
     assert_eq!(label, "当前列 2/2");
     assert!(!label.contains("横向"));
 }

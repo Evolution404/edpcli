@@ -14,8 +14,6 @@ use crate::protocol::{
     },
 };
 
-#[path = "inspect/catalog.rs"]
-mod catalog;
 #[path = "inspect/edpf_fields.rs"]
 mod edpf_fields;
 #[path = "inspect/field_contract.rs"]

@@ -1,9 +1,7 @@
-use std::io;
-
 use encoding_rs::GBK;
 
 use crate::common::SECTOR;
-use crate::metainfo::{ownership_from_lba8, summarize};
+use crate::metainfo::ownership_from_lba8;
 use crate::protocol::crypto::{a6b0_full, crc32_bare, lba6_checksum, lba6_decode, xor_rolling};
 use crate::protocol::{
     lba4,
@@ -12,111 +10,11 @@ use crate::protocol::{
 
 use super::{
     OfficialPartitionGeometry, OfficialPartitionMode, OfficialProvisionPlan, ProvisionImage,
-    ProvisionSpec, PROVISION_IMAGE_LEN,
+    ProvisionSpec,
 };
-
-const SHARE_START: u64 = 63;
-const TYPE4_SECTORS: u64 = 6;
-const LBA12_TABLE_LEN: usize = 0x170;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProvisionValidation {
-    profile_id: String,
-    device_id: String,
-    onlyid: String,
-}
-
-impl ProvisionValidation {
-    pub fn profile_id(&self) -> &str {
-        &self.profile_id
-    }
-
-    pub fn device_id(&self) -> &str {
-        &self.device_id
-    }
-
-    pub fn onlyid(&self) -> &str {
-        &self.onlyid
-    }
-}
-
-pub struct ProvisionValidator;
-
-impl ProvisionValidator {
-    pub fn validate(
-        spec: &ProvisionSpec,
-        image: &ProvisionImage,
-    ) -> Result<ProvisionValidation, String> {
-        Self::validate_bytes(spec, image.as_bytes())
-    }
-
-    pub fn validate_bytes(
-        spec: &ProvisionSpec,
-        bytes: &[u8],
-    ) -> Result<ProvisionValidation, String> {
-        if bytes.len() != PROVISION_IMAGE_LEN {
-            return Err(format!(
-                "provision image must be exactly {PROVISION_IMAGE_LEN} bytes, got {}",
-                bytes.len()
-            ));
-        }
-        validate_reserved(bytes)?;
-        validate_mbr(spec, sector(bytes, 0))?;
-        let context = semantic_context(spec);
-        validate_lba4(spec, sector(bytes, 4))?;
-        validate_lba6(spec, sector(bytes, 6))?;
-        validate_lba9(spec, sector(bytes, 9))?;
-        validate_lba7(spec, sector(bytes, 7))?;
-        validate_lba8(spec, sector(bytes, 8), &context)?;
-        validate_lba11(spec, sector(bytes, 11), &context)?;
-        validate_lba12(spec, sector(bytes, 12))?;
-
-        let summary = summarize(&context, |lba| {
-            checked_sector(bytes, lba as usize)
-                .map(|sector| sector.to_vec())
-                .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "LBA 不在制盘镜像内"))
-        })
-        .map_err(|err| format!("metainfo validation failed: {err}"))?;
-        if summary.onlyid.as_deref() != Some(spec.metadata().onlyid().text()) {
-            return Err("metainfo onlyid does not match ProvisionSpec".into());
-        }
-        if summary.pdkb_device_id.as_deref() != Some(spec.target().device_id()) {
-            return Err("metainfo PDKB device_id does not match target device_id".into());
-        }
-
-        Ok(ProvisionValidation {
-            profile_id: spec.profile().id().to_string(),
-            device_id: spec.target().device_id().to_string(),
-            onlyid: spec.metadata().onlyid().text().to_string(),
-        })
-    }
-}
 
 fn sector(bytes: &[u8], lba: usize) -> &[u8] {
     &bytes[lba * SECTOR..(lba + 1) * SECTOR]
-}
-
-fn checked_sector(bytes: &[u8], lba: usize) -> Option<&[u8]> {
-    let start = lba.checked_mul(SECTOR)?;
-    let end = start.checked_add(SECTOR)?;
-    bytes.get(start..end)
-}
-
-#[cfg(test)]
-mod sector_bounds_tests {
-    use super::{checked_sector, SECTOR};
-
-    #[test]
-    fn callbacks_reject_missing_truncated_and_overflowed_sectors() {
-        let bytes = vec![0; SECTOR * 2];
-        assert_eq!(
-            checked_sector(&bytes, 1).map(|sector| sector.len()),
-            Some(SECTOR)
-        );
-        assert!(checked_sector(&bytes, 2).is_none());
-        assert!(checked_sector(&bytes[..SECTOR + 1], 1).is_none());
-        assert!(checked_sector(&bytes, usize::MAX).is_none());
-    }
 }
 
 fn semantic_context(spec: &ProvisionSpec) -> SemanticContext {
@@ -140,33 +38,6 @@ fn validate_reserved(bytes: &[u8]) -> Result<(), String> {
         if sector(bytes, lba).iter().any(|byte| *byte != 0) {
             return Err(format!("LBA{lba} violates canonical zero-sector policy"));
         }
-    }
-    Ok(())
-}
-
-fn layout(spec: &ProvisionSpec) -> Result<(u64, u64), String> {
-    let type4_start = spec
-        .target()
-        .total_sectors()
-        .checked_sub(TYPE4_SECTORS)
-        .ok_or("target is too small for type4 reserve")?;
-    let share_sectors = type4_start
-        .checked_sub(SHARE_START)
-        .ok_or("target is too small for Share@63")?;
-    Ok((share_sectors, type4_start))
-}
-
-fn validate_mbr(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
-    let (share_sectors, _) = layout(spec)?;
-    let mut expected = [0u8; SECTOR];
-    expected[0x1be + 4] = 0x07;
-    expected[0x1be + 8..0x1be + 12].copy_from_slice(&(SHARE_START as u32).to_le_bytes());
-    let share_u32 =
-        u32::try_from(share_sectors).map_err(|_| "MBR Share sector count overflows u32")?;
-    expected[0x1be + 12..0x1be + 16].copy_from_slice(&share_u32.to_le_bytes());
-    expected[0x1fe..0x200].copy_from_slice(&[0x55, 0xaa]);
-    if raw != expected {
-        return Err("MBR does not match canonical provision layout".into());
     }
     Ok(())
 }
@@ -324,62 +195,6 @@ fn put_u32(dst: &mut [u8], offset: usize, value: u32) {
     dst[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
-fn put_u64(dst: &mut [u8], offset: usize, value: u64) {
-    dst[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
-}
-
-fn expected_entry(
-    stride: usize,
-    ptype: u32,
-    start: u64,
-    size_bytes: u64,
-    material: &[u8],
-) -> Vec<u8> {
-    let mut entry = vec![0u8; stride];
-    entry[..4].copy_from_slice(b"EDPF");
-    put_u32(&mut entry, 0x08, 2);
-    put_u32(&mut entry, 0x0c, ptype);
-    put_u32(&mut entry, 0x10, 1);
-    put_u32(&mut entry, 0x14, 1);
-    put_u64(&mut entry, 0x18, start);
-    put_u64(&mut entry, 0x20, SECTOR as u64);
-    put_u64(&mut entry, 0x28, size_bytes);
-    entry[0x30..0x30 + material.len()].copy_from_slice(material);
-    if stride == 0x60 {
-        put_u64(&mut entry, 0x58, 2);
-    }
-    entry
-}
-
-fn validate_lba7(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
-    let (share_sectors, type4_start) = layout(spec)?;
-    let crc = crc32_bare(spec.target().device_id().as_bytes());
-    let k0 = (crc & 0xffff) ^ (crc >> 16);
-    let decoded = xor_rolling(raw, k0);
-    let mut expected = [0u8; SECTOR];
-    let share = expected_entry(
-        0x40,
-        2,
-        SHARE_START,
-        share_sectors * SECTOR as u64,
-        spec.profile().lba7_material(),
-    );
-    let type4 = expected_entry(
-        0x40,
-        4,
-        type4_start,
-        TYPE4_SECTORS * SECTOR as u64,
-        spec.profile().lba7_material(),
-    );
-    expected[..0x40].copy_from_slice(&share);
-    expected[0x40..0x80].copy_from_slice(&type4);
-    expected[0xc0..0xce].copy_from_slice(&spec.profile().lba7_pass_info());
-    if decoded != expected {
-        return Err("LBA7 EDPF/profile mismatch for target device_id".into());
-    }
-    Ok(())
-}
-
 fn expected_lba8_plain(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
     let mut expected = [0u8; SECTOR];
     expected[..4].copy_from_slice(b"LLGB");
@@ -441,38 +256,6 @@ fn validate_lba11(
     let actual = semantic::pdkb_device_id(raw, context).ok_or("LBA11 PDKB device_id missing")?;
     if actual != expected {
         return Err("LBA11 PDKB device_id mismatch".into());
-    }
-    Ok(())
-}
-
-fn validate_lba12(spec: &ProvisionSpec, raw: &[u8]) -> Result<(), String> {
-    let (share_sectors, type4_start) = layout(spec)?;
-    let crc = crc32_bare(spec.target().device_id().as_bytes());
-    let key = crc.to_le_bytes();
-    let decoded = a6b0_full(raw, &key, 0);
-    let mut expected = [0u8; SECTOR];
-    let share = expected_entry(
-        0x60,
-        2,
-        SHARE_START,
-        share_sectors * SECTOR as u64,
-        spec.profile().lba12_material(),
-    );
-    let type4 = expected_entry(
-        0x60,
-        4,
-        type4_start,
-        TYPE4_SECTORS * SECTOR as u64,
-        spec.profile().lba12_material(),
-    );
-    expected[..0x60].copy_from_slice(&share);
-    expected[0x60..0xc0].copy_from_slice(&type4);
-    expected[0x120..0x12e].copy_from_slice(&spec.profile().lba12_pass_info());
-    if decoded[..LBA12_TABLE_LEN] != expected[..LBA12_TABLE_LEN] {
-        return Err("LBA12 EDPF/profile mismatch for target device_id".into());
-    }
-    if decoded[LBA12_TABLE_LEN..].iter().any(|byte| *byte != 0) {
-        return Err("LBA12 decoded tail is not canonical zero plaintext".into());
     }
     Ok(())
 }

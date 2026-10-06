@@ -1,7 +1,6 @@
 //! Shared presentation primitives. They consume application-owned data and perform no I/O.
 
 pub mod badge;
-pub mod banner;
 pub mod card;
 pub mod confirmation;
 pub mod message;
@@ -16,7 +15,6 @@ pub(crate) mod text;
 pub mod workspace_overview;
 
 pub use badge::{status_badge, BadgeTone};
-pub use banner::{notice_banner, BannerTone};
 pub use card::card;
 pub use confirmation::{
     render_action_confirmation_modal, render_write_confirmation_modal, ActionConfirmationSpec,

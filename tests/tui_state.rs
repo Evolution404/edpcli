@@ -58,8 +58,8 @@ fn chapter_11_provision_escape_restores_device_selection() {
     state.replace_devices(vec![first, second]);
     state.navigate(NavCommand::Down, 20);
     assert_eq!(state.selected_device_disk(), Some(7));
-    state.scroll_table(TableKind::Devices, false);
-    state.scroll_table(TableKind::Devices, false);
+    state.scroll_table_for_viewport(TableKind::Devices, false, 80, 24);
+    state.scroll_table_for_viewport(TableKind::Devices, false, 80, 24);
     let expected_scroll = state.table_scroll_offset(TableKind::Devices);
     assert!(expected_scroll > 0);
     state.begin_provision_for_selected_device().unwrap();
@@ -1160,7 +1160,7 @@ fn registered_identity_prefills_custom_label_and_force_policy_but_remains_editab
         .position(|(label, _, _)| label == "初始化密码强制修改")
         .unwrap();
     state.provision_mut().field_selected = force_index;
-    assert!(state.provision_toggle_force_change_password());
+    assert!(state.provision_toggle_selected_option());
     assert!(!state.provision().form.force_change_password);
 
     let complexity_index = state
@@ -2467,17 +2467,20 @@ fn provision_fill_selected_capacity_uses_same_maximum_as_layout_and_text_f_is_li
         .position(|(label, _, _)| label.starts_with("保密区容量"))
         .expect("encrypt capacity");
     state.provision_mut().field_selected = encrypt;
-    let max_sectors = state
-        .provision_layout_editor_lines()
-        .into_iter()
-        .find_map(|line| {
-            let marker = "最大可设 ";
-            line.strip_prefix(marker)
-                .and_then(|rest| rest.rsplit_once('('))
-                .and_then(|(_, tail)| tail.strip_suffix(" sector)"))
-                .and_then(|value| value.parse::<u64>().ok())
-        })
-        .expect("maximum sector count");
+    let before = state.provision_request().unwrap();
+    let usable_end =
+        edpcli::protocol::lba7_compat::locate_lba7_compatibility_extent_from_verified_usb_capacity(
+            64_000_000_000 / 512,
+            512,
+        )
+        .unwrap()
+        .start_lba;
+    let max_sectors = usable_end - before.encrypt_start_lba.unwrap();
+    let expected_max = edpcli::application::support::fmt_capacity_sectors(max_sectors);
+    assert!(state
+        .provision_layout_editor_details()
+        .iter()
+        .any(|detail| { detail.text.contains(&format!("最大 {expected_max}")) }));
     assert!(state.provision_fill_selected_capacity());
     assert_eq!(
         state.provision_request().unwrap().encrypt_sectors,
@@ -2690,37 +2693,40 @@ fn provision_layout_editor_reports_total_space_and_selected_partition_limits() {
         .position(|(label, _, _)| label.starts_with("保密区容量"))
         .expect("encrypt capacity");
     state.provision_mut().field_selected = encrypt;
-    let lines = state.provision_layout_editor_lines();
-
-    assert!(lines.iter().any(|line| line.contains("整盘")), "{lines:?}");
+    let details = state.provision_layout_editor_details();
+    let model = state.provision_layout_model();
+    assert_eq!(model.total_sectors, 64_000_000_000 / 512);
     assert!(
-        lines.iter().any(|line| line.contains("可分区 LBA")),
-        "{lines:?}"
+        details
+            .iter()
+            .any(|detail| detail.text.contains("可分区 LBA")),
+        "{details:?}"
     );
     assert!(
-        lines.iter().any(|line| line.contains("未分配")),
-        "{lines:?}"
+        details.iter().any(|detail| detail.text.contains("剩余")),
+        "{details:?}"
     );
-    let bar = state.provision_layout_bar(40);
+    let bar = model.bar(40);
     assert_eq!(bar.len(), 40);
     assert!(bar.contains(&edpcli::tui::disk_layout::DiskRegionKind::Encrypt));
     assert!(bar.contains(&edpcli::tui::disk_layout::DiskRegionKind::Free));
-    assert!(lines.iter().any(|line| line == "当前: 保密区"), "{lines:?}");
     assert!(
-        lines.iter().any(|line| line.contains("最大可设")),
-        "{lines:?}"
+        details
+            .iter()
+            .any(|detail| detail.text.contains("当前区域  保密区")),
+        "{details:?}"
     );
     assert!(
-        lines.iter().any(|line| line.contains("还能增加")),
-        "{lines:?}"
+        details
+            .iter()
+            .any(|detail| detail.text.contains("当前容量") && detail.text.contains("最大")),
+        "{details:?}"
     );
     assert!(
-        lines.iter().any(|line| line.contains("限制: 可分区末端")),
-        "{lines:?}"
-    );
-    assert!(
-        lines.iter().any(|line| line.starts_with("✓ 当前布局")),
-        "{lines:?}"
+        details
+            .iter()
+            .any(|detail| detail.text.starts_with("✓ 当前布局")),
+        "{details:?}"
     );
 }
 
@@ -2770,30 +2776,31 @@ fn provision_layout_rows_are_sorted_by_start_lba_including_free_space() {
     state.provision_mut().form.encrypt_mib = "1".into();
     state.provision_mut().form.encrypt_start_lba = "13627392".into();
 
-    let rows = state
-        .provision_layout_editor_lines()
-        .into_iter()
-        .filter(|line| {
-            line.starts_with("启动区")
-                || line.starts_with("交换区")
-                || line.starts_with("保密区")
-                || line.starts_with("空闲")
-        })
+    let details = state.provision_layout_editor_details();
+    let rows = details
+        .iter()
+        .filter(|detail| detail.region_kind.is_some())
+        .filter_map(|detail| detail.columns.as_ref())
         .collect::<Vec<_>>();
     let starts = rows
         .iter()
-        .map(|line| {
-            let value = line
-                .split("LBA ")
-                .nth(1)
-                .expect("layout row LBA")
+        .map(|columns| {
+            columns[2]
+                .strip_prefix("LBA ")
+                .unwrap()
                 .split('–')
                 .next()
-                .expect("layout row start");
-            value.parse::<u64>().expect("numeric start LBA")
+                .unwrap()
+                .parse::<u64>()
+                .unwrap()
         })
         .collect::<Vec<_>>();
     assert!(starts.windows(2).all(|pair| pair[0] < pair[1]), "{rows:?}");
+    let model = state.provision_layout_model();
+    assert!(model
+        .segments
+        .iter()
+        .any(|segment| segment.kind == edpcli::tui::disk_layout::DiskRegionKind::Free));
 }
 
 #[test]
@@ -2845,31 +2852,39 @@ fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
         .position(|(label, _, _)| label.starts_with("交换区容量"))
         .expect("share capacity");
     state.provision_mut().field_selected = share_index;
-    let constraints = state.provision_layout_editor_lines();
+    let max_share = encrypt_start - 63;
+    let details = state.provision_layout_editor_details();
     assert!(
-        constraints.iter().any(|line| {
-            line.contains(&format!("限制: 后续保密区固定起点 LBA {encrypt_start}"))
-        }),
-        "{constraints:?}"
+        details.iter().any(|detail| detail.text.contains(&format!(
+            "最大 {}",
+            edpcli::application::support::fmt_capacity_sectors(max_share)
+        ))),
+        "{details:?}"
     );
 
     let smaller = encrypt_start - 63 - 4096;
     state.provision_mut().form.share_sectors = smaller.to_string();
-    let preview = state.provision_geometry_preview_lines();
-    assert!(preview
-        .iter()
-        .any(|line| line.contains("空隙  4096 sector")));
-    assert!(preview
-        .iter()
-        .any(|line| line.contains(&format!("LBA {encrypt_start}–"))));
+    let model = state.provision_layout_model();
+    assert!(model.segments.iter().any(|segment| {
+        segment.kind == edpcli::tui::disk_layout::DiskRegionKind::Free
+            && segment.start_lba == encrypt_start - 4096
+            && segment.sector_count == 4096
+    }));
+    assert!(model.segments.iter().any(|segment| {
+        segment.kind == edpcli::tui::disk_layout::DiskRegionKind::Encrypt
+            && segment.start_lba == encrypt_start
+    }));
     let request = state
         .provision_request()
         .expect("shrink must leave a legal gap");
     assert_eq!(request.encrypt_start_lba, Some(encrypt_start));
 
     state.provision_mut().form.share_sectors = (encrypt_start - 63 + 1).to_string();
-    let preview = state.provision_geometry_preview_lines();
-    assert!(preview.iter().any(|line| line.contains("overlap")));
+    let details = state.provision_layout_editor_details();
+    assert!(details.iter().any(|detail| {
+        detail.tone == edpcli::tui::disk_layout::DiskLayoutDetailTone::Danger
+            && detail.text.contains("overlap")
+    }));
     assert!(state.provision_request().is_err());
 }
 
@@ -2887,22 +2902,32 @@ fn plain_mode0_preview_reflows_unanchored_share_after_boot_edit() {
     assert_eq!(request.boot_start_lba, Some(63));
     assert_eq!(request.share_start_lba, Some(10_063));
     assert!(state
-        .provision_geometry_preview_lines()
+        .provision_layout_model()
+        .segments
         .iter()
-        .any(|line| line.contains("LBA 10063–")));
+        .any(|segment| {
+            segment.kind == edpcli::tui::disk_layout::DiskRegionKind::Share
+                && segment.start_lba == 10_063
+        }));
     let boot_index = state
         .provision_visible_fields()
         .iter()
         .position(|(label, _, _)| label.starts_with("启动区容量"))
         .expect("boot capacity");
     state.provision_mut().field_selected = boot_index;
-    let constraints = state.provision_layout_editor_lines();
-    assert!(
-        constraints
-            .iter()
-            .any(|line| { line.contains("后续未锚定分区可自动后移") }),
-        "{constraints:?}"
-    );
+    state.provision_mut().form.boot_sectors = "20000".into();
+    let enlarged = state
+        .provision_request()
+        .expect("boot edit must reflow unanchored partitions");
+    assert_eq!(enlarged.share_start_lba, Some(20_063));
+    assert!(state
+        .provision_layout_model()
+        .segments
+        .iter()
+        .any(|segment| {
+            segment.kind == edpcli::tui::disk_layout::DiskRegionKind::Share
+                && segment.start_lba == 20_063
+        }));
 }
 
 #[test]
@@ -2935,10 +2960,19 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
         format_giga_3(expected_share_sectors)
     );
     let expected_remainder = usable_sectors - 20_417 - expected_share_sectors - encrypt_sectors;
-    assert!(state
-        .provision_geometry_preview_lines()
-        .iter()
-        .any(|line| line == &format!("未分配  {expected_remainder} sector")));
+    assert_eq!(
+        state
+            .provision_layout_model()
+            .segments
+            .iter()
+            .filter(
+                |segment| segment.kind == edpcli::tui::disk_layout::DiskRegionKind::Free
+                    && segment.start_lba < lce.start_lba
+            )
+            .map(|segment| segment.sector_count)
+            .sum::<u64>(),
+        expected_remainder
+    );
 
     let original_share = state.provision().form.share_mib.clone();
     state.provision_mut().field_selected = state
@@ -2964,14 +2998,19 @@ fn mode0_defaults_share_to_remaining_space_once_without_linking_fields() {
         configured_text_to_sectors("0.500", edpcli::provision::QuickCapacityUnit::GiB);
     assert_eq!(state.provision().form.encrypt_mib, "0.500");
     assert_eq!(state.provision().form.share_mib, original_share);
-    assert!(state
-        .provision_geometry_preview_lines()
-        .iter()
-        .any(|line| line
-            == &format!(
-                "未分配  {} sector",
-                expected_remainder + encrypt_sectors - edited_encrypt_sectors
-            )));
+    assert_eq!(
+        state
+            .provision_layout_model()
+            .segments
+            .iter()
+            .filter(
+                |segment| segment.kind == edpcli::tui::disk_layout::DiskRegionKind::Free
+                    && segment.start_lba < lce.start_lba
+            )
+            .map(|segment| segment.sector_count)
+            .sum::<u64>(),
+        expected_remainder + encrypt_sectors - edited_encrypt_sectors
+    );
 
     state.provision_begin_selected();
     assert_eq!(state.provision().form.encrypt_mib, "0.500");
@@ -2994,8 +3033,10 @@ fn mode0_live_layout_reports_invalid_geometry_without_rebalancing_other_fields()
     let original_encrypt = state.provision().form.encrypt_mib.clone();
     state.provision_mut().form.share_mib = "999999999".into();
 
-    let preview = state.provision_geometry_preview_lines();
-    assert!(preview.iter().any(|line| line.starts_with("布局无效:")));
+    let details = state.provision_layout_editor_details();
+    assert!(details
+        .iter()
+        .any(|detail| { detail.tone == edpcli::tui::disk_layout::DiskLayoutDetailTone::Danger }));
     assert!(state.provision_request().is_err());
     assert_eq!(state.provision().form.encrypt_mib, original_encrypt);
 }
@@ -3011,9 +3052,9 @@ fn provision_force_change_password_checkbox_defaults_off_and_toggles() {
         .unwrap();
 
     assert!(!state.provision().form.force_change_password);
-    assert!(state.provision_toggle_force_change_password());
+    assert!(state.provision_toggle_selected_option());
     assert!(state.provision().form.force_change_password);
-    assert!(state.provision_toggle_force_change_password());
+    assert!(state.provision_toggle_selected_option());
     assert!(!state.provision().form.force_change_password);
 }
 

@@ -41,17 +41,15 @@ impl AppState {
 
     pub(super) fn provision_field_descriptors(&self) -> Vec<ProvisionFieldDescriptor> {
         let descriptor =
-            |id, section, editable, secret, toggle, fill_capacity, _verification_removed| {
-                ProvisionFieldDescriptor {
-                    id,
-                    section,
-                    capabilities: ProvisionFieldCapabilities {
-                        editable,
-                        secret,
-                        toggle,
-                        fill_capacity,
-                    },
-                }
+            |id, section, editable, secret, toggle, fill_capacity| ProvisionFieldDescriptor {
+                id,
+                section,
+                capabilities: ProvisionFieldCapabilities {
+                    editable,
+                    secret,
+                    toggle,
+                    fill_capacity,
+                },
             };
         if self.provision.kind == ProvisionKind::Plain {
             let mut fields = Vec::with_capacity(self.provision.plain_form.partitions.len() * 4);
@@ -68,7 +66,6 @@ impl AppState {
                         false,
                         false,
                         true,
-                        false,
                     ),
                     descriptor(
                         ProvisionFieldId::Plain {
@@ -80,7 +77,6 @@ impl AppState {
                         false,
                         true,
                         true,
-                        false,
                     ),
                     descriptor(
                         ProvisionFieldId::Plain {
@@ -92,7 +88,6 @@ impl AppState {
                         false,
                         true,
                         false,
-                        false,
                     ),
                     descriptor(
                         ProvisionFieldId::Plain {
@@ -101,7 +96,6 @@ impl AppState {
                         },
                         section,
                         true,
-                        false,
                         false,
                         false,
                         false,
@@ -127,13 +121,11 @@ impl AppState {
                 false,
                 false,
                 false,
-                false,
             ));
         }
         fields.push(descriptor(
             ProvisionFieldId::AdvancedSection,
             ProvisionFieldSection::Identity,
-            false,
             false,
             false,
             false,
@@ -145,7 +137,6 @@ impl AppState {
                     ProvisionFieldId::Lba8Identity(field),
                     ProvisionFieldSection::AdvancedIdentity,
                     true,
-                    false,
                     false,
                     false,
                     false,
@@ -162,7 +153,6 @@ impl AppState {
                 true,
                 false,
                 false,
-                true,
             ));
             fields.push(descriptor(
                 ProvisionFieldId::TargetPassword(domain),
@@ -170,7 +160,6 @@ impl AppState {
                 true,
                 true,
                 source_password_editable,
-                false,
                 false,
             ));
         }
@@ -184,7 +173,6 @@ impl AppState {
                 true,
                 false,
                 false,
-                true,
             ));
             fields.push(descriptor(
                 ProvisionFieldId::TargetPassword(domain),
@@ -192,7 +180,6 @@ impl AppState {
                 true,
                 true,
                 source_password_editable,
-                false,
                 false,
             ));
         }
@@ -211,7 +198,6 @@ impl AppState {
                         id,
                         ProvisionFieldId::Capacity(_) | ProvisionFieldId::StartLba(_)
                     ),
-                    false,
                 ));
             }
         }
@@ -235,7 +221,6 @@ impl AppState {
                         id,
                         ProvisionFieldId::Capacity(_) | ProvisionFieldId::StartLba(_)
                     ),
-                    false,
                 ));
             }
         }
@@ -254,7 +239,6 @@ impl AppState {
                         id,
                         ProvisionFieldId::Capacity(_) | ProvisionFieldId::StartLba(_)
                     ),
-                    false,
                 ));
             }
         }
@@ -278,7 +262,6 @@ impl AppState {
                 false,
                 target.format_capable && disposition.toggle_allowed(),
                 false,
-                false,
             ));
             if target.format_capable {
                 fields.push(descriptor(
@@ -288,13 +271,11 @@ impl AppState {
                     false,
                     format_selected,
                     false,
-                    false,
                 ));
                 fields.push(descriptor(
                     ProvisionFieldId::VolumeLabel(target.role),
                     ProvisionFieldSection::Formatting,
                     format_selected,
-                    false,
                     false,
                     false,
                     false,
@@ -317,7 +298,6 @@ impl AppState {
                     ProvisionFieldId::ForceChangePassword
                         | ProvisionFieldId::CancelPasswordComplexityCheck
                 ),
-                false,
                 false,
             ));
         }

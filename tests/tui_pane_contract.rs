@@ -1066,15 +1066,19 @@ fn provision_disk_layout_tail_starts_collapsed_and_expands_without_changing_geom
     state.toggle_disk_layout_tail();
     let expanded = render_text(&state, 160, 45);
     assert!(expanded.contains("盘尾恢复节点"));
-    assert!(state
-        .disk_layout_detail(&canonical)
-        .unwrap()
-        .contains("EDP 主协议区"));
+    let details = state.provision_layout_editor_details();
+    assert!(details.iter().any(|detail| detail.selected
+        && detail
+            .columns
+            .as_ref()
+            .is_some_and(|columns| columns[0].contains("EDP 主协议区"))));
     state.disk_layout_move_selection(1, canonical.segments.len());
-    assert!(state
-        .disk_layout_detail(&canonical)
-        .unwrap()
-        .contains("保留区域"));
+    let details = state.provision_layout_editor_details();
+    assert!(details.iter().any(|detail| detail.selected
+        && detail
+            .columns
+            .as_ref()
+            .is_some_and(|columns| columns[0].contains("保留区域"))));
     assert_eq!(state.provision_layout_model().segments, canonical.segments);
     state.toggle_disk_layout_tail();
     assert_eq!(

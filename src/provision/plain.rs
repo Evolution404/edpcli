@@ -57,10 +57,6 @@ impl PlainProvisionWritePlan {
     pub fn touched_sector_count(&self) -> usize {
         self.writes.len()
     }
-
-    pub fn highest_touched_lba(&self) -> Option<u32> {
-        self.writes.keys().next_back().copied()
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

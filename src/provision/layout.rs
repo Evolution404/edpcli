@@ -321,19 +321,6 @@ pub const fn physical_partition_encryption(
         .is_encrypted()
 }
 
-pub fn official_format_targets(
-    mode: OfficialPartitionMode,
-    sizes: OfficialPartitionSizes,
-    sector_size: u64,
-) -> Result<Vec<PartitionFormatTarget>, String> {
-    official_format_targets_with_filesystems(
-        mode,
-        sizes,
-        sector_size,
-        OfficialPartitionFilesystems::defaults(),
-    )
-}
-
 pub fn official_format_targets_with_filesystems(
     mode: OfficialPartitionMode,
     sizes: OfficialPartitionSizes,

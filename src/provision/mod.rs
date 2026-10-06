@@ -23,7 +23,7 @@ pub use crate::filesystem_capability::{
     EXFAT_MAX_VALIDATED_CLUSTERS, EXFAT_MAX_VALIDATED_CLUSTER_SHIFT,
 };
 pub use crate::partition_transform::{decrypt_mode2, EdpSm4Transform};
-pub use generate::{generate_image, generate_official_image, ProvisionEntropy};
+pub use generate::{generate_official_image, ProvisionEntropy};
 pub use key_domain::{
     KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets, PassthroughBasis, PasswordDisposition,
     SecretBytes, SourcePasswordKnowledge, TargetPasswordPolicy, DEFAULT_KEY_DOMAIN_PASSWORD,
@@ -35,12 +35,12 @@ pub use keys::{
     FileKeyWrapMode, LegacyLba7KeyMaterial, ProvisionKeyMaterial,
 };
 pub use layout::{
-    build_official_partition_layout, official_format_targets,
-    official_format_targets_with_filesystems, official_mbr_partition_type, official_partition_role,
-    physical_partition_encryption, visible_mbr_partition_type, OfficialPartitionFilesystems,
-    OfficialPartitionGeometry, OfficialPartitionMode, OfficialPartitionSizes,
-    OfficialProvisionPlan, PartitionFormatTarget, PartitionRole, DEFAULT_MODE0_BOOT_SECTORS,
-    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    build_official_partition_layout, official_format_targets_with_filesystems,
+    official_mbr_partition_type, official_partition_role, physical_partition_encryption,
+    visible_mbr_partition_type, OfficialPartitionFilesystems, OfficialPartitionGeometry,
+    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, PartitionFormatTarget,
+    PartitionRole, DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
+    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
 pub use partition_format::{build_official_partition_filesystem, PartitionFilesystemImage};
@@ -62,23 +62,16 @@ pub use region_mapping::{
 };
 pub use reprovision::{
     apply_target_geometry_overrides, apply_target_geometry_overrides_draft,
-    decide_partition_action, parse_existing_provision, pass_info_policy_from_sectors,
-    plain_extent_preserve_candidate, prefill_for_target_mode, rekey_existing_partition_image,
-    validate_target_geometry, CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind,
-    ExistingPartition, ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision,
-    PartitionAction, PlainSourceExtent, ProvisionPrefill, ProvisionTarget, QuickCapacityUnit,
-    RegionDisposition, TargetGeometryOverrides, TargetPartitionGeometry, TargetPartitionPlan,
-    TargetProvisionPlan,
+    parse_existing_provision, pass_info_policy_from_sectors, plain_extent_preserve_candidate,
+    prefill_for_target_mode, rekey_existing_partition_image, validate_target_geometry,
+    CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind, ExistingPartition,
+    ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision, PlainSourceExtent,
+    ProvisionPrefill, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
+    TargetGeometryOverrides, TargetPartitionGeometry, TargetPartitionPlan, TargetProvisionPlan,
 };
 pub use spec::{Lba8Identity, OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};
-pub use validate::{
-    OfficialProvisionValidation, OfficialProvisionValidator, ProvisionValidation,
-    ProvisionValidator,
-};
-pub use write_plan::{
-    build_official_provision_protocol_image, build_official_provision_write_image,
-    OfficialProvisionWriteImage,
-};
+pub use validate::{OfficialProvisionValidation, OfficialProvisionValidator};
+pub use write_plan::{build_official_provision_protocol_image, OfficialProvisionWriteImage};
 
 use crate::common::METADATA_IMAGE_LEN;
 

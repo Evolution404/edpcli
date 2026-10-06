@@ -132,7 +132,7 @@ impl TableInteractionState {
         self.scroll_x
     }
 
-    pub fn set_offset(&mut self, offset: usize, _layout: &AdaptiveTableLayout) {
+    pub fn set_offset(&mut self, offset: usize) {
         self.scroll_x = offset;
     }
 
@@ -174,7 +174,7 @@ impl TableInteractionState {
             return false;
         }
         self.active_column = next;
-        self.ensure_active_visible(layout, content_widths, viewport_width, reverse);
+        self.ensure_active_visible(layout, content_widths, viewport_width);
         true
     }
 
@@ -218,7 +218,7 @@ impl TableInteractionState {
         let next = if last { count - 1 } else { 0 };
         let changed = next != self.active_column;
         self.active_column = next;
-        self.ensure_active_visible(layout, content_widths, viewport_width, !last);
+        self.ensure_active_visible(layout, content_widths, viewport_width);
         changed
     }
 
@@ -246,7 +246,6 @@ impl TableInteractionState {
         layout: &AdaptiveTableLayout,
         content_widths: &[usize],
         viewport_width: u16,
-        _reverse: bool,
     ) {
         let viewport_width = usize::from(viewport_width.max(1));
         let (start, end) =
@@ -348,10 +347,6 @@ impl TableInteractionState {
         });
     }
 
-    pub fn toggle_sort(&mut self) {
-        self.toggle_sort_for(self.active_column);
-    }
-
     pub fn set_active_column(&mut self, column: usize) {
         self.active_column = column;
     }
@@ -361,9 +356,8 @@ impl TableInteractionState {
         layout: &AdaptiveTableLayout,
         content_widths: &[usize],
         viewport_width: u16,
-        reverse: bool,
     ) {
-        self.ensure_active_visible(layout, content_widths, viewport_width, reverse);
+        self.ensure_active_visible(layout, content_widths, viewport_width);
     }
 
     pub fn clear_sort(&mut self) -> bool {
@@ -458,13 +452,6 @@ impl TableViewport {
         self.columns
             .iter()
             .map(|column| ratatui::layout::Constraint::Length(column.width))
-            .collect()
-    }
-
-    pub fn project<T: Clone>(&self, values: &[T]) -> Vec<T> {
-        self.columns
-            .iter()
-            .filter_map(|column| values.get(column.index).cloned())
             .collect()
     }
 }
@@ -670,7 +657,6 @@ pub fn table_heading(heading: &str, index: usize, interaction: TableInteractionS
 pub fn table_position_label(
     layout: &AdaptiveTableLayout,
     interaction: TableInteractionState,
-    _viewport: &TableViewport,
 ) -> String {
     let total = layout.specs().len().max(1);
     format!(

@@ -307,7 +307,7 @@ impl AppState {
         let viewport_width = self.table_viewport_width(kind, terminal_width, terminal_height);
         let interaction = self.shell.horizontal_scroll.entry(kind).or_default();
         interaction.set_active_column(target);
-        interaction.ensure_active_visible_for_layout(&layout, &widths, viewport_width, reverse);
+        interaction.ensure_active_visible_for_layout(&layout, &widths, viewport_width);
         true
     }
 
@@ -350,19 +350,6 @@ impl AppState {
         kind: crate::tui::table_layout::TableKind,
     ) -> Option<crate::tui::table_layout::TableSort> {
         self.table_interaction(kind).sort()
-    }
-
-    pub fn move_table_column(
-        &mut self,
-        kind: crate::tui::table_layout::TableKind,
-        reverse: bool,
-    ) -> bool {
-        let (layout, widths) = self.table_visual_geometry(kind);
-        self.shell
-            .horizontal_scroll
-            .entry(kind)
-            .or_default()
-            .move_active(&layout, &widths, u16::MAX, reverse)
     }
 
     pub fn toggle_table_sort(&mut self, kind: crate::tui::table_layout::TableKind) {
@@ -466,14 +453,6 @@ impl AppState {
             .copied()
             .unwrap_or_default()
             .offset()
-    }
-
-    pub fn scroll_table(
-        &mut self,
-        kind: crate::tui::table_layout::TableKind,
-        reverse: bool,
-    ) -> bool {
-        self.scroll_table_for_viewport(kind, reverse, 80, 24)
     }
 
     pub fn scroll_table_for_viewport(

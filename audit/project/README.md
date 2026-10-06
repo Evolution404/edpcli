@@ -1,27 +1,114 @@
-# 项目架构审计索引
+# 当前仓库清理结论与证据索引
 
-审计基线：[2026-10-06 全仓库技术债与优化空间审计](20261006-comprehensive-technical-debt-audit.md)。它合并此前剩余 F1～F8，并补充 F9～F22、覆盖范围、删除/保护界线及验收顺序。
+审计日期：2026-10-06。基线提交：`5ef594592511719ed80c5c93a1852fbbc6557b4c`。本轮针对不再使用的代码入口、旧设计与文档，按模块注册、符号引用、现行契约和验证入口核对。
 
-22 项确认问题的实施与验证见 [全面修复记录](20261006-comprehensive-fixes.md)。后续代码与文档清理见 [本轮治理记录](20261006-code-documentation-governance.md)，已完成计划的原文见 [历史归档](history/README.md)。
+[逐文件清单](cleanup-inventory.tsv) 覆盖基线的全部 **756 个跟踪文件**，每行记录所属模块、保留/更新/移除结论、依据与基线文件 SHA-256。它是本轮审计快照，不是后续待办。未跟踪且被忽略的构建缓存、运行日志和用户数据不计入源码清理范围。
 
-当前审计证据位于 [evidence/](evidence/)；[范围清单](evidence/20261006-scope-inventory.tsv) 固定基线提交的文件名、大小及 SHA-256，用于区分“当时被审计的内容”和后续代码。复现程序是基线缺陷的证明，修复后其中成功/失败断言应相应变化，不属于常规生产测试入口。
+## 模块覆盖
 
-历史报告按各自基线阅读，不把已完成的改动重复计为当前待办，也不删除原始协议/硬件证据：
+| 模块 | 基线文件数 | 核对与结论 |
+| --- | ---: | --- |
+| 根入口与门面 | 39 | 核对 CLI 路由、扫描、元信息、身份、分区表、备份读模型、提权、终端输出与导入边界；保留实际职责，移除旧扇区概览重导出 |
+| `application` | 58 | 核对设备、证据、检查、备份、写会话、恢复后处理、制盘准备/提交/导出和进度；删除两个无消费者的检查包装 |
+| `backup_catalog` | 1 | 当前删除计划与目录能力，保留 |
+| `cli` / `cli_args` | 12 | 当前命令、参数、确认与秘密输入，保留 |
+| `domain` | 4 | 几何、硬件与秘密值类型，保留 |
+| `diskio` | 2 | 只读句柄、重开、事务、同步、读回与回滚，保留 |
+| `edpb` | 8 | 当前 v3 模型、身份、预算、编解码、校验与发布，保留 |
+| `filesystem` | 19 | 驱动、格式策略、空文件系统生成、解析与格式化读回；保留实际验证，修正文件迁移残留说明 |
+| `infrastructure` | 10 | 备份存储、私有原子发布、时钟、有界进程执行，保留 |
+| `inspect` | 11 | 当前上下文解码、字段目录、诊断与文本展示；删除旧扇区单行概览 |
+| `platform` | 8 | 三平台、原生探测、系统缓存与 Unix 支持；条件编译分支均纳入模块图，保留 |
+| `protocol` | 25 | LBA0～12、配置类型、跨扇区语义、密码学、IIR、LCE；保留真实介质历史协议 |
+| `provision` | 21 | 官方四模式与 Plain、来源解析、区域策略、密钥域、布局、文件系统和写计划；删除无消费者的默认格式目标包装，以及旧固定盘尾布局生成/校验路径 |
+| `tui` | 184 | 核对设备、备份、检查、制盘、恢复各工作区及状态/任务/渲染模块，输入、导航、进度、表格、UI 原语、演示和内部测试均已注册；删除制盘字段描述中已废弃的验证参数和 18 处无效实参；退役绕过当前视口算法的旧表格包装 |
+| 测试与夹具 | 156 | 8 个普通套件、2 个独立虚拟 HIL 入口及辅助模块均可达；夹具继续参与当前回归 |
+| 示例 | 5 | 当前目录基准与独立真实 USB HIL 工具，保留；本轮不执行实盘写入 |
+| 脚本 | 48 | 检查安装、测试、构建/发布、回放、HIL 和协议证据复现；删除无人调用的旧 CI 转发脚本 |
+| 现行文档 | 12 | 核对产品边界、源码路径、相对链接及命令；修正旧检查键位与面板说明 |
+| 审计资料 | 92 | 移除 29 份失效计划、重复报告、旧复现与过期清单；保留协议、HIL、日志规范及真实备份转换回执 |
+| 仓库备份 | 23 | 当前 v3 测试样本，保留并只读验证 |
+| 工作流与根配置 | 18 | 当前构建、依赖、CI、发布、Git 门禁与安装入口，保留 |
 
-| 报告 | 用途 |
+清理后 398 份生产源码均可从 `src/lib.rs` / `src/main.rs` 的 Rust AST 模块图找到，包括所有平台和内部测试条件分支。第三轮对仅测试消费者进一步核查，移除 4 个已被现行入口替代的生产模块；其余均可达。新增源码注册检查防止游离文件再次被常规构建遗漏。测试、示例与字段指南生成器也逐一核对入口；只有两个已修复缺陷的旧一次性复现不属于当前构建。
+
+## 删除与修正
+
+累计删除 **34 个文件**：29 份已完成/废止设计、重复架构/TUI 报告、一次性复现程序及输出、过期清单和历史索引，加上 `scripts/ci/run-cargo-test-ci.py` 和第三轮的 4 个旧生产模块。精确路径和各自依据见逐文件清单。旧内容仍可从 Git 基线恢复；不再复制到另一个历史计划目录。
+
+删除四个仅剩定义和重导出、无生产/测试/示例消费者的入口：
+
+| 删除入口 | 当前使用入口 |
 | --- | --- |
-| [整体架构审计](20261006-overall-architecture-audit.md) | 初始问题与原优化路线 |
-| [S0 实施](20261006-architecture-s0-implementation.md) | 已实施写入安全边界 |
-| [S1～S4 实施](20261006-architecture-s1-s4-implementation.md) | 已实施架构收敛 |
-| [开发兼容清理](20261006-development-compatibility-cleanup.md) | 历史 API/包装清理结果 |
-| [EDPB v3 清理与迁移](20261006-edpb-v3-only-migration.md) | 旧 reader 移除及本地转换/归档结果 |
-| [剩余 8 项审计](20261006-remaining-technical-debt-audit.md) | F1～F8 的详细初次证据；修复结果见全面修复记录 |
-| [2026-10-05 架构优化进度](20261005-architecture-optimization-progress.md) | 当时实施进度 |
-| [2026-10-05 桌面 TUI 审计](20261005-desktop-tui-engineering-audit.md) | 当时 TUI 审计 |
-| [2026-10-05 桌面 TUI 完成记录](20261005-desktop-tui-engineering-completion.md) | 对应实现结果 |
-| [2026-10-05 工程 TUI 完成记录](20261005-engineering-tui-completion.md) | 对应实现结果 |
-| [2026-10-05 独立质量复核](20261005-independent-quality-review.md) | 当时质量结论 |
-| [2026-10-05 公共 API 兼容记录](20261005-public-api-compatibility.md) | 历史决策；后续开发兼容清理按用户新要求执行 |
-| [2026-10-05 容量地图修复](20261005-capacity-map-visibility-fix.md) | 对应修复结果 |
+| `application::inspect::load_disk_inspect` | `load_disk_advanced_inspect`，显式传递请求 |
+| `application::inspect_tree::find_sector_structured_path` | `find_sector_structured_paths`，保留全部匹配 |
+| `inspect::overview_line` | 当前检查工作区、摘要与字段/十六进制渲染 |
+| `provision::official_format_targets` | `official_format_targets_with_filesystems`，显式传递文件系统 |
 
-当前实现架构以 [ARCHITECTURE.md](../../docs/architecture/ARCHITECTURE.md) 为准；协议历史材料继续由 audit/protocol 和 docs/protocol 管理。运行时进度日志规则在 [ai-progress/README.md](../ai-progress/README.md)。
+README 与使用手册改为当前 `J` 跳转、四面板检查及原地保留/重新包装/授权重建语义；移除“数据迁移”能力宣称。协议基线复现命令改用已注册的 `protocol_suite`。
+
+制盘表单字段描述删除已忽略的 `_verification_removed` 参数及 18 处布尔实参，保留现行 `editable/secret/toggle/fill_capacity` 能力。密码学模块只修正已删除 u32 包装的过时注释，运算代码不变。
+
+`backup_prepared_provision_on_disk` 虽无仓库内普通调用，仍是构造不可伪造 `BackedUpPreparedProvision` 的公开配套安全入口；不把公开安全会话构造能力误删为旧包装。文件系统分析仍用于制盘格式化读回，真实介质的历史解析及原生探测回退也继续维护。
+
+## 有效证据
+
+- [备份转换回执](20261006-edpb-v3-only-migration.md)：保留先前真实数据转换的原件归档位置、数量、身份缺失处理和验证结果，不作为待实施设计。
+- [协议证据](../protocol/README.md)：字节账本、字段目录、金标、静态/虚拟/真实物理采集及来源调查。
+- [实体盘验收契约](../../docs/architecture/PHYSICAL_HIL_GOVERNANCE.md)：场景与结果 schema，仍为当前门禁。
+- [实时日志规范](../ai-progress/README.md)：运行日志为首轮 `audit/ai-progress/20261006-193650-manual.log`、第二轮 `audit/ai-progress/20261006-195414-manual.log`、第三轮 `audit/ai-progress/20261006-203127-manual.log`。
+
+当前行为以 [文档索引](../../docs/README.md) 所列规范及代码/测试为准。
+
+## 第二轮清理与一键扫描
+
+第二轮删除仅被测试调用的 `generate_image` / `ProvisionValidator` / `ProvisionValidation` 旧实现，以及旧生成器专用布局、固定材料和校验期望构造器。当前生产路径只使用 `generate_official_image` / `OfficialProvisionValidator`。生成与校验回归全部改用官方模式，错误长度由固定大小 `ProvisionImage` 构造器拒绝；架构边界检查同步更新。
+
+历史读取、备份与恢复所需的 mode1 合成样本留在 `tests/common/mod.rs`，复用现行身份扇区，仅在测试模块重建历史布局；三型号迁移前后 SHA-256 相同：
+
+| 样本 | SHA-256 |
+| --- | --- |
+| netac | `d582801656f1aa0c99f0e68e7d7a89fabd10f998a500d20f9a6ccf94b9053f6c` |
+| lexar | `2ad47c28299bf1bc6f17fb360aa0eaf00da5b1f7f7f77fd8184fae278be7802f` |
+| aigo | `f7bb265dececceb510f35f986bff751a1221ca51d7bc8ad2e45431f117fbbe57` |
+
+继续删除忽略密钥/卷标/序列号的 `build_official_provision_write_image`、无人使用的表格 `project` 与 Plain 最高 LBA 方法，以及仅供旧测试使用的 `move_table_column` / `scroll_table` / `toggle_sort` 包装。相关测试改为现行视口/排序/协议写计划入口。全仓参数扫描还促成了制盘加密容量、SAFE6 标签解析、设备详情、表格偏移/可见性/位置提示的无效参数清理，全部消费者已更新。
+
+新增 [一键扫描工具](../../scripts/audit/README.md)，根目录执行 `make audit`。第二轮最初的 11 条登记规则默认对所有跟踪及非忽略新文件执行全仓扫描；AST 覆盖所有平台/测试分支、内联与重定位模块、别名、宏标识符、格式字符串隐式变量。不存在的模块/链接/测试目标和退役入口回流作为确认问题，其余只给核查候选及引用证据。
+
+第二轮扫描覆盖 **731 个文件 / 522 份 Rust 源码**，确认问题为 **0**。仍列出 **203 个候选匹配**：2 个无普通消费者的安全接口、77 个仅测试引用接口、32 个未读取参数和 92 个直接转发接口；同一接口可匹配多个规则，不能把这些数量当作可删除文件数。公开备份证明/提交能力、平台统一签名、协议检测轴回调及历史兼容回归不能仅凭引用数量删除。检测边界和新类型扩展流程见工具说明；`AGENTS.md` 已要求新发现必须补规则与行为回归，然后重扫全仓。
+
+新增 5 个项目文件：本次逐文件清单、扫描 Python 入口、Rust AST 检测器、规则表和工具说明；`Cargo.toml` 注册检测器 example，开发依赖复用已锁定的 `proc-macro2`，没有依赖版本升级。
+
+## 第三轮：仅测试支撑的旧实现
+
+新增 `test_only_module` 通用规则，对整个模块的函数与类型等声明核对消费者，包括同文件 `cfg(test)` 测试。含公开重导出、trait 分派或其他模块生产消费者的文件保守保留；行为回归覆盖纯类型模块、有效类型引用、trait、门面和内部测试，随后对全仓重新执行全部规则。
+
+确认并删除 4 个旧模块：
+
+| 移除文件 | 当前覆盖与替代 |
+| --- | --- |
+| `src/application/inspect/request.rs` | 当前 `cli_args/inspect.rs` 负责列表、范围、计数及边界；默认范围在 `inspect_cli` 的请求转换层验证 |
+| `src/inspect/render.rs` | 当前 CLI 纯文本/原始十六进制与 TUI 渲染；字段内容测试迁到当前 `render_fields_plain` |
+| `src/inspect/catalog.rs` | 单项测试显式构造现行 `InspectMeta`，移除孤立备份适配器 |
+| `src/tui/ui/banner.rs` | 未进入实际产品界面的旧横幅原语；保留实际使用的卡片、面板、表格与状态徽章契约 |
+
+同时移除旧 `load_backup_inspect` 隐式请求包装、彩色字段主题回调、`PartitionAction` / `decide_partition_action` 二状态几何判断、专用强制改密切换/配置包装，以及旧 TUI 几何文本预览、布局编辑器文本、条形图与选中区域字符串包装。有效回归迁到显式 Inspect 请求、当前兼容性引擎、选中字段切换和实际 `provision_layout_model` / `provision_layout_editor_details`，没有把旧生产实现复制进测试。
+
+布局回归继续核对容量上限、填满、固定加密起点、自动后移、合法空隙、重叠错误、可分区剩余容量、盘尾展开和选中区域。区域模型包含盘尾空闲空间，详情包含表头；相应断言按真实可分区边界和带 `region_kind` 的区域行核对。
+
+当前一键扫描为 **12 类规则、727 个文件 / 518 份 Rust 源码**，确认问题 **0**、候选匹配 **190**：2 个无普通调用的安全入口、65 个仅测试引用接口、31 个未读取参数、92 个转发接口；整模块仅测试候选已全部核查并清理，现为 0。其余包含协议纯函数与校验回归、平台统一签名、字段/表格模型测试访问和安全会话能力；仅引用数量不能证明退役。此次确认退役的入口已进入回流检测清单。
+
+## 本轮验证
+
+- 第二轮最终 `scripts/test-fast.sh`：格式/差异检查、Clippy 无警告、表格滚动、工程/运行器/伪终端检查及 8 套件 / 10 工件通过；运行器 35.60 秒。
+- 第二轮 `python3 scripts/test-full.py --profile full --deadline-seconds 900 --max-seconds 900`：8 套件 / 10 工件及文档测试通过，0 失败，47.11 秒。
+- 第三轮 `scripts/test-fast.sh`：格式/差异检查、Clippy、工程/运行器/伪终端检查、8 套件 / 10 工件通过，0 失败，56.91 秒。首次新增断言误把执行层默认范围当作参数层输出，修正为空列表哨兵并补请求转换回归后通过。
+- 第三轮 `python3 scripts/test-full.py --profile full --deadline-seconds 900 --max-seconds 900`：8 套件 / 10 工件和文档测试通过，0 失败，70.81 秒。
+- 第三轮 `make audit`：全仓 12 规则通过，确认问题为 0；6 项 AST 检测器回归和 11 项工程脚本行为测试通过。
+- Windows GNU x86_64 全目标 Clippy（拒绝警告）通过；Linux GNU x86_64 全目标编译检查通过。
+- 首轮 `scripts/protocol/audit_baseline.py`：20 份唯一金标（19 份加密盘、1 份真实 mode1）及独立 EESI 实体证据通过。第二轮完整协议套件再次通过。
+- 首轮本次构建的 `backup verify --backup-dir backup`：仓库 23 份 EDPB 全部通过只读校验，第二、三轮均未修改备份内容。
+- 逐文件清单与 Git 删除/修改集合一致：基线 756 文件中 657 保留、65 更新、34 移除；657 个保留文件 SHA-256 完全相同。全部 Rust 文件均注册，Markdown 本地链接有效，退役入口无残留定义或调用。
+
+未执行虚拟或真实物理盘 HIL，未更新本机安装。改动留在当前工作区，未提交或推送。

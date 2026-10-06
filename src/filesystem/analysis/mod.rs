@@ -1,4 +1,4 @@
-//! Read-only filesystem analysis used by provisioning and migration.
+//! Read-only filesystem analysis used to verify provisioning format results.
 
 use crate::domain::geometry::PartitionGeometry;
 use serde::Serialize;

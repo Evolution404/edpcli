@@ -1,44 +1,8 @@
 //! Shared text export of Inspect fields.
 
-use crate::inspect_adapter::{FieldStyle, SectorView};
+use crate::inspect_adapter::SectorView;
 
-pub(crate) fn style_name(style: FieldStyle) -> &'static str {
-    match style {
-        FieldStyle::Magic => "魔数/签名",
-        FieldStyle::Text => "文本",
-        FieldStyle::Identity => "身份/密钥",
-        FieldStyle::Address => "地址/LBA",
-        FieldStyle::Size => "大小",
-        FieldStyle::Flag => "类型/标志",
-        FieldStyle::Checksum => "校验",
-    }
-}
-
-pub(crate) struct InspectTextTheme {
-    pub paint: fn(FieldStyle, &str, bool) -> String,
-    pub emphasize: fn(&str) -> String,
-    pub dim: fn(&str) -> String,
-}
-
-fn plain(text: &str) -> String {
-    text.to_string()
-}
-fn plain_field(_: FieldStyle, text: &str, _: bool) -> String {
-    text.to_string()
-}
-
-pub(crate) fn render_fields_plain(view: &SectorView) -> String {
-    render_fields_with(
-        view,
-        InspectTextTheme {
-            paint: plain_field,
-            emphasize: plain,
-            dim: plain,
-        },
-    )
-}
-
-pub(crate) fn render_fields_with(view: &SectorView, theme: InspectTextTheme) -> String {
+pub fn render_fields_plain(view: &SectorView) -> String {
     if view.fields.is_empty() {
         return String::new();
     }
@@ -61,11 +25,7 @@ pub(crate) fn render_fields_with(view: &SectorView, theme: InspectTextTheme) -> 
                         (min_start.min(candidate.start), max_end.max(candidate.end))
                     });
                 let range = format!("+0x{start:03X}..0x{:03X}", end.saturating_sub(1));
-                out.push_str(&format!(
-                    "    {}  {}\n",
-                    (theme.emphasize)(group_name),
-                    (theme.dim)(&range)
-                ));
+                out.push_str(&format!("    {}  {}\n", group_name, range));
             }
         }
         let range = if f.end == f.start + 1 {
@@ -88,11 +48,7 @@ pub(crate) fn render_fields_with(view: &SectorView, theme: InspectTextTheme) -> 
                 } else {
                     out.push_str(&" ".repeat(6 + 18 + 2 + 18 + 2));
                 }
-                if chunk == "<空>" {
-                    out.push_str(&(theme.dim)(chunk));
-                } else {
-                    out.push_str(&(theme.paint)(f.style, chunk, f.value.contains('✗')));
-                }
+                out.push_str(chunk);
                 out.push('\n');
             }
         }
@@ -106,7 +62,7 @@ pub(crate) fn render_fields_with(view: &SectorView, theme: InspectTextTheme) -> 
                 out.push_str(&format!(
                     "      {}  {}\n",
                     crate::text_width::pad_to(&f.label, 12),
-                    (theme.dim)(&range)
+                    range
                 ));
             }
             let mut empty_labels = Vec::new();
@@ -122,18 +78,10 @@ pub(crate) fn render_fields_with(view: &SectorView, theme: InspectTextTheme) -> 
                             "{}{}  {}\n",
                             child_indent,
                             crate::text_width::pad_to(&child.label, 12),
-                            if chunk == "<空>" {
-                                (theme.dim)(chunk)
-                            } else {
-                                (theme.paint)(f.style, chunk, chunk.contains('✗'))
-                            }
+                            chunk
                         ));
                     } else {
-                        let rendered = if chunk == "<空>" {
-                            (theme.dim)(chunk)
-                        } else {
-                            (theme.paint)(f.style, chunk, chunk.contains('✗'))
-                        };
+                        let rendered = chunk;
                         out.push_str(&format!(
                             "{}{}  {}\n",
                             child_indent,
@@ -148,7 +96,7 @@ pub(crate) fn render_fields_with(view: &SectorView, theme: InspectTextTheme) -> 
                     "{}{}  {}\n",
                     child_indent,
                     crate::text_width::pad_to("空字段", 12),
-                    (theme.dim)(&empty_labels.join(" · "))
+                    empty_labels.join(" · ")
                 ));
             }
         }

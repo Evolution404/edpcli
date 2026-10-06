@@ -196,7 +196,7 @@ fn ch14_table_projection_is_stable_across_animation_and_scroll() {
     for _ in 0..10 {
         state.advance_animation();
         state.navigate(NavCommand::Down, 20);
-        state.scroll_table(TableKind::Devices, false);
+        state.scroll_table_for_viewport(TableKind::Devices, false, 80, 24);
     }
     let view = state.table_view_data(TableKind::Devices).unwrap();
     assert_eq!(view.generation, generation);
@@ -268,7 +268,7 @@ fn sorted_device_refresh_preserves_selection_through_filter_reorder_and_removal(
         for filtered in [false, true] {
             let mut state = AppState::new();
             state.replace_devices(rows());
-            state.move_table_column(TableKind::Devices, false);
+            state.move_table_column_for_viewport(TableKind::Devices, false, 80, 24);
             state.toggle_table_sort(TableKind::Devices);
             if descending {
                 state.toggle_table_sort(TableKind::Devices);
@@ -473,8 +473,8 @@ fn backup_table_sort_preserves_selected_backup_reference() {
     state.navigate(NavCommand::Down, 20);
     assert_eq!(state.selected_backup_path(), Some(PathBuf::from("two.bin")));
 
-    assert!(state.move_table_column(TableKind::Backups, false)); // time
-    assert!(state.move_table_column(TableKind::Backups, false)); // name
+    assert!(state.move_table_column_for_viewport(TableKind::Backups, false, 80, 24)); // time
+    assert!(state.move_table_column_for_viewport(TableKind::Backups, false, 80, 24)); // name
     assert_eq!(state.table_active_column(TableKind::Backups), 2);
 
     state.toggle_table_sort(TableKind::Backups);

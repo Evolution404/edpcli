@@ -88,7 +88,7 @@ pub(super) fn draw_inspect_field_table(
         if values.is_empty() { 0 } else { row_start + 1 },
         row_end,
         values.len(),
-        table_position_label(&layout, interaction, &viewport)
+        table_position_label(&layout, interaction)
     );
     let table = crate::tui::ui::data_table(&title, header, rows, viewport.widths(), detail_focus);
     let mut table_state = ratatui::widgets::TableState::default();

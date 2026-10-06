@@ -11,19 +11,15 @@ use crate::ports::CmdRunner;
 mod decode;
 mod export;
 mod model;
-mod request;
 mod service;
 mod source;
 
+pub use super::inspect_text::render_fields_plain;
 use decode::materialize_protocol_fields;
 pub use decode::{decode_sector, sector_meta_text};
 use export::{export_advanced_bytes, export_advanced_meta};
 pub use model::*;
-pub use request::parse_advanced_lbas;
-pub use service::{
-    load_backup_advanced_inspect, load_backup_inspect, load_disk_advanced_inspect,
-    load_disk_inspect,
-};
+pub use service::{load_backup_advanced_inspect, load_disk_advanced_inspect};
 #[cfg(test)]
 use source::run_advanced_source;
 use source::run_evidence_source;

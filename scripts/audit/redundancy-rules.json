@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "unregistered_rust",
+      "kind": "unregistered_rust",
+      "description": "没有注册到任何 Cargo 目标的 Rust 文件"
+    },
+    {
+      "id": "missing_module",
+      "kind": "missing_module",
+      "description": "模块声明引用不存在的源码"
+    },
+    {
+      "id": "unreferenced_api",
+      "kind": "unreferenced_api",
+      "description": "没有执行性引用的公开函数或方法"
+    },
+    {
+      "id": "test_only_api",
+      "kind": "test_only_api",
+      "description": "仅测试引用的生产接口"
+    },
+    {
+      "id": "test_only_module",
+      "kind": "test_only_module",
+      "description": "模块仍注册，但所有公开函数/声明仅由测试使用且无外部生产消费者"
+    },
+    {
+      "id": "ignored_parameter",
+      "kind": "ignored_parameter",
+      "description": "生产函数声明但不读取的参数"
+    },
+    {
+      "id": "forwarding_api",
+      "kind": "forwarding_api",
+      "description": "只有一次转发调用的公开接口"
+    },
+    {
+      "id": "unreferenced_script",
+      "kind": "unreferenced_script",
+      "description": "仓库其他文本没有提及的脚本入口"
+    },
+    {
+      "id": "broken_document_link",
+      "kind": "broken_document_link",
+      "description": "Markdown 本地链接目标不存在"
+    },
+    {
+      "id": "obsolete_test_target",
+      "kind": "obsolete_test_target",
+      "description": "文档使用不存在的 Cargo 测试目标"
+    },
+    {
+      "id": "duplicate_document",
+      "kind": "duplicate_document",
+      "description": "内容完全相同的文档"
+    },
+    {
+      "id": "retired_symbol",
+      "kind": "retired_symbol",
+      "description": "已确认退役的入口重新出现",
+      "symbols": [
+        "load_disk_inspect",
+        "find_sector_structured_path",
+        "overview_line",
+        "official_format_targets",
+        "build_official_provision_write_image",
+        "generate_image",
+        "ProvisionValidator",
+        "ProvisionValidation",
+        "move_table_column",
+        "scroll_table",
+        "toggle_sort",
+        "load_backup_inspect",
+        "render_fields_with",
+        "InspectTextTheme",
+        "PartitionAction",
+        "decide_partition_action",
+        "notice_banner",
+        "BannerTone",
+        "provision_toggle_force_change_password",
+        "with_force_change_password",
+        "provision_geometry_preview_lines",
+        "provision_layout_editor_lines",
+        "provision_plain_layout_editor_lines",
+        "provision_layout_bar",
+        "disk_layout_detail",
+        "parse_advanced_lbas",
+        "render_fields",
+        "render_hex",
+        "from_backup_meta"
+      ]
+    }
+  ]
+}

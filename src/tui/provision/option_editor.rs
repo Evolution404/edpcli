@@ -1,17 +1,6 @@
 use super::*;
 
 impl AppState {
-    pub fn provision_toggle_force_change_password(&mut self) -> bool {
-        if self.provision_field_id(self.provision.field_selected)
-            != Some(ProvisionFieldId::ForceChangePassword)
-        {
-            return false;
-        }
-        self.provision.form.force_change_password = !self.provision.form.force_change_password;
-        self.provision.message = None;
-        true
-    }
-
     pub fn provision_toggle_selected_option(&mut self) -> bool {
         let descriptor = self.provision_field_descriptor(self.provision.field_selected);
         if descriptor.is_some_and(|descriptor| !descriptor.capabilities.toggle) {

@@ -680,6 +680,25 @@ fn inspect_requires_mode_and_explicit_lba_flag() {
 }
 
 #[test]
+fn inspect_default_sweep_and_mixed_list_are_parsed_by_the_current_cli() {
+    match parse_args(&args(&["inspect", "decode"])).unwrap() {
+        Parsed::Inspect(opts) => {
+            assert!(opts.lbas.is_empty(), "execution selects the protocol sweep")
+        }
+        _ => panic!("expected inspect decode"),
+    }
+    match parse_args(&args(&["inspect", "decode", "--lba", "7,12,20-22,7"])).unwrap() {
+        Parsed::Inspect(opts) => assert_eq!(opts.lbas, [7, 12, 20, 21, 22]),
+        _ => panic!("expected inspect decode"),
+    }
+    for rest in [&["--count", "2"][..], &["--lba", "0", "--count", "0"][..]] {
+        let mut argv = args(&["inspect", "decode"]);
+        argv.extend(args(rest));
+        assert!(parse_args(&argv).is_err());
+    }
+}
+
+#[test]
 fn inspect_accepts_u64_ranges_and_count() {
     match parse_args(&args(&[
         "inspect",

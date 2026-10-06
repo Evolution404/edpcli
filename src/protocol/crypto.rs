@@ -223,7 +223,7 @@ pub fn aes128_ecb_decrypt_block(ciphertext: &[u8; 16], key: &[u8; 16]) -> [u8; 1
 /// 轮密钥展开 + counter 混入(cb 的 8 字节循环 XOR 进全部 176 个轮密钥字节)。
 ///
 /// 驱动把物理 backing byte offset 作为 64 位 tweak seed 传入；LBA0-LBA12
-/// 的历史调用仍以 0 起步，因此现有 u32 API 由下面的兼容包装保持位级一致。
+/// 的元数据调用以 0 起步；统一 u64 接口同时支持元数据与完整物理字节偏移。
 fn expand_with_counter(key_raw: &[u8], counter: u64) -> [[u8; 4]; 44] {
     let mut expanded = [0u8; 16];
     for i in 0..16 {

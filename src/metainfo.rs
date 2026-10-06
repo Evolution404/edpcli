@@ -101,7 +101,7 @@ fn partition_info(partition: semantic::PartitionSemantics) -> PartitionInfo {
     }
 }
 
-pub fn safe6_label_from_lba6<C: SemanticContextSource>(raw: &[u8], _context: &C) -> Option<String> {
+pub fn safe6_label_from_lba6(raw: &[u8]) -> Option<String> {
     semantic::safe6_label(raw)
 }
 

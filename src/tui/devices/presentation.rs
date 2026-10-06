@@ -3,7 +3,6 @@ use crate::common::fmt_sector_percentage as percentage;
 use crate::tui::state::DeviceInfoNodeKey;
 
 pub(super) fn device_detail_lines(
-    state: &AppState,
     row: &crate::disk_scan::Row,
     key: DeviceInfoNodeKey,
     width: usize,
@@ -17,9 +16,7 @@ pub(super) fn device_detail_lines(
         DeviceInfoNodeKey::LayoutSegment { start_lba, kind } => {
             segment_detail_lines(row, key, start_lba, kind, width)
         }
-        DeviceInfoNodeKey::Status | DeviceInfoNodeKey::Backups => {
-            status_backup_detail_lines(state, row, width)
-        }
+        DeviceInfoNodeKey::Status | DeviceInfoNodeKey::Backups => status_backup_detail_lines(row),
     }
 }
 
@@ -339,11 +336,7 @@ fn active_capacity_extent(
     }
 }
 
-fn status_backup_detail_lines(
-    _state: &AppState,
-    row: &crate::disk_scan::Row,
-    _width: usize,
-) -> Vec<Line<'static>> {
+fn status_backup_detail_lines(row: &crate::disk_scan::Row) -> Vec<Line<'static>> {
     let status_style = if row.probe_error.is_some() {
         danger()
     } else if row.denied {

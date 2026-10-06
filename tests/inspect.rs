@@ -1,9 +1,10 @@
 use crate::common;
+use edpcli::application::inspect::render_fields_plain;
 
 use common::*;
 use edpcli::inspect::{
-    analyze_sector_with_context, render_fields, render_hex, FieldStyle, FieldTransform,
-    InspectDiagnosticCode, InspectMeta, InspectParseState,
+    analyze_sector_with_context, FieldStyle, FieldTransform, InspectDiagnosticCode, InspectMeta,
+    InspectParseState,
 };
 use edpcli::protocol::crypto::{a7f0_full, crc32_bare, xor_rolling};
 
@@ -163,12 +164,10 @@ fn inspect_protocol_semantics_stay_routed_to_canonical_parsers() {
     let source = concat!(
         include_str!("../src/inspect/model.rs"),
         include_str!("../src/inspect/metadata.rs"),
-        include_str!("../src/inspect/catalog.rs"),
         include_str!("../src/inspect/lba_adapter.rs"),
         include_str!("../src/inspect/lba_early.rs"),
         include_str!("../src/inspect/lba_middle.rs"),
         include_str!("../src/inspect/lba_late.rs"),
-        include_str!("../src/inspect/render.rs"),
     );
     let semantic = include_str!("../src/protocol/semantic.rs");
     for parser in [
@@ -660,26 +659,11 @@ fn lba9_decodes_eppe_as_its_own_canonical_overlay_profile() {
 }
 
 #[test]
-fn hex_renderer_has_offsets_and_field_legend_without_color() {
-    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
-    let data = load_disk_image("netac");
-    let meta = meta_for("netac");
-    let v = analyze_sector_with_context(7, &data[7 * 512..8 * 512], &meta, Some(&data));
-    let out = render_hex(&v, false);
-    assert!(out.contains("+0x000:"));
-    assert!(out.contains("+0x1F0:"));
-    assert!(out.contains("字段图例"));
-    assert!(!out.contains("\x1b["));
-    edpcli::cli::terminal_ui::reset_enabled_for_tests();
-}
-
-#[test]
 fn lba8_llgb_fields_render_as_vertical_key_value_rows() {
-    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
     let data = load_disk_image("aigo");
     let meta = meta_for("aigo");
     let view = analyze_sector_with_context(8, &data[8 * 512..9 * 512], &meta, Some(&data));
-    let out = render_fields(&view);
+    let out = render_fields_plain(&view);
 
     assert!(out.contains("[ELABEL]"), "{out}");
     assert!(out.contains("GLab"), "{out}");
@@ -696,7 +680,6 @@ fn lba8_llgb_fields_render_as_vertical_key_value_rows() {
             .any(|line| line.contains("GLab=") && line.contains("Dept=")),
         "LLGB 子字段不应再拼成一行: {out}"
     );
-    edpcli::cli::terminal_ui::reset_enabled_for_tests();
 }
 
 #[test]
@@ -731,7 +714,7 @@ fn lba8_splits_elabel_bytes_before_gbk_decoding_each_value() {
         ..InspectMeta::default()
     };
     let view = analyze_sector_with_context(8, &raw, &meta, None);
-    let out = render_fields(&view);
+    let out = render_fields_plain(&view);
 
     assert!(out.contains("User"), "{out}");
     assert!(out.contains("张玉玺"), "{out}");
@@ -769,7 +752,7 @@ fn lba8_preserves_a_malformed_label_value_instead_of_collapsing_it_to_safe6() {
         ..InspectMeta::default()
     };
     let view = analyze_sector_with_context(8, &raw, &meta, None);
-    let out = render_fields(&view);
+    let out = render_fields_plain(&view);
 
     assert!(out.contains("Label  江苏电力!SAFE6"), "{out}");
 }
@@ -810,7 +793,7 @@ fn lba8_decrypts_the_llgb_length_instead_of_a_fixed_0x170_prefix() {
         ..InspectMeta::default()
     };
     let view = analyze_sector_with_context(8, &raw, &meta, None);
-    let out = render_fields(&view);
+    let out = render_fields_plain(&view);
 
     assert!(out.contains("VOLC2"), "{out}");
     assert!(out.contains("TAIL"), "{out}");
@@ -946,11 +929,10 @@ fn lba8_decrypts_one_extra_block_when_logical_length_is_16_byte_aligned() {
 
 #[test]
 fn repeated_structures_render_as_groups_instead_of_repeating_prefixes() {
-    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
     let data = load_disk_image("netac");
     let meta = meta_for("netac");
 
-    let edpf = render_fields(&analyze_sector_with_context(
+    let edpf = render_fields_plain(&analyze_sector_with_context(
         7,
         &data[7 * 512..8 * 512],
         &meta,
@@ -964,7 +946,7 @@ fn repeated_structures_render_as_groups_instead_of_repeating_prefixes() {
         "Entry 标题应只显示一次: {edpf}"
     );
 
-    let mbr = render_fields(&analyze_sector_with_context(
+    let mbr = render_fields_plain(&analyze_sector_with_context(
         0,
         &data[..512],
         &meta,
@@ -972,17 +954,15 @@ fn repeated_structures_render_as_groups_instead_of_repeating_prefixes() {
     ));
     assert!(mbr.contains("分区 P1"), "{mbr}");
     assert_eq!(mbr.matches("P1").count(), 1, "P1 标题应只显示一次: {mbr}");
-    edpcli::cli::terminal_ui::reset_enabled_for_tests();
 }
 
 #[test]
 fn structured_output_keeps_known_sector_lines_readable() {
-    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
     let data = load_disk_image("aigo");
     let meta = meta_for("aigo");
     for lba in [0u32, 4, 6, 7, 8, 9, 11, 12] {
         let start = lba as usize * 512;
-        let out = render_fields(&analyze_sector_with_context(
+        let out = render_fields_plain(&analyze_sector_with_context(
             lba,
             &data[start..start + 512],
             &meta,
@@ -996,15 +976,13 @@ fn structured_output_keeps_known_sector_lines_readable() {
             );
         }
     }
-    edpcli::cli::terminal_ui::reset_enabled_for_tests();
 }
 
 #[test]
 fn edpf_key_material_renders_as_separate_rows() {
-    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
     let data = load_disk_image("netac");
     let meta = meta_for("netac");
-    let out = render_fields(&analyze_sector_with_context(
+    let out = render_fields_plain(&analyze_sector_with_context(
         7,
         &data[7 * 512..8 * 512],
         &meta,
@@ -1020,16 +998,14 @@ fn edpf_key_material_renders_as_separate_rows() {
         }),
         "密钥字段不应挤在同一行: {out}"
     );
-    edpcli::cli::terminal_ui::reset_enabled_for_tests();
 }
 
 #[test]
 fn mbr_empty_partition_slots_are_summarized_not_expanded() {
-    edpcli::cli::terminal_ui::set_enabled_for_tests(false);
     let data = load_disk_image("aigo");
     let meta = meta_for("aigo");
     let view = analyze_sector_with_context(0, &data[..512], &meta, Some(&data));
-    let out = render_fields(&view);
+    let out = render_fields_plain(&view);
     assert!(out.contains("分区 P1"), "{out}");
     assert!(!out.contains("分区 P2"), "空分区不应展开: {out}");
     assert!(
@@ -1037,7 +1013,6 @@ fn mbr_empty_partition_slots_are_summarized_not_expanded() {
         "{:?}",
         view.notes
     );
-    edpcli::cli::terminal_ui::reset_enabled_for_tests();
 }
 
 #[test]

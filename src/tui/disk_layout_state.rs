@@ -26,26 +26,4 @@ impl AppState {
         }
         .min(count.saturating_sub(1));
     }
-
-    pub fn disk_layout_detail(
-        &self,
-        model: &crate::tui::disk_layout::DiskLayoutModel,
-    ) -> Option<String> {
-        let presentation = crate::tui::disk_layout::DiskLayoutPresentation::new(
-            model,
-            crate::tui::disk_layout::DiskLayoutProfile::DetailedExact,
-            self.shell.disk_layout_tail,
-        );
-        let visible = presentation.visible_model();
-        let segment = visible.segments.get(self.shell.disk_layout_selected)?;
-        Some(format!(
-            "{} · {} · {} sectors · {} bytes",
-            segment.label,
-            segment.closed_range(),
-            segment.sector_count,
-            segment
-                .sector_count
-                .saturating_mul(crate::common::SECTOR as u64)
-        ))
-    }
 }

@@ -342,10 +342,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
                     })
                     .collect::<Vec<_>>(),
             );
-            let table_title = format!(
-                "{title} · {}",
-                table_position_label(&layout, interaction, &viewport)
-            );
+            let table_title = format!("{title} · {}", table_position_label(&layout, interaction));
             let table = crate::tui::ui::data_table(
                 &table_title,
                 header,

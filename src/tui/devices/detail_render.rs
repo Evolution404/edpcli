@@ -30,7 +30,7 @@ pub(super) fn draw_device_detail(frame: &mut Frame, area: ratatui::layout::Rect,
         draw_status_backup_detail(frame, area, state, row, title.as_str(), focused);
         return;
     }
-    let lines = device_detail_lines(state, row, key, area.width.saturating_sub(4) as usize);
+    let lines = device_detail_lines(row, key, area.width.saturating_sub(4) as usize);
     frame.render_widget(
         Paragraph::new(lines)
             .block(crate::tui::ui::card(title.as_str(), focused))
@@ -123,7 +123,6 @@ fn draw_status_backup_detail(
     frame.render_widget(block, area);
 
     let summary = device_detail_lines(
-        state,
         row,
         crate::tui::state::DeviceInfoNodeKey::Status,
         inner.width as usize,
@@ -231,10 +230,7 @@ fn draw_status_backup_detail(
             })
             .collect::<Vec<_>>(),
     );
-    let table_title = format!(
-        "关联备份 · {}",
-        table_position_label(&layout, interaction, &viewport)
-    );
+    let table_title = format!("关联备份 · {}", table_position_label(&layout, interaction));
     let table = crate::tui::ui::data_table(&table_title, header, rows, viewport.widths(), focused);
     let mut table_state = TableState::default();
     table_state.select(state.device_related_backup_selected_index());

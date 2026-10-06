@@ -352,20 +352,12 @@ fn editor_preserve_assessment_reports_typed_geometry_reason() {
 
 #[test]
 fn mode2_quick_and_exact_encrypt_capacity_are_partition_scoped() {
-    let quick = target_encrypt_capacity_override(
-        OfficialPartitionMode::WholeDiskEncrypted,
-        Some(128),
-        None,
-    )
-    .unwrap()
-    .unwrap();
-    let exact = target_encrypt_capacity_override(
-        OfficialPartitionMode::WholeDiskEncrypted,
-        None,
-        Some(128 * 2048),
-    )
-    .unwrap()
-    .unwrap();
+    let quick = target_encrypt_capacity_override(Some(128), None)
+        .unwrap()
+        .unwrap();
+    let exact = target_encrypt_capacity_override(None, Some(128 * 2048))
+        .unwrap()
+        .unwrap();
     assert_eq!(quick.sectors(), 128 * 2048);
     assert_eq!(exact.sectors(), 128 * 2048);
     assert_eq!(quick.sectors(), exact.sectors());

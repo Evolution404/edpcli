@@ -16,6 +16,10 @@ path = "src/lib.rs"
 name = "edpcli"
 path = "src/main.rs"
 
+[[example]]
+name = "audit-redundancy"
+path = "scripts/audit/redundancy_scan.rs"
+
 [features]
 default = []
 # 仅供 CI 在 GitHub-hosted Runner 的临时 loop/VHD 上做 HIL-lite。
@@ -69,6 +73,7 @@ required-features = ["ci-virtual-disk"]
 strip = true
 
 [dev-dependencies]
+proc-macro2 = "1"
 syn = { version = "2.0.119", features = ["full", "visit"] }
 
 [dependencies]

@@ -324,6 +324,16 @@ mod tests {
     use crate::application::inspect_tree::DiskRegionSemantic;
 
     #[test]
+    fn inspect_request_defaults_to_protocol_sweep_and_keeps_explicit_lbas() {
+        let mut opts = crate::cli_args::InspectOpts::default();
+        assert_eq!(
+            super::request_from_opts(&opts).lbas,
+            (0u64..13).collect::<Vec<_>>()
+        );
+        opts.lbas = vec![7, 12, 20, 21, 22];
+        assert_eq!(super::request_from_opts(&opts).lbas, opts.lbas);
+    }
+    #[test]
     fn protocol_semantic_has_priority_over_unallocated_regions() {
         assert_eq!(
             classify_inspect_region_semantics([
