@@ -235,6 +235,7 @@ impl AppState {
                         preflight::ProvisionFormatDisposition::Preserve
                     }
                 });
+            let region = crate::disk_layout::DiskRegionKind::from_partition_role(role).label();
             let target_label = match role {
                 crate::provision::PartitionRole::Boot
                 | crate::provision::PartitionRole::BootShareCombined => {
@@ -252,17 +253,17 @@ impl AppState {
                 preflight::ProvisionFormatDisposition::UserRequestedRebuild => "☑ 格式化",
                 preflight::ProvisionFormatDisposition::NotApplicable => "固定，不格式化",
             };
-            out.push((format!("{}格式化", role.label()), format_status, false));
+            out.push((format!("{region}格式化"), format_status, false));
             out.push((
-                format!("{}文件系统", role.label()),
+                format!("{region}文件系统"),
                 target.filesystem.unwrap().display_name(),
                 false,
             ));
             if disposition.selected() {
-                out.push((format!("{}格式化后卷标", role.label()), target_label, false));
+                out.push((format!("{region}格式化后卷标"), target_label, false));
             } else {
                 out.push((
-                    format!("{}卷标（原样保留）", role.label()),
+                    format!("{region}卷标（原样保留）"),
                     self.provision_preserved_volume_label(role)
                         .unwrap_or("未读取"),
                     false,

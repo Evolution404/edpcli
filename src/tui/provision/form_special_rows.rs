@@ -135,10 +135,156 @@ pub(super) fn paired_region_row(
     parameters_focused: bool,
     metrics: (usize, usize, usize, usize),
 ) -> Option<Line<'static>> {
+    let provision = state.provision();
+
+    if section == ProvisionFieldSection::Formatting && indexes.len() == 3 {
+        let role = match (
+            state.provision_field_id(indexes[0]),
+            state.provision_field_id(indexes[1]),
+            state.provision_field_id(indexes[2]),
+        ) {
+            (
+                Some(ProvisionFieldId::FormatEnabled(role)),
+                Some(ProvisionFieldId::Filesystem(filesystem_role)),
+                Some(ProvisionFieldId::VolumeLabel(label_role)),
+            ) if role == filesystem_role && role == label_role => role,
+            _ => return None,
+        };
+        let region = crate::disk_layout::DiskRegionKind::from_partition_role(role).label();
+        let labels = ["格式化", "文件系统", "卷标"];
+        let values = [
+            (fields[indexes[0]].1, fields[indexes[0]].2),
+            (fields[indexes[1]].1, fields[indexes[1]].2),
+            (fields[indexes[2]].1, fields[indexes[2]].2),
+        ];
+
+        let desired_value_width = |value: &str, secret: bool| {
+            if value.is_empty() {
+                crate::ui::disp_width("〈请输入〉")
+            } else if secret {
+                value.chars().count()
+            } else {
+                crate::ui::disp_width(&safe(value))
+            }
+            .saturating_add(2)
+            .clamp(8, 26)
+        };
+        let mut value_widths = [8usize; 3];
+        for (index, (_, value, secret)) in fields.iter().enumerate() {
+            let slot = match state.provision_field_id(index) {
+                Some(ProvisionFieldId::FormatEnabled(_)) => Some(0),
+                Some(ProvisionFieldId::Filesystem(_)) => Some(1),
+                Some(ProvisionFieldId::VolumeLabel(_)) => Some(2),
+                _ => None,
+            };
+            if let Some(slot) = slot {
+                value_widths[slot] = value_widths[slot].max(desired_value_width(value, *secret));
+            }
+        }
+
+        const REGION_WIDTH: usize = 8;
+        let separator = " │ ";
+        let separator_width = crate::ui::disp_width(separator);
+        let label_widths = labels.map(crate::ui::disp_width);
+        let minimum_widths = [
+            2 + REGION_WIDTH + label_widths[0] + 1 + 4,
+            2 + label_widths[1] + 1 + 4,
+            2 + label_widths[2] + 1 + 4,
+        ];
+        let desired_widths = [
+            2 + REGION_WIDTH + label_widths[0] + 1 + value_widths[0],
+            2 + label_widths[1] + 1 + value_widths[1],
+            2 + label_widths[2] + 1 + value_widths[2],
+        ];
+        let available = content_width.saturating_sub(separator_width * 2);
+        let minimum_total = minimum_widths.iter().sum::<usize>();
+        if available < minimum_total {
+            return None;
+        }
+        let mut widths = minimum_widths;
+        let mut extra = available - minimum_total;
+        for position in 0..3 {
+            let wanted = desired_widths[position].saturating_sub(widths[position]);
+            let take = wanted.min(extra);
+            widths[position] += take;
+            extra -= take;
+        }
+        widths[2] += extra;
+
+        let mut spans = Vec::new();
+        for position in 0..3 {
+            if position > 0 {
+                spans.push(Span::styled(separator, muted()));
+            }
+            let index = indexes[position];
+            let active = provision.field_selected == index;
+            let focused_active = active && parameters_focused;
+            let editing_active = focused_active
+                && state.input_mode() == InputMode::Insert
+                && state.provision_selected_field_is_editable();
+            spans.push(Span::styled(
+                if focused_active { "▌ " } else { "  " },
+                if focused_active {
+                    selection_marker()
+                } else {
+                    Style::default()
+                },
+            ));
+            if position == 0 {
+                spans.push(Span::styled(
+                    crate::ui::pad_to(region, REGION_WIDTH),
+                    secondary(),
+                ));
+            }
+            spans.push(Span::styled(format!("{} ", labels[position]), muted()));
+
+            let prefix_width =
+                2 + (if position == 0 { REGION_WIDTH } else { 0 }) + label_widths[position] + 1;
+            let value_width = widths[position].saturating_sub(prefix_width).max(4);
+            let (value, secret) = values[position];
+            let shown = if editing_active {
+                input_value_window(
+                    value,
+                    state.provision_field_cursor(),
+                    value_width.saturating_sub(2),
+                    secret,
+                )
+            } else {
+                fit_display_width(&masked_value(value, secret), value_width)
+                    .trim_end()
+                    .to_string()
+            };
+            if editing_active {
+                let occupied = crate::ui::disp_width(&shown)
+                    .saturating_add(2)
+                    .min(value_width);
+                spans.push(Span::styled("[", accent()));
+                spans.push(Span::styled(shown, input_focused()));
+                spans.push(Span::styled("]", accent()));
+                if occupied < value_width {
+                    spans.push(Span::raw(" ".repeat(value_width - occupied)));
+                }
+            } else {
+                let occupied = crate::ui::disp_width(&shown).min(value_width);
+                spans.push(Span::styled(
+                    shown,
+                    if focused_active {
+                        accent().add_modifier(Modifier::BOLD)
+                    } else {
+                        crate::tui::theme::current().secondary_text()
+                    },
+                ));
+                if occupied < value_width {
+                    spans.push(Span::raw(" ".repeat(value_width - occupied)));
+                }
+            }
+        }
+        return Some(Line::from(spans));
+    }
+
     if indexes.len() != 2 {
         return None;
     }
-    let provision = state.provision();
     let left_index = indexes[0];
     let right_index = indexes[1];
     let left_id = state.provision_field_id(left_index)?;

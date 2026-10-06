@@ -68,11 +68,12 @@ pub(super) fn draw_provision_form(
             form_lines.push(advanced_settings_row(state, indexes[0], parameters_focused));
             continue;
         }
-        if matches!(
+        let region_row = (matches!(
             section,
             ProvisionFieldSection::PasswordDomain | ProvisionFieldSection::PartitionLayout
-        ) && indexes.len() == 2
-        {
+        ) && indexes.len() == 2)
+            || (section == ProvisionFieldSection::Formatting && indexes.len() == 3);
+        if region_row {
             if indexes.contains(&provision.field_selected) {
                 selected_line = form_lines.len();
             }

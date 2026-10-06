@@ -51,7 +51,7 @@ impl AppState {
                         crate::provision::PartitionRole::CompatibilityReserve,
                     ),
                 ) => 1,
-                (ProvisionFieldSection::Formatting, ProvisionFieldId::FormatEnabled(_)) => 2,
+                (ProvisionFieldSection::Formatting, ProvisionFieldId::FormatEnabled(_)) => 3,
                 (ProvisionFieldSection::Formatting, _) => 1,
                 (ProvisionFieldSection::PlainPartition(_), _) => 2,
             };
@@ -204,6 +204,60 @@ mod tests {
                 .copied()
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn provision_compact_rows_keep_formatting_controls_together() {
+        let mut state = AppState::new();
+        state.provision_mut().kind = ProvisionKind::Mode0;
+
+        let fields = state.provision_visible_fields();
+        let rows = state.provision_field_rows_for_width(68);
+        for region in ["启动区", "交换区", "保密区"] {
+            let row = rows
+                .iter()
+                .find(|(section, indexes)| {
+                    *section == ProvisionFieldSection::Formatting
+                        && indexes
+                            .iter()
+                            .any(|index| fields[*index].0 == format!("{region}格式化"))
+                })
+                .expect("formatting row");
+            let labels = row
+                .1
+                .iter()
+                .map(|index| fields[*index].0.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(labels.len(), 3);
+            assert_eq!(labels[0], format!("{region}格式化"));
+            assert_eq!(labels[1], format!("{region}文件系统"));
+            assert!(
+                labels[2] == format!("{region}格式化后卷标")
+                    || labels[2] == format!("{region}卷标（原样保留）")
+            );
+        }
+    }
+
+    #[test]
+    fn mode1_formatting_uses_combined_region_name() {
+        let mut state = AppState::new();
+        state.provision_mut().kind = ProvisionKind::Mode1;
+
+        let fields = state.provision_visible_fields();
+        let rows = state.provision_field_rows_for_width(68);
+        let combined = rows
+            .iter()
+            .find(|(section, indexes)| {
+                *section == ProvisionFieldSection::Formatting
+                    && indexes
+                        .iter()
+                        .any(|index| fields[*index].0 == "二合一区格式化")
+            })
+            .expect("mode1 combined formatting row");
+        assert_eq!(combined.1.len(), 3);
+        assert!(!fields
+            .iter()
+            .any(|(label, _, _)| label.starts_with("启动/交换区")));
     }
 
     #[test]
