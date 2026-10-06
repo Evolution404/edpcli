@@ -349,13 +349,80 @@ mod tests {
         assert!(outcome.stdout_truncated);
     }
     #[cfg(windows)]
+    #[allow(
+        clippy::zombie_processes,
+        reason = "Fixture intentionally leaves its child to the owning Windows job, including after parent exit"
+    )]
+    fn windows_fixture_parent(wait: bool) {
+        use std::io::Write;
+        // Native helpers avoid spending the cleanup deadline on PowerShell startup.
+        let child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "infrastructure::process::tests::windows_job_fixture_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .spawn()
+            .unwrap();
+        println!("fixture-child-pid={}", child.id());
+        std::io::stdout().flush().unwrap();
+        if wait {
+            std::thread::sleep(Duration::from_secs(60));
+        }
+        // Child deliberately keeps the inherited pipes open after parent exit.
+    }
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "subprocess fixture launched by the process-tree regression"]
+    fn windows_job_fixture_child() {
+        std::thread::sleep(Duration::from_secs(60));
+    }
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "subprocess fixture launched by the process-tree regression"]
+    fn windows_job_fixture_parent_wait() {
+        windows_fixture_parent(true);
+    }
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "subprocess fixture launched by the process-tree regression"]
+    fn windows_job_fixture_parent_exit() {
+        windows_fixture_parent(false);
+    }
+    #[cfg(windows)]
     #[test]
     fn windows_job_kills_inherited_child_tree_on_timeout() {
-        for tail in ["Start-Sleep 60", "exit 0"] {
-            let script = format!("$p = Start-Process powershell.exe -ArgumentList '-NoProfile','-Command','Start-Sleep 60' -PassThru -NoNewWindow; [Console]::Out.WriteLine($p.Id); {tail}");
-            let outcome = run_command(&shell(&script), Duration::from_secs(5)).unwrap();
+        let executable = std::env::current_exe().unwrap();
+        for helper in [
+            "windows_job_fixture_parent_wait",
+            "windows_job_fixture_parent_exit",
+        ] {
+            let name = format!("infrastructure::process::tests::{helper}");
+            let outcome = run_command(
+                &[
+                    executable.to_str().unwrap(),
+                    "--exact",
+                    &name,
+                    "--ignored",
+                    "--nocapture",
+                ],
+                Duration::from_secs(5),
+            )
+            .unwrap();
             assert_eq!(outcome.completion, CommandCompletion::TimedOut);
-            let pid = outcome.stdout.trim().parse::<u32>().unwrap();
+            let pid = outcome
+                .stdout
+                .split("fixture-child-pid=")
+                .nth(1)
+                .and_then(|text| text.split_whitespace().next())
+                .and_then(|text| text.parse::<u32>().ok())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "fixture did not start its child: stdout={:?} stderr={:?}",
+                        outcome.stdout, outcome.stderr
+                    )
+                });
             use windows_sys::Win32::{
                 Foundation::CloseHandle,
                 System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE},

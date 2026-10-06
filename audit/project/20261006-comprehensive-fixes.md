@@ -42,3 +42,11 @@
 五个改动工作流通过 actionlint 1.7.12（本次未调用 shellcheck/pyflakes）；协议基线 20 个唯一 LBA0-12 镜像通过（19 strict + 1 authentic）；仓库及用户目录的 121 份现有 EDPB v3 备份使用最终 reader 只读复核通过。
 
 远端提交 7358f33 的 [Virtual Disk HIL](https://github.com/Evolution404/edpcli/actions/runs/37420791511) 通过；同提交 Rust CI 的 Windows 门禁因 Python 使用 cp1252 读取中文文档失败。本轮显式指定 UTF-8，随后本地 runner 回归通过；最终提交的远端验证将单独记录，未把上个提交的结果当作最终提交的绿色证据。
+
+收尾构建回归补充：跟踪文件删除后仍监听其路径，保证不经 Git 操作重新创建文件也会触发构建元信息刷新；保留文件名的前导空格。缺失文件期间 Cargo 可能再次运行 build script，这是保持删除/恢复检测正确性的明确选择。
+
+提交 `47b2840` 的本机 macOS arm64 release 连续两次构建（固定提交时间，第二次触发主程序重新编译）SHA-256 均为 `fc31875be1baa7b8ec144fd8a44d89ea0e67aca0e7d4ba4dc625709431358f56`。此证据只覆盖该提交、该平台的二进制，不扩展为七套归档可复现的结论。
+
+远端 47b2840 的 Windows 门禁已通过 UTF-8 修复，随后发现进程树清理回归的旧 PowerShell 夹具在五秒预算内尚未输出子进程 PID（ParseInt Empty）。将父/子夹具改为测试可执行文件中的显式 subprocess fixture，保持五秒超时、父进程等待/先退出两条路径、继承管道和实际子进程退出验证，消除 PowerShell 冷启动对该测试的干扰；其他 PowerShell 管道/退出码测试继续覆盖真实 shell。
+
+收尾回归 fast 8 suites / 10 artifacts 零失败（31.93s），Windows 全目标 Clippy 通过。47b2840 的 [同 SHA 虚拟 HIL](https://github.com/Evolution404/edpcli/actions/runs/37440095209) 已全部通过（Linux/Windows 两架构、macOS arm64 的协议及 Plain 盘路径）。原生进程夹具只供清理回归显式启动，默认标记 ignored，不是跳过产品验证；主回归仍在普通 Windows lib 测试中执行。

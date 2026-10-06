@@ -7,7 +7,9 @@ fn command_output(program: &str, args: &[&str]) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let text = String::from_utf8_lossy(&output.stdout)
+        .trim_end_matches(['\r', '\n'])
+        .to_string();
     (!text.is_empty()).then_some(text)
 }
 
@@ -78,9 +80,9 @@ fn main() {
     if let Some(paths) = command_output("git", &["ls-files", "-z"]) {
         for name in paths.split('\0').filter(|name| !name.is_empty()) {
             let path = std::path::PathBuf::from(name);
-            if path.exists() {
-                watched.insert(path.clone());
-            }
+            // A deleted tracked file must stay watched until it reappears.
+            // Missing files may rerun builds; omitting them would hide restoration.
+            watched.insert(path.clone());
             if let Some(parent) = path.parent().filter(|p| p.exists()) {
                 watched.insert(parent.to_path_buf());
             }
