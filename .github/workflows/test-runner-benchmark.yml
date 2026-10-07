@@ -9,6 +9,10 @@ on:
       - "scripts/test-benchmark.py"
       - "tests/test_infrastructure.rs"
       - ".github/workflows/test-runner-benchmark.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".python-version"
+      - ".github/actions/setup-python-tooling/**"
   workflow_dispatch:
 
 permissions:
@@ -25,8 +29,10 @@ jobs:
       matrix: ${{ steps.build.outputs.primary }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Python tooling
+        uses: ./.github/actions/setup-python-tooling
       - id: build
-        run: python3 scripts/ci/build_config.py
+        run: uv run --locked python scripts/ci/build_config.py
 
   parallelism:
     name: ${{ matrix.label }} parallelism matrix
@@ -43,8 +49,10 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Python tooling
+        uses: ./.github/actions/setup-python-tooling
       - name: Load build facts
-        run: python scripts/ci/build_config.py
+        run: uv run --locked python scripts/ci/build_config.py
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
@@ -54,17 +62,17 @@ jobs:
         with:
           version: "v0.17.0"
       - name: Warm test artifacts
-        run: python scripts/test-full.py --profile full --workers 2 --test-threads 4
+        run: uv run --locked python scripts/test-full.py --profile full --workers 2 --test-threads 4
       - name: Benchmark parallelism configurations
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p benchmark-out
-          python scripts/test-benchmark.py --profile full --repeat 2 --workers 1 --test-threads 4 --json benchmark-out/1x4.json
-          python scripts/test-benchmark.py --profile full --repeat 2 --workers 2 --test-threads 2 --json benchmark-out/2x2.json
-          python scripts/test-benchmark.py --profile full --repeat 2 --workers 2 --test-threads 4 --json benchmark-out/2x4.json
-          python scripts/test-benchmark.py --profile full --repeat 2 --workers 4 --test-threads 1 --json benchmark-out/4x1.json
-          python scripts/test-benchmark.py --profile full --repeat 2 --workers 4 --test-threads 2 --json benchmark-out/4x2.json
+          uv run --locked python scripts/test-benchmark.py --profile full --repeat 2 --workers 1 --test-threads 4 --json benchmark-out/1x4.json
+          uv run --locked python scripts/test-benchmark.py --profile full --repeat 2 --workers 2 --test-threads 2 --json benchmark-out/2x2.json
+          uv run --locked python scripts/test-benchmark.py --profile full --repeat 2 --workers 2 --test-threads 4 --json benchmark-out/2x4.json
+          uv run --locked python scripts/test-benchmark.py --profile full --repeat 2 --workers 4 --test-threads 1 --json benchmark-out/4x1.json
+          uv run --locked python scripts/test-benchmark.py --profile full --repeat 2 --workers 4 --test-threads 2 --json benchmark-out/4x2.json
       - name: Upload benchmark reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

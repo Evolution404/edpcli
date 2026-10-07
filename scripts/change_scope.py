@@ -6,8 +6,8 @@ from fnmatch import fnmatchcase
 import sys
 
 PROTOCOL = ("audit/protocol/*", "scripts/protocol/*", "docs/protocol/*", "docs/EDP_PROTOCOL*", "src/protocol/*", "tests/protocol*", "tests/fixtures/protocol/*", "backup/*")
-RUST = ("docs/ui/*", "docs/backup/*","src/*", "tests/*", "scripts/*", "Cargo.toml", "Cargo.lock", "rust-toolchain*", ".cargo/*", ".github/workflows/*", "build.rs", "backup/*")
-DEPS = (".github/release-platforms.json", "Cargo.toml", "Cargo.lock", "deny.toml", ".github/dependabot.yml", ".github/workflows/*")
+RUST = ("docs/ui/*", "docs/backup/*", "src/*", "tests/*", "scripts/*", "Cargo.toml", "Cargo.lock", "rust-toolchain*", ".cargo/*", ".github/workflows/*", ".github/actions/setup-python-tooling/*", "pyproject.toml", "uv.lock", ".python-version", "build.rs", "backup/*")
+DEPS = (".github/release-platforms.json", "Cargo.toml", "Cargo.lock", "pyproject.toml", "uv.lock", ".python-version", "deny.toml", ".github/dependabot.yml", ".github/workflows/*", ".github/actions/setup-python-tooling/*")
 
 def matches(path: str, patterns: tuple[str, ...]) -> bool:
     return any(fnmatchcase(path, pattern) for pattern in patterns)

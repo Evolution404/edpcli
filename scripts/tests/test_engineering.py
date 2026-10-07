@@ -113,6 +113,54 @@ class RedundancyAuditTests(unittest.TestCase):
         self.assertTrue(all(f['certainty'] == 'confirmed' for f in found))
 
 
+class PythonToolingTests(unittest.TestCase):
+    def test_uv_project_contract_is_pinned_and_portable(self):
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertEqual(project["project"]["requires-python"], ">=3.11")
+        self.assertEqual(project["tool"]["uv"]["python-preference"], "only-managed")
+        self.assertFalse(project["tool"]["uv"]["package"])
+        self.assertEqual(project["tool"]["uv"]["required-version"], ">=0.12.23,<0.13")
+        self.assertEqual((ROOT / ".python-version").read_text(encoding="utf-8").strip(), "3.14.5")
+        deps = {item.split(">=", 1)[0] for item in project["dependency-groups"]["protocol"]}
+        self.assertEqual(deps, {"capstone", "pefile", "unicorn"})
+        lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
+        self.assertIn('registry = "https://pypi.org/simple"', lock)
+        self.assertNotIn("mirrors.aliyun.com", lock)
+
+    def test_repository_entrypoints_use_locked_uv(self):
+        checked = [
+            ROOT / "Makefile",
+            ROOT / "AGENTS.md",
+            ROOT / "README.md",
+            ROOT / "scripts/test-fast.sh",
+            ROOT / "scripts/audit/README.md",
+            ROOT / "audit/protocol/README.md",
+            ROOT / "docs/development/PYTHON_TOOLING.md",
+        ]
+        checked += list((ROOT / ".github/workflows").glob("*.yml"))
+        for path in checked:
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("uv run --locked uv run", text, path)
+            for line in text.splitlines():
+                stripped = line.strip()
+                if "scripts/" not in stripped:
+                    continue
+                self.assertNotRegex(stripped, r"(^|[|;&(]\s*)python3?\s+scripts/", path)
+
+    def test_every_workflow_python_job_sets_up_uv(self):
+        for path in (ROOT / ".github/workflows").glob("*.yml"):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            starts = [i for i, line in enumerate(lines) if line.startswith("  ") and not line.startswith("    ") and line.endswith(":")]
+            for index, start in enumerate(starts):
+                end = starts[index + 1] if index + 1 < len(starts) else len(lines)
+                block = "\n".join(lines[start:end])
+                if "uv run --locked python" in block or "uv run --python " in block:
+                    self.assertIn("uses: ./.github/actions/setup-python-tooling", block, f"{path}:{lines[start]}")
+        action = (ROOT / ".github/actions/setup-python-tooling/action.yml").read_text(encoding="utf-8")
+        self.assertIn("astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0", action)
+
+
+
 class ReleaseTests(unittest.TestCase):
     def test_ci_identity_and_latest_run(self):
         verifier = load_script("verify-release-ci.py")

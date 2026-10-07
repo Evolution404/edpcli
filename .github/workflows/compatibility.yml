@@ -15,8 +15,10 @@ jobs:
       matrix: ${{ steps.build.outputs.compatibility }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Python tooling
+        uses: ./.github/actions/setup-python-tooling
       - id: build
-        run: python3 scripts/ci/build_config.py
+        run: uv run --locked python scripts/ci/build_config.py
 
   latest:
     name: ${{ matrix.label }} / latest stable Rust
@@ -27,12 +29,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Python tooling
+        uses: ./.github/actions/setup-python-tooling
       - name: Install latest stable Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
           toolchain: stable
           components: clippy
       - name: Test all targets
-        run: python scripts/test-full.py --profile full
+        run: uv run --locked python scripts/test-full.py --profile full
       - name: Clippy is warning-free
         run: cargo clippy --all-targets --locked -- -D warnings
