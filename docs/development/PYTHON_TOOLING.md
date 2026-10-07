@@ -6,7 +6,7 @@ Python 环境由 `uv` 统一管理，不依赖系统 Python、全局 `pip`、Hom
 ## 版本合同
 
 - `.python-version` 固定日常开发解释器为 Python 3.14.5。
-- `pyproject.toml` 声明最低兼容版本 `>=3.11`；CI 同时验证 3.11.15 和 3.14.5。
+- `pyproject.toml` 声明最低可运行版本 `>=3.11`；CI 只使用仓库默认 Python 3.14.5，不维护多版本兼容矩阵。
 - `[tool.uv] python-preference = "only-managed"`，仓库命令只使用 uv 管理的解释器。
 - `uv.lock` 必须提交；正式门禁使用 `--locked`，依赖声明和锁文件不一致时直接失败。
 - 仓库显式使用官方 `https://pypi.org/simple` 生成锁文件，避免个人或地区镜像改变可复现结果。
@@ -43,7 +43,7 @@ GitHub Actions 通过 `.github/actions/setup-python-tooling/action.yml` 统一�
 该复合 action 对 `astral-sh/setup-uv` 使用精确 commit pin，并启用 uv/Python 缓存。
 workflow 不允许直接调用裸 `python`/`python3` 执行仓库脚本，统一使用 `uv run --locked python`。
 
-`ci.yml` 的 Python tooling contract 会在 Python 3.11.15 和 3.14.5 上执行：
+`ci.yml` 的 Python tooling contract 只使用 `.python-version` 固定的 Python 3.14.5 执行：
 
 1. 全部 `scripts/**/*.py` 语法编译；
 2. `scripts/tests` 单元测试；

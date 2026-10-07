@@ -158,6 +158,11 @@ class PythonToolingTests(unittest.TestCase):
                     self.assertIn("uses: ./.github/actions/setup-python-tooling", block, f"{path}:{lines[start]}")
         action = (ROOT / ".github/actions/setup-python-tooling/action.yml").read_text(encoding="utf-8")
         self.assertIn("astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0", action)
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        python_job = ci.split("  python-tooling:\n", 1)[1].split("  supply-chain:\n", 1)[0]
+        self.assertNotIn("matrix.python", python_job)
+        self.assertNotIn("strategy:", python_job)
+        self.assertIn("uv run --locked python", python_job)
 
 
 

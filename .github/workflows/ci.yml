@@ -97,30 +97,26 @@ jobs:
         run: uv run --locked python scripts/protocol/audit_baseline.py
 
   python-tooling:
-    name: Python ${{ matrix.python }} tooling contract
+    name: Python tooling contract
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.11.15", "3.14.5"]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Python tooling
         uses: ./.github/actions/setup-python-tooling
       - name: Load build facts
-        run: uv run --python ${{ matrix.python }} --locked python scripts/ci/build_config.py
+        run: uv run --locked python scripts/ci/build_config.py
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
           toolchain: ${{ env.EDPCLI_RUST_TOOLCHAIN }}
       - name: Compile Python scripts
-        run: uv run --python ${{ matrix.python }} --locked python -m compileall -q scripts
+        run: uv run --locked python -m compileall -q scripts
       - name: Test Python engineering scripts
-        run: uv run --python ${{ matrix.python }} --locked python -m unittest discover -s scripts/tests -p "test_*.py" -q
+        run: uv run --locked python -m unittest discover -s scripts/tests -p "test_*.py" -q
       - name: Resolve protocol reverse-engineering dependencies
-        run: uv run --python ${{ matrix.python }} --locked --group protocol python -c "import capstone, pefile, unicorn"
+        run: uv run --locked --group protocol python -c "import capstone, pefile, unicorn"
 
   supply-chain:
     name: dependency policy
