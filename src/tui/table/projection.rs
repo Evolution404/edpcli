@@ -129,11 +129,21 @@ fn numeric_cell(value: &str) -> Option<f64> {
 }
 
 pub(crate) fn smart_cell_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    if let (Some(a), Some(b)) = (semantic_rank(a), semantic_rank(b)) {
-        return a.cmp(&b);
+    use std::cmp::Ordering;
+
+    // Classification must be consistent for every pair: switching to lexical
+    // comparison when only one cell has a rank/number creates ordering cycles.
+    match (semantic_rank(a), semantic_rank(b)) {
+        (Some(a), Some(b)) => return a.cmp(&b),
+        (Some(_), None) => return Ordering::Less,
+        (None, Some(_)) => return Ordering::Greater,
+        (None, None) => {}
     }
-    if let (Some(a), Some(b)) = (numeric_cell(a), numeric_cell(b)) {
-        return a.total_cmp(&b);
+    match (numeric_cell(a), numeric_cell(b)) {
+        (Some(a), Some(b)) => return a.total_cmp(&b),
+        (Some(_), None) => return Ordering::Less,
+        (None, Some(_)) => return Ordering::Greater,
+        (None, None) => {}
     }
     a.to_lowercase().cmp(&b.to_lowercase())
 }
@@ -278,4 +288,60 @@ pub fn related_backup_table_view(
         })
         .collect::<Vec<_>>();
     TableViewData::from_rows(0, &columns, projected)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mixed_semantic_numeric_and_unknown_cells_obey_total_order() {
+        let cells = [
+            "普通盘",
+            "plain",
+            "mode0 · 缺省三分区",
+            "mode1 · 二合一区",
+            "mode2 · 整盘加密",
+            "mode3 · 内外网通用双分区",
+            "—",
+            "未知",
+            "",
+            "可用",
+            "需权限",
+            "读取异常",
+            "非 USB",
+            "-1",
+            "100 MB",
+            "2 GB",
+            "10 GB",
+            "disk2",
+            "disk10",
+            "3tree",
+            "abc",
+            "ABC",
+        ];
+        for a in cells {
+            assert_eq!(smart_cell_cmp(a, a), std::cmp::Ordering::Equal);
+            for b in cells {
+                assert_eq!(
+                    smart_cell_cmp(a, b),
+                    smart_cell_cmp(b, a).reverse(),
+                    "{a:?} / {b:?}"
+                );
+                for c in cells {
+                    if smart_cell_cmp(a, b).is_le() && smart_cell_cmp(b, c).is_le() {
+                        assert!(
+                            smart_cell_cmp(a, c).is_le(),
+                            "non-transitive {a:?} <= {b:?} <= {c:?}"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(smart_cell_cmp("普通盘", "mode0").is_lt());
+        assert!(smart_cell_cmp("mode0", "mode1").is_lt());
+        assert!(smart_cell_cmp("mode1", "—").is_lt());
+        assert!(smart_cell_cmp("100 MB", "2 GB").is_lt());
+        assert!(smart_cell_cmp("disk2", "disk10").is_lt());
+    }
 }

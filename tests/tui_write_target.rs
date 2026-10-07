@@ -503,3 +503,79 @@ fn backup_copy_skips_control_column_and_normalizes_unicode_text() {
     assert!(row.contains("张三 测试  🙂"));
     assert!(!row.starts_with('✓'));
 }
+
+#[test]
+fn repeated_disk_kind_sort_handles_unknown_backups_and_preserves_selection() {
+    use edpcli::provision::DiskProvisionKind;
+    use edpcli::tui::table_layout::{table_column_schema, ColumnId, SortDirection, TableKind};
+
+    // This 35-row mixed ordering used to sort ascending then panic descending.
+    let kinds = [
+        Some(DiskProvisionKind::Plain),
+        Some(DiskProvisionKind::Mode0),
+        Some(DiskProvisionKind::Mode1),
+        None,
+    ];
+    let mut seed = 2u64;
+    let rows = (0..35)
+        .map(|index| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            let mut item = backup(index + 1, &format!("mixed-{index}.edpb"));
+            item.provision_kind = kinds[(seed % 4) as usize];
+            item
+        })
+        .collect();
+    let mut state = AppState::new();
+    state.replace_backups(rows);
+    state.navigate(NavCommand::WorkspaceBackups, 20);
+    state.navigate(NavCommand::Down, 20);
+    let selected = state.selected_backup_path();
+    let kind = TableKind::Backups;
+    let column = table_column_schema(kind)
+        .unwrap()
+        .iter()
+        .position(|column| column.id == ColumnId::ProvisionKind)
+        .unwrap();
+    for _ in 0..column {
+        assert!(state.move_table_column_for_viewport(kind, false, 500));
+    }
+    assert_eq!(
+        state.table_logical_column(kind, state.table_active_column(kind)),
+        column
+    );
+    state.toggle_table_sort(kind);
+    assert_eq!(
+        state.table_sort(kind).unwrap().direction,
+        SortDirection::Ascending
+    );
+    assert_eq!(state.selected_backup_path(), selected);
+    state.toggle_table_sort(kind);
+
+    let rank = |index: usize| match state.backups()[index].provision_kind {
+        Some(DiskProvisionKind::Plain) => 0,
+        Some(DiskProvisionKind::Mode0) => 1,
+        Some(DiskProvisionKind::Mode1) => 2,
+        _ => 3,
+    };
+    let mut ascending = (0..35).collect::<Vec<_>>();
+    ascending.sort_by_key(|index| (rank(*index), *index));
+    let mut descending = ascending.clone();
+    descending.reverse();
+    let mut terminal = Terminal::new(TestBackend::new(240, 50)).unwrap();
+    for toggle in 0..6 {
+        let expected = if toggle % 2 == 0 {
+            &descending
+        } else {
+            &ascending
+        };
+        assert_eq!(&state.visible_backup_indices(), expected);
+        assert_eq!(state.selected_backup_path(), selected);
+        terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+        state.toggle_table_sort(kind);
+    }
+    assert!(state.clear_table_sort(kind));
+    assert_eq!(state.visible_backup_indices(), (0..35).collect::<Vec<_>>());
+    assert_eq!(state.selected_backup_path(), selected);
+}

@@ -722,3 +722,99 @@ fn scrollbars_reach_the_track_end_at_maximum_offsets() {
         "vertical thumb must touch the bottom when row_start == max_row_start"
     );
 }
+
+#[test]
+fn table_sort_mixed_values_gate_all_columns_directions_filters_and_row_counts() {
+    use edpcli::tui::table_layout::TableViewData;
+
+    // Independent expected ranks: semantic values, numbers in actual units,
+    // then case-insensitive text. Equivalent values keep source-index order.
+    let samples = [
+        ("普通盘", 0),
+        ("plain", 0),
+        ("mode0 · 缺省三分区", 1),
+        ("mode1 · 二合一区", 2),
+        ("mode2 · 整盘加密", 3),
+        ("mode3 · 内外网通用双分区", 4),
+        ("可用", 5),
+        ("需权限", 6),
+        ("读取异常", 7),
+        ("非 USB", 8),
+        ("-1", 9),
+        ("0", 10),
+        ("disk2", 11),
+        ("disk10", 12),
+        ("100 MB", 13),
+        ("2 GB", 14),
+        ("10 GB", 15),
+        ("", 16),
+        ("ABC", 17),
+        ("abc", 17),
+        ("EDPB ✓", 18),
+        ("FAT16", 19),
+        ("NTFS", 20),
+        ("—", 21),
+        ("未知", 22),
+    ];
+    for kind in TableKind::ALL {
+        // Related backups intentionally retain identity-affinity order.
+        if kind == TableKind::RelatedBackups {
+            continue;
+        }
+        let column_count = layout_for(kind).specs().len();
+        for count in [0, 1, 2, 19, 20, 21, 35, 64, 128] {
+            for seed in 1..=4u64 {
+                let mut rng = seed;
+                let sample_indices = (0..count)
+                    .map(|_| {
+                        rng ^= rng << 13;
+                        rng ^= rng >> 7;
+                        rng ^= rng << 17;
+                        (rng as usize) % samples.len()
+                    })
+                    .collect::<Vec<_>>();
+                let view = TableViewData {
+                    rows: sample_indices
+                        .iter()
+                        .map(|sample| {
+                            (0..column_count)
+                                .map(|column| {
+                                    samples[(sample + column) % samples.len()].0.to_string()
+                                })
+                                .collect()
+                        })
+                        .collect(),
+                    ..TableViewData::default()
+                };
+                for column in 0..column_count {
+                    for filtered in [false, true] {
+                        let indices = (0..count)
+                            .filter(|index| !filtered || index % 3 != 0)
+                            .collect::<Vec<_>>();
+                        let mut expected = indices.clone();
+                        expected.sort_by_key(|index| {
+                            (
+                                samples[(sample_indices[*index] + column) % samples.len()].1,
+                                *index,
+                            )
+                        });
+                        let mut interaction = TableInteractionState::default();
+                        for toggle in 0..4 {
+                            interaction.toggle_sort_for(column);
+                            if toggle % 2 == 1 {
+                                expected.reverse();
+                            }
+                            assert_eq!(view.sorted_indices(indices.clone(), interaction), expected,
+                                "{kind:?} column={column} rows={count} seed={seed} filtered={filtered} toggle={toggle}");
+                            if toggle % 2 == 1 {
+                                expected.reverse();
+                            }
+                        }
+                        interaction.clear_sort();
+                        assert_eq!(view.sorted_indices(indices.clone(), interaction), indices);
+                    }
+                }
+            }
+        }
+    }
+}

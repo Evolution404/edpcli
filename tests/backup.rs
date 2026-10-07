@@ -1144,3 +1144,36 @@ fn catalog_lookup_propagates_unreadable_directory_errors() {
         .confirmed
         .is_empty());
 }
+
+#[test]
+fn catalog_sort_has_total_order_with_unknown_equal_and_extreme_timestamps() {
+    use edpcli::infrastructure::backup_store::catalog::cmp_backup_newest_first;
+    let mut entries = Vec::new();
+    for created in [None, Some(i64::MIN), Some(0), Some(i64::MAX)] {
+        for mtime in [i64::MIN, 0, i64::MAX] {
+            for name in ["a.edpb", "b.edpb"] {
+                let mut entry = fake_entry(name, "A", mtime);
+                entry.created_epoch = created;
+                entries.push(entry);
+            }
+        }
+    }
+    for a in &entries {
+        assert_eq!(cmp_backup_newest_first(a, a), std::cmp::Ordering::Equal);
+        for b in &entries {
+            assert_eq!(
+                cmp_backup_newest_first(a, b),
+                cmp_backup_newest_first(b, a).reverse()
+            );
+            for c in &entries {
+                if cmp_backup_newest_first(a, b).is_le() && cmp_backup_newest_first(b, c).is_le() {
+                    assert!(cmp_backup_newest_first(a, c).is_le());
+                }
+            }
+        }
+    }
+    entries.sort_by(cmp_backup_newest_first);
+    assert_eq!(entries.first().unwrap().created_epoch, Some(i64::MAX));
+    assert_eq!(entries.last().unwrap().created_epoch, None);
+    assert_eq!(entries.last().unwrap().mtime, i64::MIN);
+}
