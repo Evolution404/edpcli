@@ -6,8 +6,8 @@ use crate::tui::state::{
 #[path = "form_special_rows.rs"]
 mod form_special_rows;
 use form_special_rows::{
-    advanced_settings_row, compact_field_label, paired_region_row, single_column_field,
-    two_column_widths,
+    advanced_settings_row, compact_field_label, field_label_style, paired_region_row,
+    single_column_field, two_column_widths,
 };
 
 pub(super) fn draw_provision_form(
@@ -152,18 +152,18 @@ pub(super) fn draw_provision_form(
             spans.push(Span::styled(
                 if focused_active { "▌ " } else { "  " },
                 if focused_active {
-                    selection_marker()
+                    crate::tui::theme::current().input_active()
                 } else {
                     Style::default()
                 },
             ));
             spans.push(Span::styled(
                 fit_display_width(display_label.as_ref(), label_width),
-                muted(),
+                field_label_style(state, index),
             ));
             spans.push(Span::raw(" "));
 
-            let editable_active = active && state.provision_selected_field_is_editable();
+            let editable_active = focused_active && state.provision_selected_field_is_editable();
             let editing_active = editable_active && state.input_mode() == InputMode::Insert;
             let shown = if editing_active {
                 input_value_window(
@@ -185,9 +185,9 @@ pub(super) fn draw_provision_form(
                 let occupied = crate::ui::disp_width(&shown)
                     .saturating_add(2)
                     .min(value_width);
-                spans.push(Span::styled("[", accent()));
+                spans.push(Span::styled("[", input_focused()));
                 spans.push(Span::styled(shown, input_focused()));
-                spans.push(Span::styled("]", accent()));
+                spans.push(Span::styled("]", input_focused()));
                 if occupied < value_width {
                     spans.push(Span::raw(" ".repeat(value_width - occupied)));
                 }
@@ -196,7 +196,7 @@ pub(super) fn draw_provision_form(
                 spans.push(Span::styled(
                     shown,
                     if focused_active {
-                        accent().add_modifier(Modifier::BOLD)
+                        crate::tui::theme::current().input_active()
                     } else {
                         crate::tui::theme::current().secondary_text()
                     },

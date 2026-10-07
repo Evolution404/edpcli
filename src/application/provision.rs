@@ -394,6 +394,9 @@ impl ProvisionWriteOutcome {
             if states.contains(&MediaState::RolledBack) {
                 return ProvisionExecutionStatus::FormatRolledBack;
             }
+            if !report.provision_succeeded {
+                return ProvisionExecutionStatus::FatalFailure;
+            }
         }
         if self
             .warnings
@@ -587,6 +590,11 @@ fn sizes(
     request: &OfficialProvisionRequest,
     mode: OfficialPartitionMode,
 ) -> EdpCliResult<OfficialPartitionSizes> {
+    let share_region = if mode == OfficialPartitionMode::BootShareCombined {
+        PartitionRole::BootShareCombined.label()
+    } else {
+        PartitionRole::Share.label()
+    };
     if request.boot_mib.is_some() && request.boot_sectors.is_some() {
         return Err(err(
             EXIT_TARGET,
@@ -596,7 +604,7 @@ fn sizes(
     if request.share_mib.is_some() && request.share_sectors.is_some() {
         return Err(err(
             EXIT_TARGET,
-            "错误: 交换区不能同时指定 MiB 和精确扇区数",
+            format!("错误: {share_region}不能同时指定 MiB 和精确扇区数"),
         ));
     }
     if request.encrypt_mib.is_some() && request.encrypt_sectors.is_some() {
@@ -632,7 +640,10 @@ fn sizes(
     }
     if let Some(share_sectors) = request.share_sectors {
         if share_sectors == 0 {
-            return Err(err(EXIT_TARGET, "错误: 交换区扇区数必须大于 0"));
+            return Err(err(
+                EXIT_TARGET,
+                format!("错误: {share_region}扇区数必须大于 0"),
+            ));
         }
         sizes = sizes.with_share_sectors(share_sectors);
     }

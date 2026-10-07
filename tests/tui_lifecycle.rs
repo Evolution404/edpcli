@@ -488,8 +488,7 @@ fn wide_provision_form_uses_two_columns_and_compact_partition_rows() {
             })
             .expect("compact formatting row");
         assert!(
-            !row.contains(&format!("{region}文件系统"))
-                && !row.contains(&format!("{region}卷标")),
+            !row.contains(&format!("{region}文件系统")) && !row.contains(&format!("{region}卷标")),
             "partition name should only prefix the row, not each formatting field: {row}"
         );
     }
@@ -599,6 +598,83 @@ fn mode1_partition_layout_renders_combined_region_with_start_and_capacity_on_one
 }
 
 #[test]
+fn provision_form_region_labels_match_layout_colors_at_single_and_multiple_columns() {
+    use edpcli::tui::disk_layout::DiskRegionKind;
+    let theme = edpcli::tui::theme::current();
+    for (kind, regions) in [
+        (
+            ProvisionKind::Mode0,
+            vec![
+                DiskRegionKind::Boot,
+                DiskRegionKind::Share,
+                DiskRegionKind::Encrypt,
+            ],
+        ),
+        (
+            ProvisionKind::Mode1,
+            vec![DiskRegionKind::Combined, DiskRegionKind::Encrypt],
+        ),
+        (ProvisionKind::Mode2, vec![DiskRegionKind::Encrypt]),
+        (
+            ProvisionKind::Mode3,
+            vec![DiskRegionKind::Boot, DiskRegionKind::Share],
+        ),
+    ] {
+        let mut state = edpcli::tui::demo::build_scene("provision-form").unwrap();
+        state.provision_mut().kind = kind;
+        for width in [60u16, 240] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 64)).unwrap();
+            terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let form_width = if width >= 120 {
+                width as usize * 44 / 100
+            } else {
+                width as usize
+            };
+            for region in &regions {
+                for suffix in ["起点LBA", "格式化"] {
+                    let needle = format!("{}{suffix}", region.label());
+                    let row = buffer
+                        .content()
+                        .chunks(width as usize)
+                        .find(|row| {
+                            row[..form_width]
+                                .iter()
+                                .map(|cell| cell.symbol())
+                                .collect::<String>()
+                                .replace(' ', "")
+                                .contains(&needle)
+                        })
+                        .unwrap_or_else(|| panic!("missing {needle} at {width} for {kind:?}"));
+                    let first = region.label().chars().next().unwrap().to_string();
+                    let cell = row[..form_width]
+                        .iter()
+                        .find(|cell| cell.symbol() == first)
+                        .unwrap();
+                    assert_eq!(
+                        cell.style().fg,
+                        theme.disk_region(*region).fg,
+                        "{needle} at {width}"
+                    );
+                }
+            }
+            if kind == ProvisionKind::Mode1 {
+                let text = buffer
+                    .content()
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .replace(' ', "");
+                assert!(!text.contains("启动/交换"), "{text}");
+                assert!(!text.contains("启动区和交换区"), "{text}");
+                assert!(!text.contains("交换区错误上限"), "{text}");
+                assert!(text.contains("二合一区错误上限"), "{text}");
+            }
+        }
+    }
+}
+
+#[test]
 fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor() {
     let mut state = AppState::new();
     state.replace_devices(vec![usb_device()]);
@@ -636,7 +712,7 @@ fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor(
         .expect("selected value cell");
     assert_eq!(
         value_cell.style().fg,
-        theme.accent().fg,
+        theme.input_active().fg,
         "Normal focus should emphasize the value without a full-width selection fill"
     );
     assert_eq!(value_cell.style().bg, label_cell.style().bg);
@@ -685,6 +761,29 @@ fn provision_selection_highlights_only_value_and_long_values_scroll_with_cursor(
         text.contains('‹'),
         "long Insert input should scroll from the left: {text}"
     );
+
+    let editing_row = terminal
+        .backend()
+        .buffer()
+        .content()
+        .chunks(width as usize)
+        .find(|row| {
+            row.iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .replace(' ', "")
+                .contains("部门")
+        })
+        .expect("editing department row");
+    for bracket in ["[", "]"] {
+        let cell = editing_row
+            .iter()
+            .find(|cell| cell.symbol() == bracket)
+            .expect("input bracket");
+        assert_eq!(cell.style().fg, theme.input_focused().fg);
+        assert_eq!(cell.style().bg, theme.input_focused().bg);
+        assert_ne!(cell.style().fg, theme.accent().fg);
+    }
 
     state.provision_cursor_home();
     terminal.draw(|frame| render::draw(frame, &state)).unwrap();
@@ -1152,6 +1251,10 @@ fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
     }));
 
     let (post_restore, colors) = rendered_text(&state);
+    assert_eq!(
+        state.result_partition_table_view().unwrap().rows[0][2],
+        "备份 exFAT"
+    );
     let compact = post_restore.replace(' ', "");
     assert!(compact.contains("恢复结果"), "{post_restore}");
     assert!(compact.contains("元数据恢复成功"), "{post_restore}");
@@ -1223,4 +1326,60 @@ fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
         password_view.matches('•').count() >= "visible-secret".chars().count(),
         "{password_view}"
     );
+}
+
+#[test]
+fn mode2_and_mode3_forms_hide_inapplicable_controls_but_keep_fixed_layout_regions() {
+    for (kind, hidden, visible) in [
+        (ProvisionKind::Mode2, "交换区错误上限", "保密区错误上限"),
+        (ProvisionKind::Mode3, "保密区错误上限", "交换区错误上限"),
+    ] {
+        let mut state = edpcli::tui::demo::build_scene("provision-form").unwrap();
+        state.provision_mut().kind = kind;
+        for width in [60u16, 240] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 64)).unwrap();
+            terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+            let text = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .replace(' ', "");
+            let form_width = if width == 240 {
+                width as usize * 44 / 100
+            } else {
+                width as usize
+            };
+            let form_text = terminal
+                .backend()
+                .buffer()
+                .content()
+                .chunks(width as usize)
+                .flat_map(|row| &row[..form_width])
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .replace(' ', "");
+            assert!(!form_text.contains("模式2兼容区"));
+            assert!(!form_text.contains("固定63sector"));
+            assert!(!form_text.contains(hidden));
+            assert!(form_text.contains(visible));
+            if kind == ProvisionKind::Mode2 && width == 240 {
+                let layout_text = terminal
+                    .backend()
+                    .buffer()
+                    .content()
+                    .chunks(width as usize)
+                    .flat_map(|row| &row[form_width..])
+                    .map(|cell| cell.symbol())
+                    .collect::<String>()
+                    .replace(' ', "");
+                assert!(
+                    layout_text.contains("模式2兼容区"),
+                    "fixed compatibility region must remain visible in disk layout: {text}"
+                );
+            }
+        }
+    }
 }

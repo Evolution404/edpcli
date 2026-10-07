@@ -1,10 +1,10 @@
 use super::*;
 
 impl AppState {
-    fn provision_preserved_volume_label(
+    fn provision_preserved_physical_partition(
         &self,
         role: crate::provision::PartitionRole,
-    ) -> Option<&str> {
+    ) -> Option<&crate::partition_table::PhysicalPartition> {
         let (resolved, _) = self.provision_resolved_prefill().ok()?;
         let target = resolved
             .draft_partitions(crate::common::SECTOR as u64)
@@ -20,7 +20,6 @@ impl AppState {
                 partition.start_lba == target.start_lba
                     && partition.sector_count == target.sector_count
             })
-            .and_then(|partition| partition.volume_label.as_deref())
     }
 
     pub fn provision_visible_fields(&self) -> Vec<(String, &str, bool)> {
@@ -213,18 +212,6 @@ impl AppState {
         let preflight = self.provision_preflight().ok();
         for target in self.provision_format_template() {
             let role = target.role;
-            if !target.format_capable {
-                out.push((
-                    role.label().into(),
-                    if role == crate::provision::PartitionRole::CompatibilityReserve {
-                        "固定 63 sector · 不格式化"
-                    } else {
-                        "固定，不格式化"
-                    },
-                    false,
-                ));
-                continue;
-            }
             let disposition = preflight
                 .as_ref()
                 .and_then(|value| value.format_disposition(role))
@@ -256,7 +243,13 @@ impl AppState {
             out.push((format!("{region}格式化"), format_status, false));
             out.push((
                 format!("{region}文件系统"),
-                target.filesystem.unwrap().display_name(),
+                if disposition.selected() {
+                    target.filesystem.unwrap().display_name()
+                } else {
+                    self.provision_preserved_physical_partition(role)
+                        .and_then(|partition| partition.filesystem.as_deref())
+                        .unwrap_or("未读取")
+                },
                 false,
             ));
             if disposition.selected() {
@@ -264,7 +257,8 @@ impl AppState {
             } else {
                 out.push((
                     format!("{region}卷标（原样保留）"),
-                    self.provision_preserved_volume_label(role)
+                    self.provision_preserved_physical_partition(role)
+                        .and_then(|partition| partition.volume_label.as_deref())
                         .unwrap_or("未读取"),
                     false,
                 ));
@@ -288,16 +282,35 @@ impl AppState {
             },
             false,
         ));
-        out.push((
-            "交换区密码最大错误次数".into(),
-            self.provision.form.max_share_password_errors.as_str(),
-            false,
-        ));
-        out.push((
-            "保密区密码最大错误次数".into(),
-            self.provision.form.max_encrypt_password_errors.as_str(),
-            false,
-        ));
+        if self
+            .provision
+            .kind
+            .disk_kind()
+            .has_key_domain(crate::provision::KeyDomainRole::Share)
+        {
+            out.push((
+                if mode == 1 {
+                    "二合一区密码最大错误次数"
+                } else {
+                    "交换区密码最大错误次数"
+                }
+                .into(),
+                self.provision.form.max_share_password_errors.as_str(),
+                false,
+            ));
+        }
+        if self
+            .provision
+            .kind
+            .disk_kind()
+            .has_key_domain(crate::provision::KeyDomainRole::Encrypt)
+        {
+            out.push((
+                "保密区密码最大错误次数".into(),
+                self.provision.form.max_encrypt_password_errors.as_str(),
+                false,
+            ));
+        }
         for (index, (_, _, secret)) in out.iter_mut().enumerate() {
             if let Some(descriptor) = self.provision_field_descriptor(index) {
                 *secret = descriptor.capabilities.secret;

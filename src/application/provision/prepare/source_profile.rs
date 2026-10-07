@@ -1,6 +1,21 @@
 //! Read-only source profile and filesystem defaults.
 use super::*;
 
+pub(in crate::application::provision) fn resolve_target_filesystems(
+    targets: &mut [crate::provision::TargetPartitionGeometry],
+    source: Option<&crate::provision::ExistingProvisionProfile>,
+    format: &FormatOptions,
+) {
+    for target in targets {
+        if format.choice(target.role).0 {
+            target.filesystem = format.filesystems().for_role(target.role);
+        } else if let Some(old) = source.and_then(|source| source.partition(target.role)) {
+            // Unknown source types must stay unknown throughout the preservation plan.
+            target.filesystem = old.filesystem;
+        }
+    }
+}
+
 pub(in crate::application::provision) fn source_protocol_device_id(
     target: &TargetIdentity,
     source_identity: &crate::media_identity::MediaIdentitySnapshot,

@@ -27,7 +27,7 @@ impl Lba7PartitionMode {
     pub const fn ui_name_zh(self) -> &'static str {
         match self {
             Self::DefaultThreePartition => "缺省三分区",
-            Self::BootShareCombined => "启动区和交换区二合一",
+            Self::BootShareCombined => "二合一区",
             Self::WholeDiskEncrypted => "整盘加密",
             Self::IntranetExtranetDualPartition => "内外网通用双分区",
         }

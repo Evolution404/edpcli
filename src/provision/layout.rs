@@ -288,7 +288,7 @@ impl PartitionRole {
             Self::Boot => "启动区",
             Self::Share => "交换区",
             Self::Encrypt => "保密区",
-            Self::BootShareCombined => "启动/交换区",
+            Self::BootShareCombined => "二合一区",
             Self::CompatibilityReserve => "模式2兼容区",
         }
     }

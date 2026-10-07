@@ -670,9 +670,23 @@ fn plain_source_to_every_official_mode_has_no_password_probe_or_pending_region()
             "Plain -> {kind:?} region count"
         );
 
+        if !share_active {
+            state.provision_mut().form.max_share_password_errors = "invalid hidden value".into();
+        }
+        if !encrypt_active {
+            state.provision_mut().form.max_encrypt_password_errors = "invalid hidden value".into();
+        }
         let request = state
             .provision_request()
             .unwrap_or_else(|error| panic!("Plain -> {kind:?} request failed: {error}"));
+        assert_eq!(
+            request.max_share_password_errors,
+            share_active.then_some(255)
+        );
+        assert_eq!(
+            request.max_encrypt_password_errors,
+            encrypt_active.then_some(255)
+        );
         match kind {
             ProvisionKind::Mode0 => {
                 assert!(request.format.boot);
@@ -1929,16 +1943,12 @@ fn provision_format_controls_follow_current_mode_targets() {
 
     state.provision_mut().kind = ProvisionKind::Mode2;
     let fields = state.provision_visible_fields();
-    assert!(fields
-        .iter()
-        .any(|(label, value, _)| label == "模式2兼容区" && *value == "固定 63 sector · 不格式化"));
+    assert!(!fields.iter().any(|(label, _, _)| label == "模式2兼容区"));
     assert!(!fields.iter().any(|(label, _, _)| label == "启动区格式化"));
-    let reserve_index = fields
+    assert!(fields.iter().any(|(label, _, _)| label == "保密区格式化"));
+    assert!(!fields
         .iter()
-        .position(|(label, _, _)| label == "模式2兼容区")
-        .unwrap();
-    state.provision_mut().field_selected = reserve_index;
-    assert!(!state.provision_toggle_selected_option());
+        .any(|(label, _, _)| label == "交换区密码最大错误次数"));
 }
 
 #[test]
@@ -3454,4 +3464,132 @@ fn table_copy_follows_logical_column_after_runtime_reorder() {
     assert!(state.move_table_column_edge_for_viewport(TableKind::Devices, false, 160));
     let first = state.table_copy_payload(TableKind::Devices, false).unwrap();
     assert_ne!(first, last);
+}
+
+#[test]
+fn provision_volume_label_edits_reach_visible_fields_and_format_request_for_every_mode() {
+    use edpcli::provision::DiskProvisionKind;
+    for (scheme, source_kind) in [
+        DiskProvisionKind::Mode0,
+        DiskProvisionKind::Mode1,
+        DiskProvisionKind::Mode2,
+        DiskProvisionKind::Mode3,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut state = AppState::new();
+        state.replace_devices(vec![official_device(64_000_000_000, source_kind)]);
+        let kind = enter_provision_kind(&mut state, scheme);
+        authorize_all_rebuilds(&mut state, kind);
+        if kind == ProvisionKind::Mode1 {
+            assert!(state
+                .provision_visible_fields()
+                .iter()
+                .any(|(label, value, _)| {
+                    label == "二合一区格式化后卷标" && *value == "启动区"
+                }));
+            let request = state.provision_request().unwrap();
+            assert_eq!(request.volume_label, "启动区");
+            assert_eq!(request.format.boot_label, "启动区");
+        }
+        let indices = state
+            .provision_visible_fields()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (label, _, _))| label.ends_with("格式化后卷标").then_some(index))
+            .collect::<Vec<_>>();
+        for index in indices {
+            state.provision_mut().field_selected = index;
+            let before = state.provision_visible_fields()[index].1.to_string();
+            assert!(state.provision_begin_insert());
+            state.provision_cursor_end();
+            state.provision_push_char('X');
+            assert!(!state.provision_end_insert());
+            let fields = state.provision_visible_fields();
+            let (label, value, _) = &fields[index];
+            let expected = format!("{before}X");
+            assert_eq!(*value, expected, "{kind:?}: {label}");
+            let label = label.clone();
+            let request = state.provision_request().unwrap();
+            let submitted = if label.starts_with("启动区") || label.starts_with("二合一区") {
+                &request.format.boot_label
+            } else if label.starts_with("交换区") {
+                &request.format.share_label
+            } else {
+                &request.format.encrypt_label
+            };
+            assert_eq!(submitted, &expected, "{kind:?}: {label}");
+        }
+    }
+}
+
+#[test]
+fn preserved_edp_filesystems_show_scan_evidence_instead_of_format_drafts() {
+    use edpcli::application::filesystem::FilesystemKind;
+    use edpcli::application::partition_table::{
+        PartitionSource, PartitionTableKind, PartitionTableSnapshot, PhysicalPartition,
+    };
+    use edpcli::provision::DiskProvisionKind;
+    for (scheme, kind) in [
+        DiskProvisionKind::Mode0,
+        DiskProvisionKind::Mode1,
+        DiskProvisionKind::Mode2,
+        DiskProvisionKind::Mode3,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for scanned_fs in [None, Some("FAT32")] {
+            let mut row = official_device(64_000_000_000, kind);
+            row.partition_table = Some(PartitionTableSnapshot {
+                kind: PartitionTableKind::Mbr,
+                partitions: row
+                    .partitions
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, part)| PhysicalPartition {
+                        index: index + 1,
+                        start_lba: part.start_lba,
+                        sector_count: part.size_bytes / 512,
+                        source: PartitionSource::Mbr {
+                            partition_type: 0x0b,
+                            primary_slot: Some(index + 1),
+                        },
+                        filesystem: scanned_fs.map(str::to_string),
+                        volume_label: None,
+                    })
+                    .collect(),
+                table_extents: Vec::new(),
+                issues: Vec::new(),
+            });
+            let mut state = AppState::new();
+            state.replace_devices(vec![row]);
+            enter_provision_kind(&mut state, scheme);
+            // Draft filesystem choices must not masquerade as preserved filesystem evidence.
+            state.provision_mut().form.boot_fs = FilesystemKind::ExFat;
+            state.provision_mut().form.share_fs = FilesystemKind::Fat16;
+            state.provision_mut().form.encrypt_fs = FilesystemKind::Fat16;
+            let fields = state.provision_visible_fields();
+            for (_, value, _) in fields
+                .iter()
+                .filter(|(label, _, _)| label.ends_with("文件系统"))
+            {
+                assert_eq!(*value, scanned_fs.unwrap_or("未读取"), "{kind:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn mode1_geometry_validation_names_the_combined_region() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision_kind(&mut state, 1), ProvisionKind::Mode1);
+    state.provision_mut().form.share_start_lba = "invalid".into();
+    let error = state.provision_request().unwrap_err();
+    assert!(error.contains("二合一区"), "{error}");
+    assert!(!error.contains("交换区"), "{error}");
 }

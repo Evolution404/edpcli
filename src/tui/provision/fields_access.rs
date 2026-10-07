@@ -55,13 +55,13 @@ impl AppState {
             ProvisionFieldId::Lba8Identity(field) => {
                 Some(field.value_mut(&mut self.provision.form.lba8_identity))
             }
-            ProvisionFieldId::VolumeLabel(crate::provision::PartitionRole::Boot) => {
-                Some(&mut self.provision.form.volume_label)
-            }
             ProvisionFieldId::VolumeLabel(
-                crate::provision::PartitionRole::Share
+                crate::provision::PartitionRole::Boot
                 | crate::provision::PartitionRole::BootShareCombined,
-            ) => Some(&mut self.provision.form.share_label),
+            ) => Some(&mut self.provision.form.volume_label),
+            ProvisionFieldId::VolumeLabel(crate::provision::PartitionRole::Share) => {
+                Some(&mut self.provision.form.share_label)
+            }
             ProvisionFieldId::VolumeLabel(crate::provision::PartitionRole::Encrypt) => {
                 Some(&mut self.provision.form.encrypt_label)
             }
@@ -189,13 +189,13 @@ impl AppState {
             ProvisionFieldId::Lba8Identity(field) => {
                 Some(field.value(&self.provision.form.lba8_identity))
             }
-            ProvisionFieldId::VolumeLabel(crate::provision::PartitionRole::Boot) => {
-                Some(self.provision.form.volume_label.as_str())
-            }
             ProvisionFieldId::VolumeLabel(
-                crate::provision::PartitionRole::Share
+                crate::provision::PartitionRole::Boot
                 | crate::provision::PartitionRole::BootShareCombined,
-            ) => Some(self.provision.form.share_label.as_str()),
+            ) => Some(self.provision.form.volume_label.as_str()),
+            ProvisionFieldId::VolumeLabel(crate::provision::PartitionRole::Share) => {
+                Some(self.provision.form.share_label.as_str())
+            }
             ProvisionFieldId::VolumeLabel(crate::provision::PartitionRole::Encrypt) => {
                 Some(self.provision.form.encrypt_label.as_str())
             }

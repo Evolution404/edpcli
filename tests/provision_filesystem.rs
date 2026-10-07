@@ -548,9 +548,16 @@ fn filesystem_stage_fails_closed_on_wrong_key_or_unsupported_portable_profile() 
     )
     .unwrap_err();
     assert!(ntfs_error.to_ascii_lowercase().contains("ntfs"));
-    assert!(
-        plan_format_targets(&ntfs_plan, &FormatOptions::default(), &serials, &FILE_KEY).is_err()
-    );
+    assert!(plan_format_targets(
+        &ntfs_plan,
+        &FormatOptions {
+            share: true,
+            ..FormatOptions::default()
+        },
+        &serials,
+        &FILE_KEY
+    )
+    .is_err());
 }
 
 #[test]

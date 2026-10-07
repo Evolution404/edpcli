@@ -1,6 +1,64 @@
 //! One result-state projection shared by drawing and copied table values.
 use crate::tui::state::{ProvisionResultPartition, ProvisionState};
 
+pub(crate) fn partition_action_label(partition: &ProvisionResultPartition) -> &'static str {
+    use crate::provision::RegionDisposition as D;
+    if partition.selected_for_format {
+        return "格式化";
+    }
+    match partition.disposition {
+        Some(D::PreserveOpaque) => "原样保留",
+        Some(D::PreserveVerified) => "验证保留",
+        Some(D::RewrapVerified) => "更新密钥",
+        Some(D::Rebuild) => "重建",
+        Some(D::Drop) => "移除",
+        None => "写入",
+    }
+}
+
+pub(crate) fn partition_filesystem_label(
+    provision: &ProvisionState,
+    plan: &crate::tui::state::ProvisionResultSnapshot,
+    partition: &ProvisionResultPartition,
+) -> String {
+    use crate::application::provision::ProvisionCommitOutcome;
+    let Some(filesystem) = partition.filesystem else {
+        return "—".into();
+    };
+    let confirmed = match provision
+        .result_outcome
+        .as_ref()
+        .map(|outcome| &outcome.commit)
+    {
+        Some(ProvisionCommitOutcome::Plain { partition_count })
+            if plan.target == crate::provision::ProvisionTarget::Plain =>
+        {
+            *partition_count == plan.partitions.len()
+        }
+        Some(ProvisionCommitOutcome::Official(report))
+            if report.provision_succeeded
+                && plan.target != crate::provision::ProvisionTarget::Plain =>
+        {
+            !partition.selected_for_format
+                || report
+                    .formats
+                    .iter()
+                    .any(|format| Some(format.role) == partition.role && format.result.is_ok())
+        }
+        _ => false,
+    };
+    if confirmed {
+        filesystem.display_name().into()
+    } else {
+        let origin = if partition.selected_for_format {
+            "目标"
+        } else {
+            "来源"
+        };
+        format!("{origin} {}", filesystem.display_name())
+    }
+}
+
 pub(crate) fn disposition_label(disposition: crate::provision::RegionDisposition) -> &'static str {
     use crate::provision::RegionDisposition as D;
     match disposition {
@@ -17,12 +75,13 @@ pub(crate) fn partition_final_status(
     plan: &crate::tui::state::ProvisionResultSnapshot,
     partition: &ProvisionResultPartition,
 ) -> (String, crate::tui::ui::ResultTone) {
-    let outcome = provision.result_outcome.as_ref();
-    if outcome.is_none() {
+    let Some(outcome) = provision.result_outcome.as_ref() else {
         return ("未确认".into(), crate::tui::ui::ResultTone::Warning);
-    }
+    };
     if plan.target == crate::provision::ProvisionTarget::Plain {
-        return if outcome.is_some() {
+        return if matches!(outcome.commit, crate::application::provision::ProvisionCommitOutcome::Plain { partition_count }
+            if partition_count == plan.partitions.len())
+        {
             (
                 "已写入 · 读回通过".into(),
                 crate::tui::ui::ResultTone::Success,
@@ -31,13 +90,16 @@ pub(crate) fn partition_final_status(
             ("未确认".into(), crate::tui::ui::ResultTone::Warning)
         };
     }
+    let crate::application::provision::ProvisionCommitOutcome::Official(report) = &outcome.commit
+    else {
+        return ("未确认".into(), crate::tui::ui::ResultTone::Warning);
+    };
+    if !report.provision_succeeded {
+        return ("未确认".into(), crate::tui::ui::ResultTone::Warning);
+    }
 
     if partition.selected_for_format {
-        if let (
-            Some(role),
-            Some(crate::application::provision::ProvisionCommitOutcome::Official(report)),
-        ) = (partition.role, outcome.map(|value| &value.commit))
-        {
+        if let Some(role) = partition.role {
             if let Some(format) = report.formats.iter().find(|item| item.role == role) {
                 return match &format.result {
                     Ok(()) => (
@@ -68,7 +130,7 @@ pub(crate) fn partition_final_status(
                 };
             }
         }
-        return ("已写入".into(), crate::tui::ui::ResultTone::Primary);
+        return ("未确认".into(), crate::tui::ui::ResultTone::Warning);
     }
 
     (

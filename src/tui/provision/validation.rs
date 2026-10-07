@@ -121,6 +121,11 @@ impl AppState {
         };
 
         let mode = self.provision.kind.mode().unwrap_or(0);
+        let share_region = if mode == 1 {
+            "二合一区"
+        } else {
+            "交换区"
+        };
         let overrides = TargetGeometryOverrides {
             boot: matches!(mode, 0 | 3)
                 .then(|| {
@@ -144,7 +149,7 @@ impl AppState {
                         &form.share_sectors,
                         form.share_capacity_edited,
                         base.share,
-                        "交换区",
+                        share_region,
                     )
                 })
                 .transpose()?,
@@ -171,7 +176,7 @@ impl AppState {
                 matches!(mode, 0 | 1 | 3),
                 &form.share_start_lba,
                 base.share_start_lba,
-                "交换区",
+                share_region,
             )?,
             encrypt_start_lba: parse_start(
                 matches!(mode, 0..=2),
@@ -282,6 +287,11 @@ impl AppState {
             .kind
             .mode()
             .ok_or_else(|| "当前流程不使用新盘表单".to_string())?;
+        let share_region = if mode == 1 {
+            "二合一区"
+        } else {
+            "交换区"
+        };
         let parse_sectors = |value: &str, label: &str| -> Result<u64, String> {
             value
                 .parse::<u64>()
@@ -353,7 +363,7 @@ impl AppState {
             &form.share_mib,
             &form.share_sectors,
             form.share_capacity_edited,
-            "交换区",
+            share_region,
         )?;
         let encrypt_sectors = capacity_sectors(
             matches!(mode, 0..=2),
@@ -377,25 +387,31 @@ impl AppState {
             return Err("标签标识、用户、部门和标签均不能为空".into());
         }
         if matches!(mode, 0 | 1 | 3) && share_target.is_some_and(str::is_empty) {
-            return Err("交换密钥域目标密码不能为空".into());
+            return Err(format!("{share_region}目标密码不能为空"));
         }
         if matches!(mode, 0..=2) && encrypt_target.is_some_and(str::is_empty) {
             return Err("保密密钥域目标密码不能为空".into());
         }
-        let max_share_password_errors = self
-            .provision
-            .form
-            .max_share_password_errors
-            .trim()
-            .parse::<u8>()
-            .map_err(|_| "交换区密码最大错误次数必须为 0..255".to_string())?;
-        let max_encrypt_password_errors = self
-            .provision
-            .form
-            .max_encrypt_password_errors
-            .trim()
-            .parse::<u8>()
-            .map_err(|_| "保密区密码最大错误次数必须为 0..255".to_string())?;
+        let password_error_limit = |domain, value: &str, region| -> Result<Option<u8>, String> {
+            if !self.provision.kind.disk_kind().has_key_domain(domain) {
+                return Ok(None);
+            }
+            value
+                .trim()
+                .parse::<u8>()
+                .map(Some)
+                .map_err(|_| format!("{region}密码最大错误次数必须为 0..255"))
+        };
+        let max_share_password_errors = password_error_limit(
+            crate::provision::KeyDomainRole::Share,
+            &self.provision.form.max_share_password_errors,
+            share_region,
+        )?;
+        let max_encrypt_password_errors = password_error_limit(
+            crate::provision::KeyDomainRole::Encrypt,
+            &self.provision.form.max_encrypt_password_errors,
+            "保密区",
+        )?;
         Ok(crate::application::provision::OfficialProvisionRequest {
             target: self.provision.kind.target(),
             boot_start_lba: matches!(mode, 0 | 3)
@@ -446,8 +462,8 @@ impl AppState {
             cancel_password_complexity_check: Some(
                 self.provision.form.cancel_password_complexity_check,
             ),
-            max_share_password_errors: Some(max_share_password_errors),
-            max_encrypt_password_errors: Some(max_encrypt_password_errors),
+            max_share_password_errors,
+            max_encrypt_password_errors,
         })
     }
 }

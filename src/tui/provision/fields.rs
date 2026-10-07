@@ -254,56 +254,64 @@ impl AppState {
                         preflight::ProvisionFormatDisposition::Preserve
                     }
                 });
-            let format_selected = target.format_capable && disposition.selected();
+            let format_selected = disposition.selected();
             fields.push(descriptor(
                 ProvisionFieldId::FormatEnabled(target.role),
                 ProvisionFieldSection::Formatting,
                 false,
                 false,
-                target.format_capable && disposition.toggle_allowed(),
+                disposition.toggle_allowed(),
                 false,
             ));
-            if target.format_capable {
+            fields.push(descriptor(
+                ProvisionFieldId::Filesystem(target.role),
+                ProvisionFieldSection::Formatting,
+                false,
+                false,
+                format_selected,
+                false,
+            ));
+            fields.push(descriptor(
+                ProvisionFieldId::VolumeLabel(target.role),
+                ProvisionFieldSection::Formatting,
+                format_selected,
+                false,
+                false,
+                false,
+            ));
+        }
+        for id in [
+            ProvisionFieldId::ForceChangePassword,
+            ProvisionFieldId::CancelPasswordComplexityCheck,
+        ] {
+            fields.push(descriptor(
+                id,
+                ProvisionFieldSection::PasswordPolicy,
+                false,
+                false,
+                true,
+                false,
+            ));
+        }
+        for domain in [
+            crate::provision::KeyDomainRole::Share,
+            crate::provision::KeyDomainRole::Encrypt,
+        ] {
+            if self.provision.kind.disk_kind().has_key_domain(domain) {
                 fields.push(descriptor(
-                    ProvisionFieldId::Filesystem(target.role),
-                    ProvisionFieldSection::Formatting,
-                    false,
-                    false,
-                    format_selected,
-                    false,
-                ));
-                fields.push(descriptor(
-                    ProvisionFieldId::VolumeLabel(target.role),
-                    ProvisionFieldSection::Formatting,
-                    format_selected,
+                    ProvisionFieldId::MaxPasswordErrors(domain),
+                    ProvisionFieldSection::PasswordPolicy,
+                    true,
                     false,
                     false,
                     false,
                 ));
             }
         }
-        for id in [
-            ProvisionFieldId::ForceChangePassword,
-            ProvisionFieldId::CancelPasswordComplexityCheck,
-            ProvisionFieldId::MaxPasswordErrors(crate::provision::KeyDomainRole::Share),
-            ProvisionFieldId::MaxPasswordErrors(crate::provision::KeyDomainRole::Encrypt),
-        ] {
-            fields.push(descriptor(
-                id,
-                ProvisionFieldSection::PasswordPolicy,
-                matches!(id, ProvisionFieldId::MaxPasswordErrors(_)),
-                false,
-                matches!(
-                    id,
-                    ProvisionFieldId::ForceChangePassword
-                        | ProvisionFieldId::CancelPasswordComplexityCheck
-                ),
-                false,
-            ));
-        }
         fields
     }
 
+    // Fixed protocol regions remain in the layout and plan, outside form controls.
     pub(super) fn provision_format_template(&self) -> Vec<crate::provision::PartitionFormatTarget> {
         let Some(mode) = self.provision.kind.mode() else {
             return Vec::new();
@@ -325,5 +333,8 @@ impl AppState {
             },
         )
         .unwrap_or_default()
+        .into_iter()
+        .filter(|target| target.format_capable)
+        .collect()
     }
 }

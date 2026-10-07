@@ -74,7 +74,7 @@ fn provisioning_documents_current_product_contract() {
         "## 1. 产品边界",
         "## 2. 五种目标状态",
         "缺省三分区",
-        "启动区和交换区二合一",
+        "二合一区",
         "整盘加密",
         "内外网通用双分区",
         "Plain 不是 mode4",

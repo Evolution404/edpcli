@@ -163,7 +163,7 @@ fn scan_and_print_all_row_kinds() {
     };
     let rows2 = scan_disks(&runner, &bak.0, &read_conv);
     let out2 = print_disk_table(&rows2);
-    assert!(out2.contains("mode1 · 二合一"), "{}", out2);
+    assert!(out2.contains("mode1 · 二合一区"), "{}", out2);
     let row6b = rows2.iter().find(|r| r.disk == 6).unwrap();
     assert_eq!(row6b.label.as_deref(), Some("江苏电力!SAFE6"));
     assert_eq!(row6b.force_change_password, Some(true));

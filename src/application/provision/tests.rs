@@ -920,3 +920,102 @@ fn lce_readback_gate_rejects_corrupted_final_lba7_pointer_table() {
     let error = verify_lce_readback(&mut dev, &prepared).unwrap_err();
     assert!(error.msg.contains("最终 LBA7"));
 }
+
+#[test]
+fn writable_filesystem_validation_only_applies_to_selected_format_actions() {
+    let key = [0x42; 16];
+    for mode in [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionMode::WholeDiskEncrypted,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ] {
+        for readonly_fs in [FilesystemKind::Ntfs, FilesystemKind::Fat12] {
+            let plan = format_test_plan(mode, &key).with_filesystems(
+                crate::provision::OfficialPartitionFilesystems::all(readonly_fs),
+            );
+            let targets = plan.format_targets().unwrap();
+            let serials = vec![1; targets.len()];
+            let choices = plan_format_targets(&plan, &FormatOptions::default(), &serials, &key)
+                .expect("unselected regions need no writable filesystem writer");
+            assert!(choices
+                .iter()
+                .all(|choice| !choice.selected && choice.prepared_image.is_none()));
+            for target in targets.iter().filter(|target| target.format_capable) {
+                let mut options = FormatOptions::default();
+                match target.role {
+                    PartitionRole::Boot => options.boot = true,
+                    PartitionRole::Share | PartitionRole::BootShareCombined => options.share = true,
+                    PartitionRole::Encrypt => options.encrypt = true,
+                    PartitionRole::CompatibilityReserve => unreachable!(),
+                }
+                assert!(
+                    plan_format_targets(&plan, &options, &serials, &key).is_err(),
+                    "{mode:?}: {:?} must reject formatting {readonly_fs:?}",
+                    target.role
+                );
+            }
+        }
+    }
+    let plan = format_test_plan(OfficialPartitionMode::BootShareCombined, &key).with_filesystems(
+        crate::provision::OfficialPartitionFilesystems {
+            boot: FilesystemKind::Ntfs,
+            share: FilesystemKind::Ntfs,
+            encrypt: FilesystemKind::ExFat,
+        },
+    );
+    let choices = plan_format_targets(
+        &plan,
+        &FormatOptions {
+            encrypt: true,
+            ..FormatOptions::default()
+        },
+        &[1, 2],
+        &key,
+    )
+    .expect("preserving NTFS must not prevent formatting a separate exFAT region");
+    assert!(!choices[0].selected && choices[0].prepared_image.is_none());
+    assert!(choices[1].selected && choices[1].prepared_image.is_some());
+}
+
+#[test]
+fn application_size_errors_use_the_current_partition_name() {
+    for mode in [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::BootShareCombined,
+    ] {
+        let mut request = OfficialProvisionRequest {
+            target: ProvisionTarget::Official(mode),
+            boot_start_lba: None,
+            share_start_lba: None,
+            encrypt_start_lba: None,
+            boot_mib: None,
+            boot_sectors: None,
+            share_mib: Some(1),
+            share_sectors: Some(1),
+            encrypt_mib: None,
+            encrypt_sectors: None,
+            label_id: "1".into(),
+            user: String::new(),
+            dept: String::new(),
+            label: String::new(),
+            lba8_identity: crate::provision::Lba8Identity::default(),
+            key_domains: KeyDomainSecrets::default(),
+            volume_label: "启动区".into(),
+            format: FormatOptions::default(),
+            force_change_password: None,
+            cancel_password_complexity_check: None,
+            max_share_password_errors: None,
+            max_encrypt_password_errors: None,
+        };
+        let region = if mode == OfficialPartitionMode::BootShareCombined {
+            "二合一区"
+        } else {
+            "交换区"
+        };
+        assert!(sizes(&request, mode).unwrap_err().msg.contains(region));
+        request.share_mib = None;
+        request.share_sectors = Some(0);
+        assert!(sizes(&request, mode).unwrap_err().msg.contains(region));
+    }
+}

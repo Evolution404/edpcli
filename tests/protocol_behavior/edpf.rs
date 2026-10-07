@@ -27,11 +27,7 @@ pub fn official_lba7_partition_types_and_label_modes_are_exact() {
             "缺省三分区",
             vec![1, 2, 4],
         ),
-        (
-            Lba7PartitionMode::BootShareCombined,
-            "启动区和交换区二合一",
-            vec![2, 4],
-        ),
+        (Lba7PartitionMode::BootShareCombined, "二合一区", vec![2, 4]),
         (
             Lba7PartitionMode::WholeDiskEncrypted,
             "整盘加密",

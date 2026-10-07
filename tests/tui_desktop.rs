@@ -202,3 +202,100 @@ fn desktop_progress_log_fills_workspace_and_keeps_write_safety_at_the_bottom() {
         );
     }
 }
+
+#[test]
+fn result_filesystem_values_and_actions_do_not_claim_unconfirmed_changes() {
+    use edpcli::application::provision::ProvisionExecutionStatus;
+    use edpcli::tui::table_layout::TableKind;
+    for scene in [
+        "provision-result-success",
+        "provision-result-partial",
+        "provision-result-failure",
+    ] {
+        let mut state = demo::build_scene(scene).unwrap();
+        let view = state.result_partition_table_view().unwrap();
+        let plan = state.provision().result_plan.as_ref().unwrap();
+        for (partition, row) in plan.partitions.iter().zip(&view.rows) {
+            if let Some(filesystem) = partition.filesystem {
+                if partition.selected_for_format && row[5] != "已格式化 · 读回通过" {
+                    assert_eq!(
+                        row[2],
+                        format!("目标 {}", filesystem.display_name()),
+                        "{scene}"
+                    );
+                } else if row[5] == "已格式化 · 读回通过" {
+                    assert_eq!(row[2], filesystem.display_name());
+                }
+            }
+            assert!(
+                !row[4].contains("已"),
+                "planned action must not claim completion: {}",
+                row[4]
+            );
+        }
+        let rendered = screen(&mut state, 240, 60).join("\n").replace(' ', "");
+        if scene != "provision-result-success" {
+            assert!(rendered.contains("目标"), "{scene}: {rendered}");
+        }
+        assert!(state
+            .table_copy_payload(TableKind::ResultPartitions, true)
+            .is_some());
+    }
+    let mut state = demo::build_scene("provision-result-success").unwrap();
+    let first_role = state
+        .provision()
+        .result_plan
+        .as_ref()
+        .unwrap()
+        .partitions
+        .iter()
+        .find(|partition| partition.selected_for_format)
+        .unwrap()
+        .role
+        .unwrap();
+    let outcome = state.provision_mut().result_outcome.as_mut().unwrap();
+    let edpcli::application::provision::ProvisionCommitOutcome::Official(report) =
+        &mut outcome.commit
+    else {
+        unreachable!()
+    };
+    report.formats.retain(|format| format.role != first_role);
+    let view = state.result_partition_table_view().unwrap();
+    let first = state
+        .provision()
+        .result_plan
+        .as_ref()
+        .unwrap()
+        .partitions
+        .iter()
+        .position(|partition| partition.role == Some(first_role))
+        .unwrap();
+    assert_eq!(view.rows[first][5], "未确认");
+    assert!(view.rows[first][2].starts_with("目标 "));
+
+    let outcome = state.provision_mut().result_outcome.as_mut().unwrap();
+    let edpcli::application::provision::ProvisionCommitOutcome::Official(report) =
+        &mut outcome.commit
+    else {
+        unreachable!()
+    };
+    report.provision_succeeded = false;
+    assert_eq!(
+        outcome.execution_status(),
+        ProvisionExecutionStatus::FatalFailure
+    );
+    let outcome = outcome.clone();
+    state.provision_finish_write(Ok(outcome));
+    assert!(state
+        .result_partition_table_view()
+        .unwrap()
+        .rows
+        .iter()
+        .all(|row| row[5] == "未确认"));
+    assert_eq!(
+        state.provision().result_status,
+        Some(ProvisionExecutionStatus::FatalFailure)
+    );
+    let rendered = screen(&mut state, 240, 60).join("\n").replace(' ', "");
+    assert!(rendered.contains("制盘失败"));
+}

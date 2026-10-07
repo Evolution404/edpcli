@@ -45,12 +45,6 @@ impl AppState {
                     ProvisionFieldSection::PasswordPolicy | ProvisionFieldSection::PasswordDomain,
                     _,
                 ) => 2,
-                (
-                    ProvisionFieldSection::Formatting,
-                    ProvisionFieldId::FormatEnabled(
-                        crate::provision::PartitionRole::CompatibilityReserve,
-                    ),
-                ) => 1,
                 (ProvisionFieldSection::Formatting, ProvisionFieldId::FormatEnabled(_)) => 3,
                 (ProvisionFieldSection::Formatting, _) => 1,
                 (ProvisionFieldSection::PlainPartition(_), _) => 2,
@@ -69,7 +63,8 @@ impl AppState {
     }
 
     pub fn provision_field_hint(&self, display_index: usize) -> Option<String> {
-        let id = self.provision_field_id(display_index)?;
+        let descriptor = self.provision_field_descriptor(display_index)?;
+        let id = descriptor.id;
         if let ProvisionFieldId::Plain { kind, .. } = id {
             return match kind {
                 PlainProvisionFieldKind::StartLba => Some("精确 LBA；不会自动移动其它分区".into()),
@@ -93,8 +88,14 @@ impl AppState {
                 ProvisionForm::quick_unit_label(crate::provision::QuickCapacityUnit::MiB),
                 ProvisionForm::quick_unit_label(crate::provision::QuickCapacityUnit::GiB)
             )),
+            ProvisionFieldId::SourcePassword(domain) if self.provision_source_password_not_applicable(domain) => {
+                Some("来源没有该密码域，无需原密码".into())
+            }
             ProvisionFieldId::SourcePassword(_) => {
                 Some("修改原密码后，Enter / Esc 结束输入会自动只读验证".into())
+            }
+            ProvisionFieldId::TargetPassword(_) if !descriptor.capabilities.toggle => {
+                Some("输入新密码，用于初始化该密码域".into())
             }
             ProvisionFieldId::TargetPassword(_) => Some(
                 "Space 切换透传/设置密码；原密码已验证且新密码相同会自动归一化为透传；无法无损改密时系统会自动转为必须重建并格式化".into(),
@@ -120,6 +121,9 @@ impl AppState {
                     })
                     .unwrap_or("格式化状态暂不可判定");
                 Some(hint.into())
+            }
+            ProvisionFieldId::Filesystem(_) if !descriptor.capabilities.toggle => {
+                Some("保留现有文件系统；选择重新格式化后可切换".into())
             }
             ProvisionFieldId::Filesystem(_) => {
                 Some("Space 切换 FAT16 / FAT32 / exFAT".into())
@@ -288,5 +292,60 @@ mod tests {
         assert!(!fields.iter().any(|(label, _, _)| {
             label.starts_with("交换区起点") || label.starts_with("交换区容量")
         }));
+    }
+    #[test]
+    fn form_targets_and_policy_domains_are_applicable_and_indices_stay_aligned() {
+        use crate::provision::{KeyDomainRole, PartitionRole};
+        for kind in [
+            ProvisionKind::Plain,
+            ProvisionKind::Mode0,
+            ProvisionKind::Mode1,
+            ProvisionKind::Mode2,
+            ProvisionKind::Mode3,
+        ] {
+            for advanced in [false, true] {
+                let mut state = AppState::new();
+                state.provision_mut().kind = kind;
+                state.provision_mut().advanced_identity_open = advanced;
+                let fields = state.provision_visible_fields();
+                let descriptors = state.provision_field_descriptors();
+                assert_eq!(fields.len(), descriptors.len(), "{kind:?}");
+                for (index, descriptor) in descriptors.iter().enumerate() {
+                    match descriptor.id {
+                        ProvisionFieldId::FormatEnabled(role)
+                        | ProvisionFieldId::Filesystem(role)
+                        | ProvisionFieldId::VolumeLabel(role) => {
+                            assert_ne!(role, PartitionRole::CompatibilityReserve);
+                            let region =
+                                crate::disk_layout::DiskRegionKind::from_partition_role(role)
+                                    .label();
+                            assert!(fields[index].0.starts_with(region));
+                        }
+                        ProvisionFieldId::MaxPasswordErrors(domain) => {
+                            assert!(kind.disk_kind().has_key_domain(domain));
+                            assert!(fields[index].0.ends_with("密码最大错误次数"));
+                        }
+                        _ => {}
+                    }
+                }
+                for domain in [KeyDomainRole::Share, KeyDomainRole::Encrypt] {
+                    assert_eq!(
+                        descriptors
+                            .iter()
+                            .any(|field| field.id == ProvisionFieldId::MaxPasswordErrors(domain)),
+                        kind.disk_kind().has_key_domain(domain)
+                    );
+                }
+                for width in [40, 67, 68, 120] {
+                    let rows = state.provision_field_rows_for_width(width);
+                    assert_eq!(
+                        rows.iter()
+                            .flat_map(|(_, indices)| indices.iter().copied())
+                            .collect::<Vec<_>>(),
+                        (0..fields.len()).collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
     }
 }

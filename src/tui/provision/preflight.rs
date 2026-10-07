@@ -81,7 +81,7 @@ impl ProvisionPreflight {
                 }
                 ProvisionPreflightKind::BlockedNeedsTargetPassword => {
                     return Err(format!(
-                        "{}已选择格式化，但原密码未验证；请按 i 设置新密码后再继续",
+                        "{}需要目标新密码；请按 i 设置新密码后再继续",
                         part.role.label()
                     ));
                 }

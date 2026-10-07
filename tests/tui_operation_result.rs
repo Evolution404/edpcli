@@ -74,7 +74,7 @@ fn rendered(width: u16, height: u16) -> String {
                             kind: DiskRegionKind::Protocol,
                         },
                         DiskLayoutSegment {
-                            label: "启动/交换区".into(),
+                            label: "二合一区".into(),
                             start_lba: 13,
                             sector_count: 700,
                             kind: DiskRegionKind::Combined,
@@ -163,7 +163,7 @@ fn shared_result_page_prioritizes_outcome_in_wide_and_narrow_viewports() {
                     "missing capacity marker {marker} at {width}x{height}"
                 );
             }
-            for region in ["EDP主协议区", "启动/交换区", "保密区", "尾部区域"] {
+            for region in ["EDP主协议区", "二合一区", "保密区", "尾部区域"] {
                 assert!(
                     text.contains(region),
                     "missing region {region} at {width}x{height}"

@@ -221,9 +221,7 @@ impl ProvisionTarget {
         match self {
             Self::Plain => "普通盘",
             Self::Official(OfficialPartitionMode::DefaultThreePartition) => "模式0 · 缺省三分区",
-            Self::Official(OfficialPartitionMode::BootShareCombined) => {
-                "模式1 · 启动区和交换区二合一"
-            }
+            Self::Official(OfficialPartitionMode::BootShareCombined) => "模式1 · 二合一区",
             Self::Official(OfficialPartitionMode::WholeDiskEncrypted) => "模式2 · 整盘加密",
             Self::Official(OfficialPartitionMode::IntranetExtranetDualPartition) => {
                 "模式3 · 内外网通用双分区"
@@ -237,9 +235,7 @@ impl ProvisionTarget {
             Self::Official(OfficialPartitionMode::DefaultThreePartition) => {
                 "启动区 + 交换区 + 保密区"
             }
-            Self::Official(OfficialPartitionMode::BootShareCombined) => {
-                "启动/交换二合一区 + 保密区"
-            }
+            Self::Official(OfficialPartitionMode::BootShareCombined) => "二合一区 + 保密区",
             Self::Official(OfficialPartitionMode::WholeDiskEncrypted) => {
                 "兼容保留区 + 保密区（整盘加密）"
             }
@@ -301,7 +297,7 @@ impl DiskProvisionKind {
         match self {
             Self::Plain => "普通盘",
             Self::Mode0 => "mode0 · 缺省三分区",
-            Self::Mode1 => "mode1 · 二合一",
+            Self::Mode1 => "mode1 · 二合一区",
             Self::Mode2 => "mode2 · 整盘加密",
             Self::Mode3 => "mode3 · 内外网双分区",
         }

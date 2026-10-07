@@ -424,10 +424,22 @@ impl Theme {
             .bg(self.palette.surface)
     }
 
+    pub fn input_active(self) -> Style {
+        let foreground = match self.mode {
+            ThemeMode::TrueColorDark => Color::Rgb(0xE8, 0xE8, 0xE8),
+            ThemeMode::Ansi256Dark => Color::Indexed(255),
+            ThemeMode::Ansi16 => Color::White,
+        };
+        Style::default().fg(foreground).add_modifier(Modifier::BOLD)
+    }
+
     pub fn input_focused(self) -> Style {
-        Style::default()
-            .fg(self.palette.table_text_active)
-            .bg(self.palette.surface_active)
+        let background = match self.mode {
+            ThemeMode::TrueColorDark => Color::Rgb(0x2B, 0x2D, 0x30),
+            ThemeMode::Ansi256Dark => Color::Indexed(236),
+            ThemeMode::Ansi16 => Color::DarkGray,
+        };
+        self.input_active().bg(background)
     }
 
     pub fn success(self) -> Style {

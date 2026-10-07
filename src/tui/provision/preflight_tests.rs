@@ -267,3 +267,56 @@ fn preserved_plain_partition_reports_unknown_volume_label_without_inventing_defa
         label == "启动区卷标（原样保留）" && *value == "启动区"
     }));
 }
+
+#[test]
+fn field_hints_offer_only_actions_available_for_source_and_format_state() {
+    let mut state = mode0_plain_state(None);
+    let descriptors = state.provision_field_descriptors();
+    for (index, field) in descriptors.iter().enumerate() {
+        if matches!(field.id, ProvisionFieldId::SourcePassword(_)) {
+            let hint = state.provision_field_hint(index).unwrap();
+            assert!(!field.capabilities.editable);
+            assert!(hint.contains("无需原密码"));
+            assert!(!hint.contains("验证"));
+        }
+        if matches!(field.id, ProvisionFieldId::TargetPassword(_)) {
+            assert!(!field.capabilities.toggle);
+            assert!(!state.provision_field_hint(index).unwrap().contains("Space"));
+        }
+    }
+    state = mode0_plain_state(Some((63, 20_417, Some("FAT16"))));
+    let index = state
+        .provision_field_descriptors()
+        .iter()
+        .position(|field| {
+            field.id == ProvisionFieldId::Filesystem(crate::provision::PartitionRole::Boot)
+        })
+        .unwrap();
+    assert!(state
+        .provision_field_hint(index)
+        .unwrap()
+        .contains("保留现有文件系统"));
+    state.provision_mut().field_selected = index;
+    assert!(!state.provision_toggle_selected_option());
+    let format_index = state
+        .provision_field_descriptors()
+        .iter()
+        .position(|field| {
+            field.id == ProvisionFieldId::FormatEnabled(crate::provision::PartitionRole::Boot)
+        })
+        .unwrap();
+    state.provision_mut().field_selected = format_index;
+    assert!(state.provision_toggle_selected_option());
+    assert!(state.provision_field_hint(index).unwrap().contains("Space"));
+    state.provision_mut().field_selected = index;
+    assert!(state.provision_toggle_selected_option());
+}
+
+#[test]
+fn initializing_new_domain_does_not_ask_for_an_absent_source_password() {
+    let mut state = mode0_plain_state(None);
+    state.provision.form.share_target_password = "".into();
+    let error = state.provision_request().unwrap_err();
+    assert!(error.contains("目标新密码"), "{error}");
+    assert!(!error.contains("原密码"), "{error}");
+}

@@ -82,7 +82,7 @@ pub(super) fn plan_format_targets_with_keys(
             }
         })
         .collect::<Vec<_>>();
-    for choice in planned.iter().filter(|choice| choice.target.format_capable) {
+    for choice in planned.iter().filter(|choice| choice.selected) {
         let filesystem = choice
             .filesystem
             .ok_or(ProvisionPlanningError::MissingFilesystem {

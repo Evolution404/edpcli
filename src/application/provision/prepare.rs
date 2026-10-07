@@ -177,19 +177,11 @@ pub fn prepare_target_provision(
     let mut targets = prefill
         .target_partitions(SECTOR as u64)
         .map_err(|message| err(EXIT_TARGET, format!("错误: 目标分区重叠或越界: {message}")))?;
-    for target in &mut targets {
-        let selected_format = request.format.choice(target.role).0;
-        if !selected_format {
-            if let Some(old) = source
-                .as_ref()
-                .and_then(|source| source.profile.partition(target.role))
-            {
-                if old.filesystem.is_some() {
-                    target.filesystem = old.filesystem;
-                }
-            }
-        }
-    }
+    resolve_target_filesystems(
+        &mut targets,
+        source.as_ref().map(|source| &source.profile),
+        &request.format,
+    );
     let mut target_plan = TargetProvisionPlan::build_with_plain_extents(
         source.as_ref(),
         &plain_source_extents,
@@ -727,5 +719,82 @@ mod tests {
 
         let filesystems = effective_target_filesystems(&format, &target_plan);
         assert_eq!(filesystems.share, FilesystemKind::ExFat);
+    }
+    #[test]
+    fn target_filesystems_follow_requested_actions_and_preserved_evidence_for_all_modes() {
+        use crate::provision::{ExistingPartition, ExistingProvisionProfile};
+        for mode in [
+            OfficialPartitionMode::DefaultThreePartition,
+            OfficialPartitionMode::BootShareCombined,
+            OfficialPartitionMode::WholeDiskEncrypted,
+            OfficialPartitionMode::IntranetExtranetDualPartition,
+        ] {
+            let template = crate::provision::official_format_targets_with_filesystems(
+                mode,
+                OfficialPartitionSizes::new(32, 64, 128),
+                512,
+                crate::provision::OfficialPartitionFilesystems::defaults(),
+            )
+            .unwrap();
+            let draft = template
+                .iter()
+                .map(|target| crate::provision::TargetPartitionGeometry {
+                    role: target.role,
+                    partition_type: target.geometry.partition_type,
+                    start_lba: target.geometry.start_sector,
+                    sector_count: target.geometry.sector_count(),
+                    physically_encrypted: target.physically_encrypted,
+                    filesystem: target.filesystem,
+                })
+                .collect::<Vec<_>>();
+            for source_fs in [None, Some(FilesystemKind::Ntfs)] {
+                let source = ExistingProvisionProfile {
+                    source_mode: mode,
+                    partitions: draft
+                        .iter()
+                        .map(|target| ExistingPartition {
+                            role: target.role,
+                            partition_type: target.partition_type,
+                            start_lba: target.start_lba,
+                            sector_count: target.sector_count,
+                            physically_encrypted: target.physically_encrypted,
+                            filesystem: if target.role == PartitionRole::CompatibilityReserve {
+                                None
+                            } else {
+                                source_fs
+                            },
+                        })
+                        .collect(),
+                };
+                for selected in [false, true] {
+                    let format = FormatOptions {
+                        boot: selected
+                            && mode != OfficialPartitionMode::BootShareCombined
+                            && mode != OfficialPartitionMode::WholeDiskEncrypted,
+                        share: selected && mode != OfficialPartitionMode::WholeDiskEncrypted,
+                        encrypt: selected
+                            && mode != OfficialPartitionMode::IntranetExtranetDualPartition,
+                        boot_fs: FilesystemKind::Fat32,
+                        share_fs: FilesystemKind::Fat16,
+                        encrypt_fs: FilesystemKind::ExFat,
+                        ..FormatOptions::default()
+                    };
+                    let mut targets = draft.clone();
+                    resolve_target_filesystems(&mut targets, Some(&source), &format);
+                    for target in targets {
+                        let expected = if format.choice(target.role).0 {
+                            format.filesystems().for_role(target.role)
+                        } else {
+                            source.partition(target.role).unwrap().filesystem
+                        };
+                        assert_eq!(
+                            target.filesystem, expected,
+                            "{mode:?} {:?} selected={selected}",
+                            target.role
+                        );
+                    }
+                }
+            }
+        }
     }
 }

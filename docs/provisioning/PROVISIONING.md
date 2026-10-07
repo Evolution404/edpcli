@@ -21,7 +21,7 @@ Plain 不是 mode4。官方编号只有 mode0、mode1、mode2、mode3；Plain �
 | 目标 | 当前含义 | 典型逻辑区域 |
 | --- | --- | --- |
 | mode0 | 缺省三分区 | type1 启动区 + type2 交换区 + type4 保密区 |
-| mode1 | 启动区和交换区二合一 | type2 二合一区 + type4 保密区 |
+| mode1 | 二合一区 | type2 二合一区 + type4 保密区 |
 | mode2 | 整盘加密 | 兼容保留区 + type4 保密区 |
 | mode3 | 内外网通用双分区 | type1 启动区 + type2 交换区 |
 | Plain | 标准普通盘 | 1～4 个 MBR 主分区 |
@@ -97,7 +97,7 @@ Plain 不是 mode4。官方编号只有 mode0、mode1、mode2、mode3；Plain �
 | exFAT | 支持 | 支持 | 支持 | 支持 | 支持 |
 | NTFS | 支持 | 支持 | 不支持 | 不支持 | 不支持 |
 
-当前真实格式化和重建统一开放 FAT16/FAT32/exFAT；`filesystem::WRITABLE_FILESYSTEMS` 是 Provision、恢复后格式化、CLI/TUI 共用的可写格式真相源；校验和切换直接使用 `filesystem::validate_writable_filesystem` 与 `filesystem::shift_writable_filesystem`。FAT12 只补齐只读文件级分析，不作为制盘格式；NTFS 暂保持识别和元信息读取。只读分析能力不代表 Provision 会搬运用户文件。
+当前真实格式化和重建统一开放 FAT16/FAT32/exFAT；`filesystem::WRITABLE_FILESYSTEMS` 是 Provision、恢复后格式化、CLI/TUI 共用的可写格式真相源；校验和切换直接使用 `filesystem::validate_writable_filesystem` 与 `filesystem::shift_writable_filesystem`。FAT12 只补齐只读文件级分析，不作为制盘格式；NTFS 暂保持识别和元信息读取。只读分析能力不代表 Provision 会搬运用户文件。可写格式校验仅适用于实际选择格式化的区域；原样保留区域仍须通过来源与布局兼容性校验，但不要求存在对应的文件系统写入器。
 
 ### 4.3 Plain
 
@@ -117,7 +117,13 @@ Plain 使用 `PlainProvisionPlan` 和 `PlainPartitionSpec` 描述最多 4 个主
 
 对普通用户文件系统区域，`Rebuild` 与“完整文件系统初始化”不可拆分：正常可执行计划不存在“重建但不格式化”。TUI 将交互状态明确区分为 `Preserve`、`RequiredRebuild`、`UserRequestedRebuild` 和不适用的固定协议区域；`RequiredRebuild` 自动启用并锁定格式化，而应用层仍保留 `Rebuild + format=false` 的 fail-closed 门禁。CLI 的显式格式化参数仍由命令行调用方负责提供，不能借 TUI 的交互归一化绕过应用层安全检查。
 
+TUI 的“格式化”表单只列出可格式化的文件系统区域；模式2兼容区等固定结构仅在磁盘布局与计划审查中显示。密码错误上限只显示当前目标模式存在的密码域：模式2仅保密区、模式3仅交换区；隐藏域的策略继续沿用可靠来源或默认值。保留文件系统与不存在的来源密码域显示只读状态，提示不提供不可用操作。
+
+保留状态下的文件系统同样只显示扫描证据，未读取时不使用格式化草稿或默认值替代。mode1 二合一区卷标的显示、编辑和提交统一使用启动卷标字段；起点、容量和密码校验提示使用当前分区名称。
+
 卷标遵循处理动作而不是表单默认值：`Preserve` 显示扫描到的来源卷标且只读，无法可靠读取时显示“未读取”；`Rebuild` 显示可编辑的格式化后卷标。默认启动/交换/保密卷标分别为“启动区/交换区/保密区”；mode1 二合一区复用交换区格式化开关，但默认目标卷标采用“启动区”。
+
+结果页的文件系统信息保留来源：原样保留分区沿用计划中已确认的来源类型，未知类型不以格式化默认值替代；未读回成功的格式化区域标明“目标”类型；恢复后仅有备份提示时标明“备份”类型。处理方式描述计划动作，最终状态依据对应分区的执行回执；缺失回执或协议写入未确认时不显示完成。
 
 ### 5.1 文件数据边界
 

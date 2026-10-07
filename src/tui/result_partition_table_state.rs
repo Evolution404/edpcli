@@ -72,7 +72,9 @@ impl AppState {
                         partition
                             .detected_filesystem
                             .map(|value| value.label().to_string())
-                            .or_else(|| partition.filesystem_hint.as_deref().map(filesystem_display_label))
+                            .or_else(|| partition.filesystem_hint.as_deref().map(|hint| {
+                                format!("备份 {}", filesystem_display_label(hint))
+                            }))
                             .unwrap_or_else(|| "—".into())
                     };
                     let key_state = post_restore_key_state(partition);
@@ -98,17 +100,16 @@ impl AppState {
                 .iter()
                 .enumerate()
                 .map(|(index, partition)| {
-                    let filesystem = partition
-                        .filesystem
-                        .map(|kind| kind.display_name().to_string())
-                        .unwrap_or_else(|| "—".into());
-                    let disposition =
-                        super::super::provision_result_presentation::disposition_label;
-                    let action = if partition.selected_for_format {
-                        "格式化"
-                    } else {
-                        partition.disposition.map(disposition).unwrap_or("写入")
-                    };
+                    let filesystem =
+                        super::super::provision_result_presentation::partition_filesystem_label(
+                            &self.provision,
+                            plan,
+                            partition,
+                        );
+                    let action =
+                        super::super::provision_result_presentation::partition_action_label(
+                            partition,
+                        );
                     let (final_status, _) =
                         super::super::provision_result_presentation::partition_final_status(
                             &self.provision,

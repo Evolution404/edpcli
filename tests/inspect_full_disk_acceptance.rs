@@ -89,7 +89,7 @@ fn mode1_combined_decode_is_identity_even_when_need_encrypt_is_one() {
     assert_eq!(combined.partition_type, 2);
     assert_eq!(combined.need_encrypt, 1);
     let semantics = context.partition_semantics(combined).unwrap();
-    assert_eq!(semantics.role.label(), "启动/交换区");
+    assert_eq!(semantics.role.label(), "二合一区");
     assert!(!semantics.physically_encrypted());
 
     let raw = [0xA5u8; SECTOR];

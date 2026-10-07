@@ -1,6 +1,34 @@
 use super::*;
 use crate::tui::state::ProvisionFieldSection;
 
+pub(super) fn field_label_style(state: &AppState, index: usize) -> Style {
+    use crate::tui::disk_layout::DiskRegionKind;
+    use crate::tui::state::ProvisionFieldId;
+    use crate::tui::state::ProvisionRegionFocus;
+    let theme = crate::tui::theme::current();
+    let Some(id) = state.provision_field_id(index) else {
+        return muted();
+    };
+    let kind = match id {
+        ProvisionFieldId::Plain { .. } => DiskRegionKind::Plain,
+        ProvisionFieldId::FormatEnabled(role)
+        | ProvisionFieldId::Filesystem(role)
+        | ProvisionFieldId::VolumeLabel(role)
+        | ProvisionFieldId::StartLba(role)
+        | ProvisionFieldId::Capacity(role) => DiskRegionKind::from_partition_role(role),
+        _ => match id.region_focus() {
+            ProvisionRegionFocus::Boot => DiskRegionKind::Boot,
+            ProvisionRegionFocus::Share if state.provision().kind.mode() == Some(1) => {
+                DiskRegionKind::Combined
+            }
+            ProvisionRegionFocus::Share => DiskRegionKind::Share,
+            ProvisionRegionFocus::Encrypt => DiskRegionKind::Encrypt,
+            ProvisionRegionFocus::None => return muted(),
+        },
+    };
+    theme.disk_region(kind)
+}
+
 pub(super) fn single_column_field<'a>(
     state: &AppState,
     index: usize,
@@ -53,6 +81,7 @@ pub(super) fn compact_field_label(label: &str) -> std::borrow::Cow<'_, str> {
         "初始化密码强制修改" => "首次改密".into(),
         "取消密码复杂性验证" => "取消复杂度".into(),
         "交换区密码最大错误次数" => "交换区错误上限".into(),
+        "二合一区密码最大错误次数" => "二合一区错误上限".into(),
         "保密区密码最大错误次数" => "保密区错误上限".into(),
         _ => label
             .strip_suffix("卷标（原样保留）")
@@ -91,7 +120,7 @@ pub(super) fn advanced_settings_row(
         Span::styled(
             if focused_active { "▌ " } else { "  " },
             if focused_active {
-                selection_marker()
+                crate::tui::theme::current().input_active()
             } else {
                 Style::default()
             },
@@ -99,7 +128,7 @@ pub(super) fn advanced_settings_row(
         Span::styled(
             "高级设置",
             if focused_active {
-                accent().add_modifier(Modifier::BOLD)
+                crate::tui::theme::current().input_active()
             } else {
                 crate::tui::theme::current().secondary_text()
             },
@@ -225,7 +254,7 @@ pub(super) fn paired_region_row(
             spans.push(Span::styled(
                 if focused_active { "▌ " } else { "  " },
                 if focused_active {
-                    selection_marker()
+                    crate::tui::theme::current().input_active()
                 } else {
                     Style::default()
                 },
@@ -233,7 +262,7 @@ pub(super) fn paired_region_row(
             if position == 0 {
                 spans.push(Span::styled(
                     crate::ui::pad_to(region, REGION_WIDTH),
-                    secondary(),
+                    field_label_style(state, index),
                 ));
             }
             spans.push(Span::styled(format!("{} ", labels[position]), muted()));
@@ -258,9 +287,9 @@ pub(super) fn paired_region_row(
                 let occupied = crate::ui::disp_width(&shown)
                     .saturating_add(2)
                     .min(value_width);
-                spans.push(Span::styled("[", accent()));
+                spans.push(Span::styled("[", input_focused()));
                 spans.push(Span::styled(shown, input_focused()));
-                spans.push(Span::styled("]", accent()));
+                spans.push(Span::styled("]", input_focused()));
                 if occupied < value_width {
                     spans.push(Span::raw(" ".repeat(value_width - occupied)));
                 }
@@ -269,7 +298,7 @@ pub(super) fn paired_region_row(
                 spans.push(Span::styled(
                     shown,
                     if focused_active {
-                        accent().add_modifier(Modifier::BOLD)
+                        crate::tui::theme::current().input_active()
                     } else {
                         crate::tui::theme::current().secondary_text()
                     },
@@ -472,26 +501,29 @@ pub(super) fn paired_region_row(
                 "  "
             },
             if left_active && parameters_focused {
-                selection_marker()
+                crate::tui::theme::current().input_active()
             } else {
                 Style::default()
             },
         ),
-        Span::styled(crate::ui::pad_to(region, REGION_WIDTH), secondary()),
+        Span::styled(
+            crate::ui::pad_to(region, REGION_WIDTH),
+            field_label_style(state, left_index),
+        ),
         Span::styled(
             format!("{} ", crate::ui::pad_to(&left_label, left_label_width)),
             muted(),
         ),
     ];
     if left_editing {
-        left.push(Span::styled("[", accent()));
+        left.push(Span::styled("[", input_focused()));
         left.push(Span::styled(left_shown, input_focused()));
-        left.push(Span::styled("]", accent()));
+        left.push(Span::styled("]", input_focused()));
     } else {
         left.push(Span::styled(
             left_shown,
             if left_active && parameters_focused {
-                accent().add_modifier(Modifier::BOLD)
+                crate::tui::theme::current().input_active()
             } else {
                 crate::tui::theme::current().secondary_text()
             },
@@ -518,7 +550,7 @@ pub(super) fn paired_region_row(
             "  "
         },
         if right_active && parameters_focused {
-            selection_marker()
+            crate::tui::theme::current().input_active()
         } else {
             Style::default()
         },
@@ -528,14 +560,14 @@ pub(super) fn paired_region_row(
         muted(),
     ));
     if right_editing {
-        spans.push(Span::styled("[", accent()));
+        spans.push(Span::styled("[", input_focused()));
         spans.push(Span::styled(right_shown, input_focused()));
-        spans.push(Span::styled("]", accent()));
+        spans.push(Span::styled("]", input_focused()));
     } else {
         spans.push(Span::styled(
             right_shown,
             if right_active && parameters_focused {
-                accent().add_modifier(Modifier::BOLD)
+                crate::tui::theme::current().input_active()
             } else {
                 crate::tui::theme::current().secondary_text()
             },

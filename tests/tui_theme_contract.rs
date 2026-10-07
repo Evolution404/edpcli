@@ -538,3 +538,28 @@ fn root_canvas_uses_theme_background_at_supported_sizes() {
         );
     }
 }
+
+#[test]
+fn input_focus_is_bright_neutral_at_every_color_depth() {
+    for theme in [
+        Theme::truecolor_dark(),
+        Theme::ansi256_dark(),
+        Theme::ansi16(),
+    ] {
+        let active = theme.input_active();
+        let editing = theme.input_focused();
+        assert_eq!(
+            active.fg,
+            Some(match theme.mode() {
+                ThemeMode::TrueColorDark => Color::Rgb(0xE8, 0xE8, 0xE8),
+                ThemeMode::Ansi256Dark => Color::Indexed(255),
+                ThemeMode::Ansi16 => Color::White,
+            })
+        );
+        assert_eq!(editing.fg, active.fg);
+        assert_ne!(active.fg, theme.accent().fg);
+        assert_eq!(active.bg, None);
+        assert!(active.add_modifier.contains(ratatui::style::Modifier::BOLD));
+        assert_ne!(editing.bg, theme.pane_surface(true).bg);
+    }
+}

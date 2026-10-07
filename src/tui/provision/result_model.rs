@@ -26,21 +26,7 @@ impl ProvisionResultSnapshot {
                 .format_targets
                 .iter()
                 .map(|item| {
-                    let role = item.target.role;
-                    let disposition = official.target_plan.as_ref().and_then(|plan| {
-                        plan.partitions
-                            .iter()
-                            .find(|part| part.geometry.role == role)
-                            .map(|part| part.disposition)
-                    });
-                    ProvisionResultPartition {
-                        role: Some(role),
-                        filesystem: item.filesystem.or(item.target.filesystem),
-                        start_lba: item.target.geometry.start_sector,
-                        size_bytes: item.target.geometry.size_bytes,
-                        selected_for_format: item.selected,
-                        disposition,
-                    }
+                    ProvisionResultPartition::from_format(item, official.target_plan.as_ref())
                 })
                 .collect(),
             crate::application::provision::PreparedProvision::Plain(plain) => plain
@@ -68,3 +54,38 @@ impl ProvisionResultSnapshot {
         }
     }
 }
+
+impl ProvisionResultPartition {
+    fn from_format(
+        item: &crate::application::provision::PlannedPartitionFormat,
+        target_plan: Option<&crate::provision::TargetProvisionPlan>,
+    ) -> Self {
+        let role = item.target.role;
+        let planned = target_plan.and_then(|plan| {
+            plan.partitions.iter().find(|part| {
+                part.geometry.role == role
+                    && part.geometry.start_lba == item.target.geometry.start_sector
+                    && part.geometry.sector_count == item.target.geometry.sector_count()
+            })
+        });
+        let filesystem = if item.selected {
+            item.filesystem.or(item.target.filesystem)
+        } else {
+            planned
+                .filter(|part| part.disposition.preserves_extent())
+                .and_then(|part| part.geometry.filesystem)
+        };
+        Self {
+            role: Some(role),
+            filesystem,
+            start_lba: item.target.geometry.start_sector,
+            size_bytes: item.target.geometry.size_bytes,
+            selected_for_format: item.selected,
+            disposition: planned.map(|part| part.disposition),
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "result_model_tests.rs"]
+mod tests;
