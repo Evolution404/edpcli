@@ -107,7 +107,7 @@ Linux arm64、Linux x86_64、Windows arm64、Windows x86_64。新增/删除正�
 
 ## Rust 与执行器基线
 
-- 发布使用的 Rust 工具链固定为 `rust-toolchain.toml` 中指定的版本；当前为 `1.98.1`。
+- 发布使用的 Rust 工具链固定为 `rust-toolchain.toml` 中指定的版本；当前为 `1.99.0`。
 - 正式持续集成 / 发布使用固定系统镜像和原生 CPU 架构执行器，避免 `*-latest` 静默切换，
   也避免把交叉编译成功误当成目标平台原生验证成功。
 - 另设 `latest` 兼容性工作流用于提前发现未来操作系统或 Rust stable 的兼容问题，但它不改变
