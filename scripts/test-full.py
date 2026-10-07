@@ -8,6 +8,11 @@ gives each binary its own timeout and duration record.
 """
 
 from __future__ import annotations
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from python_runtime import require_python
+require_python()
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,9 +20,7 @@ from dataclasses import dataclass
 import json
 import os
 import shutil
-from pathlib import Path
 import subprocess
-import sys
 import time
 from typing import Iterable
 

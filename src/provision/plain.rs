@@ -358,6 +358,26 @@ fn build_plain_provision_write_plan_inner(
         }
     }
 
+    let mut resources = crate::filesystem::FormatResourceEstimate::from_sectors(
+        12u64
+            .checked_add(source_lce.map_or(0, |extent| extent.sector_count))
+            .ok_or("Plain 资源估算溢出")?,
+    )
+    .map_err(|error| error.to_string())?;
+    for partition in &plan.partitions {
+        let estimate = crate::filesystem::estimate_format_resources(
+            partition.filesystem,
+            partition.sector_count,
+        )
+        .map_err(|error| error.to_string())?;
+        resources = resources
+            .checked_add(estimate)
+            .map_err(|error| error.to_string())?;
+    }
+    crate::filesystem::FormatResourceBudget::default()
+        .check(resources)
+        .map_err(|error| error.to_string())?;
+
     let mbr = build_plain_mbr(plan)?;
     let mut writes = BTreeMap::new();
 

@@ -519,3 +519,12 @@ pub fn named_test_capture_epoch(path: &std::path::Path) -> i64 {
         .map(|time| time.assume_utc().unix_timestamp())
         .unwrap_or(1_789_603_200)
 }
+
+// Mock host write tests reuse disk6/disk26 in one suite process. Keep those
+// fixture lifetimes disjoint, just as the production host lease requires.
+static HOST_WRITE_FIXTURE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub fn lock_host_write_fixture() -> std::sync::MutexGuard<'static, ()> {
+    HOST_WRITE_FIXTURE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}

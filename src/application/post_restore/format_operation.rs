@@ -50,7 +50,7 @@ pub fn format_partition_after_restore_on_disk_assessed(
             .ok_or(PostRestoreFormatError::TargetIdentityMissing)?;
         let mut dev = crate::application::device::open_readonly_usb_disk(runner, disk)
             .map_err(|error| PostRestoreFormatError::Operation(error.into()))?;
-        format_partition_on_disk_with_key(
+        let assessed = format_partition_on_disk_assessed(
             runner,
             disk,
             &mut dev,
@@ -60,10 +60,9 @@ pub fn format_partition_after_restore_on_disk_assessed(
             request,
             volume_label,
             volume_serial,
-            None,
-            &mut assessment,
-        )
-        .result
+        );
+        assessment = assessed.assessment;
+        assessed.format.result
     })();
     AssessedPostRestoreFormatResult {
         format: PostRestoreFormatResult {
@@ -335,7 +334,7 @@ pub(super) fn verify_current_target(
 /// Execute a separately selected and confirmed format operation on one partition.
 /// The caller's metadata-restore report is never mutated by this operation.
 #[allow(clippy::too_many_arguments)]
-pub fn format_partition_on_disk(
+pub fn format_partition_on_disk_assessed(
     runner: &dyn CmdRunner,
     disk: u32,
     dev: &mut dyn SectorDev,
@@ -345,8 +344,9 @@ pub fn format_partition_on_disk(
     request: &PartitionFormatRequest,
     volume_label: &str,
     volume_serial: u32,
-) -> PostRestoreFormatResult {
-    format_partition_on_disk_with_key(
+) -> AssessedPostRestoreFormatResult {
+    let mut assessment = None;
+    let format = format_partition_on_disk_with_key(
         runner,
         disk,
         dev,
@@ -357,8 +357,9 @@ pub fn format_partition_on_disk(
         volume_label,
         volume_serial,
         None,
-        &mut None,
-    )
+        &mut assessment,
+    );
+    AssessedPostRestoreFormatResult { format, assessment }
 }
 
 #[allow(clippy::too_many_arguments)]

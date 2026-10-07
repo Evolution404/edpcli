@@ -7,7 +7,7 @@ use crate::common::*;
 #[cfg(target_os = "macos")]
 use edpcli::application::support::SECTOR;
 #[cfg(target_os = "macos")]
-use edpcli::cli::{print_disk_table, scan_disks};
+use edpcli::cli::{print_disk_table, scan_disks_with_catalog};
 #[cfg(target_os = "macos")]
 use edpcli::platform::identity::identify;
 
@@ -106,7 +106,13 @@ fn scan_and_print_all_row_kinds() {
         }
     };
     let bak = TmpDir::new("scan_bak");
-    let rows = scan_disks(&runner, &bak.0, &read_ok);
+    let rows = scan_disks_with_catalog(&runner, &read_ok, || {
+        let selector = edpcli::application::load_backup_selector(&bak.0);
+        match selector.catalog().scan_error() {
+            Some(error) => Err(error.to_owned()),
+            None => Ok(selector.catalog().entries().to_vec()),
+        }
+    });
     let out = print_disk_table(&rows);
     assert!(out.contains("外接盘 3 个:"), "{}", out);
     assert!(out.contains("disk4") && out.contains("普通盘"), "{}", out);
@@ -161,7 +167,13 @@ fn scan_and_print_all_row_kinds() {
             Ok(vec![0; SECTOR])
         }
     };
-    let rows2 = scan_disks(&runner, &bak.0, &read_conv);
+    let rows2 = scan_disks_with_catalog(&runner, &read_conv, || {
+        let selector = edpcli::application::load_backup_selector(&bak.0);
+        match selector.catalog().scan_error() {
+            Some(error) => Err(error.to_owned()),
+            None => Ok(selector.catalog().entries().to_vec()),
+        }
+    });
     let out2 = print_disk_table(&rows2);
     assert!(out2.contains("mode1 · 二合一区"), "{}", out2);
     let row6b = rows2.iter().find(|r| r.disk == 6).unwrap();
@@ -185,7 +197,13 @@ fn scan_and_print_all_row_kinds() {
             "denied",
         ))
     };
-    let rows2 = scan_disks(&runner, &bak.0, &read_denied);
+    let rows2 = scan_disks_with_catalog(&runner, &read_denied, || {
+        let selector = edpcli::application::load_backup_selector(&bak.0);
+        match selector.catalog().scan_error() {
+            Some(error) => Err(error.to_owned()),
+            None => Ok(selector.catalog().entries().to_vec()),
+        }
+    });
     let out2 = print_disk_table(&rows2);
     assert!(
         out2.contains("管理员权限") && out2.contains("识别"),
@@ -201,7 +219,13 @@ fn scan_and_print_all_row_kinds() {
             Ok(netac[lba as usize * SECTOR..(lba as usize + 1) * SECTOR].to_vec())
         }
     };
-    let rows3 = scan_disks(&runner, &bak.0, &read_short);
+    let rows3 = scan_disks_with_catalog(&runner, &read_short, || {
+        let selector = edpcli::application::load_backup_selector(&bak.0);
+        match selector.catalog().scan_error() {
+            Some(error) => Err(error.to_owned()),
+            None => Ok(selector.catalog().entries().to_vec()),
+        }
+    });
     let row6c = rows3.iter().find(|r| r.disk == 6).unwrap();
     assert!(!row6c.denied, "短读不是权限错误，不应误导用户去提权");
     assert!(row6c
@@ -263,7 +287,13 @@ fn scan_prefers_live_plain_filesystem_over_stale_edp_protocol_fields() {
         Ok(vec![0u8; SECTOR])
     };
     let bak = TmpDir::new("stale_edp_plain_scan");
-    let rows = scan_disks(&runner, &bak.0, &read);
+    let rows = scan_disks_with_catalog(&runner, &read, || {
+        let selector = edpcli::application::load_backup_selector(&bak.0);
+        match selector.catalog().scan_error() {
+            Some(error) => Err(error.to_owned()),
+            None => Ok(selector.catalog().entries().to_vec()),
+        }
+    });
     let row = rows.iter().find(|row| row.disk == 6).unwrap();
 
     assert_eq!(

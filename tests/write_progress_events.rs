@@ -29,6 +29,7 @@ fn styled(event: &WriteEvent) -> String {
 // ══════════════════════════════════════════════════════════════════
 #[test]
 fn render_restore_events() {
+    let _fixture = crate::common::lock_host_write_fixture();
     assert_eq!(
         plain(&WriteEvent::RestoreMatchesHeader {
             disk: 6,
@@ -87,6 +88,7 @@ fn render_restore_events() {
 
 #[test]
 fn styled_events_keep_ansi_wrap() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let created = styled(&WriteEvent::BackupCreated {
         path: "/b/disk6.bin".into(),
     });

@@ -670,8 +670,8 @@ pub use error::ProvisionPlanningError;
 pub use export::{
     export_provision_image, export_sparse_plain_provision_image, export_sparse_provision_image,
 };
+pub use format_plan::plan_format_targets_typed;
 use format_plan::plan_format_targets_with_keys;
-pub use format_plan::{plan_format_targets, plan_format_targets_typed};
 pub use prepare::{
     prepare_plain_provision, prepare_provision, prepare_target_provision,
     probe_provision_key_domains_on_disk, verify_provision_source_password_on_disk,
@@ -1030,3 +1030,7 @@ use commit::{validate_key_disposition_plan, validate_target_write_set};
 
 #[cfg(test)]
 mod tests;
+
+pub mod password;
+pub mod preflight;
+pub mod result_model;

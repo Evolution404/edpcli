@@ -35,8 +35,8 @@ use crate::platform::system;
 use crate::ports::{Clock, CmdRunner, SectorDev};
 use crate::selectors::{BackupSelector, DeviceSelector};
 
+pub use super::device::guard_usb_disk;
 use super::device::open_readonly_usb_disk;
-pub use super::device::{guard_system_disk, guard_usb_disk};
 pub use super::Prompter;
 
 const OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);

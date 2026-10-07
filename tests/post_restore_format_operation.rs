@@ -5,7 +5,7 @@ use crate::common::{self, load_disk_image, netac_runner};
 use edpcli::application::filesystem::FilesystemKind;
 use edpcli::application::media_identity::MediaIdentityPin;
 use edpcli::application::post_restore::{
-    assess_partitions_readonly, format_partition_on_disk, MetadataRestoreOutcome,
+    assess_partitions_readonly, format_partition_on_disk_assessed, MetadataRestoreOutcome,
     MetadataRestoreReport, PartitionFormatRequest, PostRestoreFormatError,
     PostRestorePartitionState,
 };
@@ -144,7 +144,7 @@ fn run_with_progress(
         panic_on_write,
         ..Default::default()
     };
-    let result = format_partition_on_disk(
+    let result = format_partition_on_disk_assessed(
         &runner,
         6,
         dev,
@@ -154,12 +154,14 @@ fn run_with_progress(
         &request(),
         "恢复卷",
         0x1234_5678,
-    );
+    )
+    .format;
     (result, outcome, prompt.events)
 }
 
 #[test]
 fn format_progress_reports_actual_work_and_only_completes_after_reassessment() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let mut dev = SparseFormatDev::new();
     let (result, outcome, events) = run_with_progress(&mut dev, None, false);
     assert!(result.result.is_ok(), "{:?}", result.result);
@@ -205,6 +207,7 @@ fn format_progress_reports_actual_work_and_only_completes_after_reassessment() {
 
 #[test]
 fn format_progress_keeps_rollback_visible_without_marking_success() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let mut dev = SparseFormatDev::new();
     let (result, outcome, events) = run_with_progress(&mut dev, Some(2), false);
     let error = result.result.as_ref().unwrap_err();
@@ -245,6 +248,7 @@ fn format_progress_keeps_rollback_visible_without_marking_success() {
 
 #[test]
 fn post_write_boot_verification_and_reassessment_failures_mark_media_unknown() {
+    let _fixture = crate::common::lock_host_write_fixture();
     for fail_on_read in [2, 3] {
         let mut dev = SparseFormatDev::new();
         dev.fail_boot_read_after_write = Some(fail_on_read);
@@ -275,6 +279,7 @@ fn post_write_boot_verification_and_reassessment_failures_mark_media_unknown() {
 
 #[test]
 fn post_restore_progress_sink_panic_does_not_interrupt_format() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let mut dev = SparseFormatDev::new();
     let (result, _, events) = run_with_progress(&mut dev, None, true);
     assert!(result.result.is_ok());
@@ -351,7 +356,7 @@ fn run(
     confirm: bool,
     outcome: &MetadataRestoreOutcome,
 ) -> edpcli::application::post_restore::PostRestoreFormatResult {
-    format_partition_on_disk(
+    format_partition_on_disk_assessed(
         runner,
         6,
         dev,
@@ -362,10 +367,12 @@ fn run(
         "恢复卷",
         0x1234_5678,
     )
+    .format
 }
 
 #[test]
 fn unconfirmed_format_has_zero_writes() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let mut dev = SparseFormatDev::new();
     let (runner, outcome) = fixture(&mut dev);
     let result = run(&runner, &mut dev, false, &outcome);
@@ -375,6 +382,7 @@ fn unconfirmed_format_has_zero_writes() {
 
 #[test]
 fn non_needs_format_has_zero_writes() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let mut dev = SparseFormatDev::new();
     let (runner, mut outcome) = fixture(&mut dev);
     outcome.assessment.partitions[0].state = PostRestorePartitionState::Usable;
@@ -391,6 +399,7 @@ fn non_needs_format_has_zero_writes() {
 
 #[test]
 fn physical_identity_mismatch_has_zero_writes() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let mut dev = SparseFormatDev::new();
     let (runner, mut outcome) = fixture(&mut dev);
     outcome.format_target_pin.as_mut().unwrap().vid = Some(0xffff);
@@ -404,6 +413,7 @@ fn physical_identity_mismatch_has_zero_writes() {
 
 #[test]
 fn geometry_mismatch_has_zero_writes() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let mut dev = SparseFormatDev::new();
     let (runner, mut outcome) = fixture(&mut dev);
     outcome.partitions[0].sector_count += 1;
@@ -417,6 +427,7 @@ fn geometry_mismatch_has_zero_writes() {
 
 #[test]
 fn reopen_media_swap_has_zero_writes() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let mut dev = SparseFormatDev::new();
     let (runner, outcome) = fixture(&mut dev);
     dev.swap_on_reopen = true;
@@ -430,6 +441,7 @@ fn reopen_media_swap_has_zero_writes() {
 
 #[test]
 fn formats_only_selected_partition_and_reassesses_usable() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let mut dev = SparseFormatDev::new();
     let (runner, outcome) = fixture(&mut dev);
     let result = run(&runner, &mut dev, true, &outcome);
@@ -448,6 +460,7 @@ fn formats_only_selected_partition_and_reassesses_usable() {
 
 #[test]
 fn format_failure_preserves_verified_metadata_restore_result() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let mut dev = SparseFormatDev::new();
     let (runner, outcome) = fixture(&mut dev);
     dev.fail_write_once_after = Some(2);
@@ -463,6 +476,7 @@ fn format_failure_preserves_verified_metadata_restore_result() {
 
 #[test]
 fn encrypted_edp_partition_cannot_enter_plaintext_format() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let image = load_disk_image("netac");
     let protocol = image[..13 * SECTOR].to_vec();
     let provision = edpcli::provision::ProvisionImage::from_bytes(protocol.clone()).unwrap();
@@ -535,7 +549,7 @@ fn encrypted_edp_partition_cannot_enter_plaintext_format() {
             edpcli::application::media_identity::MediaIdentityResumePin::from_pin(&pin),
         ),
     };
-    let result = format_partition_on_disk(
+    let result = format_partition_on_disk_assessed(
         &runner,
         6,
         &mut dev,
@@ -548,7 +562,8 @@ fn encrypted_edp_partition_cannot_enter_plaintext_format() {
         },
         "恢复卷",
         0x1234_5678,
-    );
+    )
+    .format;
     assert!(result.result.is_err());
     assert!(dev.writes.is_empty());
 }
@@ -690,6 +705,7 @@ fn encrypted_mode0_fixture() -> (
 
 #[test]
 fn original_password_format_preserves_key_records_and_verifies_encrypted_boot() {
+    let _fixture = crate::common::lock_host_write_fixture();
     use edpcli::application::post_restore::{
         assess_partitions_with_password_readonly, format_encrypted_partition_on_disk,
         EncryptedPostRestoreError,
@@ -807,6 +823,7 @@ fn original_password_format_preserves_key_records_and_verifies_encrypted_boot() 
 
 #[test]
 fn edp_plaintext_partition_uses_the_same_authorized_format_path() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let (runner, mut dev, outcome, protocol) = encrypted_mode0_fixture();
     let target = &outcome.partitions[0];
     assert!(!outcome.assessment.partitions[0].requires_original_key);
@@ -814,7 +831,7 @@ fn edp_plaintext_partition_uses_the_same_authorized_format_path() {
         outcome.assessment.partitions[0].state,
         PostRestorePartitionState::NeedsFormat
     );
-    let result = format_partition_on_disk(
+    let result = format_partition_on_disk_assessed(
         &runner,
         6,
         &mut dev,
@@ -827,7 +844,8 @@ fn edp_plaintext_partition_uses_the_same_authorized_format_path() {
         },
         "启动区",
         0x1234_5678,
-    );
+    )
+    .format;
     assert!(result.result.is_ok(), "{:?}", result.result);
     assert!(dev.writes.iter().all(|lba| {
         (target.start_lba..target.start_lba + target.sector_count).contains(&u64::from(*lba))
@@ -842,6 +860,7 @@ fn edp_plaintext_partition_uses_the_same_authorized_format_path() {
 
 #[test]
 fn mode1_combined_restore_formats_plaintext_despite_need_encrypt_one() {
+    let _fixture = crate::common::lock_host_write_fixture();
     use edpcli::provision::{parse_existing_provision, OfficialPartitionMode, ProvisionImage};
 
     let (runner, mut dev, outcome, protocol) =
@@ -859,7 +878,7 @@ fn mode1_combined_restore_formats_plaintext_despite_need_encrypt_one() {
     );
     assert!(!outcome.assessment.partitions[0].requires_original_key);
 
-    let result = format_partition_on_disk(
+    let result = format_partition_on_disk_assessed(
         &runner,
         6,
         &mut dev,
@@ -872,7 +891,8 @@ fn mode1_combined_restore_formats_plaintext_despite_need_encrypt_one() {
         },
         "二合一",
         0x6ac3_074a,
-    );
+    )
+    .format;
     assert!(result.result.is_ok(), "{:?}", result.result);
 
     let raw_boot = dev.sectors.get(&(target.start_lba as u32)).unwrap();
@@ -897,6 +917,7 @@ fn mode1_combined_restore_formats_plaintext_despite_need_encrypt_one() {
 
 #[test]
 fn corrupted_file_key_crc_is_typed_and_has_zero_writes() {
+    let _fixture = crate::common::lock_host_write_fixture();
     use edpcli::application::post_restore::{
         format_encrypted_partition_on_disk, EncryptedPostRestoreError,
     };
@@ -973,6 +994,7 @@ fn run_reinitialize(
 
 #[test]
 fn reinitialize_requires_new_password_twice_and_a_distinct_password() {
+    let _fixture = crate::common::lock_host_write_fixture();
     use edpcli::application::post_restore::EncryptedPartitionReinitializeRequest;
     assert!(EncryptedPartitionReinitializeRequest::new(3, b"", b"").is_err());
     assert!(EncryptedPartitionReinitializeRequest::new(3, b"one", b"two").is_err());
@@ -997,6 +1019,7 @@ fn reinitialize_requires_new_password_twice_and_a_distinct_password() {
 
 #[test]
 fn reinitialize_safety_checks_prevent_all_writes() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let (runner, mut dev, outcome, _) = encrypted_mode0_fixture();
     assert!(run_reinitialize(&runner, &mut dev, false, &outcome)
         .result
@@ -1027,6 +1050,7 @@ fn reinitialize_safety_checks_prevent_all_writes() {
 
 #[test]
 fn reinitialize_replaces_only_selected_key_domain_and_filesystem() {
+    let _fixture = crate::common::lock_host_write_fixture();
     use edpcli::application::post_restore::assess_partitions_with_password_readonly;
     use edpcli::provision::{parse_existing_provision, ProvisionImage};
 
@@ -1093,6 +1117,7 @@ fn reinitialize_replaces_only_selected_key_domain_and_filesystem() {
 
 #[test]
 fn reinitialize_failure_does_not_change_metadata_restore_report() {
+    let _fixture = crate::common::lock_host_write_fixture();
     let (runner, mut dev, outcome, protocol) = encrypted_mode0_fixture();
     dev.fail_write_once_after = Some(2);
     assert!(run_reinitialize(&runner, &mut dev, true, &outcome)

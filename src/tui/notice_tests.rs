@@ -49,10 +49,11 @@ fn message_keys_do_not_submit_confirmation_and_quit_stays_deferred() {
     };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let mut state = AppState::new();
-    state.begin_write_wizard(
+    state.begin_write_wizard_for_identity(
         crate::tui::state::WriteKind::Restore,
         6,
         Some("unused.edpb".into()),
+        None,
     );
     state.set_error_notice("长错误原因");
     let mut tasks = TaskHub::new();

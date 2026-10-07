@@ -600,7 +600,7 @@ fn format_test_plan(mode: OfficialPartitionMode, key: &[u8; 16]) -> OfficialProv
 fn combined_boot_share_uses_boot_label_while_reusing_share_format_toggle() {
     let key = [0x42; 16];
     let plan = format_test_plan(OfficialPartitionMode::BootShareCombined, &key);
-    let choices = plan_format_targets(
+    let choices = plan_format_targets_typed(
         &plan,
         &FormatOptions {
             share: true,
@@ -639,7 +639,7 @@ fn format_executor_uses_the_same_matrix_and_preserves_protocol_sectors() {
             encrypt: mode != OfficialPartitionMode::IntranetExtranetDualPartition,
             ..FormatOptions::default()
         };
-        let choices = plan_format_targets(&plan, &options, &serials, &key).unwrap();
+        let choices = plan_format_targets_typed(&plan, &options, &serials, &key).unwrap();
         let mut dev = MemoryDev::default();
         for lba in 0..13u32 {
             dev.sectors.insert(lba, vec![lba as u8; SECTOR]);
@@ -671,7 +671,7 @@ fn format_executor_uses_the_same_matrix_and_preserves_protocol_sectors() {
 fn format_failure_keeps_the_protocol_and_prior_successful_partition() {
     let key = [0x42; 16];
     let plan = format_test_plan(OfficialPartitionMode::DefaultThreePartition, &key);
-    let choices = plan_format_targets(
+    let choices = plan_format_targets_typed(
         &plan,
         &FormatOptions {
             boot: true,
@@ -716,7 +716,7 @@ fn portable_test_temp_file_name_uses_safe_ascii_components() {
 fn sparse_export_includes_selected_format_images() {
     let key = [0x42; 16];
     let plan = format_test_plan(OfficialPartitionMode::DefaultThreePartition, &key);
-    let choices = plan_format_targets(
+    let choices = plan_format_targets_typed(
         &plan,
         &FormatOptions {
             boot: true,
@@ -936,8 +936,9 @@ fn writable_filesystem_validation_only_applies_to_selected_format_actions() {
             );
             let targets = plan.format_targets().unwrap();
             let serials = vec![1; targets.len()];
-            let choices = plan_format_targets(&plan, &FormatOptions::default(), &serials, &key)
-                .expect("unselected regions need no writable filesystem writer");
+            let choices =
+                plan_format_targets_typed(&plan, &FormatOptions::default(), &serials, &key)
+                    .expect("unselected regions need no writable filesystem writer");
             assert!(choices
                 .iter()
                 .all(|choice| !choice.selected && choice.prepared_image.is_none()));
@@ -950,7 +951,7 @@ fn writable_filesystem_validation_only_applies_to_selected_format_actions() {
                     PartitionRole::CompatibilityReserve => unreachable!(),
                 }
                 assert!(
-                    plan_format_targets(&plan, &options, &serials, &key).is_err(),
+                    plan_format_targets_typed(&plan, &options, &serials, &key).is_err(),
                     "{mode:?}: {:?} must reject formatting {readonly_fs:?}",
                     target.role
                 );
@@ -964,7 +965,7 @@ fn writable_filesystem_validation_only_applies_to_selected_format_actions() {
             encrypt: FilesystemKind::ExFat,
         },
     );
-    let choices = plan_format_targets(
+    let choices = plan_format_targets_typed(
         &plan,
         &FormatOptions {
             encrypt: true,

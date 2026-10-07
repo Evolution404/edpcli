@@ -11,10 +11,8 @@ use std::time::Duration;
 
 use crate::common::{EdpCliError, EdpCliResult, EXIT_TARGET};
 use crate::platform::system;
-use crate::platform::{HardwareProbe, WriteGuard};
-use crate::ports::{CmdRunner, SectorDev};
-
-use super::device::guard_usb_disk;
+use crate::platform::HardwareProbe;
+use crate::ports::{CmdRunner, DeviceObserver, SectorDev, WriteLease, WriteLeaseProvider};
 
 /// Read-only sessions have no transaction capability.
 /// ```compile_fail
@@ -27,7 +25,7 @@ use super::device::guard_usb_disk;
 pub struct ReadOnly;
 
 pub struct PreparedWrite {
-    _guard: WriteGuard,
+    _guard: Box<dyn WriteLease>,
 }
 
 /// The device remains exclusively borrowed until its locked session is released.
@@ -43,7 +41,7 @@ pub struct PreparedWrite {
 /// }
 /// ```
 pub struct WriteLocked<'d> {
-    _guard: WriteGuard,
+    _guard: Box<dyn WriteLease>,
     dev: &'d mut dyn SectorDev,
 }
 
@@ -53,8 +51,30 @@ impl Drop for WriteLocked<'_> {
     fn drop(&mut self) {}
 }
 
+enum SessionCapabilities<'a> {
+    Host(system::SystemDeviceAccess<'a>),
+    Injected {
+        observer: &'a dyn DeviceObserver,
+        leases: &'a dyn WriteLeaseProvider,
+    },
+}
+impl SessionCapabilities<'_> {
+    fn observer(&self) -> &dyn DeviceObserver {
+        match self {
+            Self::Host(host) => host,
+            Self::Injected { observer, .. } => *observer,
+        }
+    }
+    fn leases(&self) -> &dyn WriteLeaseProvider {
+        match self {
+            Self::Host(host) => host,
+            Self::Injected { leases, .. } => *leases,
+        }
+    }
+}
+
 pub struct TargetSession<'a, State> {
-    runner: &'a dyn CmdRunner,
+    capabilities: SessionCapabilities<'a>,
     disk: u32,
     state: State,
     geometry: Option<crate::domain::hardware::ObservedDeviceGeometry>,
@@ -69,27 +89,44 @@ pub enum ReopenAndVerifyError<E = EdpCliError> {
 
 impl<'a> TargetSession<'a, ReadOnly> {
     pub fn open_usb(runner: &'a dyn CmdRunner, disk: u32) -> EdpCliResult<Self> {
-        guard_usb_disk(runner, disk)?;
+        Self::open_capabilities(
+            SessionCapabilities::Host(system::SystemDeviceAccess { runner }),
+            disk,
+        )
+    }
+
+    /// Open a session with independently supplied facts and lease acquisition.
+    pub fn open_with_ports(
+        observer: &'a dyn DeviceObserver,
+        leases: &'a dyn WriteLeaseProvider,
+        disk: u32,
+    ) -> EdpCliResult<Self> {
+        Self::open_capabilities(SessionCapabilities::Injected { observer, leases }, disk)
+    }
+
+    fn open_capabilities(capabilities: SessionCapabilities<'a>, disk: u32) -> EdpCliResult<Self> {
+        super::device::guard_observed_usb_disk(capabilities.observer(), disk)?;
+        let geometry = capabilities.observer().device_geometry(disk);
         Ok(Self {
-            runner,
+            capabilities,
             disk,
             state: ReadOnly,
-            geometry: system::device_geometry(runner, disk),
+            geometry,
         })
     }
 
     pub fn prepare_write(self) -> io::Result<TargetSession<'a, PreparedWrite>> {
         self.writable_geometry()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.msg))?;
-        if system::device_geometry(self.runner, self.disk) != self.geometry {
+        if self.capabilities.observer().device_geometry(self.disk) != self.geometry {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "写准备前设备几何发生变化",
             ));
         }
-        let guard = system::prepare_write(self.runner, self.disk)?;
+        let guard = self.capabilities.leases().acquire_write_lease(self.disk)?;
         Ok(TargetSession {
-            runner: self.runner,
+            capabilities: self.capabilities,
             disk: self.disk,
             state: PreparedWrite { _guard: guard },
             geometry: self.geometry,
@@ -106,7 +143,7 @@ impl<'a> TargetSession<'a, PreparedWrite> {
     ) -> Result<TargetSession<'a, WriteLocked<'d>>, ReopenAndVerifyError<E>> {
         dev.reopen_rdwr(wait)
             .map_err(ReopenAndVerifyError::Reopen)?;
-        if system::device_geometry(self.runner, self.disk) != self.geometry {
+        if self.capabilities.observer().device_geometry(self.disk) != self.geometry {
             return Err(ReopenAndVerifyError::Geometry(EdpCliError::new(
                 EXIT_TARGET,
                 "重开后设备几何发生变化，禁止写入",
@@ -115,7 +152,7 @@ impl<'a> TargetSession<'a, PreparedWrite> {
         verify(dev).map_err(ReopenAndVerifyError::Verify)?;
         let PreparedWrite { _guard } = self.state;
         Ok(TargetSession {
-            runner: self.runner,
+            capabilities: self.capabilities,
             disk: self.disk,
             state: WriteLocked { _guard, dev },
             geometry: self.geometry,
@@ -140,17 +177,15 @@ impl<State> TargetSession<'_, State> {
     }
 
     pub fn total_sectors(&self) -> Option<u64> {
-        system::disk_total_sectors(self.runner, self.disk)
+        self.capabilities.observer().total_sectors(self.disk)
     }
 
     pub fn hardware_probe(&self) -> Option<HardwareProbe> {
-        self.runner
-            .hardware_probe(self.disk)
-            .or_else(|| crate::platform::fallback_hardware_probe(self.runner, self.disk))
+        self.capabilities.observer().hardware_probe(self.disk)
     }
 
     pub fn hardware_serial(&self) -> Option<String> {
-        self.runner.hardware_serial(self.disk)
+        self.capabilities.observer().hardware_serial(self.disk)
     }
 }
 
@@ -167,6 +202,9 @@ impl TargetSession<'_, WriteLocked<'_>> {
         crate::diskio::execute_write_transaction(self.state.dev, plan)
     }
 }
+
+#[cfg(test)]
+mod port_tests;
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {

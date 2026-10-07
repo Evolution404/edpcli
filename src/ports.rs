@@ -3,6 +3,31 @@ use crate::domain::hardware::{HardwareProbe, ObservedDeviceGeometry};
 use std::io;
 use std::time::Duration;
 
+/// Command execution carries no device authorization or write lease.
+pub trait CommandExecutor {
+    fn run_command(&self, cmd: &[&str], timeout: Duration) -> io::Result<CommandOutcome>;
+}
+
+/// Fresh device facts, independent of command execution and raw write access.
+pub trait DeviceObserver {
+    fn is_system_disk(&self, disk: u32) -> bool;
+    fn is_external_usb_whole(&self, disk: u32) -> bool;
+    fn device_geometry(&self, disk: u32) -> Option<ObservedDeviceGeometry>;
+    fn total_sectors(&self, disk: u32) -> Option<u64>;
+    fn hardware_probe(&self, disk: u32) -> Option<HardwareProbe>;
+    fn hardware_serial(&self, disk: u32) -> Option<String>;
+}
+
+/// Owned write exclusion; releasing it must release the platform guard.
+/// Providers must reject overlapping leases for the same target.
+pub trait WriteLease {}
+
+pub trait WriteLeaseProvider {
+    fn acquire_write_lease(&self, disk: u32) -> io::Result<Box<dyn WriteLease>>;
+}
+
+/// Transitional host probe adapter. New safety sessions use DeviceObserver and
+/// WriteLeaseProvider separately; legacy read-side consumers still use this contract.
 pub trait CmdRunner {
     fn check_output(&self, cmd: &[&str], timeout: Duration) -> io::Result<String>;
     fn hardware_probe(&self, _disk: u32) -> Option<HardwareProbe> {

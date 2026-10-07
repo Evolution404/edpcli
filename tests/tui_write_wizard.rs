@@ -14,7 +14,7 @@ use edpcli::tui::state::{AppState, NavCommand, StateEffect, WizardStage, WriteIn
 #[test]
 fn backup_create_skips_yes_but_restore_requires_exact_media_write_authorization() {
     let mut state = AppState::new();
-    state.begin_write_wizard(WriteKind::BackupCreate, 6, None);
+    state.begin_write_wizard_for_identity(WriteKind::BackupCreate, 6, None, None);
     assert_eq!(state.wizard().expect("wizard").stage, WizardStage::Confirm);
     for ch in ['Y', 'E', 'S'] {
         state.push_wizard_confirmation(ch);
@@ -33,7 +33,7 @@ fn backup_create_skips_yes_but_restore_requires_exact_media_write_authorization(
     state.finish_write(Ok(()));
     state.navigate(NavCommand::Escape, 20);
 
-    state.begin_write_wizard(WriteKind::Restore, 9, Some("backup.edpb".into()));
+    state.begin_write_wizard_for_identity(WriteKind::Restore, 9, Some("backup.edpb".into()), None);
     for ch in ['Y', 'E', 'S', 'x'] {
         state.push_wizard_confirmation(ch);
     }
@@ -51,7 +51,7 @@ fn backup_create_skips_yes_but_restore_requires_exact_media_write_authorization(
 fn restore_intent_pins_both_disk_and_backup_path() {
     let mut state = AppState::new();
     let path = PathBuf::from("backup/example.bin");
-    state.begin_write_wizard(WriteKind::Restore, 9, Some(path.clone()));
+    state.begin_write_wizard_for_identity(WriteKind::Restore, 9, Some(path.clone()), None);
     assert_eq!(state.wizard().expect("wizard").stage, WizardStage::Confirm);
     for ch in ['Y', 'E', 'S'] {
         state.push_wizard_confirmation(ch);
@@ -71,7 +71,7 @@ fn restore_intent_pins_both_disk_and_backup_path() {
 #[test]
 fn finishing_write_clears_critical_state_only_after_result_is_recorded() {
     let mut state = AppState::new();
-    state.begin_write_wizard(WriteKind::BackupCreate, 6, None);
+    state.begin_write_wizard_for_identity(WriteKind::BackupCreate, 6, None, None);
     let _ = state.confirm_backup_create();
     assert!(state.is_critical_operation());
 
@@ -83,10 +83,15 @@ fn finishing_write_clears_critical_state_only_after_result_is_recorded() {
 #[test]
 fn running_operation_rejects_new_wizards_but_allows_read_only_workspace_navigation() {
     let mut state = AppState::new();
-    assert!(state.begin_write_wizard(WriteKind::BackupCreate, 6, None));
+    assert!(state.begin_write_wizard_for_identity(WriteKind::BackupCreate, 6, None, None));
     let _ = state.confirm_backup_create();
 
-    assert!(!state.begin_write_wizard(WriteKind::Restore, 7, Some("other.bin".into())));
+    assert!(!state.begin_write_wizard_for_identity(
+        WriteKind::Restore,
+        7,
+        Some("other.bin".into()),
+        None
+    ));
     assert!(!state.begin_backup_delete(
         "old.bin".into(),
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
@@ -264,7 +269,7 @@ fn restore_post_processing_rejects_ntfs_through_shared_filesystem_capability() {
 #[test]
 fn restore_post_processing_requires_a_second_yes_before_plain_format() {
     let mut state = AppState::new();
-    state.begin_write_wizard(WriteKind::Restore, 4, Some("plain.edpb".into()));
+    state.begin_write_wizard_for_identity(WriteKind::Restore, 4, Some("plain.edpb".into()), None);
     for ch in ['Y', 'E', 'S'] {
         state.push_wizard_confirmation(ch);
     }
@@ -367,7 +372,7 @@ fn encrypted_post_restore_outcome(state: PostRestorePartitionState) -> MetadataR
 }
 
 fn begin_post_restore(state: &mut AppState, outcome: MetadataRestoreOutcome) {
-    state.begin_write_wizard(WriteKind::Restore, 4, Some("edp.edpb".into()));
+    state.begin_write_wizard_for_identity(WriteKind::Restore, 4, Some("edp.edpb".into()), None);
     for ch in ['Y', 'E', 'S'] {
         state.push_wizard_confirmation(ch);
     }
@@ -919,7 +924,7 @@ fn legacy_backup_without_volume_label_stays_empty_instead_of_inventing_a_name() 
 fn shrinking_after_yes_cannot_construct_any_media_write_intent() {
     use ratatui::layout::Size;
     let mut state = AppState::new();
-    state.begin_write_wizard(WriteKind::Restore, 9, Some("backup.edpb".into()));
+    state.begin_write_wizard_for_identity(WriteKind::Restore, 9, Some("backup.edpb".into()), None);
     for ch in "YES".chars() {
         state.push_wizard_confirmation(ch);
     }

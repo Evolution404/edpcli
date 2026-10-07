@@ -5,14 +5,17 @@ One command executes every registered rule against every tracked/non-ignored fil
 Rust evidence comes from syn ASTs, including all cfg branches, not text grep.
 """
 from __future__ import annotations
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from python_runtime import require_python
+require_python()
 import argparse
 from collections import Counter, defaultdict
 import hashlib
 import json
-from pathlib import Path
 import re
 import subprocess
-import sys
 from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]

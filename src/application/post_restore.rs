@@ -27,7 +27,7 @@ pub use format_operation::{
 };
 pub use format_operation::{
     format_partition_after_restore_on_disk, format_partition_after_restore_on_disk_assessed,
-    format_partition_on_disk,
+    format_partition_on_disk_assessed,
 };
 pub use layout_projection::project_restored_layout_readonly;
 pub use reinitialize::{

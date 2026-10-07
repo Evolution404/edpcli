@@ -1166,13 +1166,14 @@ fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
     }
 
     let mut state = AppState::new();
-    state.begin_write_wizard(
+    state.begin_write_wizard_for_identity(
         WriteKind::Restore,
         4,
         Some(
             "/Users/test/.edpcli-backup/disk5_245760000_vid2bdf_pid0300_plain_20260929_073104.edpb"
                 .into(),
         ),
+        None,
     );
 
     let (review, review_colors) = rendered_text(&state);
@@ -1293,7 +1294,12 @@ fn restore_workspace_has_visual_hierarchy_and_inline_post_restore_action() {
     );
 
     let mut password_state = AppState::new();
-    password_state.begin_write_wizard(WriteKind::Restore, 4, Some("edp.edpb".into()));
+    password_state.begin_write_wizard_for_identity(
+        WriteKind::Restore,
+        4,
+        Some("edp.edpb".into()),
+        None,
+    );
     for ch in ['Y', 'E', 'S'] {
         password_state.push_wizard_confirmation(ch);
     }

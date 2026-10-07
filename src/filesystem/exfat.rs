@@ -601,6 +601,11 @@ impl FilesystemDriver for ExFatDriver {
             ));
         }
 
+        super::FormatResourceBudget::default().check(super::estimate_format_resources(
+            self.kind(),
+            geometry.sector_count,
+        )?)?;
+
         let mut sectors = BTreeMap::new();
         let mut main_boot = [[0u8; 512]; 12];
         let b = &mut main_boot[0];
@@ -764,6 +769,21 @@ impl FilesystemDriver for ExFatDriver {
         }
         Ok(FormatVerification { metadata })
     }
+}
+
+pub(super) fn format_sector_count(volume_sectors: u64) -> Result<u64, FilesystemError> {
+    let shift = choose_shift(volume_sectors)?;
+    let spc = 1u64 << shift;
+    let (fat, _, clusters) = layout(volume_sectors, shift).ok_or_else(|| {
+        FilesystemError::for_filesystem(
+            FilesystemKind::ExFat,
+            FilesystemErrorKind::InvalidGeometry,
+            "exFAT 几何计算失败",
+        )
+    })?;
+    let bitmap = u64::from(clusters).div_ceil(8).div_ceil(spc * 512);
+    let upcase = (exfat_upcase_table().len() as u64).div_ceil(spc * 512);
+    Ok(24 + fat + (1 + bitmap + upcase) * spc)
 }
 
 #[cfg(test)]

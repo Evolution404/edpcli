@@ -152,6 +152,12 @@ fn provision_preview_and_submit_share_single_preflight_decision_source() {
         !field_input.contains("provision_password_plan_intent"),
         "field_input must not introduce a second submit-only password planning rule"
     );
+    let adapter = fs::read_to_string("src/tui/provision/preflight.rs").unwrap();
+    let evaluator = fs::read_to_string("src/application/provision/preflight.rs").unwrap();
+    assert!(adapter.contains("ProvisionPreflightInput"));
+    assert!(!adapter.contains("PreserveAssessment::for_partition"));
+    assert!(!evaluator.contains("AppState"));
+    assert!(!evaluator.contains("self.provision.form"));
 }
 
 #[test]

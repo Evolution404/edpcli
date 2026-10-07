@@ -5,19 +5,21 @@ use crate::diskio::{raw_path, FileDev};
 use crate::platform::system;
 use crate::ports::CmdRunner;
 
-pub fn guard_system_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<()> {
-    if crate::platform::is_system_disk(runner, disk) {
+pub fn guard_usb_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<()> {
+    guard_observed_usb_disk(&system::SystemDeviceAccess { runner }, disk)
+}
+
+pub fn guard_observed_usb_disk(
+    observer: &dyn crate::ports::DeviceObserver,
+    disk: u32,
+) -> EdpCliResult<()> {
+    if observer.is_system_disk(disk) {
         return Err(EdpCliError::new(
             EXIT_TARGET,
             format!("错误: 拒绝系统盘 disk{disk}"),
         ));
     }
-    Ok(())
-}
-
-pub fn guard_usb_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<()> {
-    guard_system_disk(runner, disk)?;
-    if system::usb_disk(runner, disk).is_some() {
+    if observer.is_external_usb_whole(disk) {
         return Ok(());
     }
     Err(EdpCliError::new(

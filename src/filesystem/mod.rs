@@ -13,6 +13,7 @@ mod metadata;
 mod ntfs;
 mod policy;
 pub mod registry;
+mod resource_budget;
 
 pub use driver::{DetectionConfidence, DetectionResult, FilesystemCapabilities, FilesystemDriver};
 pub use error::{FilesystemError, FilesystemErrorKind};
@@ -40,6 +41,9 @@ pub use policy::{
 pub use registry::{
     default_registry, detect_boot_sector, detect_boot_sector_with_geometry, DetectedFilesystem,
     DriverRegistry,
+};
+pub use resource_budget::{
+    estimate_format_resources, FormatResourceBudget, FormatResourceEstimate,
 };
 
 pub(crate) mod probe;

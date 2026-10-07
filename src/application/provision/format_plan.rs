@@ -16,15 +16,6 @@ fn build_plain_format_image(
     )
 }
 
-pub fn plan_format_targets(
-    plan: &OfficialProvisionPlan,
-    options: &FormatOptions,
-    serials: &[u32],
-    file_key: &[u8; 16],
-) -> Result<Vec<PlannedPartitionFormat>, String> {
-    plan_format_targets_typed(plan, options, serials, file_key).map_err(|error| error.to_string())
-}
-
 pub fn plan_format_targets_typed(
     plan: &OfficialProvisionPlan,
     options: &FormatOptions,
@@ -95,6 +86,39 @@ pub(super) fn plan_format_targets_with_keys(
             }
         })?;
     }
+    let mut resources =
+        crate::filesystem::FormatResourceEstimate::from_sectors(0).map_err(|source| {
+            ProvisionPlanningError::Filesystem {
+                partition: None,
+                source,
+            }
+        })?;
+    for choice in planned.iter().filter(|choice| choice.selected) {
+        let estimate = crate::filesystem::estimate_format_resources(
+            choice
+                .filesystem
+                .ok_or(ProvisionPlanningError::MissingFilesystem {
+                    role: choice.target.role,
+                })?,
+            choice.target.geometry.sector_count(),
+        )
+        .map_err(|source| ProvisionPlanningError::Filesystem {
+            partition: None,
+            source,
+        })?;
+        resources = resources.checked_add(estimate).map_err(|source| {
+            ProvisionPlanningError::Filesystem {
+                partition: None,
+                source,
+            }
+        })?;
+    }
+    crate::filesystem::FormatResourceBudget::default()
+        .check(resources)
+        .map_err(|source| ProvisionPlanningError::Filesystem {
+            partition: None,
+            source,
+        })?;
     for (index, choice) in planned
         .iter_mut()
         .enumerate()

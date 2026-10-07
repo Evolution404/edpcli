@@ -91,7 +91,7 @@ fn choices() -> Vec<PlannedPartitionFormat> {
         wrap_file_key(DEFAULT_KEY_DOMAIN_PASSWORD, key, FileKeyWrapMode::Sm4),
     )
     .unwrap();
-    plan_format_targets(
+    plan_format_targets_typed(
         &plan,
         &FormatOptions {
             boot: true,

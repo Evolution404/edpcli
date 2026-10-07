@@ -30,17 +30,37 @@ pub mod write;
 
 /// 稳定外部接口下的共享容量/退出语义兼容门面；实现仍由 crate 内部 `common` 持有。
 pub mod support {
-    pub use crate::common::*;
+    pub use crate::common::{
+        fmt_capacity, fmt_capacity_sectors, fmt_capacity_with_system, group_digits,
+        CapacityUnitSystem, EdpCliError, EdpCliResult, CAPACITY_UNIT_SYSTEM, EXIT_BACKUP,
+        EXIT_CANCELLED, EXIT_INTERMEDIATE, EXIT_IO, EXIT_OK, EXIT_ROLLED_BACK, EXIT_TARGET,
+        EXIT_USAGE, METADATA_IMAGE_LEN, METADATA_LAST_LBA, METADATA_SECTOR_COUNT, SECTOR,
+    };
 }
 
 /// 稳定 application 门面下的文件系统纯模型与解析/格式化能力。
 pub mod filesystem {
-    pub use crate::filesystem::*;
+    pub use crate::filesystem::{
+        analysis, build_empty_exfat, build_empty_fat16, build_empty_fat32, build_empty_filesystem,
+        build_empty_filesystem_typed, default_registry, detect_boot_sector,
+        detect_boot_sector_with_geometry, estimate_format_resources, is_writable_filesystem,
+        registry, shift_writable_filesystem, validate_volume_label, validate_volume_label_typed,
+        validate_writable_filesystem, BootSectorReader, DetectedFilesystem, DetectionConfidence,
+        DetectionResult, DriverRegistry, ExFatDriver, Fat12Driver, Fat16Driver, Fat32Driver,
+        FilesystemCapabilities, FilesystemDriver, FilesystemError, FilesystemErrorKind,
+        FilesystemGeometry, FilesystemKind, FilesystemMetadata, FilesystemReader, FilesystemWrite,
+        FormatPlan, FormatRequest, FormatResourceBudget, FormatResourceEstimate,
+        FormatVerification, NtfsDriver, SparseFilesystemImage, EXFAT_DRIVER, FAT12_DRIVER,
+        FAT16_DRIVER, FAT32_DRIVER, NTFS_DRIVER, WRITABLE_FILESYSTEMS,
+    };
 }
 
 /// 稳定 application 门面下的元信息汇总能力。
 pub mod metadata {
-    pub use crate::metainfo::*;
+    pub use crate::metainfo::{
+        backup_ownership, ownership_from_lba8, render, render_with_source, safe6_label_from_lba6,
+        summarize, MetaInfoSummary, OwnershipInfo, PartitionInfo,
+    };
 }
 pub use crate::infrastructure::backup_store::catalog::{BackupHealth, BackupIntegrityStatus};
 /// Partition values carried by device-dashboard presentation rows.

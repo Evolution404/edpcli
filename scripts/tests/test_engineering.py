@@ -103,6 +103,14 @@ class RedundancyAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Unimplemented'):
             redundancy_audit.evaluate(ROOT, [], dict(functions=[], references=[], registered=[], missing_modules=[]), {}, set(), [{'id': 'new', 'kind': 'new'}])
 
+    def test_removed_test_convenience_apis_cannot_recur_in_production(self):
+        names = ["plan_format_targets", "begin_write_wizard", "scan_disks", "format_partition_on_disk"]
+        facts = dict(functions=[], registered=[], missing_modules=[], references=[],
+                     declared_symbols=[dict(path="src/example.rs", name=name, test_only=False) for name in names])
+        found = self.findings(ROOT, [], facts, {})
+        self.assertEqual({f['subject'] for f in found if f['rule'] == 'retired_symbol'}, set(names))
+        self.assertTrue(all(f['certainty'] == 'confirmed' for f in found))
+
     def test_retired_symbols_and_missing_modules_are_confirmed(self):
         facts = dict(functions=[], registered=[], missing_modules=['src/missing.rs'],
                      declared_symbols=[dict(path='src/c.rs', name='ProvisionValidator', test_only=False)],
@@ -114,6 +122,22 @@ class RedundancyAuditTests(unittest.TestCase):
 
 
 class PythonToolingTests(unittest.TestCase):
+    def test_unsupported_interpreter_fails_before_tooling_runs(self):
+        from python_runtime import require_python
+        for version in [(3, 9), (3, 10)]:
+            with self.assertRaisesRegex(SystemExit, r"require Python 3.11\+"):
+                require_python(version)
+        for version in [(3, 11), (3, 14)]:
+            require_python(version)
+
+    def test_ci_runs_whole_repository_audit_for_every_change(self):
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        job = ci.split("  repository-audit:\n", 1)[1].split("  protocol-audit:\n", 1)[0]
+        self.assertNotIn("if: needs.changes", job)
+        self.assertIn("uv run --locked python scripts/audit-redundancy.py --check", job)
+        self.assertIn("if: always()", job)
+        self.assertIn("path: target/redundancy-audit/", job)
+
     def test_uv_project_contract_is_pinned_and_portable(self):
         project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         self.assertEqual(project["project"]["requires-python"], ">=3.11")

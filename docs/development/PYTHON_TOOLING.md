@@ -50,3 +50,8 @@ workflow 不允许直接调用裸 `python`/`python3` 执行仓库脚本，统一
 3. `protocol` 依赖组解析与导入验证。
 
 这些约束由 `scripts/tests/test_engineering.py` 回归测试锁定，防止后续 CI 或本地门禁重新退化为系统 Python。
+
+`test_gate.py`、`test-full.py`、全仓审计和 CI 构建事实入口在导入版本专用模块前通过
+[`scripts/python_runtime.py`](../../scripts/python_runtime.py) 的 `require_python` 检查 3.11 下限；直接使用旧解释器会提示改用 uv。
+CI 的 repository contract 对每次 push/PR 执行全仓冗余审计（包括纯文档变化），
+并始终上传 `target/redundancy-audit/` 报告；确认问题阻断，候选保留人工核查语义。

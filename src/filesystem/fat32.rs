@@ -421,6 +421,11 @@ impl FilesystemDriver for Fat32Driver {
             ));
         };
 
+        super::FormatResourceBudget::default().check(super::estimate_format_resources(
+            self.kind(),
+            geometry.sector_count,
+        )?)?;
+
         let mut boot = [0u8; SECTOR_SIZE];
         boot[0..3].copy_from_slice(&[0xeb, 0x58, 0x90]);
         boot[3..11].copy_from_slice(b"MSDOS5.0");
@@ -588,4 +593,22 @@ impl FilesystemDriver for Fat32Driver {
 
         Ok(FormatVerification { metadata })
     }
+}
+
+pub(super) fn format_sector_count(volume_sectors: u64) -> Result<u64, FilesystemError> {
+    if volume_sectors > u32::MAX as u64 {
+        return Err(FilesystemError::for_filesystem(
+            FilesystemKind::Fat32,
+            FilesystemErrorKind::InvalidGeometry,
+            "FAT32 分区扇区数超过 u32",
+        ));
+    }
+    let (spc, fat, _) = choose_format_geometry(volume_sectors).ok_or_else(|| {
+        FilesystemError::for_filesystem(
+            FilesystemKind::Fat32,
+            FilesystemErrorKind::InvalidGeometry,
+            "无法表示为当前已验证范围内的 FAT32",
+        )
+    })?;
+    Ok(4 + COPIES * u64::from(fat) + u64::from(spc))
 }

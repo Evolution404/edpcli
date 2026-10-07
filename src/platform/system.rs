@@ -13,13 +13,88 @@ use crate::ports::CmdRunner;
 
 pub struct SysRunner;
 
-impl SysRunner {
-    pub fn run_command(
+impl crate::ports::CommandExecutor for SysRunner {
+    fn run_command(
         &self,
         cmd: &[&str],
         timeout: Duration,
     ) -> io::Result<crate::ports::CommandOutcome> {
         crate::infrastructure::process::run_command(cmd, timeout)
+    }
+}
+
+/// Host adapter for the narrow observation and lease ports. It never caches
+/// the facts used by TargetSession before unmount or after reopen.
+pub struct SystemDeviceAccess<'a> {
+    pub runner: &'a dyn CmdRunner,
+}
+
+impl crate::ports::DeviceObserver for SystemDeviceAccess<'_> {
+    fn is_system_disk(&self, disk: u32) -> bool {
+        crate::platform::is_system_disk(self.runner, disk)
+    }
+    fn is_external_usb_whole(&self, disk: u32) -> bool {
+        usb_disk(self.runner, disk).is_some()
+    }
+    fn device_geometry(
+        &self,
+        disk: u32,
+    ) -> Option<crate::domain::hardware::ObservedDeviceGeometry> {
+        device_geometry(self.runner, disk)
+    }
+    fn total_sectors(&self, disk: u32) -> Option<u64> {
+        disk_total_sectors(self.runner, disk)
+    }
+    fn hardware_probe(&self, disk: u32) -> Option<HardwareProbe> {
+        self.runner
+            .hardware_probe(disk)
+            .or_else(|| crate::platform::fallback_hardware_probe(self.runner, disk))
+    }
+    fn hardware_serial(&self, disk: u32) -> Option<String> {
+        self.runner.hardware_serial(disk)
+    }
+}
+
+static WRITE_LEASES: std::sync::Mutex<Option<std::collections::HashSet<u32>>> =
+    std::sync::Mutex::new(None);
+
+struct SystemWriteLease {
+    disk: u32,
+    guard: Option<crate::platform::WriteGuard>,
+}
+impl crate::ports::WriteLease for SystemWriteLease {}
+impl SystemWriteLease {
+    fn reserve(disk: u32) -> io::Result<Self> {
+        let mut leases = WRITE_LEASES
+            .lock()
+            .map_err(|_| io::Error::other("写租约状态不可用"))?;
+        if !leases.get_or_insert_with(Default::default).insert(disk) {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                format!("disk{disk} 已持有写租约"),
+            ));
+        }
+        Ok(Self { disk, guard: None })
+    }
+}
+impl Drop for SystemWriteLease {
+    fn drop(&mut self) {
+        // Platform locks must be released before another in-process writer enters.
+        self.guard = None;
+        let mut leases = WRITE_LEASES
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(leases) = leases.as_mut() {
+            leases.remove(&self.disk);
+        }
+    }
+}
+
+impl crate::ports::WriteLeaseProvider for SystemDeviceAccess<'_> {
+    fn acquire_write_lease(&self, disk: u32) -> io::Result<Box<dyn crate::ports::WriteLease>> {
+        let mut lease = SystemWriteLease::reserve(disk)?;
+        lease.guard = Some(prepare_write(self.runner, disk)?);
+        Ok(Box::new(lease))
     }
 }
 
@@ -480,5 +555,20 @@ mod tests {
         let cached = ReadProbeCache::new(&inner);
         assert_eq!(cached.hardware_serial(4).as_deref(), Some("SERIAL-4"));
         assert_eq!(inner.calls.get(), 1);
+    }
+}
+
+#[cfg(test)]
+mod lease_tests {
+    use super::SystemWriteLease;
+    #[test]
+    fn host_lease_excludes_same_disk_and_releases_on_drop_without_device_io() {
+        let first = SystemWriteLease::reserve(u32::MAX).unwrap();
+        assert!(SystemWriteLease::reserve(u32::MAX).is_err());
+        let different = SystemWriteLease::reserve(u32::MAX - 1).unwrap();
+        drop(first);
+        let reacquired = SystemWriteLease::reserve(u32::MAX).unwrap();
+        drop(reacquired);
+        drop(different);
     }
 }

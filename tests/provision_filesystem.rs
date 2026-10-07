@@ -7,7 +7,7 @@ use edpcli::{
         build_empty_exfat, build_empty_fat16, build_empty_fat32, FilesystemKind,
         SparseFilesystemImage,
     },
-    application::provision::{plan_format_targets, FormatOptions},
+    application::provision::{plan_format_targets_typed, FormatOptions},
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
     provision::{
         build_official_partition_filesystem, decrypt_mode2, wrap_file_key,
@@ -421,7 +421,8 @@ fn formatting_defaults_off_and_selects_only_actual_mode_targets() {
             .map(|i| i as u32 + 1)
             .collect::<Vec<_>>();
         let defaults =
-            plan_format_targets(&plan, &FormatOptions::default(), &serials, &FILE_KEY).unwrap();
+            plan_format_targets_typed(&plan, &FormatOptions::default(), &serials, &FILE_KEY)
+                .unwrap();
         assert!(defaults.iter().all(|choice| !choice.selected));
         assert!(defaults
             .iter()
@@ -436,7 +437,7 @@ fn formatting_defaults_off_and_selects_only_actual_mode_targets() {
                 boot: true,
                 ..Default::default()
             };
-            assert!(plan_format_targets(&plan, &invalid, &serials, &FILE_KEY).is_err());
+            assert!(plan_format_targets_typed(&plan, &invalid, &serials, &FILE_KEY).is_err());
         }
         let mut options = FormatOptions::default();
         if defaults.iter().any(|choice| {
@@ -449,7 +450,7 @@ fn formatting_defaults_off_and_selects_only_actual_mode_targets() {
             options.encrypt = true;
             options.encrypt_label = "自定义数据".into();
         }
-        let selected = plan_format_targets(&plan, &options, &serials, &FILE_KEY).unwrap();
+        let selected = plan_format_targets_typed(&plan, &options, &serials, &FILE_KEY).unwrap();
         assert_eq!(selected.iter().filter(|choice| choice.selected).count(), 1);
         let choice = selected.iter().find(|choice| choice.selected).unwrap();
         let image = choice.prepared_image.as_ref().unwrap();
@@ -548,7 +549,7 @@ fn filesystem_stage_fails_closed_on_wrong_key_or_unsupported_portable_profile() 
     )
     .unwrap_err();
     assert!(ntfs_error.to_ascii_lowercase().contains("ntfs"));
-    assert!(plan_format_targets(
+    assert!(plan_format_targets_typed(
         &ntfs_plan,
         &FormatOptions {
             share: true,

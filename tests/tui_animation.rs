@@ -46,7 +46,7 @@ fn wide_devices_keep_only_compact_core_indicator_during_normal_navigation() {
 #[test]
 fn wizard_keeps_compact_core_indicator_without_business_animation_sidebar() {
     let mut state = AppState::new();
-    state.begin_write_wizard(WriteKind::BackupCreate, 6, None);
+    state.begin_write_wizard_for_identity(WriteKind::BackupCreate, 6, None, None);
     let text = render_text(&state, 160, 30);
     assert!(text.replace(' ', "").contains("创建元数据备份"), "{text}");
     assert!(text.contains("CORE ◇ ACTIVE"), "{text}");
@@ -57,7 +57,7 @@ fn wizard_keeps_compact_core_indicator_without_business_animation_sidebar() {
 #[test]
 fn narrow_tui_keeps_operation_state_in_compact_indicator() {
     let mut state = AppState::new();
-    state.begin_write_wizard(WriteKind::BackupCreate, 6, None);
+    state.begin_write_wizard_for_identity(WriteKind::BackupCreate, 6, None, None);
     let text = render_text(&state, 80, 24);
     assert!(text.contains("CORE ◇ ACTIVE"), "{text}");
     assert!(!text.contains("EDP CORE · LIVE"), "{text}");

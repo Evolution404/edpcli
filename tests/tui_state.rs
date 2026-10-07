@@ -1034,7 +1034,7 @@ fn ch14_write_progress_batch_reaches_tui_state_without_losing_milestones() {
     use edpcli::application::WriteEvent;
     use edpcli::tui::state::WriteKind;
     let mut state = AppState::new();
-    assert!(state.begin_write_wizard(WriteKind::BackupCreate, 6, None));
+    assert!(state.begin_write_wizard_for_identity(WriteKind::BackupCreate, 6, None, None));
     assert!(state.confirm_backup_create().is_some());
     for event in [
         WriteEvent::BackupCreated {

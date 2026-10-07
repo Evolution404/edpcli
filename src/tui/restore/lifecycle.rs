@@ -5,15 +5,6 @@ impl AppState {
         self.restore.wizard.as_ref()
     }
 
-    pub fn begin_write_wizard(
-        &mut self,
-        kind: WriteKind,
-        disk: u32,
-        backup: Option<std::path::PathBuf>,
-    ) -> bool {
-        self.begin_write_wizard_for_identity(kind, disk, backup, None)
-    }
-
     pub fn begin_write_wizard_for_identity(
         &mut self,
         kind: WriteKind,

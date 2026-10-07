@@ -6,7 +6,7 @@
 uv run --locked python scripts/audit-redundancy.py --check
 ```
 
-Python 入口调用已注册的 Rust `audit-redundancy` example，用 `syn` 读取全部 Rust AST。首次运行会编译工具，后续复用 Cargo 缓存；只生成报告，不操作设备、不删除文件。需要仓库现有 Rust 工具链与 Python 3，无额外安装步骤。
+Python 入口调用已注册的 Rust `audit-redundancy` example，用 `syn` 读取全部 Rust AST。首次运行会编译工具，后续复用 Cargo 缓存；只生成报告，不操作设备、不删除文件。需要仓库现有 Rust 工具链与 Python 3.11+，无额外安装步骤。
 
 `git ls-files --cached --others --exclude-standard` 提供完整当前文件集，覆盖未提交的新文件，跳过已删除路径及忽略的用户数据、日志、构建缓存。Cargo 元数据给出全部目标入口，模块图遍历所有 `cfg` 分支、内联模块及 `#[path]` 文件。`cfg(test)` 子模块的文件消费者按测试归类。
 

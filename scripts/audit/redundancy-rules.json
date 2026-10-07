@@ -100,7 +100,12 @@
         "advanced_inspect_open_selected_field",
         "activate_device_for_viewport",
         "provision_field_section",
-        "provision_compact_field_rows"
+        "provision_compact_field_rows",
+        "plan_format_targets",
+        "begin_write_wizard",
+        "scan_disks",
+        "format_partition_on_disk",
+        "guard_system_disk"
       ]
     }
   ]

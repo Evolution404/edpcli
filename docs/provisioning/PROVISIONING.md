@@ -228,3 +228,7 @@ uv run --locked python scripts/test-full.py --profile full
 只有真实块设备事务、恢复或制盘后端语义发生变化时，才需要追加对应 Virtual Disk HIL 或实体 USB HIL。纯 UI、文档或事件投影修改不得把 HIL 结果伪装成新的写盘验证。
 
 长期产品规范只记录当前能力和不可绕过的边界；真实样本、协议逆向过程和 HIL 记录放在 `audit/protocol/`。
+
+格式化的物化写集必须先通过[格式化资源预算](../architecture/ARCHITECTURE.md)：
+累计镜像有效载荷默认最多 64 MiB，工作有效载荷按八份写集计费、最多 512 MiB。
+超预算的只读规划或单分区格式化会明确拒绝，不开始对应格式化事务。

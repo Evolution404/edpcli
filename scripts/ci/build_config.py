@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Canonical toolchain/platform facts shared by CI and release generators."""
 from __future__ import annotations
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from python_runtime import require_python
+require_python()
 import json
 import os
-from pathlib import Path
 import subprocess
 import tomllib
 

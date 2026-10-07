@@ -280,35 +280,11 @@ impl FilesystemDriver for Fat16Driver {
         })?;
         let label = encode_label(request.volume_label.as_deref())?;
 
-        let mut chosen = None;
-        for spc in [1u64, 2, 4, 8, 16, 32, 64, 128] {
-            let mut fat_sectors = 1u64;
-            for _ in 0..16 {
-                let overhead = RESERVED + COPIES * fat_sectors + ROOT_SECTORS;
-                if geometry.sector_count <= overhead {
-                    break;
-                }
-                let clusters = (geometry.sector_count - overhead) / spc;
-                let next = ((clusters + 2) * 2).div_ceil(SECTOR_SIZE as u64);
-                if next == fat_sectors {
-                    if (4_085..65_525).contains(&clusters) && fat_sectors <= u16::MAX as u64 {
-                        chosen = Some((spc as u8, fat_sectors as u16));
-                    }
-                    break;
-                }
-                fat_sectors = next;
-            }
-            if chosen.is_some() {
-                break;
-            }
-        }
-        let (spc, fat_sectors) = chosen.ok_or_else(|| {
-            FilesystemError::for_filesystem(
-                self.kind(),
-                FilesystemErrorKind::InvalidGeometry,
-                "该分区大小无法表示为 FAT16",
-            )
-        })?;
+        let (spc, fat_sectors) = choose_format_geometry(geometry.sector_count)?;
+        super::FormatResourceBudget::default().check(super::estimate_format_resources(
+            self.kind(),
+            geometry.sector_count,
+        )?)?;
         let root_start = RESERVED + COPIES * fat_sectors as u64;
 
         let mut boot = [0u8; SECTOR_SIZE];
@@ -458,4 +434,47 @@ impl FilesystemDriver for Fat16Driver {
             },
         })
     }
+}
+
+fn choose_format_geometry(volume_sectors: u64) -> Result<(u8, u16), FilesystemError> {
+    let mut chosen = None;
+    for spc in [1u64, 2, 4, 8, 16, 32, 64, 128] {
+        let mut fat_sectors = 1u64;
+        for _ in 0..16 {
+            let overhead = RESERVED + COPIES * fat_sectors + ROOT_SECTORS;
+            if volume_sectors <= overhead {
+                break;
+            }
+            let clusters = (volume_sectors - overhead) / spc;
+            let next = ((clusters + 2) * 2).div_ceil(SECTOR_SIZE as u64);
+            if next == fat_sectors {
+                if (4_085..65_525).contains(&clusters) && fat_sectors <= u16::MAX as u64 {
+                    chosen = Some((spc as u8, fat_sectors as u16));
+                }
+                break;
+            }
+            fat_sectors = next;
+        }
+        if chosen.is_some() {
+            break;
+        }
+    }
+    chosen.ok_or_else(|| {
+        FilesystemError::for_filesystem(
+            FilesystemKind::Fat16,
+            FilesystemErrorKind::InvalidGeometry,
+            "该分区大小无法表示为 FAT16",
+        )
+    })
+}
+pub(super) fn format_sector_count(volume_sectors: u64) -> Result<u64, FilesystemError> {
+    if volume_sectors > u32::MAX as u64 {
+        return Err(FilesystemError::for_filesystem(
+            FilesystemKind::Fat16,
+            FilesystemErrorKind::InvalidGeometry,
+            "FAT16 分区扇区数超过 u32",
+        ));
+    }
+    let (_, fat) = choose_format_geometry(volume_sectors)?;
+    Ok(1 + COPIES * u64::from(fat) + ROOT_SECTORS)
 }

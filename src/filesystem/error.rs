@@ -11,6 +11,7 @@ pub enum FilesystemErrorKind {
     FormatUnsupported,
     CorruptFilesystem,
     ScanBudgetExceeded,
+    FormatBudgetExceeded,
     AmbiguousDetection,
 }
 

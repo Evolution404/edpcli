@@ -11,7 +11,7 @@
 - `src/cli*.rs`：CLI 参数解析与文本入口；公开命令目录统一由 `src/command_spec.rs` 描述，并供帮助与补全功能共用。
 - `src/tui/`：交互式前端。`AppState` 只保留 `shell` 与设备、检查、备份、制盘、恢复五个功能状态；`TaskHub` 负责刷新代次、单任务并发控制、关键写入任务与进度运输。帮助、页内动作提示和可用性描述通过 `ActionSpec` 与键位表共用语义；前端不实现裸盘安全策略。
 - `src/application/`：CLI/TUI 共用用例与安全会话。制盘按准备、提交、导出三个职责分离；写服务根模块保留共享事件与身份/安全校验，备份创建、恢复事务、恢复计划分别位于 `write/backup`、`write/restore`、`write/restore_plan`；`TargetSession` 统一写盘状态转换；`CatalogSnapshot` 让同一刷新批次复用一次备份目录只读快照；`OperationError` 在后台任务边界保留错误码与阶段，进入 UI 状态时才映射为展示文本。
-- `src/ports.rs`：中性 CmdRunner、SectorDev、Clock、CommandOutcome 与只读 ReadControl 定义；能力接口从 `ports` 导入。
+- `src/ports.rs`：中性 CommandExecutor、DeviceObserver、WriteLeaseProvider/WriteLease、SectorDev、Clock、CommandOutcome 与只读 ReadControl 定义。TargetSession 独立消费设备观察和写租约；旧 CmdRunner 保留为宿主探测适配契约，尚未迁移所有只读消费者。
 - `src/domain/`：逐步收拢纯值类型和不变量，目前包含 `geometry`、`hardware`、`secret`；不得执行平台命令、文件生命周期或 TUI/CLI 逻辑。对外能力通过领域门面暴露；门面承担当前模块边界，不保留开发期无调用别名。
 - `src/infrastructure/`：副作用实现。`backup_store::{catalog,display_catalog,create,config}` 负责目录校验、展示缓存、容器创建适配和备份路径配置，`clock` 实现时钟，`process` 负责带统一截止时间与输出预算的子进程执行；应用层直接使用各实现的归属路径。
 - `src/media_identity.rs`、`src/partition_table.rs`、`src/disk_layout.rs`、`src/backup_coverage.rs`：仍是与前端无关的稳定门面和读模型；不得让 `diskio`、`edpb`、`disk_scan` 反向依赖应用层。
@@ -26,7 +26,7 @@
 
 ## 读写边界
 
-只读路径使用只读设备句柄；`list/info/inspect/backup create` 不进入写盘准备流程。真实写盘必须经 `TargetSession<ReadOnly> -> TargetSession<PreparedWrite> -> TargetSession<WriteLocked>` 显式状态转换，并保持系统盘保护、USB 整盘确认、卸载/锁卷、重新打开后的身份复核、同步/读回、失败回滚。实际几何来自平台观察，未知或非 512B 逻辑块、非整除容量及超出 u32 地址范围禁止写入，卸载前/重开后复核几何；WriteLocked 独占借用设备并持有平台 guard。真实制盘提交只接受来源绑定的 BackedUpPreparedProvision，并在提交前重新验证备份；恢复后的格式化和密钥域重建是恢复事务之外的独立授权操作。
+只读路径使用只读设备句柄；`list/info/inspect/backup create` 不进入写盘准备流程。真实写盘必须经 `TargetSession<ReadOnly> -> TargetSession<PreparedWrite> -> TargetSession<WriteLocked>` 显式状态转换，并保持系统盘保护、USB 整盘确认、卸载/锁卷、重新打开后的身份复核、同步/读回、失败回滚。实际几何来自平台观察，未知或非 512B 逻辑块、非整除容量及超出 u32 地址范围禁止写入，卸载前/重开后复核几何；WriteLocked 独占借用设备并持有拥有平台 guard 的 WriteLease；几何校验仍发生在租约获取前及重开后。可通过 open_with_ports 注入独立观察者与租约提供者，内存适配不需要平台命令。宿主适配器在卸载前获取按磁盘编号的进程内独占租约，释放平台 guard 后才允许下一租约；平台本身的卷锁/卸载语义继续保留，进程内租约不增加跨进程锁保证。真实制盘提交只接受来源绑定的 BackedUpPreparedProvision，并在提交前重新验证备份；恢复后的格式化和密钥域重建是恢复事务之外的独立授权操作。
 
 恢复核心接收包含确认事实、目标 pin 与预期备份摘要的 RestoreMetadataRequest；前端选择/确认入口调用同一核心，提交前重新核验。进度观察失败不影响事务收尾，文案留在前端。
 
@@ -56,7 +56,7 @@ LBA0～12 的类型化解析器、配置类型轴和跨 LBA 语义位于 `src/pr
 
 ## 制盘架构
 
-官方 mode0～3 与 Plain 都是正式产品能力。CLI/TUI 共用只读准备和真实提交服务，可确定性导出的目标共用镜像导出路径。应用层先生成不可变计划，再由提交阶段执行安全写入，领域层不直接打开设备、执行平台命令或提权。已有盘通过区域处理策略选择原样保留、验证保留、密钥重新包装、重建或丢弃。Provision 不读取、暂存或搬运用户文件；语义或几何无法原地兼容的目标区域必须明确重建。备份恢复仍是独立的元数据恢复链，不恢复文件数据。
+官方 mode0～3 与 Plain 都是正式产品能力。CLI/TUI 共用只读准备和真实提交服务，可确定性导出的目标共用镜像导出路径。应用层先生成不可变计划，再由提交阶段执行安全写入，领域层不直接打开设备、执行平台命令或提权。`application::provision::{password,preflight,result_model}` 统一密码意图、必需格式化、区域处置预判和结果投影；TUI 只供应编辑事实和验证状态，评估结果不能作为提交授权。已有盘通过区域处理策略选择原样保留、验证保留、密钥重新包装、重建或丢弃。Provision 不读取、暂存或搬运用户文件；语义或几何无法原地兼容的目标区域必须明确重建。备份恢复仍是独立的元数据恢复链，不恢复文件数据。
 
 ## 验证
 
@@ -78,3 +78,19 @@ LBA0～12 的类型化解析器、配置类型轴和跨 LBA 语义位于 `src/pr
 | `compile_timeout_seconds` | 600 |
 | `doctest_timeout_seconds` | 180 |
 | `gate_deadline_seconds` | 900 |
+
+## 格式化资源预算
+
+`filesystem::estimate_format_resources` 复用 FAT16/FAT32/exFAT 的几何选择器，
+在生成镜像前计算实际元数据写集扇区数。`FormatResourceBudget` 默认限制一份镜像或
+整份格式化计划的累计镜像有效载荷为 **64 MiB**，工作有效载荷为 **512 MiB**。
+工作估算按写集的八份 512B 有效载荷计费，为当前保留的物理/验证镜像、构建临时集合、
+事务复制和回滚快照留出额度。它是可检查的有效载荷合同，未计 BTreeMap 节点、字符串、
+分配器开销、UI 克隆及其他用例内存，不能当作进程 RSS 硬上限或固件可用性证明。
+
+官方制盘在生成任一选中镜像前核算累计写集；Plain 在构建整份写计划前核算所有分区；
+恢复后单分区格式化和密钥域重建通过同一文件系统构建器执行单镜像门禁。
+格式化驱动的直接调用也在大块分配前检查默认预算；超预算返回
+`FilesystemErrorKind::FormatBudgetExceeded`，应用层保留现有类型化规划错误和安全事务路径。
+预算估算及边界、累计 Plain 计划和超大镜像拒绝均有行为回归。
+当前继续使用物化写计划；尚未引入流式事务、持久化回滚日志或拆 crate。

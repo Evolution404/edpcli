@@ -1698,7 +1698,7 @@ fn restore_confirmation_prioritizes_backup_device_match_and_basic_identity() {
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
     state.replace_backups(vec![item]);
-    assert!(state.begin_write_wizard(WriteKind::Restore, 6, Some(path)));
+    assert!(state.begin_write_wizard_for_identity(WriteKind::Restore, 6, Some(path), None));
 
     let text = render_text(&state, 180, 46);
     for expected in [
@@ -1741,7 +1741,12 @@ fn restore_overlay_escape_consumes_visible_layer_before_device_panes() {
     state.device_info_focus_detail();
     assert_eq!(state.devices_focused_pane(), PaneId::DevicesDetail);
 
-    assert!(state.begin_write_wizard(WriteKind::Restore, 6, Some("backup-1.edpb".into())));
+    assert!(state.begin_write_wizard_for_identity(
+        WriteKind::Restore,
+        6,
+        Some("backup-1.edpb".into()),
+        None
+    ));
     assert_eq!(state.wizard().unwrap().stage, WizardStage::Confirm);
     assert_eq!(state.input_mode(), edpcli::tui::state::InputMode::Confirm);
     state.navigate(NavCommand::Escape, 20);

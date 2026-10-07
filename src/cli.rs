@@ -45,7 +45,7 @@ pub use prompter::{AlwaysYes, StdPrompter};
 // ══════════════════════════════════════════════════════════════════
 // 3. 外接盘一览
 // ══════════════════════════════════════════════════════════════════
-pub use crate::disk_scan::{scan_disks, Row};
+pub use crate::disk_scan::{scan_disks_with_catalog, Row};
 pub use crate::disk_scan_render::print_disk_table;
 
 // ══════════════════════════════════════════════════════════════════

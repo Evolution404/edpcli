@@ -5,7 +5,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io;
-use std::path::Path;
 
 use crate::common::SECTOR;
 use crate::identify::identify;
@@ -226,17 +225,7 @@ fn hardware_model(runner: &dyn CmdRunner, disk: u32) -> Option<String> {
 
 /// 外接盘一览数据: 编号/容量/接口; USB 盘再尽力识别 cems 身份、
 /// EDPF 分区与备份份数。权限不足和读取异常分开记录。
-pub fn scan_disks(
-    runner: &dyn CmdRunner,
-    backup_dir: &Path,
-    read_disk: &dyn Fn(u32, u32) -> io::Result<Vec<u8>>,
-) -> Vec<Row> {
-    scan_disks_with_catalog(runner, read_disk, || {
-        crate::infrastructure::backup_store::catalog::scan_backup_dir_checked(backup_dir)
-    })
-}
-
-pub(crate) fn scan_disks_with_catalog(
+pub fn scan_disks_with_catalog(
     runner: &dyn CmdRunner,
     read_disk: &dyn Fn(u32, u32) -> io::Result<Vec<u8>>,
     load_catalog: impl FnOnce() -> Result<

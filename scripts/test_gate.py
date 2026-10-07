@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Owned test-command watchdog, separate from post-run performance thresholds."""
 from __future__ import annotations
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from python_runtime import require_python
+require_python()
 import argparse
 import json
 import math
 import os
-from pathlib import Path
 import signal
 import subprocess
-import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 BUDGETS = json.loads((ROOT / "scripts/test-budgets.json").read_text())
