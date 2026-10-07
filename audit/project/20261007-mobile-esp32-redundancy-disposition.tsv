@@ -1,0 +1,181 @@
+rule	path	subject	certainty	evidence	disposition
+declaration_consumers	src/protocol/sectors.rs	EDPF_TABLE_LEN	candidate	Only test consumers of declaration: tests/crypto_prims.rs	保留；协议表长度声明有测试消费者，缺少运行时引用不是移除协议常量的充分依据。
+forwarding_api	src/application.rs	backup_dir_argv_suffix	candidate	Single-call body forwards to backup_dir_argv_suffix; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/application.rs	load_backup_selector	candidate	Single-call body forwards to load	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/application.rs	pin_disk_selector	candidate	Single-call body forwards to disk_selector_value	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/application.rs	resolve_backup_dir	candidate	Single-call body forwards to resolve_backup_dir; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/application/post_restore.rs	assess_partitions_readonly	candidate	Single-call body forwards to assess_partitions_impl	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/application/post_restore/format_operation.rs	format_partition_on_disk	candidate	Single-call body forwards to format_partition_on_disk_with_key	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/application/provision/prepare.rs	target_encrypt_capacity_override	candidate	Single-call body forwards to override_capacity	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/application/write.rs	read_image	candidate	Single-call body forwards to read_protocol_image_readonly	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/cli/commands/list.rs	list_needs_elevation	candidate	Single-call body forwards to device_scan_needs_elevation	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/common.rs	fmt_capacity	candidate	Single-call body forwards to fmt_capacity_with_system	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/diskio/device.rs	raw_path	candidate	Single-call body forwards to raw_disk_path	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/edpb/read.rs	VerifiedBackupReader::read_raw_protocol	candidate	Single-call body forwards to read_artifact; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/edpb/read.rs	read_raw_protocol	candidate	Single-call body forwards to read_artifact; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/elevate.rs	is_root	candidate	Single-call body forwards to is_elevated	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/filesystem/kind.rs	FilesystemKind::label	candidate	Single-call body forwards to display_name; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/infrastructure/backup_store/catalog.rs	scan_backup_dir_checked	candidate	Single-call body forwards to scan_backup_dir_with_budget	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/inspect/metadata.rs	infer_lba12	candidate	Single-call body forwards to infer_lba12; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/inspect/metadata.rs	infer_lba7	candidate	Single-call body forwards to infer_lba7; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/inspect/metadata.rs	infer_lba8	candidate	Single-call body forwards to infer_lba8; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/inspect/model.rs	human_bytes	candidate	Single-call body forwards to fmt_capacity; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/metainfo.rs	render	candidate	Single-call body forwards to render_with_source; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/metainfo.rs	safe6_label_from_lba6	candidate	Single-call body forwards to safe6_label	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/partition_table.rs	read_partition_table	candidate	Single-call body forwards to read_partition_table_inner	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/linux.rs	disk_selector_value	candidate	Single-call body forwards to raw_disk_path; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/macos.rs	hardware_probe	candidate	Single-call body forwards to probe_disk; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/macos.rs	hardware_serial	candidate	Single-call body forwards to probe_disk_serial; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	device_geometry	candidate	Single-call body forwards to device_geometry; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	disk_selector_syntax	candidate	Single-call body forwards to disk_selector_syntax; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	disk_selector_value	candidate	Single-call body forwards to disk_selector_value; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	disk_total_sectors	candidate	Single-call body forwards to disk_total_sectors; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	elevation_label	candidate	Single-call body forwards to elevation_label; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	fallback_hardware_probe	candidate	Single-call body forwards to fallback_hardware_probe; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	hardware_probe	candidate	Single-call body forwards to hardware_probe; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	has_elevation_origin	candidate	Single-call body forwards to has_elevation_origin; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	invoking_user_home	candidate	Single-call body forwards to invoking_user_home; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	is_elevated	candidate	Single-call body forwards to is_elevated; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	is_raw_device_path	candidate	Single-call body forwards to is_raw_device_path; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	is_system_disk	candidate	Single-call body forwards to is_system_disk; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	kind	candidate	Single-call body forwards to kind; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	list_external_disks	candidate	Single-call body forwards to list_external_disks; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	parse_disk_selector	candidate	Single-call body forwards to parse_disk_selector; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	probe_command_cacheable	candidate	Single-call body forwards to probe_command_cacheable; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	publish_file	candidate	Single-call body forwards to publish_file; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	raw_busy_error	candidate	Single-call body forwards to raw_busy_error; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	raw_disk_path	candidate	Single-call body forwards to raw_disk_path; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	run_elevated	candidate	Single-call body forwards to run_elevated; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	sync_raw_device	candidate	Single-call body forwards to sync_raw_device; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/mod.rs	usb_vid_pid	candidate	Single-call body forwards to usb_vid_pid; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/system.rs	SysRunner::run_command	candidate	Single-call body forwards to run_command; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/system.rs	disk_total_sectors	candidate	Single-call body forwards to disk_total_sectors; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/system.rs	list_external_disks	candidate	Single-call body forwards to list_external_disks; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/system.rs	prepare_write	candidate	Single-call body forwards to prepare_write; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/windows.rs	disk_selector_value	candidate	Single-call body forwards to physical_path; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/windows.rs	is_system_disk	candidate	Single-call body forwards to is_system_disk_number; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/windows.rs	prepare_write	candidate	Single-call body forwards to prepare_write_disk; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/platform/windows.rs	raw_disk_path	candidate	Single-call body forwards to physical_path; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/protocol/crypto.rs	sm4_decrypt_block	candidate	Single-call body forwards to sm4_crypt_block; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/protocol/crypto.rs	sm4_encrypt_block	candidate	Single-call body forwards to sm4_crypt_block	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/protocol/lba1.rs	parse_lba1	candidate	Single-call body forwards to parse_header_at	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/provision/layout.rs	official_partition_role	candidate	Single-call body forwards to official_partition_role_semantics	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/provision/plain.rs	build_plain_provision_write_plan	candidate	Single-call body forwards to build_plain_provision_write_plan_inner	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/provision/profile.rs	ProvisionProfile::safe6_template	candidate	Single-call body forwards to decode_hex_512	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/inspect/sector_state.rs	AppState::advanced_inspect_sector_top	candidate	Single-call body forwards to advanced_inspect_sector_set_cursor	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/inspect/task.rs	TaskHub::request_advanced_inspect_preview	candidate	Single-call body forwards to request_advanced_inspect_sector_mode	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/inspect/task.rs	TaskHub::request_advanced_inspect_sector	candidate	Single-call body forwards to request_advanced_inspect_sector_mode	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/provision/field_input.rs	AppState::provision_cursor_end	candidate	Single-call body forwards to provision_sync_cursor_to_end	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/provision/form.rs	PlainPartitionForm::cycle_capacity_unit	candidate	Single-call body forwards to shift_capacity_unit	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/provision/form.rs	ProvisionForm::toggle_capacity_input	candidate	Single-call body forwards to shift_capacity_input	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/provision/form.rs	shift_supported_fs	candidate	Single-call body forwards to shift_writable_filesystem	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/provision/form.rs	toggle_supported_fs	candidate	Single-call body forwards to shift_supported_fs	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/provision/layout.rs	AppState::format_sector_size	candidate	Single-call body forwards to fmt_capacity_sectors; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/provision/render.rs	draw_scheme_picker	candidate	Single-call body forwards to draw_scheme_picker; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/restore/lifecycle.rs	AppState::begin_write_wizard	candidate	Single-call body forwards to begin_write_wizard_for_identity	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/table_layout.rs	AdaptiveTableLayout::layout	candidate	Single-call body forwards to layout_with_active; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/table_layout.rs	TableInteractionState::ensure_active_visible_for_layout	candidate	Single-call body forwards to ensure_active_visible	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/table_layout.rs	display_width	candidate	Single-call body forwards to width	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/table_state.rs	AppState::clear_table_sort	candidate	Single-call body forwards to change_table_sort	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/table_state.rs	AppState::toggle_table_sort	candidate	Single-call body forwards to change_table_sort	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/theme.rs	Theme::modal_border	candidate	Single-call body forwards to strong_border	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/theme.rs	Theme::modal_surface	candidate	Single-call body forwards to raised_surface	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/theme.rs	Theme::modal_title	candidate	Single-call body forwards to accent	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/theme.rs	Theme::selection	candidate	Single-call body forwards to selection_overlay; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/theme.rs	Theme::tab	candidate	Single-call body forwards to muted	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/tui/theme.rs	Theme::text	candidate	Single-call body forwards to body_text; overloaded/shared name: usage classification is conservative.	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/ui.rs	bold	candidate	Single-call body forwards to wrap	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/ui.rs	bold_cyan	candidate	Single-call body forwards to wrap	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/ui.rs	cyan	candidate	Single-call body forwards to wrap	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/ui.rs	dim	candidate	Single-call body forwards to wrap	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/ui.rs	green	candidate	Single-call body forwards to wrap	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/ui.rs	magenta	candidate	Single-call body forwards to wrap	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/ui.rs	red	candidate	Single-call body forwards to wrap	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+forwarding_api	src/ui.rs	yellow	candidate	Single-call body forwards to wrap	保留；边界门面、默认参数或 UI 投影可能有职责，单调用形态不能证明可删除；后续按模块提取时评估。
+ignored_parameter	src/platform/linux.rs	device_geometry	candidate	Unread parameters: _runner; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/linux.rs	disk_total_sectors	candidate	Unread parameters: _runner; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/linux.rs	fallback_hardware_probe	candidate	Unread parameters: _runner, _disk; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/linux.rs	is_system_disk	candidate	Unread parameters: _runner; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/linux.rs	prepare_write	candidate	Unread parameters: _runner; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/linux.rs	probe_command_cacheable	candidate	Unread parameters: _cmd; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/linux.rs	usb_vid_pid	candidate	Unread parameters: _runner; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/windows.rs	device_geometry	candidate	Unread parameters: _runner; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/windows.rs	disk_total_sectors	candidate	Unread parameters: _runner; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/windows.rs	fallback_hardware_probe	candidate	Unread parameters: _runner, _disk; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/windows.rs	is_system_disk	candidate	Unread parameters: _runner; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/windows.rs	list_external_disks	candidate	Unread parameters: _runner; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/windows.rs	prepare_write	candidate	Unread parameters: _runner; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/windows.rs	probe_command_cacheable	candidate	Unread parameters: _cmd; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/platform/windows.rs	usb_vid_pid	candidate	Unread parameters: _runner; overloaded/shared name: usage classification is conservative.	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/protocol/profile_detector.rs	detect_dept_layout	candidate	Unread parameters: _	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/protocol/profile_detector.rs	detect_gpt_layout	candidate	Unread parameters: _	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/protocol/profile_detector.rs	detect_host_hardinfo_source	candidate	Unread parameters: _	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/protocol/profile_detector.rs	detect_lba0_bootstrap	candidate	Unread parameters: _	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/protocol/profile_detector.rs	detect_lba0_sector_size_overlay	candidate	Unread parameters: _	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/protocol/profile_detector.rs	detect_lba3_metadata	candidate	Unread parameters: _	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/protocol/profile_detector.rs	detect_lba4_encoding	candidate	Unread parameters: _	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/protocol/profile_detector.rs	detect_lba4_hserial_source	candidate	Unread parameters: _	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/protocol/profile_detector.rs	detect_lba4_second_key_source	candidate	Unread parameters: _	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+ignored_parameter	src/protocol/profile_detector.rs	detect_lba6_mbr_underlay	candidate	Unread parameters: _	保留；平台原生实现与未识别协议轴共享接口，忽略参数不等于缺失安全校验；非本轮删除范围。
+test_only_api	src/application/inspect/model.rs	AbsoluteByteRange::spans_sectors	candidate	Only test consumers: src/application/inspect/advanced_tests.rs, src/application/inspect_tree/tests.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/application/post_restore/format_operation.rs	format_partition_on_disk	candidate	Only test consumers: tests/post_restore_format_operation.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/application/progress.rs	ProgressEvent::with_overall	candidate	Only test consumers: tests/tui_ch16_contract.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/application/progress.rs	ProgressEvent::with_work	candidate	Only test consumers: src/tui/write_task.rs, tests/tui_ch16_contract.rs, tests/tui_write_wizard.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/application/provision/format_plan.rs	plan_format_targets	candidate	Only test consumers: src/application/provision/commit/tests.rs, src/application/provision/tests.rs, tests/provision_filesystem.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/command_spec.rs	CommandSpec::action_names	candidate	Only test consumers: tests/command_spec.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/disk_layout.rs	DiskLayoutModel::bar	candidate	Only test consumers: src/tui/disk_layout/tests.rs, tests/tui_state.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/disk_scan.rs	scan_disks	candidate	Only test consumers: tests/identify_list.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/diskio/device.rs	pwrite_loop	candidate	Only test consumers: tests/atomic_write.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/diskio/transaction.rs	atomic_write_official_provision_sectors	candidate	Only test consumers: tests/provision_transaction_write.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/diskio/transaction.rs	atomic_write_sectors	candidate	Only test consumers: tests/atomic_write.rs, tests/virtual_disk_hil.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/edpb/write.rs	write_core_backup_with_identity	candidate	Only test consumers: tests/cli_write_safety.rs, tests/edpb.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/edpb/write.rs	write_metadata_backup	candidate	Only test consumers: src/application/provision/tests.rs, tests/backup.rs, tests/backup_metadata.rs, tests/edpb.rs, tests/inspect_backup_workspace.rs, tests/inspect_cli.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/filesystem/driver.rs	FilesystemCapabilities::detect_only	candidate	Only test consumers: tests/filesystem_domain.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/filesystem/image.rs	SparseFilesystemImage::metadata_bytes	candidate	Only test consumers: tests/provision_filesystem.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/filesystem/kind.rs	FilesystemKind::from_first_party_config	candidate	Only test consumers: tests/provision_filesystem.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/identify.rs	build_device_id	candidate	Only test consumers: src/identify.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/inspect_target.rs	InspectDiskContext::decode_non_protocol	candidate	Only test consumers: tests/inspect_full_disk_acceptance.rs, tests/inspect_target.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/protocol/iir.rs	IirPlainAnalysis::all_crc_ok	candidate	Only test consumers: tests/iir.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/protocol/iir.rs	analyze_iir_plain	candidate	Only test consumers: tests/iir.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/protocol/image.rs	parse_protocol_image	candidate	Only test consumers: tests/protocol_image.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/protocol/lba10.rs	Lba10View::reencode	candidate	Only test consumers: tests/protocol_behavior/dept.rs, tests/protocol_behavior/edpf.rs, tests/protocol_behavior/lba10.rs, tests/protocol_behavior/lba11.rs, tests/protocol_behavior/lba8.rs, tests/protocol_image.rs; overloaded/shared name: usage classification is conservative.	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/protocol/lba11.rs	Lba11View::reencode	candidate	Only test consumers: tests/protocol_behavior/dept.rs, tests/protocol_behavior/edpf.rs, tests/protocol_behavior/lba10.rs, tests/protocol_behavior/lba11.rs, tests/protocol_behavior/lba8.rs, tests/protocol_image.rs; overloaded/shared name: usage classification is conservative.	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/protocol/lba12.rs	Lba12View::reencode	candidate	Only test consumers: tests/protocol_behavior/dept.rs, tests/protocol_behavior/edpf.rs, tests/protocol_behavior/lba10.rs, tests/protocol_behavior/lba11.rs, tests/protocol_behavior/lba8.rs, tests/protocol_image.rs; overloaded/shared name: usage classification is conservative.	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/protocol/lba6.rs	Lba6View::reencode	candidate	Only test consumers: tests/protocol_behavior/dept.rs, tests/protocol_behavior/edpf.rs, tests/protocol_behavior/lba10.rs, tests/protocol_behavior/lba11.rs, tests/protocol_behavior/lba8.rs, tests/protocol_image.rs; overloaded/shared name: usage classification is conservative.	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/protocol/lba7.rs	Lba7View::reencode	candidate	Only test consumers: tests/protocol_behavior/dept.rs, tests/protocol_behavior/edpf.rs, tests/protocol_behavior/lba10.rs, tests/protocol_behavior/lba11.rs, tests/protocol_behavior/lba8.rs, tests/protocol_image.rs; overloaded/shared name: usage classification is conservative.	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/protocol/lba8.rs	Lba8View::reencode	candidate	Only test consumers: tests/protocol_behavior/dept.rs, tests/protocol_behavior/edpf.rs, tests/protocol_behavior/lba10.rs, tests/protocol_behavior/lba11.rs, tests/protocol_behavior/lba8.rs, tests/protocol_image.rs; overloaded/shared name: usage classification is conservative.	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/protocol/lba9.rs	Lba9View::reencode	candidate	Only test consumers: tests/protocol_behavior/dept.rs, tests/protocol_behavior/edpf.rs, tests/protocol_behavior/lba10.rs, tests/protocol_behavior/lba11.rs, tests/protocol_behavior/lba8.rs, tests/protocol_image.rs; overloaded/shared name: usage classification is conservative.	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/protocol/profile_detector.rs	detect_profile_axes	candidate	Only test consumers: tests/protocol_image.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/provision/key_domain.rs	KeyDomainSecrets::default_targets	candidate	Only test consumers: tests/provision_reprovision.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/provision/plain.rs	PlainProvisionPlan::fill_partition	candidate	Only test consumers: tests/plain_provision.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/provision/plain.rs	PlainProvisionWritePlan::preserved_lbas	candidate	Only test consumers: tests/plain_provision.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/provision/reprovision/model.rs	CapacityInput::to_exact	candidate	Only test consumers: tests/provision_reprovision.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/provision/reprovision/model.rs	CapacityInput::whole_mib	candidate	Only test consumers: tests/provision_reprovision.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/provision/reprovision/model.rs	ProvisionTarget::from_mode_number	candidate	Only test consumers: tests/provision_reprovision.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/provision/reprovision/plan.rs	TargetProvisionPlan::build	candidate	Only test consumers: src/tui/backups/view_state.rs, tests/architecture_split.rs, tests/provision_reprovision.rs, tests/virtual_disk_hil.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/provision/validate.rs	OfficialProvisionValidation::profile_id	candidate	Only test consumers: tests/provision_validate.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/provision/write_plan.rs	OfficialProvisionWriteImage::highest_touched_lba	candidate	Only test consumers: tests/provision_write_plan.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/backups/panel_state.rs	AppState::backup_capacity_selection	candidate	Only test consumers: tests/tui_backup_coverage.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/backups/panel_state.rs	AppState::navigate_in_viewport	candidate	Only test consumers: tests/tui_backup_coverage.rs, tests/tui_desktop.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/backups/state.rs	AppState::backup_device_tree_expanded	candidate	Only test consumers: tests/tui_pane_contract.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/clipboard.rs	copy_with	candidate	Only test consumers: src/tui/clipboard.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/devices/state.rs	AppState::device_capacity_selection	candidate	Only test consumers: tests/tui_pane_contract.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/inspect/state.rs	AppState::advanced_inspect_set_view_mode	candidate	Only test consumers: tests/tui_sector_inspector.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/inspect/state.rs	AppState::advanced_inspect_view_mode	candidate	Only test consumers: tests/tui_lifecycle.rs, tests/tui_sector_inspector.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/provision/pane.rs	AppState::provision_focus_pane	candidate	Only test consumers: tests/tui_pane_contract.rs, tests/tui_state.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/restore/lifecycle.rs	AppState::begin_write_wizard	candidate	Only test consumers: src/tui/notice_tests.rs, tests/tui_animation.rs, tests/tui_lifecycle.rs, tests/tui_pane_contract.rs, tests/tui_state.rs, tests/tui_write_wizard.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/restore/lifecycle.rs	AppState::clear_wizard_confirmation	candidate	Only test consumers: tests/tui_write_wizard.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/state.rs	AppState::backup_at_visible	candidate	Only test consumers: tests/tui_pane_contract.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/state.rs	AppState::clear_notice	candidate	Only test consumers: tests/tui_lifecycle.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/state.rs	AppState::exit_pending	candidate	Only test consumers: tests/tui_state.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/state.rs	AppState::set_critical_operation	candidate	Only test consumers: src/tui/notice_tests.rs, tests/tui_state.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/state.rs	AppState::visible_backup_count	candidate	Only test consumers: tests/tui_pane_contract.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/table_layout.rs	TableKind::gate_index	candidate	Only test consumers: tests/tui_table_layout.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/theme.rs	Theme::canvas	candidate	Only test consumers: tests/tui_theme_contract.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/theme.rs	Theme::modal_surface	candidate	Only test consumers: tests/tui_pane_contract.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/theme.rs	Theme::palette	candidate	Only test consumers: src/tui/theme.rs, tests/tui_backup_workspace.rs, tests/tui_lifecycle.rs, tests/tui_pane_contract.rs, tests/tui_theme_contract.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/tui/theme.rs	Theme::table_text_active	candidate	Only test consumers: tests/tui_theme_contract.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/ui.rs	reset_enabled_for_tests	candidate	Only test consumers: src/ui.rs, tests/metainfo.rs, tests/write_progress_events.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+test_only_api	src/ui.rs	set_enabled_for_tests	candidate	Only test consumers: src/ui.rs, tests/metainfo.rs, tests/write_progress_events.rs	保留；检测器记录测试消费者，测试、公开核心 API 或行为门禁仍可能需要；本轮不修改可见性。
+unreferenced_api	src/application/provision.rs	backup_prepared_provision_on_disk	candidate	No AST path, method-call or macro-token reference; imports/re-exports excluded.	保留；公开备份证明/提交入口与未来用例拆分相关，先保留安全边界，后续决定 API 归属。
+unreferenced_api	src/application/provision.rs	commit_provision_on_disk	candidate	No AST path, method-call or macro-token reference; imports/re-exports excluded.	保留；公开备份证明/提交入口与未来用例拆分相关，先保留安全边界，后续决定 API 归属。
