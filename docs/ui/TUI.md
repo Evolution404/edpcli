@@ -240,7 +240,7 @@ TUI 统一使用主题模块提供的 24-bit TrueColor 低饱和配色，并保�
 
 默认空闲装饰重绘为 1 秒，Reduced 为 2 秒；后台运行保留原有动画频率。Off 模式运行中的耗时与等待文本每秒更新，空闲时不进行装饰重绘。
 
-macOS/Linux 桌面回放使用 `python3 scripts/tui-replay.py --binary ~/.local/bin/edpcli --scene provision-result-partial --size 200x60`。每次在 `~/.local/state/edpcli/tui-replay/` 新建 run-id 目录，记录二进制版本/SHA、行列、输入、PID、退出码及 ANSI。`--steps` 接受 JSON 数组（keys/wait/resize），`--timeout` 限制总回放时间；超时或异常只清理该次创建的进程组。
+macOS/Linux 桌面回放使用 `uv run --locked python scripts/tui-replay.py --binary ~/.local/bin/edpcli --scene provision-result-partial --size 200x60`。每次在 `~/.local/state/edpcli/tui-replay/` 新建 run-id 目录，记录二进制版本/SHA、行列、输入、PID、退出码及 ANSI。`--steps` 接受 JSON 数组（keys/wait/resize），`--timeout` 限制总回放时间；超时或异常只清理该次创建的进程组。
 
 真实只读回放显式使用 `--live-read-only`（需要管理员身份时加 `--sudo`），只接受设备/备份导航和只读检查按键；恢复、格式化、删除、制盘等写入测试仍使用独立 HIL 流程。演示新增 `provision-result-partial` 和 `provision-result-rollback-failure`，结果来自应用层真实类型的内存夹具，不进行设备操作。
 

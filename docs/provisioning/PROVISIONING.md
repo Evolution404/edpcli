@@ -222,7 +222,7 @@ scripts/test-fast.sh
 大范围架构、写盘、安全链或发布前变更运行：
 
 ```text
-python3 scripts/test-full.py --profile full
+uv run --locked python scripts/test-full.py --profile full
 ```
 
 只有真实块设备事务、恢复或制盘后端语义发生变化时，才需要追加对应 Virtual Disk HIL 或实体 USB HIL。纯 UI、文档或事件投影修改不得把 HIL 结果伪装成新的写盘验证。

@@ -208,12 +208,14 @@ edpcli completion fish | source
 通过 GitHub/API 等不会执行本地 hook 的提交路径，仓库 `AGENTS.md` 仍要求在每次提交前
 显式执行 `cargo fmt --all`。
 
+Python 工程脚本统一由 `uv` 管理：日常版本固定为 Python 3.14.5，兼容下限为 3.11；核心脚本保持标准库零第三方依赖，协议逆向依赖放在独立 `protocol` 组。完整约定见 [Python 工具链](docs/development/PYTHON_TOOLING.md)。
+
 日常验证与大范围重构门禁：
 
 ```bash
 ./scripts/test-fast.sh
 # 合并、发布前，以及大范围重构后
-python3 scripts/test-full.py --profile full
+uv run --locked python scripts/test-full.py --profile full
 ```
 
 每次提交前显式执行 `cargo fmt --all`，CI 保留 `cargo fmt --all -- --check` 兜底。日常 CI 在 macOS arm64、Linux x86_64、Windows x86_64 三个主平台执行完整非 HIL 测试、Clippy 和发布配置检查；macOS x86_64、Linux arm64、Windows arm64 三个次平台执行全目标编译与发布配置检查。虚拟磁盘 HIL 单独覆盖 Linux/Windows 两种架构及 macOS arm64。正式发布另有六架构完整门禁，生成六个原生包和 macOS Universal 包，详见 [发布规范](docs/user/RELEASE.md)。

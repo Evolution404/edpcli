@@ -92,7 +92,7 @@ Linux arm64、Linux x86_64、Windows arm64、Windows x86_64。新增/删除正�
 1. `main` 工作区干净，`HEAD == origin/main`；
 2. `Cargo.toml` 版本已经按本规范递增，`Cargo.lock` 同步；
 3. `cargo fmt --all -- --check` 通过；
-4. `python3 scripts/test-full.py --profile full` 通过（虚拟/真实 HIL 独立）；
+4. `uv run --locked python scripts/test-full.py --profile full` 通过（虚拟/真实 HIL 独立）；
 5. `cargo clippy --all-targets --locked -- -D warnings` 通过；
 6. 固定版本执行器的 macOS / Linux / Windows arm64 + x86_64 六架构持续集成全绿；
 7. Linux / Windows arm64 + x86_64 虚拟磁盘轻量硬件在环门禁全绿；

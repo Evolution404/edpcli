@@ -497,7 +497,7 @@ edpcli completion fish | source
 
 ```bash
 ./scripts/test-fast.sh
-python3 scripts/test-full.py --profile full
+uv run --locked python scripts/test-full.py --profile full
 ```
 
 提交前执行 `cargo fmt --all`，CI 使用 `cargo fmt --all -- --check` 兜底。日常 GitHub Actions 的三个主平台（macOS arm64、Linux x86_64、Windows x86_64）执行完整非 HIL 测试、Clippy 与发布配置检查；三个次平台（macOS x86_64、Linux arm64、Windows arm64）执行全目标编译与发布配置检查。独立虚拟磁盘门禁覆盖 Linux/Windows 两种架构和 macOS arm64，实体盘验收需另行执行。

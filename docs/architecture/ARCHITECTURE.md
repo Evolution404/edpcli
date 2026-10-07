@@ -60,7 +60,7 @@ LBA0～12 的类型化解析器、配置类型轴和跨 LBA 语义位于 `src/pr
 
 ## 验证
 
-日常开发使用 `scripts/test-fast.sh`，fast runner 默认耗时回归阈值 **60 秒**（`EDPCLI_FAST_MAX_SECONDS`）；合并、发布和大范围重构使用 `python3 scripts/test-full.py --profile full`，CI 主平台 full runner 阈值为 **180 秒**（`EDPCLI_TEST_MAX_SECONDS`）。这些性能阈值在运行结束后判定超预算；fast 的格式、Clippy 与 table-scroll 前置检查不在 runner 的性能计时区间内。独立强制 watchdog 默认 900 秒：fast 包括前置检查，full 包括编译、测试与 doctest；编译另有 600 秒、doctest 另有 180 秒期限，测试二进制各有独立超时。总期限可用 EDPCLI_GATE_DEADLINE_SECS / full 的 --deadline-seconds 调整，超时返回 124 并打印阶段原因。
+日常开发使用 `scripts/test-fast.sh`，fast runner 默认耗时回归阈值 **60 秒**（`EDPCLI_FAST_MAX_SECONDS`）；合并、发布和大范围重构使用 `uv run --locked python scripts/test-full.py --profile full`，CI 主平台 full runner 阈值为 **180 秒**（`EDPCLI_TEST_MAX_SECONDS`）。这些性能阈值在运行结束后判定超预算；fast 的格式、Clippy 与 table-scroll 前置检查不在 runner 的性能计时区间内。独立强制 watchdog 默认 900 秒：fast 包括前置检查，full 包括编译、测试与 doctest；编译另有 600 秒、doctest 另有 180 秒期限，测试二进制各有独立超时。总期限可用 EDPCLI_GATE_DEADLINE_SECS / full 的 --deadline-seconds 调整，超时返回 124 并打印阶段原因。
 
 `scripts/change_scope.py` 是本地与 CI 共用的变更分类事实源，已跟踪和未跟踪文件都参与路由，未知或公共测试基础设施变更保守选择完整非 HIL 套件。运行器在存在 `sccache` 时自动启用编译缓存并关闭 Cargo 增量编译，缺少缓存程序时自动退回直接 `rustc`。虚拟 HIL 独立运行，不混入普通 `fast/full`。所有提交前显式执行 `cargo fmt --all` 并通过日常门禁，门禁包含格式与 `git diff --check`；协议相关修改还必须通过协议字段、真实样本和文档契约门禁。
 

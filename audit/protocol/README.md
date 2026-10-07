@@ -36,9 +36,9 @@
 需要查看人类可读的逐字节内容时运行：
 
 ```text
-python3 scripts/protocol/query_byte_ledger.py --lba 4
-python3 scripts/protocol/query_byte_ledger.py --lba 3 --offset 0x20
-python3 scripts/protocol/query_byte_ledger.py --image <6656-byte-image> --lba 10
+uv run --locked python scripts/protocol/query_byte_ledger.py --lba 4
+uv run --locked python scripts/protocol/query_byte_ledger.py --lba 3 --offset 0x20
+uv run --locked python scripts/protocol/query_byte_ledger.py --image <6656-byte-image> --lba 10
 ```
 
 带镜像参数的形式会在账本状态、字段/区域、配置类型和证据 ID 旁显示物理偏移及字节。与解密有关的偏移，在对应解码器明确注册进查询工具之前仍以标准字段说明为准；查询工具不得臆造解密视图。
@@ -46,7 +46,7 @@ python3 scripts/protocol/query_byte_ledger.py --image <6656-byte-image> --lba 10
 ## 重新运行基线检查
 
 ```text
-python3 scripts/protocol/audit_baseline.py
+uv run --locked python scripts/protocol/audit_baseline.py
 cargo test --locked --test protocol_suite protocol_byte_ledger
 cargo test --locked --test protocol_suite protocol_documentation_contract
 ```

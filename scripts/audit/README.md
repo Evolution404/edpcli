@@ -3,7 +3,7 @@
 在仓库根目录执行 `make audit`，或直接执行：
 
 ```bash
-python3 scripts/audit-redundancy.py --check
+uv run --locked python scripts/audit-redundancy.py --check
 ```
 
 Python 入口调用已注册的 Rust `audit-redundancy` example，用 `syn` 读取全部 Rust AST。首次运行会编译工具，后续复用 Cargo 缓存；只生成报告，不操作设备、不删除文件。需要仓库现有 Rust 工具链与 Python 3，无额外安装步骤。

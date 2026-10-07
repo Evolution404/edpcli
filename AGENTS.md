@@ -11,7 +11,7 @@
 ## Test gates and long-running validation
 
 - Use `scripts/test-fast.sh` for routine local/AI validation. It runs formatting/diff checks plus the core suites and suites affected by the current change.
-- Use `python3 scripts/test-full.py --profile full` before merge/release and after broad refactors. The full runner compiles once from Cargo JSON artifacts, runs non-HIL test binaries with bounded parallelism/per-binary timeouts, reports per-suite duration, and runs doctests separately.
+- Use `uv run --locked python scripts/test-full.py --profile full` before merge/release and after broad refactors. The full runner compiles once from Cargo JSON artifacts, runs non-HIL test binaries with bounded parallelism/per-binary timeouts, reports per-suite duration, and runs doctests separately.
 - Virtual/real HIL remains separate from fast/full. Do not enable `ci-virtual-disk` in ordinary gates.
 - WebCodex/AI must not serialize `cargo check --all-targets` and `cargo test --all-targets` inside one 120-second synchronous shell call. Launch the repository full runner with a >=600-second budget; when the environment returns a durable Job, observe that same Job to its final exit code instead of retrying it.
 
@@ -34,7 +34,7 @@
 
 ## Repository redundancy audit
 
-- Run `python3 scripts/audit-redundancy.py --check` for a whole-repository code/documentation redundancy audit. It executes every rule in `scripts/audit/redundancy-rules.json` against every tracked/non-ignored file and writes reports under `target/redundancy-audit/`.
+- Run `uv run --locked python scripts/audit-redundancy.py --check` for a whole-repository code/documentation redundancy audit. It executes every rule in `scripts/audit/redundancy-rules.json` against every tracked/non-ignored file and writes reports under `target/redundancy-audit/`.
 - Whenever a new redundancy category is found, extend the rule registry and detector, add a behavioral regression, then rerun the entire audit. Do not limit a new rule to the originally found file or changed files.
 - Review all matching candidates and record the disposition. Unreferenced/public/test-only APIs, forwarding wrappers, manual scripts and historical protocol evidence are candidates, not automatic deletion authorization.
 - Confirmed broken references, missing modules and recurrence of recorded retired symbols must be resolved before considering the cleanup complete. Keep retired symbol entries scoped to their original purpose when naming conflicts exist.
