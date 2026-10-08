@@ -1,9 +1,10 @@
 use super::*;
 
-fn write_and_verify(
+fn write_and_verify<'a>(
     dev: &mut dyn SectorDev,
-    sectors: &BTreeMap<u32, Vec<u8>>,
+    sector: impl Fn(u32) -> &'a [u8],
     order: &[u32],
+    readback_order: &[u32],
     rollback: bool,
     observer: &mut dyn FnMut(TransactionActivity),
 ) -> io::Result<()> {
@@ -20,7 +21,7 @@ fn write_and_verify(
         },
     );
     for (index, &lba) in order.iter().enumerate() {
-        dev.write_sector(lba, &sectors[&lba]).map_err(|error| {
+        dev.write_sector(lba, sector(lba)).map_err(|error| {
             io::Error::new(error.kind(), format!("写入 LBA{lba} 失败: {error}"))
         })?;
         notify_activity(
@@ -60,14 +61,15 @@ fn write_and_verify(
                 TransactionActivityPhase::Readback
             },
             current: 0,
-            total: sectors.len() as u64,
+            total: readback_order.len() as u64,
         },
     );
-    for (index, &lba) in sectors.keys().enumerate() {
+    for (index, &lba) in readback_order.iter().enumerate() {
         if dev
             .read_sector(lba)
             .map_err(|error| io::Error::new(error.kind(), format!("读回 LBA{lba} 失败: {error}")))?
-            != sectors[&lba]
+            .as_slice()
+            != sector(lba)
         {
             return Err(io::Error::other(format!("LBA{} 读回校验不符", lba)));
         }
@@ -80,7 +82,7 @@ fn write_and_verify(
                     TransactionActivityPhase::Readback
                 },
                 current: index as u64 + 1,
-                total: sectors.len() as u64,
+                total: readback_order.len() as u64,
             },
         );
     }
@@ -216,13 +218,6 @@ impl WriteTransactionPlan {
         entries.sort_unstable();
         entries.into_iter().map(|(_, lba)| lba).collect()
     }
-
-    fn sector_map(&self) -> BTreeMap<u32, Vec<u8>> {
-        self.writes
-            .iter()
-            .map(|(&lba, write)| (lba, write.bytes.clone()))
-            .collect()
-    }
 }
 
 /// Execute an already normalized sector transaction.
@@ -267,7 +262,8 @@ pub fn execute_write_transaction_observed(
         )
     })?;
 
-    let sectors = plan.sector_map();
+    // Borrow the immutable planned sectors; only the rollback mirror owns old bytes.
+    let readback_order = plan.writes.keys().copied().collect::<Vec<_>>();
     let order = plan.ordered_lbas();
     let mut mirror = BTreeMap::new();
     notify_activity(
@@ -275,10 +271,10 @@ pub fn execute_write_transaction_observed(
         TransactionActivity {
             phase: TransactionActivityPhase::Mirror,
             current: 0,
-            total: sectors.len() as u64,
+            total: readback_order.len() as u64,
         },
     );
-    for (index, &lba) in sectors.keys().enumerate() {
+    for (index, &lba) in readback_order.iter().enumerate() {
         mirror.insert(
             lba,
             dev.read_sector(lba)
@@ -289,16 +285,30 @@ pub fn execute_write_transaction_observed(
             TransactionActivity {
                 phase: TransactionActivityPhase::Mirror,
                 current: index as u64 + 1,
-                total: sectors.len() as u64,
+                total: readback_order.len() as u64,
             },
         );
     }
 
-    match write_and_verify(dev, &sectors, &order, false, observer) {
+    match write_and_verify(
+        dev,
+        |lba| &plan.writes[&lba].bytes,
+        &order,
+        &readback_order,
+        false,
+        observer,
+    ) {
         Ok(()) => Ok(()),
         Err(write_error) => {
             for attempt in 0..3 {
-                match write_and_verify(dev, &mirror, &order, true, observer) {
+                match write_and_verify(
+                    dev,
+                    |lba| &mirror[&lba],
+                    &order,
+                    &readback_order,
+                    true,
+                    observer,
+                ) {
                     Ok(()) => {
                         return Err(EdpCliError::new(
                             EXIT_ROLLED_BACK,
