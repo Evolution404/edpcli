@@ -32,21 +32,10 @@ fn fingerprint(path: &Path) -> Option<Fingerprint> {
     };
     #[cfg(windows)]
     let (identity, changed) = {
-        use std::os::windows::{fs::MetadataExt, io::AsRawHandle};
-        use windows_sys::Win32::Storage::FileSystem::{
-            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
-        };
+        use std::os::windows::fs::MetadataExt;
         let file = fs::File::open(path).ok()?;
-        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
-        // SAFETY: a live owned file handle and a properly sized writable record.
-        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
-            return None;
-        }
         (
-            (
-                u64::from(info.dwVolumeSerialNumber),
-                (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
-            ),
+            crate::platform::filesystem_handle_identity(&file).ok()?,
             (metadata.creation_time(), metadata.last_write_time()),
         )
     };

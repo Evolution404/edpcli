@@ -81,6 +81,24 @@ class RedundancyAuditTests(unittest.TestCase):
             self.assertEqual(len([f for f in found if f['rule'] == 'duplicate_document']), 1)
             self.assertEqual({f['path'] for f in found if f['rule'] == 'unreferenced_script'}, {'scripts/manual.py'})
 
+    def test_duplicate_windows_handle_identity_is_detected_repository_wide(self):
+        facts = dict(functions=[], references=[], registered=[], missing_modules=[])
+        symbol = 'GetFileInformationByHandle'
+        sources = {
+            'src/platform/first.rs': f'unsafe {{ {symbol}(handle, &mut info) }}',
+            'src/backup/second.rs': f'unsafe {{ {symbol}(handle, &mut info) }}',
+            'src/facade.rs': 'crate::platform::filesystem_handle_identity(file)',
+            'docs/test.md': f'Native reader name: {symbol}(...)',
+        }
+        found = self.findings(ROOT, list(sources), facts, sources)
+        found = [f for f in found if f['rule'] == 'duplicate_native_file_identity']
+        self.assertEqual({f['path'] for f in found},
+            {'src/platform/first.rs','src/backup/second.rs'})
+        # Canonical one-provider pattern never triggers a false alert.
+        sources.pop('src/backup/second.rs')
+        found = self.findings(ROOT, list(sources), facts, sources)
+        self.assertFalse([f for f in found if f['rule'] == 'duplicate_native_file_identity'])
+
     def test_test_only_module_excludes_live_types_and_trait_dispatch(self):
         functions = [dict(path=path, name=name, owner='', public=True, test_only=False,
                           trait_impl=trait, ignored_parameters=[], forwards_to=None)

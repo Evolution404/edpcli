@@ -171,6 +171,19 @@ def evaluate(root, files, facts, texts, tests, rules):
             for paths in hashes.values():
                 if len(paths) > 1:
                     add(rule, paths[0], 'identical document', ', '.join(paths), 'candidate')
+        elif kind == 'duplicate_native_file_identity':
+            symbol = rule['symbol']
+            # Direct native API invocations only, not imports, documentation or
+            # references to the canonical platform adapter. This is a REVIEW
+            # candidate, not a reason to delete working Windows code.
+            calling_modules = [path for path, source in texts.items()
+                if path.startswith('src/') and path.endswith('.rs')
+                and re.search(r'\b'+re.escape(symbol)+r'\s*\(', source)]
+            if len(calling_modules) > 1:
+                for path in sorted(calling_modules):
+                    add(rule, path, symbol,
+                        'Direct Win32 file-identity reader also found in: '
+                        + ', '.join(other for other in sorted(calling_modules) if other != path))
         elif kind == 'retired_symbol':
             retired = set(rule['symbols'])
             for declaration in facts['functions'] + facts.get('declared_symbols', []):

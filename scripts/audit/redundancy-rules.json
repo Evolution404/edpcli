@@ -62,6 +62,12 @@
       "description": "内容完全相同的文档"
     },
     {
+      "id": "duplicate_native_file_identity",
+      "kind": "duplicate_native_file_identity",
+      "description": "Windows 原生文件身份查询在多个生产模块重复直接实现（需人工确认）",
+      "symbol": "GetFileInformationByHandle"
+    },
+    {
       "id": "retired_symbol",
       "kind": "retired_symbol",
       "description": "已确认退役的入口重新出现",

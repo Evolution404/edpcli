@@ -116,28 +116,41 @@ pub(crate) fn same_open_file_identity(a: &File, b: &File) -> io::Result<bool> {
     Ok(a.dev() == b.dev() && a.ino() == b.ino() && a.rdev() == b.rdev())
 }
 
+/// One Win32 file-identity provider for backup-cache fingerprints and disk
+/// handle reopen checks. Returning an error avoids mistaking an unavailable
+/// file index for a verified stable target.
 #[cfg(windows)]
-pub(crate) fn same_open_file_identity(a: &File, b: &File) -> io::Result<bool> {
+pub(crate) fn filesystem_handle_identity(file: &File) -> io::Result<(u64, u64)> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
         GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
     };
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: the owned File handle is live and the record has the exact API size.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((
+        u64::from(info.dwVolumeSerialNumber),
+        (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+    ))
+}
+
+#[cfg(windows)]
+pub(crate) fn same_open_file_identity(a: &File, b: &File) -> io::Result<bool> {
+    use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::System::Ioctl::{
         IOCTL_STORAGE_GET_DEVICE_NUMBER, STORAGE_DEVICE_NUMBER,
     };
     use windows_sys::Win32::System::IO::DeviceIoControl;
     #[derive(PartialEq, Eq)]
     enum OpenIdentity {
-        FilesystemFile(u32, u64),
+        FilesystemFile(u64, u64),
         StorageDevice(u32, u32, u32),
     }
     fn fingerprint(file: &File) -> io::Result<OpenIdentity> {
-        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
-        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } != 0 {
-            return Ok(OpenIdentity::FilesystemFile(
-                info.dwVolumeSerialNumber,
-                (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
-            ));
+        if let Ok((volume, index)) = filesystem_handle_identity(file) {
+            return Ok(OpenIdentity::FilesystemFile(volume, index));
         }
         // Raw physical drive handles can reject GetFileInformationByHandle.
         // Query the underlying storage device identity instead of rejecting
