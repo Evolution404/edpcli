@@ -1,0 +1,164 @@
+{
+  "schema": 1,
+  "utc": "2026-10-08T08:28:27.104258+00:00",
+  "git": "e68776b3fd94c2a568386911c20b814817bf94d4",
+  "system": {
+    "os": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "processor": "arm64",
+    "python": "3.14.5"
+  },
+  "scope": {
+    "physical_usb": false,
+    "device_scan": "fixture-only, no physical discovery",
+    "inspect": "1,000 file-backed reads",
+    "provision": "transaction on temporary regular file"
+  },
+  "startup_help_ms": {
+    "p50": 5.291166991810314,
+    "p95": 10.401749997981824,
+    "samples": [
+      10.401749997981824,
+      7.585083003505133,
+      4.844458992010914,
+      4.811292004887946,
+      4.902792003122158,
+      5.197042002691887,
+      5.50554200890474,
+      5.557249998673797,
+      5.291166991810314
+    ]
+  },
+  "catalog": {
+    "valid-10": {
+      "dataset": "valid",
+      "count": "10",
+      "cold_ms": "5.438",
+      "cold_bytes": "191160",
+      "warm_p50_ms": "0.632",
+      "warm_p95_ms": "0.810",
+      "warm_bytes": "0",
+      "warm_hits": "10",
+      "peak_rss_kib": "6784"
+    },
+    "valid-100": {
+      "dataset": "valid",
+      "count": "100",
+      "cold_ms": "32.388",
+      "cold_bytes": "1911780",
+      "warm_p50_ms": "2.717",
+      "warm_p95_ms": "2.981",
+      "warm_bytes": "0",
+      "warm_hits": "100",
+      "peak_rss_kib": "8512"
+    },
+    "valid-1000": {
+      "dataset": "valid",
+      "count": "1000",
+      "cold_ms": "162.946",
+      "cold_bytes": "19119780",
+      "warm_p50_ms": "23.658",
+      "warm_p95_ms": "25.351",
+      "warm_bytes": "0",
+      "warm_hits": "1000",
+      "peak_rss_kib": "22448"
+    },
+    "mixed-10": {
+      "dataset": "mixed",
+      "count": "10",
+      "cold_ms": "1.276",
+      "cold_bytes": "137020",
+      "warm_p50_ms": "0.253",
+      "warm_p95_ms": "0.274",
+      "warm_bytes": "0",
+      "warm_hits": "10",
+      "peak_rss_kib": "22512"
+    },
+    "mixed-100": {
+      "dataset": "mixed",
+      "count": "100",
+      "cold_ms": "31.835",
+      "cold_bytes": "1370290",
+      "warm_p50_ms": "2.095",
+      "warm_p95_ms": "2.198",
+      "warm_bytes": "0",
+      "warm_hits": "100",
+      "peak_rss_kib": "22896"
+    },
+    "mixed-1000": {
+      "dataset": "mixed",
+      "count": "1000",
+      "cold_ms": "135.811",
+      "cold_bytes": "13703890",
+      "warm_p50_ms": "22.059",
+      "warm_p95_ms": "25.238",
+      "warm_bytes": "0",
+      "warm_hits": "1000",
+      "peak_rss_kib": "26320"
+    }
+  },
+  "disk": {
+    "128": {
+      "sectors": "128",
+      "plan_ms": "0.030",
+      "preflight_ms": "8.216",
+      "mirror_ms": "0.193",
+      "write_ms": "0.458",
+      "sync_ms": "3.417",
+      "readback_ms": "0.189",
+      "total_ms": "12.473",
+      "inspect_1k_ms": "1.259",
+      "peak_rss_kib": "6784"
+    },
+    "1024": {
+      "sectors": "1024",
+      "plan_ms": "0.241",
+      "preflight_ms": "4.289",
+      "mirror_ms": "1.473",
+      "write_ms": "3.573",
+      "sync_ms": "7.939",
+      "readback_ms": "1.474",
+      "total_ms": "18.748",
+      "inspect_1k_ms": "1.261",
+      "peak_rss_kib": "8336"
+    }
+  },
+  "device_scan_mock": {
+    "disks": 2,
+    "loops": 300,
+    "average_ms": 0.2591
+  },
+  "tui": {
+    "100": {
+      "groups": 101,
+      "build_ms": 3.695,
+      "cached_snapshot_us": 0.089,
+      "frame_ms": 8.508,
+      "sort_ms": 0.132,
+      "filter_ms": 0.012,
+      "search_ms": 0.412
+    },
+    "1000": {
+      "groups": 1001,
+      "build_ms": 27.245,
+      "cached_snapshot_us": 0.086,
+      "frame_ms": 7.993,
+      "sort_ms": 0.189,
+      "filter_ms": 0.018,
+      "search_ms": 3.56
+    },
+    "10000": {
+      "groups": 10001,
+      "build_ms": 263.755,
+      "cached_snapshot_us": 0.092,
+      "frame_ms": 7.944,
+      "sort_ms": 1.674,
+      "filter_ms": 0.142,
+      "search_ms": 35.084
+    }
+  },
+  "notes": [
+    "Host-local measurements; debug TUI bench and release disk benchmarks are not cross-build comparable.",
+    "Manual --compare only: GitHub CI performance varies by shared runner load.",
+    "Memory from maxrss in child benchmarks; not an isolated stage peak."
+  ]
+}

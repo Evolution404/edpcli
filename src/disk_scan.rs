@@ -485,6 +485,35 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "host-only P0 fixture benchmark; run with --ignored"]
+    fn mock_device_scan_benchmark() {
+        use crate::platform::test_support::MultiUsbRunner;
+        use std::time::Instant;
+        let mut mbr = vec![0_u8; SECTOR];
+        mbr[510..].copy_from_slice(&[0x55, 0xaa]);
+        mbr[0x1be + 4] = 0x07;
+        mbr[0x1be + 8..0x1be + 12].copy_from_slice(&2048_u32.to_le_bytes());
+        mbr[0x1be + 12..0x1be + 16].copy_from_slice(&30720_u32.to_le_bytes());
+        let reads = |_: u32, lba: u32| {
+            Ok(if lba == 0 {
+                mbr.clone()
+            } else {
+                vec![0_u8; SECTOR]
+            })
+        };
+        let loops = 300;
+        let started = Instant::now();
+        for _ in 0..loops {
+            let rows = scan_disks_with_catalog(&MultiUsbRunner, &reads, || Ok(Vec::new()));
+            assert_eq!(rows.len(), 2);
+        }
+        println!(
+            "mock_device_scan_disks=2 loops={loops} avg_ms={:.4}",
+            started.elapsed().as_secs_f64() * 1000.0 / f64::from(loops)
+        );
+    }
+
+    #[test]
     fn scan_partition_volume_label_reads_real_fat16_metadata() {
         let start_lba = 63u64;
         let sector_count = 20_417u64;
