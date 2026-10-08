@@ -74,7 +74,14 @@ def run(args):
     def terminate_owned():
         if process is None or process.poll() is not None:
             return
-        os.write(master, b"q")
+        # A fast-exiting TUI can close its PTY after the last user 'q' but
+        # before poll() observes exit. EIO is not permission to kill anyone;
+        # simply wait for the owned child, then fall back to its process group.
+        try:
+            os.write(master, b"q")
+        except OSError as error:
+            if error.errno not in (errno.EIO, errno.EBADF):
+                raise
         try:
             process.wait(timeout=2)
             return
@@ -111,10 +118,16 @@ def run(args):
         selector.register(master, selectors.EVENT_READ)
         raw = (output / "session.ansi").open("wb")
         for index, step in enumerate(steps):
+            # Measure only after the input/resize was delivered. This is first
+            # PTY output, not an assertion about semantic/frame completion.
+            action_at = None
+            first_output_ms = None
             if "resize" in step:
                 resize(step["resize"])
+                action_at = time.monotonic()
             if "keys" in step:
                 os.write(master, step["keys"].encode())
+                action_at = time.monotonic()
             end = min(deadline, time.monotonic() + step.get("wait", 1))
             while time.monotonic() < end:
                 if not selector.select(min(0.1, end - time.monotonic())):
@@ -127,6 +140,8 @@ def run(args):
                     break
                 if not data:
                     break
+                if action_at is not None and first_output_ms is None:
+                    first_output_ms = (time.monotonic() - action_at) * 1000.0
                 raw.write(data)
                 pending += data
                 # Terminal capability/cursor queries can arrive across read boundaries.
@@ -137,7 +152,7 @@ def run(args):
                         pending = pending.replace(query, b"")
                 pending = pending[-16:]
             raw.flush()
-            metadata["frames"].append({"step": index, "elapsed_seconds": time.monotonic() - started, "ansi_offset": raw.tell()})
+            metadata["frames"].append({"step": index, "elapsed_seconds": time.monotonic() - started, "ansi_offset": raw.tell(), "first_pty_output_ms": first_output_ms})
             save()
             if process.poll() is not None:
                 break

@@ -76,17 +76,23 @@ pub fn scan_backup_dir_display(
     let mut weight = 0usize;
     let mut hits = 0;
     if dir.exists() {
+        // Directory entries are direct children; fingerprint() rejects symlink
+        // files. Resolve any parent aliases once, not once per backup file.
+        // This is display-cache indexing ONLY; restore/delete always reverify.
+        let canonical_dir =
+            fs::canonicalize(dir).map_err(|error| format!("备份目录不可解析: {error}"))?;
         for item in fs::read_dir(dir).map_err(|error| format!("备份目录不可读取: {error}"))?
         {
             control.check().map_err(|error| error.to_string())?;
-            let path = item.map_err(|error| error.to_string())?.path();
+            let item = item.map_err(|error| error.to_string())?;
+            let path = item.path();
             let Some(initial) = fingerprint(&path) else {
                 continue;
             };
             if entries.len() >= MAX_ENTRIES {
                 return Err("备份目录超过条目预算，未返回不完整编号".into());
             }
-            let key = fs::canonicalize(&path).map_err(|error| error.to_string())?;
+            let key = canonical_dir.join(item.file_name());
             let cache = CACHE.get_or_init(Default::default);
             let cached = {
                 let cache = cache.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -215,6 +221,29 @@ mod tests {
         assert!(!third.entries[0].health().is_healthy());
         fs::remove_dir_all(dir).unwrap();
     }
+    #[cfg(unix)]
+    #[test]
+    fn parent_symlink_alias_preserves_cache_key_and_scanned_display_path() {
+        let root = root();
+        let actual = root.join("actual");
+        fs::create_dir(&actual).unwrap();
+        let real = fixture(&actual, "source.edpb");
+        let alias = root.join("alias");
+        std::os::unix::fs::symlink(&actual, &alias).unwrap();
+        let first = scan_backup_dir_display(&actual, &control()).unwrap();
+        assert_eq!(first.cache_hits, 0);
+        assert!(first.bytes_read > 0);
+        let second = scan_backup_dir_display(&alias, &control()).unwrap();
+        assert_eq!(second.cache_hits, 1);
+        assert_eq!(second.bytes_read, 0);
+        assert_eq!(second.entries[0].path, alias.join("source.edpb"));
+        assert_eq!(
+            fs::canonicalize(&second.entries[0].path).unwrap(),
+            fs::canonicalize(real).unwrap()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn cancellation_and_io_budget_never_publish_partial_numbering() {
         let dir = root();
