@@ -5,9 +5,9 @@ use edpcli::{
     application::filesystem::FilesystemKind,
     application::support::{EXIT_IO, EXIT_ROLLED_BACK, SECTOR},
     diskio::{
-        atomic_write_official_provision_sectors, execute_write_transaction,
-        execute_write_transaction_observed, SectorWriteStage, TransactionActivityPhase,
-        WriteTransactionPlan,
+        atomic_write_official_provision_sectors, execute_borrowed_data_transaction_observed,
+        execute_write_transaction, execute_write_transaction_observed, SectorWriteStage,
+        TransactionActivityPhase, WriteTransactionPlan,
     },
     ports::SectorDev,
     provision::{
@@ -469,4 +469,87 @@ fn unexpected_mirror_sector_size_blocks_all_writes() {
         "malformed mirror must abort before write"
     );
     assert_eq!(dev.0.syncs, 1, "preflight sync must remain first");
+}
+
+#[test]
+fn borrowed_format_transaction_has_owned_transaction_sync_mirror_and_readback_semantics() {
+    let payloads = [[0x41_u8; SECTOR], [0x81; SECTOR], [0xc1; SECTOR]];
+    let borrowed = [
+        (63_u32, &payloads[0]),
+        (500_u32, &payloads[1]),
+        (1200_u32, &payloads[2]),
+    ];
+    let mut owned = WriteTransactionPlan::new(2000);
+    for &(lba, bytes) in &borrowed {
+        owned
+            .insert(lba, bytes.to_vec(), SectorWriteStage::Data, "filesystem")
+            .unwrap();
+    }
+    let mut a = MemoryDev::default();
+    let mut b = MemoryDev::default();
+    for dev in [&mut a, &mut b] {
+        for &lba in &[63, 500, 1200] {
+            dev.sectors.insert(lba, vec![0xda; SECTOR]);
+        }
+    }
+    let mut owned_events = Vec::new();
+    let mut borrowed_events = Vec::new();
+    execute_write_transaction_observed(&mut a, &owned, &mut |event| owned_events.push(event))
+        .unwrap();
+    execute_borrowed_data_transaction_observed(&mut b, 2000, &borrowed, &mut |event| {
+        borrowed_events.push(event)
+    })
+    .unwrap();
+    assert_eq!(a.sectors, b.sectors);
+    assert_eq!(a.writes, b.writes);
+    assert_eq!(a.syncs, b.syncs);
+    assert_eq!(owned_events, borrowed_events);
+}
+
+#[test]
+fn borrowed_format_plan_validation_fails_before_any_io() {
+    let bytes = [[0x21_u8; SECTOR], [0x31; SECTOR]];
+    type BorrowedCase<'a> = (&'a str, u64, &'a [(u32, &'a [u8; SECTOR])]);
+    let cases: [BorrowedCase<'_>; 5] = [
+        ("unsorted", 400, &[(100, &bytes[0]), (63, &bytes[1])]),
+        ("duplicate", 400, &[(63, &bytes[0]), (63, &bytes[1])]),
+        ("out of bounds", 100, &[(100, &bytes[0])]),
+        ("protocol sector", 400, &[(0, &bytes[0])]),
+        ("protocol metadata", 400, &[(12, &bytes[0])]),
+    ];
+    for (label, sectors, writes) in cases {
+        let mut dev = MemoryDev::default();
+        let err =
+            execute_borrowed_data_transaction_observed(&mut dev, sectors, writes, &mut |_| {})
+                .unwrap_err();
+        assert_eq!(err.code, EXIT_IO, "{label}: {}", err.msg);
+        assert_eq!(dev.syncs, 0, "{label} must fail before even sync");
+        assert!(dev.writes.is_empty(), "{label} must not write");
+    }
+}
+
+#[test]
+fn borrowed_format_rollback_restores_all_touched_sectors_after_partial_write() {
+    let data = [[0x23_u8; SECTOR], [0x42; SECTOR], [0x61; SECTOR]];
+    let writes = [(63, &data[0]), (101, &data[1]), (2050, &data[2])];
+    let mut dev = MemoryDev::default();
+    for &lba in &[63, 101, 2050] {
+        dev.sectors.insert(lba, vec![(lba % 251) as u8; SECTOR]);
+    }
+    let original = dev.sectors.clone();
+    dev.fail_call = Some(2);
+    let mut phases = Vec::new();
+    let err =
+        execute_borrowed_data_transaction_observed(&mut dev, 3000, &writes, &mut |activity| {
+            phases.push(activity.phase)
+        })
+        .unwrap_err();
+    assert_eq!(err.code, EXIT_ROLLED_BACK, "{}", err.msg);
+    assert_eq!(dev.sectors, original);
+    assert!(phases.contains(&TransactionActivityPhase::RollbackWrite));
+    assert!(phases.contains(&TransactionActivityPhase::RollbackReadback));
+    assert_eq!(
+        dev.syncs, 2,
+        "preflight and rollback sync; normal write sync is skipped on write failure"
+    );
 }

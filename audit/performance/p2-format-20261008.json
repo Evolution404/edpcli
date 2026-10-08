@@ -1,0 +1,237 @@
+{
+  "schema": 1,
+  "created_utc": "2026-10-08T09:50:30.640265+00:00",
+  "host": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "scope": "synthetic sparse metadata + disposable ordinary files; no USB",
+  "samples": 3,
+  "results": {
+    "16384": {
+      "materialized": {
+        "samples": [
+          {
+            "variant": "materialized",
+            "sectors": 16384,
+            "prepare_ms": 9.642,
+            "transaction_ms": 132.588,
+            "image_rss_kib": 23264,
+            "prepared_rss_kib": 25840,
+            "peak_rss_kib": 34192,
+            "peak_delta_kib": 10928
+          },
+          {
+            "variant": "materialized",
+            "sectors": 16384,
+            "prepare_ms": 3.188,
+            "transaction_ms": 78.88,
+            "image_rss_kib": 23280,
+            "prepared_rss_kib": 25856,
+            "peak_rss_kib": 34208,
+            "peak_delta_kib": 10928
+          },
+          {
+            "variant": "materialized",
+            "sectors": 16384,
+            "prepare_ms": 3.04,
+            "transaction_ms": 71.572,
+            "image_rss_kib": 23264,
+            "prepared_rss_kib": 25840,
+            "peak_rss_kib": 34192,
+            "peak_delta_kib": 10928
+          }
+        ],
+        "preparation_ms_p50": 3.188,
+        "transaction_ms_p50": 78.88,
+        "rss_delta_kib_p50": 10928
+      },
+      "borrowed": {
+        "samples": [
+          {
+            "variant": "borrowed",
+            "sectors": 16384,
+            "prepare_ms": 0.246,
+            "transaction_ms": 78.133,
+            "image_rss_kib": 23264,
+            "prepared_rss_kib": 23264,
+            "peak_rss_kib": 23520,
+            "peak_delta_kib": 256
+          },
+          {
+            "variant": "borrowed",
+            "sectors": 16384,
+            "prepare_ms": 0.2,
+            "transaction_ms": 74.538,
+            "image_rss_kib": 23264,
+            "prepared_rss_kib": 23264,
+            "peak_rss_kib": 23520,
+            "peak_delta_kib": 256
+          },
+          {
+            "variant": "borrowed",
+            "sectors": 16384,
+            "prepare_ms": 0.475,
+            "transaction_ms": 76.577,
+            "image_rss_kib": 23280,
+            "prepared_rss_kib": 23280,
+            "peak_rss_kib": 23536,
+            "peak_delta_kib": 256
+          }
+        ],
+        "preparation_ms_p50": 0.246,
+        "transaction_ms_p50": 76.577,
+        "rss_delta_kib_p50": 256
+      }
+    },
+    "32768": {
+      "materialized": {
+        "samples": [
+          {
+            "variant": "materialized",
+            "sectors": 32768,
+            "prepare_ms": 7.127,
+            "transaction_ms": 131.741,
+            "image_rss_kib": 41152,
+            "prepared_rss_kib": 46256,
+            "peak_rss_kib": 62928,
+            "peak_delta_kib": 21776
+          },
+          {
+            "variant": "materialized",
+            "sectors": 32768,
+            "prepare_ms": 6.577,
+            "transaction_ms": 132.497,
+            "image_rss_kib": 41152,
+            "prepared_rss_kib": 46256,
+            "peak_rss_kib": 62928,
+            "peak_delta_kib": 21776
+          },
+          {
+            "variant": "materialized",
+            "sectors": 32768,
+            "prepare_ms": 6.271,
+            "transaction_ms": 134.667,
+            "image_rss_kib": 41168,
+            "prepared_rss_kib": 46256,
+            "peak_rss_kib": 62928,
+            "peak_delta_kib": 21760
+          }
+        ],
+        "preparation_ms_p50": 6.577,
+        "transaction_ms_p50": 132.497,
+        "rss_delta_kib_p50": 21776
+      },
+      "borrowed": {
+        "samples": [
+          {
+            "variant": "borrowed",
+            "sectors": 32768,
+            "prepare_ms": 0.793,
+            "transaction_ms": 137.08,
+            "image_rss_kib": 41152,
+            "prepared_rss_kib": 41152,
+            "peak_rss_kib": 41600,
+            "peak_delta_kib": 448
+          },
+          {
+            "variant": "borrowed",
+            "sectors": 32768,
+            "prepare_ms": 0.708,
+            "transaction_ms": 129.709,
+            "image_rss_kib": 41168,
+            "prepared_rss_kib": 41168,
+            "peak_rss_kib": 41616,
+            "peak_delta_kib": 448
+          },
+          {
+            "variant": "borrowed",
+            "sectors": 32768,
+            "prepare_ms": 1.3,
+            "transaction_ms": 139.733,
+            "image_rss_kib": 41152,
+            "prepared_rss_kib": 41152,
+            "peak_rss_kib": 41600,
+            "peak_delta_kib": 448
+          }
+        ],
+        "preparation_ms_p50": 0.793,
+        "transaction_ms_p50": 137.08,
+        "rss_delta_kib_p50": 448
+      }
+    },
+    "65536": {
+      "materialized": {
+        "samples": [
+          {
+            "variant": "materialized",
+            "sectors": 65536,
+            "prepare_ms": 13.052,
+            "transaction_ms": 262.147,
+            "image_rss_kib": 76944,
+            "prepared_rss_kib": 87072,
+            "peak_rss_kib": 120384,
+            "peak_delta_kib": 43440
+          },
+          {
+            "variant": "materialized",
+            "sectors": 65536,
+            "prepare_ms": 12.924,
+            "transaction_ms": 251.324,
+            "image_rss_kib": 76944,
+            "prepared_rss_kib": 87072,
+            "peak_rss_kib": 120384,
+            "peak_delta_kib": 43440
+          },
+          {
+            "variant": "materialized",
+            "sectors": 65536,
+            "prepare_ms": 12.623,
+            "transaction_ms": 253.019,
+            "image_rss_kib": 76944,
+            "prepared_rss_kib": 87072,
+            "peak_rss_kib": 120384,
+            "peak_delta_kib": 43440
+          }
+        ],
+        "preparation_ms_p50": 12.924,
+        "transaction_ms_p50": 253.019,
+        "rss_delta_kib_p50": 43440
+      },
+      "borrowed": {
+        "samples": [
+          {
+            "variant": "borrowed",
+            "sectors": 65536,
+            "prepare_ms": 1.399,
+            "transaction_ms": 251.848,
+            "image_rss_kib": 76944,
+            "prepared_rss_kib": 76944,
+            "peak_rss_kib": 77776,
+            "peak_delta_kib": 832
+          },
+          {
+            "variant": "borrowed",
+            "sectors": 65536,
+            "prepare_ms": 1.175,
+            "transaction_ms": 255.218,
+            "image_rss_kib": 76944,
+            "prepared_rss_kib": 76944,
+            "peak_rss_kib": 77776,
+            "peak_delta_kib": 832
+          },
+          {
+            "variant": "borrowed",
+            "sectors": 65536,
+            "prepare_ms": 2.046,
+            "transaction_ms": 252.735,
+            "image_rss_kib": 76960,
+            "prepared_rss_kib": 76960,
+            "peak_rss_kib": 77792,
+            "peak_delta_kib": 832
+          }
+        ],
+        "preparation_ms_p50": 1.399,
+        "transaction_ms_p50": 252.735,
+        "rss_delta_kib_p50": 832
+      }
+    }
+  }
+}

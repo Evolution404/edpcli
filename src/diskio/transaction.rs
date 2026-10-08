@@ -251,10 +251,93 @@ pub fn execute_write_transaction_observed(
     if plan.writes.is_empty() {
         return Ok(());
     }
-    if plan.total_sectors == 0 || plan.total_sectors > u32::MAX as u64 {
+    let readback_order = plan.writes.keys().copied().collect::<Vec<_>>();
+    let order = plan.ordered_lbas();
+    execute_sector_transaction_observed(
+        dev,
+        plan.total_sectors,
+        &order,
+        &readback_order,
+        |lba| plan.writes.get(&lba).map(|write| write.bytes.as_slice()),
+        observer,
+    )
+}
+
+/// Execute a filesystem's borrowed, ascending-LBA data-sector view through the
+/// same sync, mirror, readback and rollback protocol as owned transactions.
+/// No per-sector payload/owner clones are created. All keys are validated
+/// *before* preflight sync; an invalid view never changes the medium.
+pub fn execute_borrowed_data_transaction_observed(
+    dev: &mut dyn SectorDev,
+    total_sectors: u64,
+    writes: &[(u32, &[u8; SECTOR])],
+    observer: &mut dyn FnMut(TransactionActivity),
+) -> EdpCliResult<()> {
+    if writes.is_empty() {
+        return Ok(());
+    }
+    if total_sectors == 0 || total_sectors > u32::MAX as u64 {
         return Err(EdpCliError::new(
             EXIT_IO,
-            format!("错误: 事务目标扇区数不受支持: {}", plan.total_sectors),
+            format!("错误: 事务目标扇区数不受支持: {total_sectors}"),
+        ));
+    }
+    let mut prior = None;
+    for &(lba, _) in writes {
+        // A format-only data transaction must never edit the protocol area.
+        // Metadata/MBR writes go through the ordered owned transaction path.
+        if lba <= crate::common::METADATA_LAST_LBA {
+            return Err(EdpCliError::new(
+                EXIT_IO,
+                format!("错误: 格式化数据事务不可写协议保留扇区 LBA{lba}"),
+            ));
+        }
+        if u64::from(lba) >= total_sectors {
+            return Err(EdpCliError::new(
+                EXIT_IO,
+                format!("错误: 事务 LBA{lba} 超过目标末端{}", total_sectors - 1),
+            ));
+        }
+        if prior.is_some_and(|previous| lba <= previous) {
+            return Err(EdpCliError::new(
+                EXIT_IO,
+                format!("错误: 借用事务 LBA{lba} 非严格递增或重复"),
+            ));
+        }
+        prior = Some(lba);
+    }
+    let lbas = writes.iter().map(|(lba, _)| *lba).collect::<Vec<_>>();
+    execute_sector_transaction_observed(
+        dev,
+        total_sectors,
+        &lbas,
+        &lbas,
+        |lba| {
+            writes
+                .binary_search_by_key(&lba, |entry| entry.0)
+                .ok()
+                .and_then(|index| writes.get(index))
+                .map(|(_, sector)| sector.as_slice())
+        },
+        observer,
+    )
+}
+
+fn execute_sector_transaction_observed<'a>(
+    dev: &mut dyn SectorDev,
+    total_sectors: u64,
+    order: &[u32],
+    readback_order: &[u32],
+    sector: impl Fn(u32) -> Option<&'a [u8]>,
+    observer: &mut dyn FnMut(TransactionActivity),
+) -> EdpCliResult<()> {
+    if readback_order.is_empty() {
+        return Ok(());
+    }
+    if total_sectors == 0 || total_sectors > u32::MAX as u64 {
+        return Err(EdpCliError::new(
+            EXIT_IO,
+            format!("错误: 事务目标扇区数不受支持: {total_sectors}"),
         ));
     }
 
@@ -274,8 +357,6 @@ pub fn execute_write_transaction_observed(
     })?;
 
     // Borrow the immutable planned sectors; only the rollback mirror owns old bytes.
-    let readback_order = plan.writes.keys().copied().collect::<Vec<_>>();
-    let order = plan.ordered_lbas();
     // A sorted LBA index already exists in readback_order. Keep one contiguous
     // rollback image instead of one BTreeMap node + heap allocation per sector.
     // A failed reservation is handled before ANY data write.
@@ -312,14 +393,7 @@ pub fn execute_write_transaction_observed(
         );
     }
 
-    match write_and_verify(
-        dev,
-        |lba| plan.writes.get(&lba).map(|write| write.bytes.as_slice()),
-        &order,
-        &readback_order,
-        false,
-        observer,
-    ) {
+    match write_and_verify(dev, &sector, order, readback_order, false, observer) {
         Ok(()) => Ok(()),
         Err(write_error) => {
             for attempt in 0..3 {
@@ -332,8 +406,8 @@ pub fn execute_write_transaction_observed(
                             .and_then(|index| mirror.get(index))
                             .map(|bytes| bytes.as_slice())
                     },
-                    &order,
-                    &readback_order,
+                    order,
+                    readback_order,
                     true,
                     observer,
                 ) {
