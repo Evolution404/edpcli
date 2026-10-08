@@ -175,6 +175,7 @@ impl edpcli::ports::CmdRunner for SerialRunner {
 #[test]
 #[cfg(target_os = "macos")]
 fn backup_create_and_restore_event_sequence() {
+    let _fixture = crate::common::lock_host_write_fixture();
     use crate::common::*;
     use edpcli::application::write::{backup_create_flow, restore_flow_typed, Ctx};
     use edpcli::diskio::FileDev;
@@ -247,6 +248,9 @@ fn backup_create_and_restore_event_sequence() {
 #[test]
 #[cfg(target_os = "macos")]
 fn structured_restore_checks_authorization_and_digest_and_isolates_observer_failure() {
+    // Multiple macOS write-flow fixtures share disk6 in this test process.
+    // Serialize them without weakening the real write lease or altering app code.
+    let _fixture = crate::common::lock_host_write_fixture();
     use crate::common::*;
     use edpcli::application::media_identity::{MediaIdentityPin, MediaIdentityResumePin};
     use edpcli::application::media_identity_observer::observe_media_identity_readonly;
