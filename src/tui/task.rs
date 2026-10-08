@@ -282,6 +282,27 @@ impl TaskHub {
         Ok(operation_id)
     }
 
+    /// A worker can complete between terminal events. Bound event wait only
+    /// while jobs run; an idle TUI retains its low-poll-frequency behavior.
+    pub fn has_pending_work(&self) -> bool {
+        self.active_operation.is_some()
+            || self.device_slot.single_flight.is_running()
+            || self.backup_slot.single_flight.is_running()
+            || self.advanced_inspect_slot.single_flight.is_running()
+            || self.advanced_inspect_sector_slot.single_flight.is_running()
+            || self.verify_slot.single_flight.is_running()
+            || self.prune_slot.single_flight.is_running()
+            || self.batch_delete_slot.single_flight.is_running()
+            || self.provision.key_probe_slot.single_flight.is_running()
+            || self.provision.plan_slot.single_flight.is_running()
+            || self.provision.export_slot.single_flight.is_running()
+            || self
+                .provision
+                .password_verify_slots
+                .iter()
+                .any(|slot| slot.single_flight.is_running())
+    }
+
     pub const fn active_operation(&self) -> Option<OperationId> {
         self.active_operation
     }

@@ -241,36 +241,6 @@ impl AppState {
         }
     }
 
-    fn device_matches_query(row: &crate::disk_scan::Row, query: &str) -> bool {
-        let identity = crate::application::identity::WorkspaceIdentity::from_device(row);
-        let text = format!(
-            "disk{} {} {} {}",
-            row.disk,
-            identity.search_text(),
-            row.proto,
-            identity
-                .provision_kind
-                .map(|kind| kind.full_name())
-                .unwrap_or_default(),
-        );
-        text.to_ascii_lowercase().contains(query)
-    }
-
-    fn backup_matches_query(row: &crate::application::BackupWorkspaceItem, query: &str) -> bool {
-        let identity = crate::application::identity::WorkspaceIdentity::from_backup(row);
-        let text = format!(
-            "{} {} {} {}",
-            row.file_name,
-            row.display_time,
-            identity.search_text(),
-            identity
-                .provision_kind
-                .map(|kind| kind.full_name())
-                .unwrap_or_default(),
-        );
-        text.to_ascii_lowercase().contains(query)
-    }
-
     fn rebuild_workspace_filter(&mut self) {
         let query = self.active_search_query().to_ascii_lowercase();
         self.clear_search_matches();
@@ -289,15 +259,15 @@ impl AppState {
 
         match self.shell.workspace {
             Workspace::Devices => {
-                for (index, row) in self.devices.rows.iter().enumerate() {
-                    if Self::device_matches_query(row, &query) {
+                for (index, text) in self.devices.search_texts.iter().enumerate() {
+                    if text.contains(&query) {
                         self.shell.search_matches.push(index);
                     }
                 }
             }
             Workspace::Backups => {
-                for (index, row) in self.backups.rows.iter().enumerate() {
-                    if Self::backup_matches_query(row, &query) {
+                for (index, text) in self.backups.search_texts.iter().enumerate() {
+                    if text.contains(&query) {
                         self.shell.search_matches.push(index);
                     }
                 }
@@ -451,10 +421,12 @@ impl AppState {
             self.provision.target_disk = None;
         }
         self.devices.rows = devices;
-        self.devices.table_view = super::table_layout::device_table_view(
+        let (view, searches) = super::table_layout::device_table_view_with_search(
             &self.devices.rows,
             self.devices.table_view.generation.wrapping_add(1),
         );
+        self.devices.table_view = view;
+        self.devices.search_texts = searches;
         self.devices.scan_pending = false;
         if self.shell.workspace == Workspace::Provision
             && self.provision.stage != ProvisionStage::Result
@@ -604,11 +576,16 @@ impl AppState {
         let selected_path = (self.shell.workspace == Workspace::Backups)
             .then(|| self.selected_backup_path())
             .flatten();
+        self.backups.overview_counts = crate::tui::overview::ProvisionKindCounts::from_kinds(
+            backups.iter().map(|backup| backup.provision_kind),
+        );
         self.backups.rows = backups;
-        self.backups.table_view = super::table_layout::backup_table_view(
+        let (view, searches) = super::table_layout::backup_table_view_with_search(
             &self.backups.rows,
             self.backups.table_view.generation.wrapping_add(1),
         );
+        self.backups.table_view = view;
+        self.backups.search_texts = searches;
         self.backups.group_keys = self
             .backups
             .rows

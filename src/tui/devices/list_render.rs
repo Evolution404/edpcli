@@ -17,7 +17,8 @@ pub(super) fn draw_device_list(frame: &mut Frame, area: ratatui::layout::Rect, s
     let metrics = crate::tui::overview::overview_metrics(counts);
     let search = crate::tui::overview::overview_search(state, "/ 搜索设备、部门、姓名、型号、盘型");
     crate::tui::ui::workspace_overview(frame, overview_area, "设备概览", &metrics, &search);
-    let visible_count = state.visible_device_count();
+    let visible = state.device_view_snapshot();
+    let visible_count = visible.len();
     let pane_focused = state.devices_focused_pane() == PaneId::DevicesList;
     let total_count = state.devices().len();
     let count_label = if state.workspace_filter_active() {
@@ -101,7 +102,7 @@ pub(super) fn draw_device_list(frame: &mut Frame, area: ratatui::layout::Rect, s
     let window_start = window.start;
     let window_len = window.len();
     let rows = window
-        .filter_map(|position| state.device_source_index_at_visible(position))
+        .filter_map(|position| visible.get(position).copied())
         .map(|index| {
             let row = &state.devices()[index];
             let values = &view.rows[index];

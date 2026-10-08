@@ -59,39 +59,89 @@ impl TableViewData {
         let Some(sort) = interaction.sort() else {
             return indices;
         };
-        indices.sort_by(|left, right| {
-            let a = self
-                .rows
-                .get(*left)
-                .and_then(|row| row.get(sort.column))
-                .map(String::as_str)
-                .unwrap_or("");
-            let b = self
-                .rows
-                .get(*right)
-                .and_then(|row| row.get(sort.column))
-                .map(String::as_str)
-                .unwrap_or("");
-            let keys = |row: usize| {
-                self.numeric_sort_keys
-                    .get(row)
-                    .and_then(|columns| columns.get(sort.column))
+        // Decorate each visible row once instead of repeatedly decoding text
+        // inside O(n log n) comparisons. Keep exact legacy rank/number/text order.
+        let mut decorated = indices
+            .drain(..)
+            .map(|index| {
+                let text = self
+                    .rows
+                    .get(index)
+                    .and_then(|row| row.get(sort.column))
+                    .map(String::as_str)
+                    .unwrap_or("");
+                let number = self
+                    .numeric_sort_keys
+                    .get(index)
+                    .and_then(|row| row.get(sort.column))
                     .copied()
-                    .flatten()
-            };
-            let ordering = match (keys(*left), keys(*right)) {
-                (Some(a), Some(b)) => a.cmp(&b),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => smart_cell_cmp(a, b),
-            }
-            .then_with(|| left.cmp(right));
+                    .flatten();
+                let key = if let Some(number) = number {
+                    SortCell::SourceNumber(number)
+                } else {
+                    SortCell::Display {
+                        semantic: semantic_rank(text),
+                        numeric: numeric_cell(text),
+                        lowercase: text.to_lowercase(),
+                    }
+                };
+                (index, key)
+            })
+            .collect::<Vec<_>>();
+        decorated.sort_by(|(left_index, left), (right_index, right)| {
+            let ordering = left.cmp(right).then_with(|| left_index.cmp(right_index));
             match sort.direction {
                 SortDirection::Ascending => ordering,
                 SortDirection::Descending => ordering.reverse(),
             }
         });
+        indices.extend(decorated.into_iter().map(|(index, _)| index));
         indices
+    }
+}
+
+enum SortCell {
+    SourceNumber(u64),
+    Display {
+        semantic: Option<i64>,
+        numeric: Option<f64>,
+        lowercase: String,
+    },
+}
+
+impl SortCell {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (self, other) {
+            (Self::SourceNumber(a), Self::SourceNumber(b)) => a.cmp(b),
+            (Self::SourceNumber(_), _) => Ordering::Less,
+            (_, Self::SourceNumber(_)) => Ordering::Greater,
+            (
+                Self::Display {
+                    semantic: sa,
+                    numeric: na,
+                    lowercase: la,
+                },
+                Self::Display {
+                    semantic: sb,
+                    numeric: nb,
+                    lowercase: lb,
+                },
+            ) => {
+                match (sa, sb) {
+                    (Some(a), Some(b)) => return a.cmp(b),
+                    (Some(_), None) => return Ordering::Less,
+                    (None, Some(_)) => return Ordering::Greater,
+                    _ => {}
+                }
+                match (na, nb) {
+                    (Some(a), Some(b)) => a.total_cmp(b),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    _ => la.cmp(lb),
+                }
+            }
+        }
     }
 }
 
@@ -193,13 +243,31 @@ pub fn backup_health_text(backup: &crate::application::BackupWorkspaceItem) -> &
 }
 
 pub fn device_table_view(rows: &[crate::disk_scan::Row], generation: u64) -> TableViewData {
+    device_table_view_with_search(rows, generation).0
+}
+
+pub fn device_table_view_with_search(
+    rows: &[crate::disk_scan::Row],
+    generation: u64,
+) -> (TableViewData, Vec<String>) {
     let columns = table_column_schema(TableKind::Devices).expect("device column schema");
-    let projected = rows
+    let (projected, searches): (Vec<_>, Vec<_>) = rows
         .iter()
         .map(|row| {
             let identity = crate::application::identity::WorkspaceIdentity::from_device(row);
+            let search = format!(
+                "disk{} {} {} {}",
+                row.disk,
+                identity.search_text(),
+                row.proto,
+                identity
+                    .provision_kind
+                    .map(|kind| kind.full_name())
+                    .unwrap_or_default()
+            )
+            .to_ascii_lowercase();
             let cells = identity.display_cells();
-            columns
+            let projected_row = columns
                 .iter()
                 .map(|column| {
                     safe(&match column.id {
@@ -236,9 +304,10 @@ pub fn device_table_view(rows: &[crate::disk_scan::Row], generation: u64) -> Tab
                         _ => unreachable!("device schema"),
                     })
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (projected_row, search)
         })
-        .collect();
+        .unzip();
     let keys = rows
         .iter()
         .map(|row| {
@@ -253,20 +322,41 @@ pub fn device_table_view(rows: &[crate::disk_scan::Row], generation: u64) -> Tab
                 .collect()
         })
         .collect();
-    TableViewData::from_rows(generation, &columns, projected).with_numeric_sort_keys(keys)
+    (
+        TableViewData::from_rows(generation, &columns, projected).with_numeric_sort_keys(keys),
+        searches,
+    )
 }
 
 pub fn backup_table_view(
     rows: &[crate::application::BackupWorkspaceItem],
     generation: u64,
 ) -> TableViewData {
+    backup_table_view_with_search(rows, generation).0
+}
+
+pub fn backup_table_view_with_search(
+    rows: &[crate::application::BackupWorkspaceItem],
+    generation: u64,
+) -> (TableViewData, Vec<String>) {
     let columns = table_column_schema(TableKind::Backups).expect("backup column schema");
-    let projected = rows
+    let (projected, searches): (Vec<_>, Vec<_>) = rows
         .iter()
         .map(|row| {
             let identity = crate::application::identity::WorkspaceIdentity::from_backup(row);
+            let search = format!(
+                "{} {} {} {}",
+                row.file_name,
+                row.display_time,
+                identity.search_text(),
+                identity
+                    .provision_kind
+                    .map(|kind| kind.full_name())
+                    .unwrap_or_default()
+            )
+            .to_ascii_lowercase();
             let cells = identity.display_cells();
-            columns
+            let projected_row = columns
                 .iter()
                 .map(|column| {
                     safe(&match column.id {
@@ -285,9 +375,10 @@ pub fn backup_table_view(
                         _ => unreachable!("backup schema"),
                     })
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (projected_row, search)
         })
-        .collect();
+        .unzip();
     let keys = rows
         .iter()
         .map(|row| {
@@ -301,7 +392,10 @@ pub fn backup_table_view(
                 .collect()
         })
         .collect();
-    TableViewData::from_rows(generation, &columns, projected).with_numeric_sort_keys(keys)
+    (
+        TableViewData::from_rows(generation, &columns, projected).with_numeric_sort_keys(keys),
+        searches,
+    )
 }
 
 pub fn related_backup_table_view(

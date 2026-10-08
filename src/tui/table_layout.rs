@@ -369,10 +369,12 @@ impl TableInteractionState {
 
 #[path = "table/projection.rs"]
 mod projection;
-pub(crate) use projection::smart_cell_cmp;
 pub use projection::{
     backup_health_text, backup_table_view, device_table_view, related_backup_table_view,
     TableViewData,
+};
+pub(crate) use projection::{
+    backup_table_view_with_search, device_table_view_with_search, smart_cell_cmp,
 };
 
 fn column(

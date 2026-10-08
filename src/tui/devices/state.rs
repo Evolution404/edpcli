@@ -74,6 +74,7 @@ impl AppState {
 pub struct DevicesState {
     pub(super) rows: Vec<crate::disk_scan::Row>,
     pub(super) table_view: super::super::table_layout::TableViewData,
+    pub(super) search_texts: Vec<String>,
     view_cache: DeviceViewCache,
     pub(super) scan_pending: bool,
     pub(super) pane_focus: crate::tui::pane::PaneFocus,
@@ -91,6 +92,7 @@ impl Default for DevicesState {
         Self {
             rows: Vec::new(),
             table_view: super::super::table_layout::TableViewData::default(),
+            search_texts: Vec::new(),
             view_cache: DeviceViewCache::default(),
             scan_pending: false,
             pane_focus: crate::tui::pane::PaneFocus::devices(),

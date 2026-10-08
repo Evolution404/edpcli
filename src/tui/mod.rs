@@ -131,6 +131,18 @@ enum LoopExit {
     Elevate(state::WriteIntent),
 }
 
+// crossterm blocks independently of worker channels. A bounded active-work
+// wait removes the previous 250ms scan-completion tail without extra threads.
+fn event_wait_timeout(pending_work: bool, animation_active: bool) -> Duration {
+    if pending_work {
+        Duration::from_millis(25)
+    } else if animation_active {
+        Duration::from_millis(animation::TICK_INTERVAL_MS)
+    } else {
+        Duration::from_millis(250)
+    }
+}
+
 fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
     let mut session = TerminalSession::enter()?;
     let mut state = AppState::new();
@@ -203,11 +215,7 @@ fn run_loop(resume: Option<state::WriteIntent>) -> io::Result<LoopExit> {
                     .unwrap_or_default()
                     .min(Duration::from_millis(animation::TICK_INTERVAL_MS))
             } else {
-                Duration::from_millis(if activity_pending {
-                    animation::TICK_INTERVAL_MS
-                } else {
-                    250
-                })
+                event_wait_timeout(tasks.has_pending_work(), activity_pending)
             };
             if !ct_event::poll(poll_timeout)? {
                 continue;
@@ -378,5 +386,20 @@ mod tests {
             Some(vec!["tui".to_string()])
         );
         assert_eq!(startup_elevation_argv(&[], true), None);
+    }
+}
+
+#[cfg(test)]
+mod pending_event_tests {
+    use super::*;
+    #[test]
+    fn work_wait_is_bounded_without_busy_polling_when_idle() {
+        assert_eq!(event_wait_timeout(true, false), Duration::from_millis(25));
+        assert_eq!(event_wait_timeout(true, true), Duration::from_millis(25));
+        assert_eq!(
+            event_wait_timeout(false, true),
+            Duration::from_millis(animation::TICK_INTERVAL_MS)
+        );
+        assert_eq!(event_wait_timeout(false, false), Duration::from_millis(250));
     }
 }

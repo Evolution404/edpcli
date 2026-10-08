@@ -295,3 +295,13 @@ fn source_password_requests_keep_one_latest_per_domain_and_cancel_pending_secret
         assert!(slot.single_flight.is_running()); // running read completes, never force-terminate raw I/O
     }
 }
+
+#[test]
+fn background_work_polling_reflects_singleflight_lifecycle() {
+    let mut hub = TaskHub::new();
+    assert!(!hub.has_pending_work());
+    let generation = hub.device_slot.try_begin().unwrap();
+    assert!(hub.has_pending_work());
+    assert!(hub.device_slot.finish(generation));
+    assert!(!hub.has_pending_work());
+}

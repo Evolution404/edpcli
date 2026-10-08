@@ -70,6 +70,8 @@ pub struct BackupsState {
     pub(super) rows: Vec<crate::application::BackupWorkspaceItem>,
     pub(super) verify_run: Option<BackupVerifyRunState>,
     pub(super) table_view: super::super::table_layout::TableViewData,
+    pub(super) search_texts: Vec<String>,
+    pub(super) overview_counts: crate::tui::overview::ProvisionKindCounts,
     pub(super) scan_pending: bool,
     pub(super) group_keys: Vec<Option<String>>,
     pub(super) tree_nodes: Vec<BackupDeviceTreeNode>,
@@ -93,6 +95,8 @@ impl Default for BackupsState {
             rows: Vec::new(),
             verify_run: None,
             table_view: super::super::table_layout::TableViewData::default(),
+            search_texts: Vec::new(),
+            overview_counts: Default::default(),
             scan_pending: false,
             group_keys: Vec::new(),
             tree_nodes: vec![BackupDeviceTreeNode {
@@ -245,12 +249,26 @@ impl AppState {
         }
     }
 
+    pub(crate) fn backup_overview_counts(&self) -> crate::tui::overview::ProvisionKindCounts {
+        self.backups.overview_counts
+    }
+
     pub fn backup_device_filtered_count(&self) -> usize {
-        self.backups
-            .rows
-            .iter()
-            .filter(|backup| self.backup_matches_device_filter(backup))
-            .count()
+        match &self.backups.device_filter {
+            BackupDeviceFilter::All => self.backups.group_keys.len(),
+            BackupDeviceFilter::Confirmed(expected) => self
+                .backups
+                .group_keys
+                .iter()
+                .filter(|key| key.as_ref() == Some(expected))
+                .count(),
+            BackupDeviceFilter::Unresolved => self
+                .backups
+                .group_keys
+                .iter()
+                .filter(|key| key.is_none())
+                .count(),
+        }
     }
 
     pub fn backup_device_filter_label(&self) -> String {

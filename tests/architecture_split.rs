@@ -1213,7 +1213,10 @@ fn device_and_backup_overviews_share_one_layout_and_one_kind_counter() {
     assert!(devices.contains("ui::workspace_overview"));
     assert!(backups.contains("ui::workspace_overview"));
     assert!(devices.contains("ProvisionKindCounts::from_kinds"));
-    assert!(backups.contains("ProvisionKindCounts::from_kinds"));
+    assert!(backups.contains("backup_overview_counts"));
+    let app_state =
+        fs::read_to_string(root.join("src/tui/state.rs")).expect("read TUI state projections");
+    assert!(app_state.contains("ProvisionKindCounts::from_kinds"));
     assert!(overview.contains("if count > 0"));
     assert!(component.contains("搜索 · 实时过滤"));
     for stale in [

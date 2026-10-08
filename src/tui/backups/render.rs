@@ -187,9 +187,7 @@ pub(super) fn draw_backups(frame: &mut Frame, area: ratatui::layout::Rect, state
             .constraints([Constraint::Length(3), Constraint::Min(4)])
             .split(list_area);
 
-        let counts = crate::tui::overview::ProvisionKindCounts::from_kinds(
-            state.backups().iter().map(|backup| backup.provision_kind),
-        );
+        let counts = state.backup_overview_counts();
         let metrics = crate::tui::overview::overview_metrics(counts);
         let search = crate::tui::overview::overview_search(state, "/ 搜索身份、容量、型号、文件名");
         crate::tui::ui::workspace_overview(frame, backup_parts[0], "备份概览", &metrics, &search);
