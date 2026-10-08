@@ -41,7 +41,7 @@ class RedundancyAuditTests(unittest.TestCase):
         self.assertTrue(run.call_args.kwargs["text"])
 
     def findings(self, root, files, facts, texts, tests=()):
-        rules = json.loads((ROOT / "scripts/audit/redundancy-rules.json").read_text())["rules"]
+        rules = json.loads((ROOT / "scripts/audit/redundancy-rules.json").read_text(encoding="utf-8"))["rules"]
         return redundancy_audit.evaluate(root, files, facts, texts, set(tests), rules)
 
     def test_all_modules_are_scanned_and_candidates_are_not_deletion_proofs(self):
@@ -141,7 +141,7 @@ class PythonToolingTests(unittest.TestCase):
             require_python(version)
 
     def test_ci_runs_whole_repository_audit_for_every_change(self):
-        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         job = ci.split("  repository-audit:\n", 1)[1].split("  protocol-audit:\n", 1)[0]
         self.assertNotIn("if: needs.changes", job)
         self.assertIn("uv run --locked python scripts/audit-redundancy.py --check", job)

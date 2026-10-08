@@ -209,14 +209,14 @@ def main():
     roots, tests = cargo_targets(ROOT)
     print(f'[audit] 全仓 {len(files)} 个文件；读取所有 Rust AST 与 Cargo 模块注册', flush=True)
     facts = rust_facts(ROOT, files, roots)
-    rules = json.loads(RULES.read_text())
+    rules = json.loads(RULES.read_text(encoding="utf-8"))
     if rules['schema_version'] != 1 or len({r['id'] for r in rules['rules']}) != len(rules['rules']):
         raise ValueError('Invalid rule schema or duplicate rule id')
     report = dict(schema_version=1, file_count=len(files), rust_file_count=sum(p.endswith('.rs') for p in files),
                   rules=rules['rules'], findings=evaluate(ROOT, files, facts, text_files(ROOT, files), tests, rules['rules']))
     args.output.mkdir(parents=True, exist_ok=True)
-    (args.output / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
-    (args.output / 'report.md').write_text(markdown(report) + '\n')
+    (args.output / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding="utf-8")
+    (args.output / 'report.md').write_text(markdown(report) + '\n', encoding="utf-8")
     counts = Counter(f['rule'] for f in report['findings'])
     for rule in report['rules']:
         print(f"[audit] {rule['id']}: {counts[rule['id']]}")
