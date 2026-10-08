@@ -6,7 +6,8 @@ use edpcli::{
     application::support::{EXIT_INTERMEDIATE, EXIT_IO, EXIT_ROLLED_BACK, SECTOR},
     diskio::{
         atomic_write_official_provision_sectors, execute_borrowed_data_transaction_observed,
-        execute_borrowed_data_transaction_scoped_observed, execute_write_transaction,
+        execute_borrowed_data_transaction_scoped_observed,
+        execute_borrowed_reinitialize_transaction, execute_write_transaction,
         execute_write_transaction_observed, BorrowedFormatBounds, BorrowedFormatLayout,
         SectorWriteStage, TransactionActivityPhase, WriteTransactionPlan,
     },
@@ -996,4 +997,145 @@ fn fault_matrix_permanent_rollback_failure_is_reported_as_intermediate() {
             assert_ne!(dev.inner.sectors, before, "{label}: incomplete rollback");
         }
     }
+}
+
+#[test]
+fn borrowed_reinitialize_matches_owned_stage_order_and_bytes() {
+    let data = [
+        (101, [0xa1; SECTOR]),
+        (102, [0xa2; SECTOR]),
+        (117, [0xa3; SECTOR]),
+    ];
+    let references = data
+        .iter()
+        .map(|(lba, bytes)| (*lba, bytes))
+        .collect::<Vec<_>>();
+    let lba7 = [0xb7; SECTOR];
+    let lba12 = [0xbc; SECTOR];
+    let mut owned = WriteTransactionPlan::new(1000);
+    for (lba, bytes) in &data {
+        owned
+            .insert(
+                *lba,
+                bytes.to_vec(),
+                SectorWriteStage::Data,
+                "new encrypted filesystem",
+            )
+            .unwrap();
+    }
+    owned
+        .insert(
+            7,
+            lba7.to_vec(),
+            SectorWriteStage::Metadata,
+            "new key domain",
+        )
+        .unwrap();
+    owned
+        .insert(
+            12,
+            lba12.to_vec(),
+            SectorWriteStage::Metadata,
+            "new key domain",
+        )
+        .unwrap();
+    let mut first = MemoryDev::default();
+    let mut borrowed = MemoryDev::default();
+    for lba in [7, 12, 101, 102, 117] {
+        first.sectors.insert(lba, vec![0x66; SECTOR]);
+    }
+    borrowed.sectors = first.sectors.clone();
+    execute_write_transaction(&mut first, &owned).unwrap();
+    execute_borrowed_reinitialize_transaction(
+        &mut borrowed,
+        1000,
+        100,
+        40,
+        &references,
+        &lba7,
+        &lba12,
+    )
+    .unwrap();
+    assert_eq!(borrowed.sectors, first.sectors);
+    assert_eq!(borrowed.writes, first.writes);
+    assert_eq!(borrowed.writes, [101, 102, 117, 7, 12]);
+    assert_eq!(borrowed.syncs, first.syncs);
+    assert_eq!(borrowed.syncs, 2);
+}
+
+#[test]
+fn borrowed_reinitialize_rejects_bad_geometry_before_any_device_io() {
+    let data = [
+        (101, [0xa1; SECTOR]),
+        (102, [0xa2; SECTOR]),
+        (117, [0xa3; SECTOR]),
+    ];
+    let bytes = [0xb7; SECTOR];
+    for (label, total, start, count, positions) in [
+        ("EDP reserved", 1000, 62, 40, vec![0]),
+        ("out of media", 1000, 100, 1000, vec![0]),
+        ("empty partition", 1000, 100, 0, vec![0]),
+        ("below start", 1000, 102, 40, vec![0]),
+        ("after end", 1000, 100, 10, vec![2]),
+        ("duplicates", 1000, 100, 40, vec![0, 0]),
+        ("unordered", 1000, 100, 40, vec![1, 0]),
+        ("u32 overflow", u64::from(u32::MAX) + 1, 100, 40, vec![0]),
+        ("partition end overflow", 1000, 100, u64::MAX, vec![0]),
+    ] {
+        let writes = positions
+            .iter()
+            .map(|&index| (data[index].0, &data[index].1))
+            .collect::<Vec<_>>();
+        let mut dev = MemoryDev::default();
+        let error = execute_borrowed_reinitialize_transaction(
+            &mut dev, total, start, count, &writes, &bytes, &bytes,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, EXIT_IO, "{label}: {}", error.msg);
+        assert_eq!(dev.syncs, 0, "{label} sync before validation");
+        assert!(dev.writes.is_empty(), "{label} wrote media");
+    }
+    let mut dev = MemoryDev::default();
+    assert!(execute_borrowed_reinitialize_transaction(
+        &mut dev,
+        1000,
+        100,
+        40,
+        &[],
+        &bytes,
+        &bytes
+    )
+    .is_err());
+    assert_eq!(dev.syncs, 0);
+}
+
+#[test]
+fn borrowed_reinitialize_failure_after_lba7_rolls_back_data_and_key_domain() {
+    let data = [(100, [0x51; SECTOR]), (101, [0x52; SECTOR])];
+    let writes = data
+        .iter()
+        .map(|(lba, bytes)| (*lba, bytes))
+        .collect::<Vec<_>>();
+    let mut dev = MemoryDev::default();
+    for lba in [7, 12, 100, 101] {
+        dev.sectors.insert(lba, vec![0x91; SECTOR]);
+    }
+    let before = dev.sectors.clone();
+    // Writes: DATA 100,101; LBA7; then LBA12 fails. Rollback must
+    // restore the original two protocol sectors as well as all data.
+    dev.fail_call = Some(4);
+    let error = execute_borrowed_reinitialize_transaction(
+        &mut dev,
+        1000,
+        100,
+        40,
+        &writes,
+        &[0x67; SECTOR],
+        &[0x6c; SECTOR],
+    )
+    .unwrap_err();
+    assert_eq!(error.code, EXIT_ROLLED_BACK, "{}", error.msg);
+    assert_eq!(dev.sectors, before);
+    assert_eq!(dev.writes.last(), Some(&12));
+    assert_eq!(dev.syncs, 2);
 }

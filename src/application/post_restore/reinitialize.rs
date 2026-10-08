@@ -6,7 +6,7 @@ use crate::application::media_identity::MediaIdentityResumePin;
 use crate::application::target_session::{ReadOnly, ReopenAndVerifyError, TargetSession};
 use crate::application::Prompter;
 use crate::common::{EdpCliError, EdpCliResult, EXIT_IO};
-use crate::diskio::{self, SectorWriteStage, WriteTransactionPlan};
+use crate::diskio;
 use crate::ports::{CmdRunner, SectorDev};
 use crate::provision::{rekey_existing_partition_image, wrap_file_key, wrap_legacy_lba7_file_key};
 
@@ -132,27 +132,21 @@ pub fn reinitialize_encrypted_partition_on_disk(
             return Err(failure("格式化镜像写入范围超出所选分区"));
         }
         let encrypted_image = plain_image.transformed(&EdpSm4Transform::new(file_key));
-        let mut transaction = WriteTransactionPlan::new(outcome.total_sectors);
+        // Keep only borrowed references to the immutable encrypted image.
+        // The shared executor still owns the complete touched-sector rollback
+        // mirror; the old owned WriteTransactionPlan doubled these new bytes.
+        let mut data_writes = Vec::with_capacity(encrypted_image.sectors().len());
         for (&relative, sector) in encrypted_image.sectors() {
-            let absolute = partition
-                .start_lba
-                .checked_add(relative)
+            let absolute = partition.start_lba.checked_add(relative)
                 .and_then(|lba| u32::try_from(lba).ok())
                 .ok_or_else(|| failure("加密文件系统 LBA 溢出"))?;
-            transaction
-                .insert(absolute, sector.to_vec(), SectorWriteStage::Data, "new encrypted filesystem")
-                .map_err(failure)?;
+            data_writes.push((absolute, sector));
         }
-        for lba in [7usize, 12] {
-            transaction
-                .insert(
-                    lba as u32,
-                    updated.as_bytes()[lba * SECTOR..(lba + 1) * SECTOR].to_vec(),
-                    SectorWriteStage::Metadata,
-                    "new key domain",
-                )
-                .map_err(failure)?;
-        }
+        let updated_lba7: &[u8; SECTOR] = updated.as_bytes()[7 * SECTOR..8 * SECTOR]
+            .try_into().map_err(|_| failure("新协议 LBA7 不是 512B"))?;
+        let updated_lba12: &[u8; SECTOR] = updated.as_bytes()[12 * SECTOR..13 * SECTOR]
+            .try_into().map_err(|_| failure("新协议 LBA12 不是 512B"))?;
+
         let session = session.prepare_write().map_err(|error| {
             EdpCliError::new(EXIT_IO, format!("无法卸载/锁定 disk{disk}: {error}"))
         })?;
@@ -171,7 +165,11 @@ pub fn reinitialize_encrypted_partition_on_disk(
             ReopenAndVerifyError::Geometry(error) => error,
             })?;
 
-    let dev = locked_session.device();        diskio::execute_write_transaction(dev, &transaction)?;
+        let dev = locked_session.device();
+        diskio::execute_borrowed_reinitialize_transaction(
+            dev, outcome.total_sectors, partition.start_lba, partition.sector_count,
+            &data_writes, updated_lba7, updated_lba12,
+        )?;
         committed = true;
         let after = assess_partitions_with_password_readonly(
             dev,

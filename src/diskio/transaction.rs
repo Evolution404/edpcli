@@ -341,6 +341,82 @@ pub fn execute_write_transaction_observed(
     )
 }
 
+/// Reinitialize one EDP encrypted partition without cloning its already
+/// materialized encrypted filesystem sectors into an owned transaction plan.
+/// Only LBA7/LBA12 may be rewritten as the metadata portion; these are
+/// committed after the partition data and mirrored/rolled back together.
+/// Every possible invalid input is rejected before the first device I/O.
+pub fn execute_borrowed_reinitialize_transaction(
+    dev: &mut dyn SectorDev,
+    total_sectors: u64,
+    partition_start: u64,
+    partition_sectors: u64,
+    data_writes: &[(u32, &[u8; SECTOR])],
+    lba7: &[u8; SECTOR],
+    lba12: &[u8; SECTOR],
+) -> EdpCliResult<()> {
+    let end = partition_start
+        .checked_add(partition_sectors)
+        .ok_or_else(|| EdpCliError::new(EXIT_IO, "错误: 重初始化分区末端 LBA 溢出"))?;
+    if total_sectors == 0
+        || total_sectors > u32::MAX as u64
+        || partition_start < 63
+        || partition_sectors == 0
+        || end > total_sectors
+    {
+        return Err(EdpCliError::new(
+            EXIT_IO,
+            "错误: 重初始化只允许在目标 EDP 分区范围内写入，且不能覆盖 LBA0-62",
+        ));
+    }
+    if data_writes.is_empty() {
+        return Err(EdpCliError::new(
+            EXIT_IO,
+            "错误: 重初始化缺少文件系统元数据",
+        ));
+    }
+    let mut previous = None;
+    for &(lba, _) in data_writes {
+        if u64::from(lba) < partition_start || u64::from(lba) >= end {
+            return Err(EdpCliError::new(
+                EXIT_IO,
+                format!("错误: 重初始化数据 LBA{lba} 超出分区范围"),
+            ));
+        }
+        if previous.is_some_and(|old| lba <= old) {
+            return Err(EdpCliError::new(
+                EXIT_IO,
+                format!("错误: 重初始化数据 LBA{lba} 乱序或重复"),
+            ));
+        }
+        previous = Some(lba);
+    }
+    // All mirrored/readback sectors are sorted, while the ordered *writes*
+    // must always finish with the two metadata changes, LBA7 then LBA12.
+    let mut readback_order = Vec::with_capacity(data_writes.len() + 2);
+    readback_order.extend([7, 12]);
+    readback_order.extend(data_writes.iter().map(|(lba, _)| *lba));
+    let mut write_order = Vec::with_capacity(readback_order.len());
+    write_order.extend(data_writes.iter().map(|(lba, _)| *lba));
+    write_order.extend([7, 12]);
+    execute_sector_transaction_observed(
+        dev,
+        total_sectors,
+        &write_order,
+        &readback_order,
+        |lba| match lba {
+            7 => Some(lba7.as_slice()),
+            12 => Some(lba12.as_slice()),
+            _ => data_writes
+                .binary_search_by_key(&lba, |entry| entry.0)
+                .ok()
+                .and_then(|index| data_writes.get(index))
+                .map(|(_, bytes)| bytes.as_slice()),
+        },
+        &mut |_| {},
+    )
+}
+
 /// A scoped partition filesystem writer is separate from a metadata writer.
 /// EDP has an LBA0-62 protocol/compatibility reserve; Plain uses its own
 /// MBR and preserves the manufacturer's LBA3. Never infer layout from data.
