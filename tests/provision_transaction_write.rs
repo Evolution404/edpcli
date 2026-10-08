@@ -3,7 +3,7 @@ use std::io;
 
 use edpcli::{
     application::filesystem::FilesystemKind,
-    application::support::{EXIT_IO, EXIT_ROLLED_BACK, SECTOR},
+    application::support::{EXIT_INTERMEDIATE, EXIT_IO, EXIT_ROLLED_BACK, SECTOR},
     diskio::{
         atomic_write_official_provision_sectors, execute_borrowed_data_transaction_observed,
         execute_borrowed_data_transaction_scoped_observed, execute_write_transaction,
@@ -814,6 +814,186 @@ fn scoped_partition_format_rejects_other_partition_and_plain_mbr_overlaps() {
         } else {
             assert!(dev.writes.is_empty(), "{description} wrote media");
             assert_eq!(dev.syncs, 0, "{description} must fail before any I/O");
+        }
+    }
+}
+
+// Fault matrix for the same shared executor used by Provision and formatting.
+// All tests use memory-backed sectors and never open a device path.
+#[derive(Default)]
+struct TransactionFaultMatrixDev {
+    inner: MemoryDev,
+    read_calls: usize,
+    fail_sync: Vec<usize>,
+    fail_read: Vec<usize>,
+    fail_write: Vec<usize>,
+    fail_read_from: Option<usize>,
+    fail_write_from: Option<usize>,
+}
+impl SectorDev for TransactionFaultMatrixDev {
+    fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+        self.read_calls += 1;
+        if self.fail_read.contains(&self.read_calls)
+            || self
+                .fail_read_from
+                .is_some_and(|start| self.read_calls >= start)
+        {
+            return Err(io::Error::other(format!(
+                "injected read #{}",
+                self.read_calls
+            )));
+        }
+        self.inner.read_sector(lba)
+    }
+    fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()> {
+        self.inner.calls += 1;
+        if self.fail_write.contains(&self.inner.calls)
+            || self
+                .fail_write_from
+                .is_some_and(|start| self.inner.calls >= start)
+        {
+            return Err(io::Error::other(format!(
+                "injected write #{}",
+                self.inner.calls
+            )));
+        }
+        self.inner.writes.push(lba);
+        self.inner.sectors.insert(lba, data.to_vec());
+        Ok(())
+    }
+    fn sync(&mut self) -> io::Result<()> {
+        self.inner.syncs += 1;
+        if self.fail_sync.contains(&self.inner.syncs) {
+            return Err(io::Error::other(format!(
+                "injected sync #{}",
+                self.inner.syncs
+            )));
+        }
+        Ok(())
+    }
+    fn reopen_rdwr(&mut self, _: std::time::Duration) -> io::Result<()> {
+        Ok(())
+    }
+}
+fn fault_matrix_plan() -> WriteTransactionPlan {
+    let mut plan = WriteTransactionPlan::new(1024);
+    for (lba, value, stage) in [
+        (63, 0x1a, SectorWriteStage::Data),
+        (64, 0x2b, SectorWriteStage::Data),
+        (12, 0x3c, SectorWriteStage::Metadata),
+        (0, 0x4d, SectorWriteStage::Commit),
+    ] {
+        plan.insert(lba, vec![value; SECTOR], stage, "fault matrix")
+            .unwrap();
+    }
+    plan
+}
+fn fault_matrix_dev() -> TransactionFaultMatrixDev {
+    let mut dev = TransactionFaultMatrixDev::default();
+    for lba in [0, 12, 63, 64] {
+        dev.inner
+            .sectors
+            .insert(lba, vec![(lba % 251) as u8; SECTOR]);
+    }
+    dev
+}
+#[test]
+fn fault_matrix_pre_write_errors_never_mutate_any_sector() {
+    for (label, fail_sync, fail_read) in [
+        ("preflight sync", vec![1], vec![]),
+        ("first mirror read", vec![], vec![1]),
+        ("later mirror read", vec![], vec![3]),
+    ] {
+        let mut dev = fault_matrix_dev();
+        let before = dev.inner.sectors.clone();
+        dev.fail_sync = fail_sync;
+        dev.fail_read = fail_read;
+        let error = execute_write_transaction(&mut dev, &fault_matrix_plan()).unwrap_err();
+        assert_eq!(error.code, EXIT_IO, "{label}: {}", error.msg);
+        assert_eq!(dev.inner.sectors, before, "{label}");
+        assert!(dev.inner.writes.is_empty(), "{label}");
+    }
+}
+#[test]
+fn fault_matrix_post_write_failures_restore_exact_bytes_and_commit_order() {
+    for (label, fail_sync, fail_read, fail_write) in [
+        ("write error", vec![], vec![], vec![2]),
+        ("write sync", vec![2], vec![], vec![]),
+        ("readback", vec![], vec![5], vec![]),
+    ] {
+        let mut dev = fault_matrix_dev();
+        let before = dev.inner.sectors.clone();
+        dev.fail_sync = fail_sync;
+        dev.fail_read = fail_read;
+        dev.fail_write = fail_write;
+        let mut progress = Vec::new();
+        let error =
+            execute_write_transaction_observed(&mut dev, &fault_matrix_plan(), &mut |activity| {
+                progress.push(activity)
+            })
+            .unwrap_err();
+        assert_eq!(error.code, EXIT_ROLLED_BACK, "{label}: {}", error.msg);
+        assert_eq!(dev.inner.sectors, before, "{label}");
+        assert_eq!(
+            dev.inner.writes.last(),
+            Some(&0),
+            "{label}: restore LBA0 last"
+        );
+        assert!(
+            progress.iter().any(
+                |event| event.phase == TransactionActivityPhase::RollbackReadback
+                    && event.current == 4
+            ),
+            "{label}: complete rollback readback"
+        );
+    }
+}
+#[test]
+fn fault_matrix_rollback_retry_can_recover_from_transient_failures() {
+    let mut dev = fault_matrix_dev();
+    let before = dev.inner.sectors.clone();
+    // First normal write of LBA63 succeeds; second write fails.
+    dev.fail_write = vec![2, 3];
+    let error = execute_write_transaction(&mut dev, &fault_matrix_plan()).unwrap_err();
+    assert_eq!(error.code, EXIT_ROLLED_BACK, "{}", error.msg);
+    assert_eq!(dev.inner.sectors, before);
+    assert!(
+        dev.inner.calls > 5,
+        "rollback must retry after injected error"
+    );
+
+    let mut dev = fault_matrix_dev();
+    let before = dev.inner.sectors.clone();
+    dev.fail_read = vec![5, 6];
+    let error = execute_write_transaction(&mut dev, &fault_matrix_plan()).unwrap_err();
+    assert_eq!(error.code, EXIT_ROLLED_BACK, "{}", error.msg);
+    assert_eq!(dev.inner.sectors, before);
+}
+#[test]
+fn fault_matrix_permanent_rollback_failure_is_reported_as_intermediate() {
+    for (label, fail_sync, fail_read_from, fail_write_from) in [
+        ("rollback write unavailable", vec![], None, Some(2)),
+        ("rollback sync unavailable", vec![2, 3, 4], None, None),
+        ("rollback verification unavailable", vec![], Some(6), None),
+    ] {
+        let mut dev = fault_matrix_dev();
+        let before = dev.inner.sectors.clone();
+        dev.fail_sync = fail_sync;
+        dev.fail_read_from = fail_read_from;
+        dev.fail_write_from = fail_write_from;
+        // A deliberate normal failure ensures we enter the rollback path.
+        dev.fail_write.push(2);
+        let error = execute_write_transaction(&mut dev, &fault_matrix_plan()).unwrap_err();
+        assert_eq!(error.code, EXIT_INTERMEDIATE, "{label}: {}", error.msg);
+        assert!(
+            error.msg.contains("中间状态") || error.msg.contains("中间态"),
+            "{label}: {}",
+            error.msg
+        );
+        // Unverifiable durability/rollback readback is INTERMEDIATE even
+        // if simulated cached bytes happen to match the original image.
+        if fail_write_from.is_some() {
+            assert_ne!(dev.inner.sectors, before, "{label}: incomplete rollback");
         }
     }
 }
