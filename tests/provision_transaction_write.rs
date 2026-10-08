@@ -6,8 +6,9 @@ use edpcli::{
     application::support::{EXIT_IO, EXIT_ROLLED_BACK, SECTOR},
     diskio::{
         atomic_write_official_provision_sectors, execute_borrowed_data_transaction_observed,
-        execute_write_transaction, execute_write_transaction_observed, SectorWriteStage,
-        TransactionActivityPhase, WriteTransactionPlan,
+        execute_borrowed_data_transaction_scoped_observed, execute_write_transaction,
+        execute_write_transaction_observed, BorrowedFormatBounds, BorrowedFormatLayout,
+        SectorWriteStage, TransactionActivityPhase, WriteTransactionPlan,
     },
     ports::SectorDev,
     provision::{
@@ -699,4 +700,120 @@ fn corrupted_contiguous_readback_triggers_exact_rollback() {
     assert!(error.msg.contains("LBA22"), "{}", error.msg);
     assert_eq!(dev.inner.sectors, before);
     assert_eq!(dev.inner.syncs, 3, "preflight + write sync + rollback sync");
+}
+
+#[test]
+fn edp_format_rejects_full_protocol_reserve_without_io_but_accepts_first_data_sector() {
+    let bytes = [0x39_u8; SECTOR];
+    for lba in [0, 12, 13, 20, 62] {
+        let mut dev = MemoryDev::default();
+        let result = execute_borrowed_data_transaction_observed(
+            &mut dev,
+            100,
+            &[(lba, &bytes)],
+            &mut |_| {},
+        );
+        assert!(result.is_err(), "EDP LBA{lba} unexpectedly accepted");
+        assert_eq!(dev.syncs, 0, "LBA{lba} must fail before sync");
+        assert!(dev.writes.is_empty());
+    }
+    let mut dev = MemoryDev::default();
+    execute_borrowed_data_transaction_observed(&mut dev, 100, &[(63, &bytes)], &mut |_| {})
+        .unwrap();
+    assert_eq!(dev.writes, vec![63]);
+    assert_eq!(dev.syncs, 2);
+}
+
+#[test]
+fn scoped_partition_format_rejects_other_partition_and_plain_mbr_overlaps() {
+    let bytes = [0x13_u8; SECTOR];
+    for (description, layout, start, end, written_lba, allowed) in [
+        (
+            "edp within start",
+            BorrowedFormatLayout::Edp,
+            100,
+            120,
+            100,
+            true,
+        ),
+        (
+            "edp within end",
+            BorrowedFormatLayout::Edp,
+            100,
+            120,
+            119,
+            true,
+        ),
+        (
+            "edp below partition",
+            BorrowedFormatLayout::Edp,
+            100,
+            120,
+            99,
+            false,
+        ),
+        (
+            "edp after partition",
+            BorrowedFormatLayout::Edp,
+            100,
+            120,
+            120,
+            false,
+        ),
+        ("edp header", BorrowedFormatLayout::Edp, 62, 100, 63, false),
+        (
+            "edp reserved",
+            BorrowedFormatLayout::Edp,
+            13,
+            100,
+            13,
+            false,
+        ),
+        ("plain earliest", BorrowedFormatLayout::Plain, 1, 3, 1, true),
+        (
+            "plain LBA3 protected",
+            BorrowedFormatLayout::Plain,
+            1,
+            4,
+            1,
+            false,
+        ),
+        (
+            "plain zero protected",
+            BorrowedFormatLayout::Plain,
+            0,
+            3,
+            1,
+            false,
+        ),
+        (
+            "plain typical",
+            BorrowedFormatLayout::Plain,
+            2048,
+            2200,
+            2048,
+            true,
+        ),
+    ] {
+        let mut dev = MemoryDev::default();
+        let result = execute_borrowed_data_transaction_scoped_observed(
+            &mut dev,
+            3000,
+            &[(written_lba, &bytes)],
+            BorrowedFormatBounds {
+                start_lba: start,
+                end_exclusive: end,
+                layout,
+            },
+            &mut |_| {},
+        );
+        assert_eq!(result.is_ok(), allowed, "{description}: {result:?}");
+        if allowed {
+            assert_eq!(dev.writes, vec![written_lba], "{description}");
+            assert_eq!(dev.syncs, 2);
+        } else {
+            assert!(dev.writes.is_empty(), "{description} wrote media");
+            assert_eq!(dev.syncs, 0, "{description} must fail before any I/O");
+        }
+    }
 }

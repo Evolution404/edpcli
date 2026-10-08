@@ -115,6 +115,7 @@ fn execute_partition_format_observed(
         dev,
         choice.target.geometry.start_sector,
         &built.image,
+        crate::diskio::BorrowedFormatLayout::Edp,
         observer,
     )?;
     let raw_boot = dev

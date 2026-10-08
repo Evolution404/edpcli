@@ -401,6 +401,11 @@ pub(crate) fn format_partition_after_restore(
             dev,
             partition.start_lba,
             &image,
+            if partition.role.as_deref() == Some("plain") {
+                crate::diskio::BorrowedFormatLayout::Plain
+            } else {
+                crate::diskio::BorrowedFormatLayout::Edp
+            },
             &mut |activity| {
                 if matches!(
                     activity.phase,

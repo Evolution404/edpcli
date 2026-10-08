@@ -13,6 +13,7 @@ pub(crate) fn write_sparse_filesystem_image(
     dev: &mut dyn SectorDev,
     start_lba: u64,
     image: &SparseFilesystemImage,
+    layout: diskio::BorrowedFormatLayout,
     observer: &mut dyn FnMut(diskio::TransactionActivity),
 ) -> EdpCliResult<()> {
     let partition_end = start_lba
@@ -34,10 +35,15 @@ pub(crate) fn write_sparse_filesystem_image(
             .ok_or_else(|| EdpCliError::new(EXIT_TARGET, "错误: 格式化写入 LBA 溢出"))?;
         writes.push((absolute, sector));
     }
-    diskio::execute_borrowed_data_transaction_observed(
+    diskio::execute_borrowed_data_transaction_scoped_observed(
         dev,
         partition_end,
         &writes,
+        diskio::BorrowedFormatBounds {
+            start_lba,
+            end_exclusive: partition_end,
+            layout,
+        },
         &mut |mut activity| {
             activity.phase = match activity.phase {
                 diskio::TransactionActivityPhase::Write => {

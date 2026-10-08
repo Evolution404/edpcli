@@ -341,39 +341,92 @@ pub fn execute_write_transaction_observed(
     )
 }
 
-/// Execute a filesystem's borrowed, ascending-LBA data-sector view through the
-/// same sync, mirror, readback and rollback protocol as owned transactions.
-/// No per-sector payload/owner clones are created. All keys are validated
-/// *before* preflight sync; an invalid view never changes the medium.
+/// A scoped partition filesystem writer is separate from a metadata writer.
+/// EDP has an LBA0-62 protocol/compatibility reserve; Plain uses its own
+/// MBR and preserves the manufacturer's LBA3. Never infer layout from data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorrowedFormatLayout {
+    Edp,
+    Plain,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BorrowedFormatBounds {
+    /// Inclusive start of the one authorized partition.
+    pub start_lba: u64,
+    /// Exclusive end of the same partition.
+    pub end_exclusive: u64,
+    pub layout: BorrowedFormatLayout,
+}
+
+/// Default to EDP safety semantics for compatibility. Plain callers must
+/// explicitly provide a Plain partition range through the scoped variant.
 pub fn execute_borrowed_data_transaction_observed(
     dev: &mut dyn SectorDev,
     total_sectors: u64,
     writes: &[(u32, &[u8; SECTOR])],
     observer: &mut dyn FnMut(TransactionActivity),
 ) -> EdpCliResult<()> {
-    if writes.is_empty() {
-        return Ok(());
-    }
-    if total_sectors == 0 || total_sectors > u32::MAX as u64 {
+    execute_borrowed_data_transaction_scoped_observed(
+        dev,
+        total_sectors,
+        writes,
+        BorrowedFormatBounds {
+            start_lba: 63,
+            end_exclusive: total_sectors,
+            layout: BorrowedFormatLayout::Edp,
+        },
+        observer,
+    )
+}
+
+/// Validates the partition's entire authorized extent and every touched sector
+/// before the first sync or write. This uses the identical mirrored transaction
+/// executor shared by all other formatting and provisioning paths.
+pub fn execute_borrowed_data_transaction_scoped_observed(
+    dev: &mut dyn SectorDev,
+    total_sectors: u64,
+    writes: &[(u32, &[u8; SECTOR])],
+    bounds: BorrowedFormatBounds,
+    observer: &mut dyn FnMut(TransactionActivity),
+) -> EdpCliResult<()> {
+    let minimum = match bounds.layout {
+        BorrowedFormatLayout::Edp => 63_u64,
+        BorrowedFormatLayout::Plain => 1_u64,
+    };
+    if total_sectors == 0
+        || total_sectors > u32::MAX as u64
+        || bounds.start_lba < minimum
+        || bounds.start_lba >= bounds.end_exclusive
+        || bounds.end_exclusive > total_sectors
+    {
         return Err(EdpCliError::new(
             EXIT_IO,
-            format!("错误: 事务目标扇区数不受支持: {total_sectors}"),
+            format!(
+                "错误: 格式化分区边界非法: {:?} LBA{}..{}，目标总扇区{}",
+                bounds.layout, bounds.start_lba, bounds.end_exclusive, total_sectors,
+            ),
+        ));
+    }
+    if bounds.layout == BorrowedFormatLayout::Plain
+        && bounds.start_lba <= 3
+        && bounds.end_exclusive > 3
+    {
+        return Err(EdpCliError::new(
+            EXIT_IO,
+            "错误: Plain 格式化分区不得覆盖需保留的制造商 LBA3",
         ));
     }
     let mut prior = None;
     for &(lba, _) in writes {
-        // A format-only data transaction must never edit the protocol area.
-        // Metadata/MBR writes go through the ordered owned transaction path.
-        if lba <= crate::common::METADATA_LAST_LBA {
+        let absolute = u64::from(lba);
+        if absolute < bounds.start_lba || absolute >= bounds.end_exclusive {
             return Err(EdpCliError::new(
                 EXIT_IO,
-                format!("错误: 格式化数据事务不可写协议保留扇区 LBA{lba}"),
-            ));
-        }
-        if u64::from(lba) >= total_sectors {
-            return Err(EdpCliError::new(
-                EXIT_IO,
-                format!("错误: 事务 LBA{lba} 超过目标末端{}", total_sectors - 1),
+                format!(
+                    "错误: 格式化 LBA{lba} 超出目标分区 LBA{}..{}",
+                    bounds.start_lba, bounds.end_exclusive,
+                ),
             ));
         }
         if prior.is_some_and(|previous| lba <= previous) {
@@ -383,6 +436,9 @@ pub fn execute_borrowed_data_transaction_observed(
             ));
         }
         prior = Some(lba);
+    }
+    if writes.is_empty() {
+        return Ok(());
     }
     let lbas = writes.iter().map(|(lba, _)| *lba).collect::<Vec<_>>();
     execute_sector_transaction_observed(
