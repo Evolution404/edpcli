@@ -664,6 +664,8 @@ mod identity_lineage;
 mod prepare;
 mod prepared_projection;
 mod progress_projection;
+mod review_facts;
+pub(crate) use review_facts::assess_official_review;
 
 pub use commit::capture_manufacturer_lba3;
 pub use error::ProvisionPlanningError;

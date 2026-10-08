@@ -227,41 +227,14 @@ impl ProvisionConfirmationViewModel {
                     return Err("计划确认失败：最终磁盘布局存在区域冲突".into());
                 }
 
+                let reviewed = crate::application::provision::assess_official_review(
+                    target_plan,
+                    &official.format_targets,
+                    official.source_kind,
+                )?;
                 let mut regions = Vec::with_capacity(target_plan.partitions.len());
-                for part in &target_plan.partitions {
-                    if part.password_disposition
-                        == Some(crate::provision::PasswordDisposition::Blocked)
-                    {
-                        return Err(format!(
-                            "计划确认失败：{} 的密码处理条件仍未满足",
-                            part.geometry.role.label()
-                        ));
-                    }
-                    let format_choice = official.format_targets.iter().find(|choice| {
-                        choice.target.role == part.geometry.role
-                            && choice.target.geometry.start_sector == part.geometry.start_lba
-                            && choice.target.geometry.sector_count() == part.geometry.sector_count
-                    });
-                    let format_selected = format_choice.is_some_and(|choice| choice.selected);
-                    if part.disposition == crate::provision::RegionDisposition::Rebuild
-                        && part.geometry.role
-                            != crate::provision::PartitionRole::CompatibilityReserve
-                        && !format_selected
-                    {
-                        return Err(format!(
-                            "计划确认失败：{} 需要重建，但未找到已选择的格式化目标",
-                            part.geometry.role.label()
-                        ));
-                    }
-                    if part.password_disposition
-                        == Some(crate::provision::PasswordDisposition::Rebuild)
-                        && !format_selected
-                    {
-                        return Err(format!(
-                            "计划确认失败：{} 的密码域需要重建，但未找到已选择的格式化目标",
-                            part.geometry.role.label()
-                        ));
-                    }
+                for (part, facts) in target_plan.partitions.iter().zip(reviewed) {
+                    let format_selected = facts.format_selected;
 
                     let kind = DiskRegionKind::from_partition_role(part.geometry.role);
                     let end_exclusive = part
@@ -350,11 +323,7 @@ impl ProvisionConfirmationViewModel {
                             ProvisionConfirmationPasswordEffect::Rewrap
                         }
                         Some(crate::provision::PasswordDisposition::Rebuild) => {
-                            let source_has_domain =
-                                crate::provision::KeyDomainRole::from_partition_role(
-                                    part.geometry.role,
-                                )
-                                .is_some_and(|domain| official.source_kind.has_key_domain(domain));
+                            let source_has_domain = facts.source_has_password_domain;
                             if source_has_domain {
                                 ProvisionConfirmationPasswordEffect::Rebuild
                             } else {
@@ -365,16 +334,11 @@ impl ProvisionConfirmationViewModel {
                         None => ProvisionConfirmationPasswordEffect::None,
                     };
                     let filesystem_effect = if format_selected {
-                        let filesystem = format_choice
-                            .and_then(|choice| choice.filesystem)
-                            .or(part.geometry.filesystem)
-                            .ok_or_else(|| {
-                                format!(
-                                    "计划确认失败：{} 已选择格式化，但缺少文件系统类型",
-                                    part.geometry.role.label()
-                                )
-                            })?;
-                        ProvisionConfirmationFilesystemEffect::Format(filesystem)
+                        ProvisionConfirmationFilesystemEffect::Format(
+                            facts
+                                .selected_filesystem
+                                .expect("application review validated format filesystem"),
+                        )
                     } else if part.geometry.role
                         == crate::provision::PartitionRole::CompatibilityReserve
                     {
