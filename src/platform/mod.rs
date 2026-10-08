@@ -106,6 +106,68 @@ pub fn is_raw_device_path(path: &str) -> bool {
     imp::is_raw_device_path(path)
 }
 
+/// Compare the *open handles* rather than names: a symlink or re-enumerated
+/// target can resolve to a different object when write access is reopened.
+#[cfg(unix)]
+pub(crate) fn same_open_file_identity(a: &File, b: &File) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let a = a.metadata()?;
+    let b = b.metadata()?;
+    Ok(a.dev() == b.dev() && a.ino() == b.ino() && a.rdev() == b.rdev())
+}
+
+#[cfg(windows)]
+pub(crate) fn same_open_file_identity(a: &File, b: &File) -> io::Result<bool> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+    use windows_sys::Win32::System::Ioctl::{
+        IOCTL_STORAGE_GET_DEVICE_NUMBER, STORAGE_DEVICE_NUMBER,
+    };
+    use windows_sys::Win32::System::IO::DeviceIoControl;
+    #[derive(PartialEq, Eq)]
+    enum OpenIdentity {
+        FilesystemFile(u32, u64),
+        StorageDevice(u32, u32, u32),
+    }
+    fn fingerprint(file: &File) -> io::Result<OpenIdentity> {
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } != 0 {
+            return Ok(OpenIdentity::FilesystemFile(
+                info.dwVolumeSerialNumber,
+                (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+            ));
+        }
+        // Raw physical drive handles can reject GetFileInformationByHandle.
+        // Query the underlying storage device identity instead of rejecting
+        // every legitimate Windows write-reopen or silently trusting its name.
+        let mut number = STORAGE_DEVICE_NUMBER::default();
+        let mut returned = 0u32;
+        if unsafe {
+            DeviceIoControl(
+                file.as_raw_handle(),
+                IOCTL_STORAGE_GET_DEVICE_NUMBER,
+                std::ptr::null(),
+                0,
+                (&mut number as *mut STORAGE_DEVICE_NUMBER).cast(),
+                std::mem::size_of::<STORAGE_DEVICE_NUMBER>() as u32,
+                &mut returned,
+                std::ptr::null_mut(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(OpenIdentity::StorageDevice(
+            number.DeviceType,
+            number.DeviceNumber,
+            number.PartitionNumber,
+        ))
+    }
+    Ok(fingerprint(a)? == fingerprint(b)?)
+}
+
 pub fn raw_busy_error(error: &io::Error) -> bool {
     imp::raw_busy_error(error)
 }

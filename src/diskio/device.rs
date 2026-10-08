@@ -70,10 +70,36 @@ where
 /// 打开镜像/raw 设备文件。流程以只读打开(挂载态可读); 写阶段经 reopen_rdwr
 /// 在卸载后切换为 O_RDWR — 与 Python 版时序一致(dry-run 从不需要写权限,
 /// O_RDWR 的 EBUSY 重试只发生在卸载之后)。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FileMediaKind {
+    /// Only a confirmed regular file may use bounded contiguous I/O.
+    Regular,
+    /// Unknown, block, character, raw or other media: never batch.
+    RawOrUnknown,
+}
+
+impl FileMediaKind {
+    fn classify(file: &File, path: &str) -> io::Result<Self> {
+        // Require positive proof from the opened handle; names alone cannot
+        // establish that a device is a safe disposable ordinary file.
+        // Never require filesystem metadata from an already known raw device:
+        // some operating systems do not expose it on a raw disk handle.
+        if crate::platform::is_raw_device_path(path) {
+            return Ok(Self::RawOrUnknown);
+        }
+        Ok(if file.metadata().is_ok_and(|m| m.file_type().is_file()) {
+            Self::Regular
+        } else {
+            Self::RawOrUnknown
+        })
+    }
+}
+
 pub struct FileDev {
     path: String,
     file: File,
     writable: bool,
+    media_kind: FileMediaKind,
 }
 
 fn try_open_rdwr(path: &str, wait: Duration) -> io::Result<File> {
@@ -94,27 +120,45 @@ fn try_open_rdwr(path: &str, wait: Duration) -> io::Result<File> {
 
 impl FileDev {
     pub fn open_rdonly(path: &str) -> io::Result<Self> {
+        let file = File::open(path)?;
+        let media_kind = FileMediaKind::classify(&file, path)?;
         Ok(FileDev {
             path: path.to_string(),
-            file: File::open(path)?,
+            file,
             writable: false,
+            media_kind,
         })
     }
 
     pub fn open_rdwr(path: &str, wait: Duration) -> io::Result<Self> {
+        let file = try_open_rdwr(path, wait)?;
+        let media_kind = FileMediaKind::classify(&file, path)?;
         Ok(FileDev {
             path: path.to_string(),
-            file: try_open_rdwr(path, wait)?,
+            file,
             writable: true,
+            media_kind,
         })
     }
 
-    /// 切换为 O_RDWR(应在卸载后调用)。已可写则不重开, 保持单 fd 全程持有。
+    /// Switching to write access must never silently change the opened target.
+    /// Validate the newly opened handle *before* replacing the original one.
     pub fn reopen_rdwr(&mut self, wait: Duration) -> io::Result<()> {
         if self.writable {
             return Ok(());
         }
-        self.file = try_open_rdwr(&self.path, wait)?;
+        let reopened = try_open_rdwr(&self.path, wait)?;
+        let media_kind = FileMediaKind::classify(&reopened, &self.path)?;
+        if media_kind != self.media_kind
+            || !crate::platform::same_open_file_identity(&self.file, &reopened)?
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "重新打开介质对应不同的文件或设备，拒绝写入",
+            ));
+        }
+        self.file = reopened;
+        self.media_kind = media_kind;
         self.writable = true;
         Ok(())
     }
@@ -188,7 +232,7 @@ impl SectorDev for FileDev {
     fn max_contiguous_sectors(&self) -> usize {
         // Never enable batched writes for raw USB/disk devices without a
         // separate hardware failure-injection acceptance gate.
-        if crate::platform::is_raw_device_path(&self.path) {
+        if self.media_kind == FileMediaKind::RawOrUnknown {
             1
         } else {
             128
@@ -200,7 +244,7 @@ impl SectorDev for FileDev {
         first_lba: u32,
         sectors: &mut [[u8; SECTOR]],
     ) -> io::Result<()> {
-        if crate::platform::is_raw_device_path(&self.path) {
+        if self.media_kind == FileMediaKind::RawOrUnknown {
             for (index, sector) in sectors.iter_mut().enumerate() {
                 let lba = first_lba
                     .checked_add(index as u32)
@@ -217,7 +261,7 @@ impl SectorDev for FileDev {
         first_lba: u32,
         sectors: &[[u8; SECTOR]],
     ) -> io::Result<()> {
-        if crate::platform::is_raw_device_path(&self.path) {
+        if self.media_kind == FileMediaKind::RawOrUnknown {
             for (index, sector) in sectors.iter().enumerate() {
                 let lba = first_lba
                     .checked_add(index as u32)
@@ -250,7 +294,7 @@ impl SectorDev for FileDev {
     }
 
     fn sync(&mut self) -> io::Result<()> {
-        if crate::platform::is_raw_device_path(&self.path) {
+        if self.media_kind == FileMediaKind::RawOrUnknown {
             crate::platform::sync_raw_device(&self.file)
         } else {
             self.file.sync_all()
@@ -287,15 +331,123 @@ mod contiguous_batch_tests {
         let mut read = [[0_u8; SECTOR]; 2];
         dev.read_contiguous_sectors_into(3, &mut read)?;
         assert_eq!(read, two);
-        // Swap only the string used for path classification; the underlying
-        // file descriptor still points to our disposable ordinary file.
+        // Changing the stored text must NOT change the proven kind of the
+        // already-opened handle. This guards against path-driven classification.
         dev.path = crate::platform::raw_disk_path(99);
-        assert_eq!(SectorDev::max_contiguous_sectors(&dev), 1);
+        assert_eq!(SectorDev::max_contiguous_sectors(&dev), 128);
         dev.write_contiguous_sectors(5, &two)?;
         dev.read_contiguous_sectors_into(5, &mut read)?;
         assert_eq!(read, two);
         drop(dev);
         std::fs::remove_file(path)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod handle_classification_tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempFolder(PathBuf);
+    impl TempFolder {
+        fn new() -> io::Result<Self> {
+            let path = std::env::temp_dir().join(format!(
+                "edpcli-s01-handle-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ));
+            std::fs::create_dir(&path)?;
+            Ok(Self(path))
+        }
+    }
+    impl Drop for TempFolder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn path_text(path: &std::path::Path) -> io::Result<&str> {
+        path.to_str()
+            .ok_or_else(|| io::Error::other("non-UTF8 test path"))
+    }
+
+    #[test]
+    fn reopened_handle_must_refer_to_the_same_file_not_reused_path() -> io::Result<()> {
+        let temp = TempFolder::new()?;
+        let target = temp.0.join("disk.img");
+        let replaced = temp.0.join("other.img");
+        File::create(&target)?.set_len(4096)?;
+        File::create(&replaced)?.set_len(4096)?;
+        let mut dev = FileDev::open_rdonly(path_text(&target)?)?;
+        assert_eq!(dev.max_contiguous_sectors(), 128);
+        dev.reopen_rdwr(Duration::ZERO)?;
+        assert_eq!(dev.max_contiguous_sectors(), 128);
+        // A second read-only descriptor must reject a renamed/replaced path.
+        let mut dev = FileDev::open_rdonly(path_text(&target)?)?;
+        std::fs::rename(&replaced, &target)?;
+        let error = dev
+            .reopen_rdwr(Duration::ZERO)
+            .err()
+            .ok_or_else(|| io::Error::other("path replacement unexpectedly accepted"))?;
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(!dev.writable);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_are_classified_by_open_handle_not_by_symlink_name() -> io::Result<()> {
+        use std::os::unix::fs::symlink;
+        let temp = TempFolder::new()?;
+        let regular = temp.0.join("data.img");
+        File::create(&regular)?.set_len(4096)?;
+        let file_alias = temp.0.join("regular-alias");
+        symlink(&regular, &file_alias)?;
+        let mut dev = FileDev::open_rdonly(path_text(&file_alias)?)?;
+        assert_eq!(dev.max_contiguous_sectors(), 128);
+        dev.reopen_rdwr(Duration::ZERO)?;
+        assert_eq!(dev.max_contiguous_sectors(), 128);
+        let nonregular_alias = temp.0.join("device-alias");
+        symlink("/dev/null", &nonregular_alias)?;
+        let device = FileDev::open_rdonly(path_text(&nonregular_alias)?)?;
+        assert_eq!(device.max_contiguous_sectors(), 1);
+        assert_eq!(device.media_kind, FileMediaKind::RawOrUnknown);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn changed_symlink_target_is_rejected_before_any_write() -> io::Result<()> {
+        use std::os::unix::fs::symlink;
+        let temp = TempFolder::new()?;
+        let first = temp.0.join("one.img");
+        let second = temp.0.join("two.img");
+        File::create(&first)?.set_len(4096)?;
+        File::create(&second)?.set_len(4096)?;
+        let alias = temp.0.join("disk-alias");
+        symlink(&first, &alias)?;
+        let mut dev = FileDev::open_rdonly(path_text(&alias)?)?;
+        std::fs::remove_file(&alias)?;
+        symlink(&second, &alias)?;
+        assert_eq!(
+            dev.reopen_rdwr(Duration::ZERO).err().map(|err| err.kind()),
+            Some(io::ErrorKind::InvalidData)
+        );
+        assert!(!dev.writable);
+        let alias = temp.0.join("disk-device-alias");
+        symlink(&first, &alias)?;
+        let mut dev = FileDev::open_rdonly(path_text(&alias)?)?;
+        std::fs::remove_file(&alias)?;
+        symlink("/dev/null", &alias)?;
+        assert_eq!(
+            dev.reopen_rdwr(Duration::ZERO).err().map(|err| err.kind()),
+            Some(io::ErrorKind::InvalidData)
+        );
+        assert!(!dev.writable);
         Ok(())
     }
 }
