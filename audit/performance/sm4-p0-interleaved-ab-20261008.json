@@ -1,0 +1,225 @@
+{
+  "scope": "same rustc/cargo and host environment; interleaved legacy/P0 release binaries built from HEAD archive and working checkout; ordinary file image only",
+  "rows": [
+    {
+      "fs": "fat32",
+      "volume": 16777216,
+      "rep": 0,
+      "implementation": "legacy",
+      "transform_ms": 844.384,
+      "rss_peak_kib": 176496.0,
+      "rss_build_kib": 137280.0,
+      "rss_transform_kib": 175568.0,
+      "metadata_sectors": 65544
+    },
+    {
+      "fs": "fat32",
+      "volume": 16777216,
+      "rep": 0,
+      "implementation": "p0",
+      "transform_ms": 464.484,
+      "rss_peak_kib": 173360.0,
+      "rss_build_kib": 147264.0,
+      "rss_transform_kib": 172416.0,
+      "metadata_sectors": 65544
+    },
+    {
+      "fs": "fat32",
+      "volume": 16777216,
+      "rep": 1,
+      "implementation": "p0",
+      "transform_ms": 463.106,
+      "rss_peak_kib": 148304.0,
+      "rss_build_kib": 147280.0,
+      "rss_transform_kib": 147376.0,
+      "metadata_sectors": 65544
+    },
+    {
+      "fs": "fat32",
+      "volume": 16777216,
+      "rep": 1,
+      "implementation": "legacy",
+      "transform_ms": 868.793,
+      "rss_peak_kib": 183312.0,
+      "rss_build_kib": 144128.0,
+      "rss_transform_kib": 182384.0,
+      "metadata_sectors": 65544
+    },
+    {
+      "fs": "fat32",
+      "volume": 16777216,
+      "rep": 2,
+      "implementation": "legacy",
+      "transform_ms": 909.983,
+      "rss_peak_kib": 176496.0,
+      "rss_build_kib": 137280.0,
+      "rss_transform_kib": 175568.0,
+      "metadata_sectors": 65544
+    },
+    {
+      "fs": "fat32",
+      "volume": 16777216,
+      "rep": 2,
+      "implementation": "p0",
+      "transform_ms": 493.162,
+      "rss_peak_kib": 173376.0,
+      "rss_build_kib": 144128.0,
+      "rss_transform_kib": 172432.0,
+      "metadata_sectors": 65544
+    },
+    {
+      "fs": "fat32",
+      "volume": 16777216,
+      "rep": 3,
+      "implementation": "p0",
+      "transform_ms": 468.29,
+      "rss_peak_kib": 173376.0,
+      "rss_build_kib": 144128.0,
+      "rss_transform_kib": 172432.0,
+      "metadata_sectors": 65544
+    },
+    {
+      "fs": "fat32",
+      "volume": 16777216,
+      "rep": 3,
+      "implementation": "legacy",
+      "transform_ms": 892.305,
+      "rss_peak_kib": 176528.0,
+      "rss_build_kib": 137312.0,
+      "rss_transform_kib": 175600.0,
+      "metadata_sectors": 65544
+    },
+    {
+      "fs": "fat32",
+      "volume": 16777216,
+      "rep": 4,
+      "implementation": "legacy",
+      "transform_ms": 840.789,
+      "rss_peak_kib": 176512.0,
+      "rss_build_kib": 137312.0,
+      "rss_transform_kib": 175584.0,
+      "metadata_sectors": 65544
+    },
+    {
+      "fs": "fat32",
+      "volume": 16777216,
+      "rep": 4,
+      "implementation": "p0",
+      "transform_ms": 578.255,
+      "rss_peak_kib": 173360.0,
+      "rss_build_kib": 144128.0,
+      "rss_transform_kib": 172416.0,
+      "metadata_sectors": 65544
+    },
+    {
+      "fs": "exfat",
+      "volume": 1000000000,
+      "rep": 0,
+      "implementation": "legacy",
+      "transform_ms": 416.589,
+      "rss_peak_kib": 89392.0,
+      "rss_build_kib": 72096.0,
+      "rss_transform_kib": 89392.0,
+      "metadata_sectors": 32077
+    },
+    {
+      "fs": "exfat",
+      "volume": 1000000000,
+      "rep": 0,
+      "implementation": "p0",
+      "transform_ms": 226.747,
+      "rss_peak_kib": 75664.0,
+      "rss_build_kib": 75552.0,
+      "rss_transform_kib": 75664.0,
+      "metadata_sectors": 32077
+    },
+    {
+      "fs": "exfat",
+      "volume": 1000000000,
+      "rep": 1,
+      "implementation": "p0",
+      "transform_ms": 226.682,
+      "rss_peak_kib": 87936.0,
+      "rss_build_kib": 75552.0,
+      "rss_transform_kib": 87936.0,
+      "metadata_sectors": 32077
+    },
+    {
+      "fs": "exfat",
+      "volume": 1000000000,
+      "rep": 1,
+      "implementation": "legacy",
+      "transform_ms": 410.939,
+      "rss_peak_kib": 72240.0,
+      "rss_build_kib": 72080.0,
+      "rss_transform_kib": 72240.0,
+      "metadata_sectors": 32077
+    },
+    {
+      "fs": "exfat",
+      "volume": 1000000000,
+      "rep": 2,
+      "implementation": "legacy",
+      "transform_ms": 413.942,
+      "rss_peak_kib": 89408.0,
+      "rss_build_kib": 72080.0,
+      "rss_transform_kib": 89408.0,
+      "metadata_sectors": 32077
+    },
+    {
+      "fs": "exfat",
+      "volume": 1000000000,
+      "rep": 2,
+      "implementation": "p0",
+      "transform_ms": 230.031,
+      "rss_peak_kib": 92768.0,
+      "rss_build_kib": 75552.0,
+      "rss_transform_kib": 92768.0,
+      "metadata_sectors": 32077
+    },
+    {
+      "fs": "exfat",
+      "volume": 1000000000,
+      "rep": 3,
+      "implementation": "p0",
+      "transform_ms": 227.907,
+      "rss_peak_kib": 87936.0,
+      "rss_build_kib": 74000.0,
+      "rss_transform_kib": 87936.0,
+      "metadata_sectors": 32077
+    },
+    {
+      "fs": "exfat",
+      "volume": 1000000000,
+      "rep": 3,
+      "implementation": "legacy",
+      "transform_ms": 410.758,
+      "rss_peak_kib": 89392.0,
+      "rss_build_kib": 72080.0,
+      "rss_transform_kib": 89392.0,
+      "metadata_sectors": 32077
+    },
+    {
+      "fs": "exfat",
+      "volume": 1000000000,
+      "rep": 4,
+      "implementation": "legacy",
+      "transform_ms": 412.557,
+      "rss_peak_kib": 89408.0,
+      "rss_build_kib": 72080.0,
+      "rss_transform_kib": 89408.0,
+      "metadata_sectors": 32077
+    },
+    {
+      "fs": "exfat",
+      "volume": 1000000000,
+      "rep": 4,
+      "implementation": "p0",
+      "transform_ms": 229.068,
+      "rss_peak_kib": 87936.0,
+      "rss_build_kib": 74000.0,
+      "rss_transform_kib": 87936.0,
+      "metadata_sectors": 32077
+    }
+  ]
+}

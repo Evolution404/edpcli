@@ -423,45 +423,72 @@ fn sm4_round_keys(key: &[u8; 16]) -> [u32; 32] {
     round_keys
 }
 
-fn sm4_crypt_block(input: &[u8; 16], key: &[u8; 16], decrypt: bool) -> [u8; 16] {
-    let round_keys = sm4_round_keys(key);
-    let mut x = [
-        u32::from_be_bytes(input[0..4].try_into().unwrap()),
-        u32::from_be_bytes(input[4..8].try_into().unwrap()),
-        u32::from_be_bytes(input[8..12].try_into().unwrap()),
-        u32::from_be_bytes(input[12..16].try_into().unwrap()),
-    ];
-    let mut apply_round = |round_key: u32| {
-        let b = sm4_tau(x[1] ^ x[2] ^ x[3] ^ round_key);
-        let next =
-            x[0] ^ b ^ b.rotate_left(2) ^ b.rotate_left(10) ^ b.rotate_left(18) ^ b.rotate_left(24);
-        x = [x[1], x[2], x[3], next];
-    };
-    if decrypt {
-        for &round_key in round_keys.iter().rev() {
-            apply_round(round_key);
-        }
-    } else {
-        for &round_key in &round_keys {
-            apply_round(round_key);
+/// Per-FileKey round schedule reused across every block of a filesystem image.
+/// Owns only derived key material; never log it or share it across partitions.
+/// It has the same lifetime as the caller-owned partition transform/request.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Sm4Cipher {
+    round_keys: [u32; 32],
+}
+
+impl Sm4Cipher {
+    pub(crate) fn new(file_key: &[u8; 16]) -> Self {
+        Self {
+            round_keys: sm4_round_keys(file_key),
         }
     }
-    let words = [x[3], x[2], x[1], x[0]];
-    let mut out = [0u8; 16];
-    for (index, word) in words.iter().enumerate() {
-        out[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
+
+    pub(crate) fn encrypt_block(&self, input: &[u8; 16]) -> [u8; 16] {
+        self.crypt_block(input, false)
     }
-    out
+
+    pub(crate) fn decrypt_block(&self, input: &[u8; 16]) -> [u8; 16] {
+        self.crypt_block(input, true)
+    }
+
+    fn crypt_block(&self, input: &[u8; 16], decrypt: bool) -> [u8; 16] {
+        let mut x = [
+            u32::from_be_bytes(input[0..4].try_into().unwrap()),
+            u32::from_be_bytes(input[4..8].try_into().unwrap()),
+            u32::from_be_bytes(input[8..12].try_into().unwrap()),
+            u32::from_be_bytes(input[12..16].try_into().unwrap()),
+        ];
+        let mut apply_round = |round_key: u32| {
+            let b = sm4_tau(x[1] ^ x[2] ^ x[3] ^ round_key);
+            let next = x[0]
+                ^ b
+                ^ b.rotate_left(2)
+                ^ b.rotate_left(10)
+                ^ b.rotate_left(18)
+                ^ b.rotate_left(24);
+            x = [x[1], x[2], x[3], next];
+        };
+        if decrypt {
+            for &round_key in self.round_keys.iter().rev() {
+                apply_round(round_key);
+            }
+        } else {
+            for &round_key in &self.round_keys {
+                apply_round(round_key);
+            }
+        }
+        let words = [x[3], x[2], x[1], x[0]];
+        let mut out = [0u8; 16];
+        for (index, word) in words.iter().enumerate() {
+            out[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
+        }
+        out
+    }
 }
 
 pub fn sm4_decrypt_block(ciphertext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
-    sm4_crypt_block(ciphertext, key, true)
+    Sm4Cipher::new(key).decrypt_block(ciphertext)
 }
 
 /// Test/provisioning helper for producing mode2 ciphertext from known plaintext.
 /// Inspect itself never calls this: its data path remains strictly read-only.
 pub fn sm4_encrypt_block(plaintext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
-    sm4_crypt_block(plaintext, key, false)
+    Sm4Cipher::new(key).encrypt_block(plaintext)
 }
 
 #[cfg(test)]
@@ -473,6 +500,24 @@ mod tests {
             .wrapping_mul(6364136223846793005)
             .wrapping_add(1442695040888963407);
         *seed
+    }
+
+    #[test]
+    fn sm4_cached_schedule_matches_standard_vector_and_public_block_api() {
+        // GB/T 32907 reference vector, with independent expected ciphertext.
+        let key = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54,
+            0x32, 0x10,
+        ];
+        let ciphertext = [
+            0x68, 0x1e, 0xdf, 0x34, 0xd2, 0x06, 0x96, 0x5e, 0x86, 0xb3, 0xe9, 0x4f, 0x53, 0x6e,
+            0x42, 0x46,
+        ];
+        let cipher = Sm4Cipher::new(&key);
+        assert_eq!(cipher.encrypt_block(&key), ciphertext);
+        assert_eq!(cipher.decrypt_block(&ciphertext), key);
+        assert_eq!(sm4_encrypt_block(&key, &key), ciphertext);
+        assert_eq!(sm4_decrypt_block(&ciphertext, &key), key);
     }
 
     #[test]
