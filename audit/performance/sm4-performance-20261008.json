@@ -1,0 +1,365 @@
+{
+  "date": "2026-10-08",
+  "head": "0867977137d459d3c6c2e767f91d532c569acc0d",
+  "machine": "Apple M1 Pro MacBookPro18,3 eight CPU cores",
+  "rustc": "rustc 1.99.0",
+  "build": "rustc --edition=2024 -C opt-level=3 -C target-cpu=generic; extracted source from src/protocol/crypto.rs; no production modifications",
+  "secs": 65544,
+  "byte_count": 33558528,
+  "methodology": "BTreeMap<u64,[u8;512]> full map transform; exclude input generation and post-transform output digest from timed section; alternate strategy order; KAT+byte digest+roundtrip verified",
+  "key_schedule_variants": {
+    "baseline": [
+      {
+        "rep": 0,
+        "elapsed_ms": 886.2339,
+        "sha64_digest": "f9f54e4617260ae6"
+      },
+      {
+        "rep": 1,
+        "elapsed_ms": 903.8263,
+        "sha64_digest": "f9f54e4617260ae6"
+      },
+      {
+        "rep": 2,
+        "elapsed_ms": 889.4065,
+        "sha64_digest": "f9f54e4617260ae6"
+      },
+      {
+        "rep": 3,
+        "elapsed_ms": 886.5553,
+        "sha64_digest": "f9f54e4617260ae6"
+      },
+      {
+        "rep": 4,
+        "elapsed_ms": 885.6979,
+        "sha64_digest": "f9f54e4617260ae6"
+      }
+    ],
+    "sector": [
+      {
+        "rep": 0,
+        "elapsed_ms": 517.6846,
+        "sha64_digest": "f9f54e4617260ae6"
+      },
+      {
+        "rep": 1,
+        "elapsed_ms": 515.4948,
+        "sha64_digest": "f9f54e4617260ae6"
+      },
+      {
+        "rep": 2,
+        "elapsed_ms": 528.942,
+        "sha64_digest": "f9f54e4617260ae6"
+      },
+      {
+        "rep": 3,
+        "elapsed_ms": 509.77,
+        "sha64_digest": "f9f54e4617260ae6"
+      },
+      {
+        "rep": 4,
+        "elapsed_ms": 514.1605,
+        "sha64_digest": "f9f54e4617260ae6"
+      }
+    ],
+    "image": [
+      {
+        "rep": 0,
+        "elapsed_ms": 506.6065,
+        "sha64_digest": "f9f54e4617260ae6"
+      },
+      {
+        "rep": 1,
+        "elapsed_ms": 510.685,
+        "sha64_digest": "f9f54e4617260ae6"
+      },
+      {
+        "rep": 2,
+        "elapsed_ms": 498.4149,
+        "sha64_digest": "f9f54e4617260ae6"
+      },
+      {
+        "rep": 3,
+        "elapsed_ms": 500.0934,
+        "sha64_digest": "f9f54e4617260ae6"
+      },
+      {
+        "rep": 4,
+        "elapsed_ms": 498.0208,
+        "sha64_digest": "f9f54e4617260ae6"
+      }
+    ]
+  },
+  "parallel_variants": {
+    "193": {
+      "1": [
+        {
+          "rep": 0,
+          "elapsed_ms": 1.476,
+          "sha64_digest": "f07a97d438a35ee8"
+        },
+        {
+          "rep": 1,
+          "elapsed_ms": 1.4327,
+          "sha64_digest": "f07a97d438a35ee8"
+        },
+        {
+          "rep": 2,
+          "elapsed_ms": 1.4408,
+          "sha64_digest": "f07a97d438a35ee8"
+        },
+        {
+          "rep": 3,
+          "elapsed_ms": 1.4394,
+          "sha64_digest": "f07a97d438a35ee8"
+        }
+      ],
+      "2": [
+        {
+          "rep": 0,
+          "elapsed_ms": 0.9503,
+          "sha64_digest": "f07a97d438a35ee8"
+        },
+        {
+          "rep": 1,
+          "elapsed_ms": 0.8437,
+          "sha64_digest": "f07a97d438a35ee8"
+        },
+        {
+          "rep": 2,
+          "elapsed_ms": 0.8783,
+          "sha64_digest": "f07a97d438a35ee8"
+        },
+        {
+          "rep": 3,
+          "elapsed_ms": 0.8455,
+          "sha64_digest": "f07a97d438a35ee8"
+        }
+      ],
+      "4": [
+        {
+          "rep": 0,
+          "elapsed_ms": 0.5259,
+          "sha64_digest": "f07a97d438a35ee8"
+        },
+        {
+          "rep": 1,
+          "elapsed_ms": 0.5073,
+          "sha64_digest": "f07a97d438a35ee8"
+        },
+        {
+          "rep": 2,
+          "elapsed_ms": 0.525,
+          "sha64_digest": "f07a97d438a35ee8"
+        },
+        {
+          "rep": 3,
+          "elapsed_ms": 0.4997,
+          "sha64_digest": "f07a97d438a35ee8"
+        }
+      ],
+      "8": [
+        {
+          "rep": 0,
+          "elapsed_ms": 0.5431,
+          "sha64_digest": "f07a97d438a35ee8"
+        },
+        {
+          "rep": 1,
+          "elapsed_ms": 0.5462,
+          "sha64_digest": "f07a97d438a35ee8"
+        },
+        {
+          "rep": 2,
+          "elapsed_ms": 0.5646,
+          "sha64_digest": "f07a97d438a35ee8"
+        },
+        {
+          "rep": 3,
+          "elapsed_ms": 0.5038,
+          "sha64_digest": "f07a97d438a35ee8"
+        }
+      ]
+    },
+    "4096": {
+      "1": [
+        {
+          "rep": 0,
+          "elapsed_ms": 32.1915,
+          "sha64_digest": "137870c5ead4bc1a"
+        },
+        {
+          "rep": 1,
+          "elapsed_ms": 32.1059,
+          "sha64_digest": "137870c5ead4bc1a"
+        },
+        {
+          "rep": 2,
+          "elapsed_ms": 31.3097,
+          "sha64_digest": "137870c5ead4bc1a"
+        },
+        {
+          "rep": 3,
+          "elapsed_ms": 31.5836,
+          "sha64_digest": "137870c5ead4bc1a"
+        }
+      ],
+      "2": [
+        {
+          "rep": 0,
+          "elapsed_ms": 17.2098,
+          "sha64_digest": "137870c5ead4bc1a"
+        },
+        {
+          "rep": 1,
+          "elapsed_ms": 16.838,
+          "sha64_digest": "137870c5ead4bc1a"
+        },
+        {
+          "rep": 2,
+          "elapsed_ms": 16.9784,
+          "sha64_digest": "137870c5ead4bc1a"
+        },
+        {
+          "rep": 3,
+          "elapsed_ms": 16.6421,
+          "sha64_digest": "137870c5ead4bc1a"
+        }
+      ],
+      "4": [
+        {
+          "rep": 0,
+          "elapsed_ms": 9.2108,
+          "sha64_digest": "137870c5ead4bc1a"
+        },
+        {
+          "rep": 1,
+          "elapsed_ms": 8.8455,
+          "sha64_digest": "137870c5ead4bc1a"
+        },
+        {
+          "rep": 2,
+          "elapsed_ms": 8.9551,
+          "sha64_digest": "137870c5ead4bc1a"
+        },
+        {
+          "rep": 3,
+          "elapsed_ms": 9.095,
+          "sha64_digest": "137870c5ead4bc1a"
+        }
+      ],
+      "8": [
+        {
+          "rep": 0,
+          "elapsed_ms": 8.8839,
+          "sha64_digest": "137870c5ead4bc1a"
+        },
+        {
+          "rep": 1,
+          "elapsed_ms": 8.9333,
+          "sha64_digest": "137870c5ead4bc1a"
+        },
+        {
+          "rep": 2,
+          "elapsed_ms": 8.8531,
+          "sha64_digest": "137870c5ead4bc1a"
+        },
+        {
+          "rep": 3,
+          "elapsed_ms": 8.7615,
+          "sha64_digest": "137870c5ead4bc1a"
+        }
+      ]
+    },
+    "65544": {
+      "1": [
+        {
+          "rep": 0,
+          "elapsed_ms": 502.4924,
+          "sha64_digest": "4d98770736d8ac48"
+        },
+        {
+          "rep": 1,
+          "elapsed_ms": 498.7584,
+          "sha64_digest": "4d98770736d8ac48"
+        },
+        {
+          "rep": 2,
+          "elapsed_ms": 499.7347,
+          "sha64_digest": "4d98770736d8ac48"
+        },
+        {
+          "rep": 3,
+          "elapsed_ms": 497.3929,
+          "sha64_digest": "4d98770736d8ac48"
+        }
+      ],
+      "2": [
+        {
+          "rep": 0,
+          "elapsed_ms": 270.6009,
+          "sha64_digest": "4d98770736d8ac48"
+        },
+        {
+          "rep": 1,
+          "elapsed_ms": 268.0388,
+          "sha64_digest": "4d98770736d8ac48"
+        },
+        {
+          "rep": 2,
+          "elapsed_ms": 266.919,
+          "sha64_digest": "4d98770736d8ac48"
+        },
+        {
+          "rep": 3,
+          "elapsed_ms": 268.4297,
+          "sha64_digest": "4d98770736d8ac48"
+        }
+      ],
+      "4": [
+        {
+          "rep": 0,
+          "elapsed_ms": 142.9145,
+          "sha64_digest": "4d98770736d8ac48"
+        },
+        {
+          "rep": 1,
+          "elapsed_ms": 145.4263,
+          "sha64_digest": "4d98770736d8ac48"
+        },
+        {
+          "rep": 2,
+          "elapsed_ms": 141.5659,
+          "sha64_digest": "4d98770736d8ac48"
+        },
+        {
+          "rep": 3,
+          "elapsed_ms": 209.3078,
+          "sha64_digest": "4d98770736d8ac48"
+        }
+      ],
+      "8": [
+        {
+          "rep": 0,
+          "elapsed_ms": 91.4767,
+          "sha64_digest": "4d98770736d8ac48"
+        },
+        {
+          "rep": 1,
+          "elapsed_ms": 106.7805,
+          "sha64_digest": "4d98770736d8ac48"
+        },
+        {
+          "rep": 2,
+          "elapsed_ms": 101.0413,
+          "sha64_digest": "4d98770736d8ac48"
+        },
+        {
+          "rep": 3,
+          "elapsed_ms": 97.1534,
+          "sha64_digest": "4d98770736d8ac48"
+        }
+      ]
+    }
+  }
+}
