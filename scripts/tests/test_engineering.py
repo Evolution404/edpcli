@@ -11,6 +11,7 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/ci"))
@@ -30,6 +31,15 @@ _audit_spec.loader.exec_module(redundancy_audit)
 
 
 class RedundancyAuditTests(unittest.TestCase):
+    def test_subprocess_encoding_is_utf8_on_non_utf8_windows_locale(self):
+        # Windows runners otherwise decode child UTF-8 using the legacy code page.
+        completed = subprocess.CompletedProcess(["example"], 0, "中文检测通过", "")
+        with patch.object(redundancy_audit.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(redundancy_audit.command(["example"]), "中文检测通过")
+        self.assertEqual(run.call_args.kwargs["encoding"], "utf-8")
+        self.assertEqual(run.call_args.kwargs["errors"], "strict")
+        self.assertTrue(run.call_args.kwargs["text"])
+
     def findings(self, root, files, facts, texts, tests=()):
         rules = json.loads((ROOT / "scripts/audit/redundancy-rules.json").read_text())["rules"]
         return redundancy_audit.evaluate(root, files, facts, texts, set(tests), rules)

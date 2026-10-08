@@ -23,7 +23,10 @@ RULES = ROOT / "scripts/audit/redundancy-rules.json"
 
 
 def command(args, *, root=ROOT, input_text=None):
-    result = subprocess.run(args, cwd=root, input=input_text, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(
+        args, cwd=root, input=input_text, capture_output=True, text=True,
+        encoding="utf-8", errors="strict", timeout=600,
+    )
     if result.returncode:
         raise RuntimeError(f"command failed ({result.returncode}): {' '.join(args)}\n{result.stderr}")
     return result.stdout
