@@ -93,6 +93,72 @@ fn provision_result_escape_returns_directly_to_originating_devices_workspace() {
 }
 
 #[test]
+fn provision_form_rejects_device_reenumeration_reusing_the_same_disk_index() {
+    let mut state = AppState::new();
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    assert_eq!(state.workspace(), Workspace::Provision);
+    assert_eq!(state.provision_target_disk(), Some(6));
+
+    // An unchanged rescanned identity must *not* destroy the user's form.
+    state.replace_devices(vec![device(64_000_000_000)]);
+    assert_eq!(state.workspace(), Workspace::Provision);
+    assert_eq!(state.provision_target_disk(), Some(6));
+
+    // Unplug first, then plug another target that reuses disk6 but has a
+    // different identity pin (same disk index, same capacity).
+    let mut replacement = device(64_000_000_000);
+    replacement
+        .identity_pin
+        .as_mut()
+        .unwrap()
+        .protocol_image_sha256 = "2".repeat(64);
+    state.replace_devices(vec![replacement]);
+    assert_eq!(state.workspace(), Workspace::Devices);
+    assert_eq!(state.provision_target_disk(), None);
+    assert_eq!(state.navigation().depth(), 0);
+    assert!(state.provision().prepared.is_none());
+}
+
+#[test]
+fn provision_review_rejects_same_number_device_swap_but_running_result_are_preserved() {
+    for stage in [
+        ProvisionStage::Review,
+        ProvisionStage::Planning,
+        ProvisionStage::Confirm,
+    ] {
+        let mut state = AppState::new();
+        state.replace_devices(vec![device(64_000_000_000)]);
+        assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+        state.provision_mut().stage = stage;
+        let mut replacement = device(64_000_000_000);
+        replacement
+            .identity_pin
+            .as_mut()
+            .unwrap()
+            .protocol_image_sha256 = "3".repeat(64);
+        state.replace_devices(vec![replacement]);
+        assert_eq!(state.workspace(), Workspace::Devices, "{stage:?}");
+        assert_eq!(state.provision_target_disk(), None, "{stage:?}");
+    }
+    for stage in [ProvisionStage::Running, ProvisionStage::Result] {
+        let mut state = AppState::new();
+        state.replace_devices(vec![device(64_000_000_000)]);
+        assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+        state.provision_mut().stage = stage;
+        let mut replacement = device(64_000_000_000);
+        replacement
+            .identity_pin
+            .as_mut()
+            .unwrap()
+            .protocol_image_sha256 = "4".repeat(64);
+        state.replace_devices(vec![replacement]);
+        assert_eq!(state.workspace(), Workspace::Provision, "{stage:?}");
+        assert_eq!(state.provision_target_disk(), Some(6), "{stage:?}");
+    }
+}
+
+#[test]
 fn provision_result_survives_transient_device_rescan_absence() {
     let mut state = AppState::new();
     state.replace_devices(vec![device(64_000_000_000)]);

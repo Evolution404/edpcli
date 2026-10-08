@@ -404,6 +404,27 @@ impl AppState {
             .flatten();
         let preserve_provision_result = self.shell.workspace == Workspace::Provision
             && self.provision.stage == ProvisionStage::Result;
+        // A hot-plugged USB may reuse the *same disk index*. The index is not
+        // the device identity. Before execution, refuse to carry an old form,
+        // reviewed plan or confirmation onto a newly scanned physical target.
+        // Do not abort Running/Result: a legitimate write changes protocol
+        // identity while its progress/receipt must remain visible.
+        let provision_target_changed = self.shell.workspace == Workspace::Provision
+            && !matches!(
+                self.provision.stage,
+                ProvisionStage::Running | ProvisionStage::Result
+            )
+            && self.provision.target_disk.is_some_and(|disk| {
+                match (
+                    self.devices.rows.iter().find(|row| row.disk == disk),
+                    devices.iter().find(|row| row.disk == disk),
+                ) {
+                    (Some(before), Some(after)) => {
+                        before.identity_pin.is_none() || before.identity_pin != after.identity_pin
+                    }
+                    _ => true,
+                }
+            });
         if !preserve_provision_result
             && self
                 .shell
@@ -430,13 +451,19 @@ impl AppState {
         self.devices.scan_pending = false;
         if self.shell.workspace == Workspace::Provision
             && self.provision.stage != ProvisionStage::Result
-            && (self.provision.target_disk.is_none() || self.selected_device().is_none())
+            && (provision_target_changed
+                || self.provision.target_disk.is_none()
+                || self.selected_device().is_none())
         {
             self.provision.target_disk = None;
             self.shell.pinned_disk = None;
             self.provision_reset();
             self.restore_workspace_frame();
-            self.set_warning_notice("制盘目标设备已断开，已安全返回设备列表。");
+            self.set_warning_notice(if provision_target_changed {
+                "制盘目标设备身份发生变化，已取消旧计划并安全返回设备列表。"
+            } else {
+                "制盘目标设备已断开，已安全返回设备列表。"
+            });
         }
         if self.shell.workspace == Workspace::Devices {
             self.rebuild_workspace_filter();
