@@ -495,7 +495,7 @@ impl AppState {
     }
 
     pub fn device_source_index_at_visible(&self, position: usize) -> Option<usize> {
-        self.visible_device_indices().get(position).copied()
+        self.device_view_snapshot().get(position).copied()
     }
 
     pub fn backup_source_index_at_visible(&self, position: usize) -> Option<usize> {
@@ -503,21 +503,11 @@ impl AppState {
     }
 
     pub fn visible_device_indices(&self) -> Vec<usize> {
-        let indices = if self.shell.workspace == Workspace::Devices
-            && !self.active_search_query().is_empty()
-        {
-            self.shell.search_matches.clone()
-        } else {
-            (0..self.devices.rows.len()).collect()
-        };
-        self.devices.table_view.sorted_indices(
-            indices,
-            self.table_interaction(super::table_layout::TableKind::Devices),
-        )
+        self.device_view_snapshot().as_ref().clone()
     }
 
     pub fn visible_device_count(&self) -> usize {
-        self.visible_device_indices().len()
+        self.device_view_snapshot().len()
     }
 
     pub fn visible_backup_indices(&self) -> Vec<usize> {

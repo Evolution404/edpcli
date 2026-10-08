@@ -1,5 +1,7 @@
 use super::*;
+use crate::tui::table_layout::{TableKind, TableSort};
 use std::collections::BTreeSet;
+use std::{cell::RefCell, rc::Rc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DeviceInfoNodeKey {
@@ -25,9 +27,54 @@ pub struct DeviceInfoTreeNode {
     pub expanded: bool,
 }
 
+#[derive(PartialEq, Eq)]
+struct DeviceViewKey {
+    generation: u64,
+    query: String,
+    sort: Option<TableSort>,
+}
+
+#[derive(Default)]
+pub(super) struct DeviceViewCache {
+    snapshot: RefCell<Option<(DeviceViewKey, Rc<Vec<usize>>)>>,
+}
+
+impl AppState {
+    pub(crate) fn device_view_snapshot(&self) -> Rc<Vec<usize>> {
+        let query = if self.workspace() == Workspace::Devices {
+            self.active_search_query().to_ascii_lowercase()
+        } else {
+            String::new()
+        };
+        let key = DeviceViewKey {
+            generation: self.devices.table_view.generation,
+            query,
+            sort: self.table_interaction(TableKind::Devices).sort(),
+        };
+        if let Some((previous, indices)) = self.devices.view_cache.snapshot.borrow().as_ref() {
+            if previous == &key {
+                return Rc::clone(indices);
+            }
+        }
+        let base = if key.query.is_empty() {
+            (0..self.devices.rows.len()).collect()
+        } else {
+            self.shell.search_matches.clone()
+        };
+        let indices = Rc::new(
+            self.devices
+                .table_view
+                .sorted_indices(base, self.table_interaction(TableKind::Devices)),
+        );
+        *self.devices.view_cache.snapshot.borrow_mut() = Some((key, Rc::clone(&indices)));
+        indices
+    }
+}
+
 pub struct DevicesState {
     pub(super) rows: Vec<crate::disk_scan::Row>,
     pub(super) table_view: super::super::table_layout::TableViewData,
+    view_cache: DeviceViewCache,
     pub(super) scan_pending: bool,
     pub(super) pane_focus: crate::tui::pane::PaneFocus,
     pub(super) info_selected: DeviceInfoNodeKey,
@@ -44,6 +91,7 @@ impl Default for DevicesState {
         Self {
             rows: Vec::new(),
             table_view: super::super::table_layout::TableViewData::default(),
+            view_cache: DeviceViewCache::default(),
             scan_pending: false,
             pane_focus: crate::tui::pane::PaneFocus::devices(),
             info_selected: DeviceInfoNodeKey::Capacity,
@@ -509,5 +557,25 @@ impl AppState {
             }
             DeviceInfoNodeKey::Protocol => 20,
         }
+    }
+}
+
+#[cfg(test)]
+mod view_cache_tests {
+    use super::*;
+
+    #[test]
+    fn device_view_snapshot_reuses_projection_and_invalidates_on_sort_and_refresh() {
+        let mut state = crate::tui::demo::build_scene("devices").unwrap();
+        let original = state.device_view_snapshot();
+        state.advance_animation();
+        assert!(Rc::ptr_eq(&original, &state.device_view_snapshot()));
+        state.navigate(NavCommand::Down, 20);
+        assert!(Rc::ptr_eq(&original, &state.device_view_snapshot()));
+        state.toggle_table_sort(TableKind::Devices);
+        let sorted = state.device_view_snapshot();
+        assert!(!Rc::ptr_eq(&original, &sorted));
+        state.replace_devices(Vec::new());
+        assert!(!Rc::ptr_eq(&sorted, &state.device_view_snapshot()));
     }
 }

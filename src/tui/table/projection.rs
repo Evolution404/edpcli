@@ -9,6 +9,8 @@ pub struct TableViewData {
     pub generation: u64,
     pub rows: Vec<Vec<String>>,
     pub content_widths: Vec<usize>,
+    #[doc(hidden)]
+    pub numeric_sort_keys: Vec<Vec<Option<u64>>>,
 }
 
 impl TableViewData {
@@ -35,7 +37,18 @@ impl TableViewData {
             generation,
             rows,
             content_widths,
+            numeric_sort_keys: Vec::new(),
         }
+    }
+
+    fn with_numeric_sort_keys(mut self, keys: Vec<Vec<Option<u64>>>) -> Self {
+        assert_eq!(keys.len(), self.rows.len());
+        assert!(keys
+            .iter()
+            .zip(&self.rows)
+            .all(|(key, row)| key.len() == row.len()));
+        self.numeric_sort_keys = keys;
+        self
     }
 
     pub fn sorted_indices(
@@ -59,7 +72,20 @@ impl TableViewData {
                 .and_then(|row| row.get(sort.column))
                 .map(String::as_str)
                 .unwrap_or("");
-            let ordering = smart_cell_cmp(a, b).then_with(|| left.cmp(right));
+            let keys = |row: usize| {
+                self.numeric_sort_keys
+                    .get(row)
+                    .and_then(|columns| columns.get(sort.column))
+                    .copied()
+                    .flatten()
+            };
+            let ordering = match (keys(*left), keys(*right)) {
+                (Some(a), Some(b)) => a.cmp(&b),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => smart_cell_cmp(a, b),
+            }
+            .then_with(|| left.cmp(right));
             match sort.direction {
                 SortDirection::Ascending => ordering,
                 SortDirection::Descending => ordering.reverse(),
@@ -213,7 +239,21 @@ pub fn device_table_view(rows: &[crate::disk_scan::Row], generation: u64) -> Tab
                 .collect::<Vec<_>>()
         })
         .collect();
-    TableViewData::from_rows(generation, &columns, projected)
+    let keys = rows
+        .iter()
+        .map(|row| {
+            columns
+                .iter()
+                .map(|column| match column.id {
+                    ColumnId::Device => Some(u64::from(row.disk)),
+                    ColumnId::Capacity => Some(row.size),
+                    ColumnId::Backups => Some(row.n_baks as u64),
+                    _ => None,
+                })
+                .collect()
+        })
+        .collect();
+    TableViewData::from_rows(generation, &columns, projected).with_numeric_sort_keys(keys)
 }
 
 pub fn backup_table_view(
@@ -248,7 +288,20 @@ pub fn backup_table_view(
                 .collect::<Vec<_>>()
         })
         .collect();
-    TableViewData::from_rows(generation, &columns, projected)
+    let keys = rows
+        .iter()
+        .map(|row| {
+            columns
+                .iter()
+                .map(|column| match column.id {
+                    ColumnId::Index => Some(row.index as u64),
+                    ColumnId::Capacity => row.size_bytes,
+                    _ => None,
+                })
+                .collect()
+        })
+        .collect();
+    TableViewData::from_rows(generation, &columns, projected).with_numeric_sort_keys(keys)
 }
 
 pub fn related_backup_table_view(
@@ -293,6 +346,39 @@ pub fn related_backup_table_view(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numeric_sort_keys_preserve_exact_capacity_above_f64_precision() {
+        let columns = table_column_schema(TableKind::Devices).unwrap();
+        let row = |label: &str| {
+            (0..columns.len())
+                .map(|index| if index == 1 { label.into() } else { "x".into() })
+                .collect::<Vec<String>>()
+        };
+        let view = TableViewData::from_rows(
+            1,
+            &columns,
+            vec![
+                row("9007199254740993 B"),
+                row("9007199254740992 B"),
+                row("unknown"),
+            ],
+        )
+        .with_numeric_sort_keys(vec![
+            (0..columns.len())
+                .map(|i| (i == 1).then_some(9_007_199_254_740_993))
+                .collect(),
+            (0..columns.len())
+                .map(|i| (i == 1).then_some(9_007_199_254_740_992))
+                .collect(),
+            vec![None; columns.len()],
+        ]);
+        let mut state = TableInteractionState::default();
+        state.toggle_sort_for(1);
+        assert_eq!(view.sorted_indices(vec![0, 1, 2], state), vec![1, 0, 2]);
+        state.toggle_sort_for(1);
+        assert_eq!(view.sorted_indices(vec![0, 1, 2], state), vec![2, 0, 1]);
+    }
 
     #[test]
     fn mixed_semantic_numeric_and_unknown_cells_obey_total_order() {
