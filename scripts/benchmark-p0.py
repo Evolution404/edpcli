@@ -82,11 +82,12 @@ def main() -> int:
     disk = read_csv(disk_output, {'sectors', 'plan_ms', 'total_ms', 'peak_rss_kib'})
     tui_output = run('cargo', 'test', '--locked', '--lib', 'desktop_projection_benchmark', '--', '--ignored', '--nocapture')
     tui = read_tui(tui_output)
-    mock_output = run('cargo', 'test', '--locked', '--lib', 'mock_device_scan_benchmark', '--', '--ignored', '--nocapture')
+    mock_output = run('cargo', 'test', '--locked', '--lib', 'mock_device_scan_benchmark', '--', '--ignored', '--nocapture') if platform.system() == 'Darwin' else ''
     mock_match = re.search(r'mock_device_scan_disks=(\d+) loops=(\d+) avg_ms=([\d.]+)', mock_output)
-    if mock_match is None:
+    if platform.system() == 'Darwin' and mock_match is None:
         raise ValueError('synthetic device scan did not produce metrics')
-    device_scan = dict(disks=int(mock_match[1]), loops=int(mock_match[2]), average_ms=float(mock_match[3]))
+    device_scan = (dict(disks=int(mock_match[1]), loops=int(mock_match[2]), average_ms=float(mock_match[3]))
+                   if mock_match else {'status': 'macos-fixture-only'})
     timings = []
     for _ in range(9):
         started = time.perf_counter()
@@ -118,7 +119,10 @@ def main() -> int:
     print(f'[P0] Saved {args.output}', flush=True)
     for count, metrics in tui.items():
         print(f'[P0] TUI {count}: build {metrics["build_ms"]:.2f}ms, sort {metrics["sort_ms"]:.2f}ms, search {metrics["search_ms"]:.2f}ms, frame {metrics["frame_ms"]:.2f}ms', flush=True)
-    print(f'[P0] Simulated device discovery+probe (2 disks): {device_scan["average_ms"]:.4f}ms', flush=True)
+    if mock_match:
+        print(f'[P0] Simulated device discovery+probe (2 disks): {device_scan["average_ms"]:.4f}ms', flush=True)
+    else:
+        print('[P0] Synthetic diskutil discovery fixture is macOS-only; skipped', flush=True)
     print(f'[P0] CLI help p50={report["startup_help_ms"]["p50"]:.3f}ms', flush=True)
     for issue in issues:
         print(f'[P0] REGRESSION: {issue}', flush=True)

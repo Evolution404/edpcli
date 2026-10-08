@@ -484,8 +484,9 @@ mod tests {
         assert!(rows.iter().all(|row| row.denied));
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
-    #[ignore = "host-only P0 fixture benchmark; run with --ignored"]
+    #[ignore = "macOS-only P0 diskutil fixture; run with --ignored"]
     fn mock_device_scan_benchmark() {
         use crate::platform::test_support::MultiUsbRunner;
         use std::time::Instant;
