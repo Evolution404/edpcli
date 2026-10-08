@@ -139,12 +139,11 @@ pub(super) fn plan_format_targets_with_keys(
             partition: None,
             source,
         })?;
-        let prepared_image = build_official_partition_filesystem(
+        let prepared_image = crate::provision::build_official_partition_filesystem_from_plain(
             plan,
             &choice.target,
             &file_keys[index],
-            &choice.volume_label,
-            choice.volume_serial,
+            &verification_image,
         )
         .map_err(|message| ProvisionPlanningError::FormatImage {
             role: choice.target.role,

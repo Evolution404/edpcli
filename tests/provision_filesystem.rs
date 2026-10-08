@@ -454,7 +454,26 @@ fn formatting_defaults_off_and_selects_only_actual_mode_targets() {
         assert_eq!(selected.iter().filter(|choice| choice.selected).count(), 1);
         let choice = selected.iter().find(|choice| choice.selected).unwrap();
         let image = choice.prepared_image.as_ref().unwrap();
-        assert!(choice.verification_image.is_some());
+        let standalone = build_official_partition_filesystem(
+            &plan,
+            &choice.target,
+            &FILE_KEY,
+            &choice.volume_label,
+            choice.volume_serial,
+        )
+        .unwrap();
+        assert_eq!(
+            image, &standalone,
+            "reused format image must be byte-for-byte identical to standalone builder"
+        );
+        let verification = choice.verification_image.as_ref().unwrap();
+        // Plaintext images now share a single immutable allocation; encrypted
+        // targets must own a distinct transformed image.
+        assert_eq!(
+            std::ptr::eq(image.image.sectors(), verification.sectors()),
+            !choice.target.physically_encrypted,
+            "plain images should alias, encrypted images must not",
+        );
         assert_eq!(
             image.physically_encrypted,
             choice.target.physically_encrypted

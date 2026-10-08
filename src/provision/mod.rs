@@ -10,6 +10,7 @@ mod keys;
 mod layout;
 mod lce;
 mod partition_format;
+pub(crate) use partition_format::build_official_partition_filesystem_from_plain;
 mod partition_semantics;
 mod plain;
 mod profile;
