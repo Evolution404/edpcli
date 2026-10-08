@@ -352,3 +352,121 @@ fn transaction_diagnostics_retain_sync_readback_and_rollback_causes() {
         }
     }
 }
+
+#[test]
+fn contiguous_rollback_restores_sparse_noncontiguous_lbas_including_mbr_last() {
+    let mut plan = WriteTransactionPlan::new(130_000);
+    for (lba, stage) in [
+        (100_000, SectorWriteStage::Data),
+        (1024, SectorWriteStage::Data),
+        (12, SectorWriteStage::Metadata),
+        (0, SectorWriteStage::Commit),
+    ] {
+        plan.insert(lba, vec![0xcc; SECTOR], stage, "sparse")
+            .unwrap();
+    }
+    let mut dev = MemoryDev::default();
+    for &lba in &[0, 12, 1024, 100_000] {
+        dev.sectors.insert(lba, vec![(lba % 251) as u8; SECTOR]);
+    }
+    let previous = dev.sectors.clone();
+    dev.fail_call = Some(3);
+    let error = execute_write_transaction(&mut dev, &plan).unwrap_err();
+    assert_eq!(error.code, EXIT_ROLLED_BACK, "{}", error.msg);
+    assert_eq!(dev.sectors, previous);
+    assert_eq!(&dev.writes[0..2], &[1024, 100_000]);
+}
+
+#[test]
+fn file_sector_read_into_matches_allocating_read_and_rejects_truncated_data() {
+    use edpcli::diskio::FileDev;
+    let path = std::env::temp_dir().join(format!(
+        "edpcli-sector-readinto-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut bytes = vec![0x32; SECTOR * 2];
+    bytes[SECTOR..].fill(0x72);
+    std::fs::write(&path, &bytes).unwrap();
+    let mut dev = FileDev::open_rdonly(path.to_str().unwrap()).unwrap();
+    let mut buffer = [0_u8; SECTOR];
+    dev.read_sector_into(1, &mut buffer).unwrap();
+    assert_eq!(buffer.as_slice(), dev.read_sector(1).unwrap());
+    assert!(buffer.iter().all(|&value| value == 0x72));
+    std::fs::write(&path, &bytes[..SECTOR]).unwrap();
+    let error = dev.read_sector_into(1, &mut buffer).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+    assert!(error.to_string().contains("LBA1"), "{error}");
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn mirror_read_failure_after_first_sector_prevents_any_write() {
+    struct ReadFaultDev(MemoryDev);
+    impl SectorDev for ReadFaultDev {
+        fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+            if lba == 32 {
+                return Err(io::Error::other("read second mirror error"));
+            }
+            self.0.read_sector(lba)
+        }
+        fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()> {
+            self.0.write_sector(lba, data)
+        }
+        fn sync(&mut self) -> io::Result<()> {
+            self.0.sync()
+        }
+        fn reopen_rdwr(&mut self, wait: std::time::Duration) -> io::Result<()> {
+            self.0.reopen_rdwr(wait)
+        }
+    }
+    let mut plan = WriteTransactionPlan::new(100);
+    plan.insert(5, vec![5; SECTOR], SectorWriteStage::Data, "first")
+        .unwrap();
+    plan.insert(32, vec![32; SECTOR], SectorWriteStage::Data, "second")
+        .unwrap();
+    let mut dev = ReadFaultDev(MemoryDev::default());
+    let error = execute_write_transaction(&mut dev, &plan).unwrap_err();
+    assert_eq!(error.code, EXIT_IO);
+    assert!(error.msg.contains("LBA32"), "{}", error.msg);
+    assert_eq!(dev.0.syncs, 1);
+    assert!(dev.0.writes.is_empty());
+}
+
+#[test]
+fn unexpected_mirror_sector_size_blocks_all_writes() {
+    struct MalformedDev(MemoryDev);
+    impl SectorDev for MalformedDev {
+        fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+            if lba == 19 {
+                Ok(vec![0xaa; SECTOR - 1])
+            } else {
+                self.0.read_sector(lba)
+            }
+        }
+        fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()> {
+            self.0.write_sector(lba, data)
+        }
+        fn sync(&mut self) -> io::Result<()> {
+            self.0.sync()
+        }
+        fn reopen_rdwr(&mut self, wait: std::time::Duration) -> io::Result<()> {
+            self.0.reopen_rdwr(wait)
+        }
+    }
+    let mut plan = WriteTransactionPlan::new(100);
+    plan.insert(19, vec![2; SECTOR], SectorWriteStage::Data, "malformed")
+        .unwrap();
+    let mut dev = MalformedDev(MemoryDev::default());
+    let error = execute_write_transaction(&mut dev, &plan).unwrap_err();
+    assert_eq!(error.code, EXIT_IO);
+    assert!(error.msg.contains("LBA19"), "{}", error.msg);
+    assert!(
+        dev.0.writes.is_empty(),
+        "malformed mirror must abort before write"
+    );
+    assert_eq!(dev.0.syncs, 1, "preflight sync must remain first");
+}

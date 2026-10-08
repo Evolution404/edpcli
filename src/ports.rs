@@ -43,6 +43,24 @@ pub trait CmdRunner {
 
 pub trait SectorDev {
     fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>>;
+    /// Read one full sector into caller-owned storage. The default preserves
+    /// existing custom device/fault-injection implementations; concrete devices
+    /// may override it to avoid a heap allocation in the transaction hot path.
+    fn read_sector_into(
+        &mut self,
+        lba: u32,
+        out: &mut [u8; crate::common::SECTOR],
+    ) -> io::Result<()> {
+        let bytes = self.read_sector(lba)?;
+        if bytes.len() != out.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("LBA{lba} 返回 {}B，预期 {}B", bytes.len(), out.len()),
+            ));
+        }
+        out.copy_from_slice(&bytes);
+        Ok(())
+    }
     fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()>;
     /// Complete durable synchronization, or return an error.
     fn sync(&mut self) -> io::Result<()>;

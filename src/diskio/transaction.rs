@@ -2,7 +2,7 @@ use super::*;
 
 fn write_and_verify<'a>(
     dev: &mut dyn SectorDev,
-    sector: impl Fn(u32) -> &'a [u8],
+    sector: impl Fn(u32) -> Option<&'a [u8]>,
     order: &[u32],
     readback_order: &[u32],
     rollback: bool,
@@ -21,7 +21,9 @@ fn write_and_verify<'a>(
         },
     );
     for (index, &lba) in order.iter().enumerate() {
-        dev.write_sector(lba, sector(lba)).map_err(|error| {
+        let bytes =
+            sector(lba).ok_or_else(|| io::Error::other(format!("写入计划缺少 LBA{lba}")))?;
+        dev.write_sector(lba, bytes).map_err(|error| {
             io::Error::new(error.kind(), format!("写入 LBA{lba} 失败: {error}"))
         })?;
         notify_activity(
@@ -64,13 +66,14 @@ fn write_and_verify<'a>(
             total: readback_order.len() as u64,
         },
     );
+    let mut checked = [0_u8; SECTOR];
     for (index, &lba) in readback_order.iter().enumerate() {
-        if dev
-            .read_sector(lba)
-            .map_err(|error| io::Error::new(error.kind(), format!("读回 LBA{lba} 失败: {error}")))?
-            .as_slice()
-            != sector(lba)
-        {
+        dev.read_sector_into(lba, &mut checked).map_err(|error| {
+            io::Error::new(error.kind(), format!("读回 LBA{lba} 失败: {error}"))
+        })?;
+        let expected =
+            sector(lba).ok_or_else(|| io::Error::other(format!("读回计划缺少 LBA{lba}")))?;
+        if checked.as_slice() != expected {
             return Err(io::Error::other(format!("LBA{} 读回校验不符", lba)));
         }
         notify_activity(
@@ -210,13 +213,21 @@ impl WriteTransactionPlan {
     }
 
     fn ordered_lbas(&self) -> Vec<u32> {
-        let mut entries = self
-            .writes
-            .iter()
-            .map(|(&lba, write)| (write.stage, lba))
-            .collect::<Vec<_>>();
-        entries.sort_unstable();
-        entries.into_iter().map(|(_, lba)| lba).collect()
+        // BTreeMap is already LBA sorted. Three passes preserve stage then LBA
+        // ordering while avoiding a temporary tuple vector and comparison sort.
+        let mut order = Vec::with_capacity(self.writes.len());
+        for stage in [
+            SectorWriteStage::Data,
+            SectorWriteStage::Metadata,
+            SectorWriteStage::Commit,
+        ] {
+            order.extend(
+                self.writes
+                    .iter()
+                    .filter_map(|(&lba, write)| (write.stage == stage).then_some(lba)),
+            );
+        }
+        order
     }
 }
 
@@ -265,7 +276,15 @@ pub fn execute_write_transaction_observed(
     // Borrow the immutable planned sectors; only the rollback mirror owns old bytes.
     let readback_order = plan.writes.keys().copied().collect::<Vec<_>>();
     let order = plan.ordered_lbas();
-    let mut mirror = BTreeMap::new();
+    // A sorted LBA index already exists in readback_order. Keep one contiguous
+    // rollback image instead of one BTreeMap node + heap allocation per sector.
+    // A failed reservation is handled before ANY data write.
+    let mut mirror: Vec<[u8; SECTOR]> = Vec::new();
+    mirror
+        .try_reserve_exact(readback_order.len())
+        .map_err(|error| {
+            EdpCliError::new(EXIT_IO, format!("错误: 回滚镜像内存预留失败: {error}"))
+        })?;
     notify_activity(
         observer,
         TransactionActivity {
@@ -275,11 +294,14 @@ pub fn execute_write_transaction_observed(
         },
     );
     for (index, &lba) in readback_order.iter().enumerate() {
-        mirror.insert(
-            lba,
-            dev.read_sector(lba)
-                .map_err(|e| EdpCliError::new(EXIT_IO, format!("错误: {e}")))?,
-        );
+        let mut old = [0_u8; SECTOR];
+        dev.read_sector_into(lba, &mut old).map_err(|e| {
+            EdpCliError::new(
+                EXIT_IO,
+                format!("错误: 回滚镜像读取 LBA{lba} 失败: {e}；尚未写入介质"),
+            )
+        })?;
+        mirror.push(old);
         notify_activity(
             observer,
             TransactionActivity {
@@ -292,7 +314,7 @@ pub fn execute_write_transaction_observed(
 
     match write_and_verify(
         dev,
-        |lba| &plan.writes[&lba].bytes,
+        |lba| plan.writes.get(&lba).map(|write| write.bytes.as_slice()),
         &order,
         &readback_order,
         false,
@@ -303,7 +325,13 @@ pub fn execute_write_transaction_observed(
             for attempt in 0..3 {
                 match write_and_verify(
                     dev,
-                    |lba| &mirror[&lba],
+                    |lba| {
+                        readback_order
+                            .binary_search(&lba)
+                            .ok()
+                            .and_then(|index| mirror.get(index))
+                            .map(|bytes| bytes.as_slice())
+                    },
                     &order,
                     &readback_order,
                     true,

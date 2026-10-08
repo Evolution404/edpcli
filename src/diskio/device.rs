@@ -123,23 +123,27 @@ impl FileDev {
         &self.path
     }
 
-    /// inspect 专用的只读 u64 LBA 读取路径。
-    ///
-    /// 写盘安全链仍使用 SectorDev 的 u32 接口，避免这次只读重构扩大写路径风险。
-    /// 偏移计算采用 checked arithmetic，任何溢出直接失败。
-    pub fn read_sector_u64(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+    fn read_exact_sector(&mut self, lba: u64, out: &mut [u8]) -> io::Result<()> {
         let base = lba
             .checked_mul(SECTOR as u64)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "LBA 字节偏移溢出"))?;
-        let mut buf = vec![0u8; SECTOR];
         self.file.seek(SeekFrom::Start(base))?;
-        self.file.read_exact(&mut buf).map_err(|error| {
+        self.file.read_exact(out).map_err(|error| {
             if error.kind() == io::ErrorKind::UnexpectedEof {
                 io::Error::new(error.kind(), format!("LBA{lba} 读取提前 EOF"))
             } else {
                 error
             }
-        })?;
+        })
+    }
+
+    /// inspect 专用的只读 u64 LBA 读取路径。
+    ///
+    /// 写盘安全链仍使用 SectorDev 的 u32 接口，避免这次只读重构扩大写路径风险。
+    /// 偏移计算采用 checked arithmetic，任何溢出直接失败。
+    pub fn read_sector_u64(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        let mut buf = vec![0u8; SECTOR];
+        self.read_exact_sector(lba, &mut buf)?;
         Ok(buf)
     }
 }
@@ -173,16 +177,12 @@ impl SectorDev for FileDev {
 
     fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
         let mut buf = vec![0u8; SECTOR];
-        let base = lba as u64 * SECTOR as u64;
-        self.file.seek(SeekFrom::Start(base))?;
-        self.file.read_exact(&mut buf).map_err(|error| {
-            if error.kind() == io::ErrorKind::UnexpectedEof {
-                io::Error::new(error.kind(), format!("LBA{} 读取提前 EOF", lba))
-            } else {
-                error
-            }
-        })?;
+        self.read_exact_sector(u64::from(lba), &mut buf)?;
         Ok(buf)
+    }
+
+    fn read_sector_into(&mut self, lba: u32, out: &mut [u8; SECTOR]) -> io::Result<()> {
+        self.read_exact_sector(u64::from(lba), out)
     }
 
     fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()> {
