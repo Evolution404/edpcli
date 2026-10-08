@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::partition_transform::PartitionTransform;
 
@@ -12,7 +12,9 @@ const SECTOR_SIZE: usize = 512;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SparseFilesystemImage {
     volume_sectors: u64,
-    sectors: BTreeMap<u64, [u8; SECTOR_SIZE]>,
+    // Immutable format metadata is shared across display/planning snapshots.
+    // A physical transform always builds a separate map to prevent aliasing.
+    sectors: Arc<BTreeMap<u64, [u8; SECTOR_SIZE]>>,
 }
 
 impl SparseFilesystemImage {
@@ -22,7 +24,7 @@ impl SparseFilesystemImage {
     ) -> Self {
         Self {
             volume_sectors,
-            sectors: writes.into_iter().collect(),
+            sectors: Arc::new(writes.into_iter().collect()),
         }
     }
 
@@ -53,11 +55,12 @@ impl SparseFilesystemImage {
     pub fn transformed<T: PartitionTransform>(&self, transform: &T) -> Self {
         Self {
             volume_sectors: self.volume_sectors,
-            sectors: self
-                .sectors
-                .iter()
-                .map(|(&lba, sector)| (lba, transform.transform_sector(lba, sector)))
-                .collect(),
+            sectors: Arc::new(
+                self.sectors
+                    .iter()
+                    .map(|(&lba, sector)| (lba, transform.transform_sector(lba, sector)))
+                    .collect(),
+            ),
         }
     }
 }
@@ -184,4 +187,46 @@ pub fn build_empty_exfat(
         volume_serial,
         Some(volume_label),
     )
+}
+
+#[cfg(test)]
+mod shared_image_tests {
+    use super::*;
+    use crate::partition_transform::IdentityTransform;
+
+    #[test]
+    fn clone_shares_immutable_sparse_metadata_but_transform_is_independent() {
+        let original = SparseFilesystemImage::from_writes(
+            100,
+            [(0, [0x12; SECTOR_SIZE]), (42, [0x34; SECTOR_SIZE])],
+        );
+        let cloned = original.clone();
+        assert!(Arc::ptr_eq(&original.sectors, &cloned.sectors));
+        assert_eq!(cloned, original);
+        assert_eq!(original.sector_or_zero(7), Some([0; SECTOR_SIZE]));
+        let transformed = cloned.transformed(&IdentityTransform);
+        assert_eq!(transformed, original);
+        assert!(!Arc::ptr_eq(&original.sectors, &transformed.sectors));
+        assert_eq!(Arc::strong_count(&original.sectors), 2);
+        assert_eq!(original.metadata_bytes(), 2 * SECTOR_SIZE);
+    }
+
+    struct Alter;
+    impl PartitionTransform for Alter {
+        fn transform_sector(&self, _lba: u64, source: &[u8; SECTOR_SIZE]) -> [u8; SECTOR_SIZE] {
+            let mut value = *source;
+            value[0] ^= 0xff;
+            value
+        }
+    }
+    #[test]
+    fn encrypted_physical_payload_must_not_modify_plain_verification_image() {
+        let plain = SparseFilesystemImage::from_writes(20, [(3, [0x11; SECTOR_SIZE])]);
+        let verification = plain.clone();
+        let physical = plain.transformed(&Alter);
+        assert_eq!(plain.sector_or_zero(3).unwrap()[0], 0x11);
+        assert_eq!(verification.sector_or_zero(3).unwrap()[0], 0x11);
+        assert_eq!(physical.sector_or_zero(3).unwrap()[0], 0xee);
+        assert!(!Arc::ptr_eq(&physical.sectors, &plain.sectors));
+    }
 }
