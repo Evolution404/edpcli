@@ -553,3 +553,150 @@ fn borrowed_format_rollback_restores_all_touched_sectors_after_partial_write() {
         "preflight and rollback sync; normal write sync is skipped on write failure"
     );
 }
+
+#[derive(Default)]
+struct BatchedFixtureDev {
+    inner: MemoryDev,
+    read_batches: usize,
+    write_batches: usize,
+    fail_batch_after_first_sector: bool,
+    corrupt_first_readback_lba: Option<u32>,
+}
+
+impl SectorDev for BatchedFixtureDev {
+    fn max_contiguous_sectors(&self) -> usize {
+        4
+    }
+    fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+        self.inner.read_sector(lba)
+    }
+    fn read_contiguous_sectors_into(
+        &mut self,
+        first: u32,
+        sectors: &mut [[u8; SECTOR]],
+    ) -> io::Result<()> {
+        self.read_batches += 1;
+        for (index, dst) in sectors.iter_mut().enumerate() {
+            let lba = first + index as u32;
+            dst.copy_from_slice(&self.inner.read_sector(lba)?);
+            if self.inner.syncs == 2 && self.corrupt_first_readback_lba == Some(lba) {
+                dst[0] ^= 0xff;
+            }
+        }
+        Ok(())
+    }
+    fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()> {
+        self.inner.write_sector(lba, data)
+    }
+    fn write_contiguous_sectors(&mut self, first: u32, sectors: &[[u8; SECTOR]]) -> io::Result<()> {
+        self.write_batches += 1;
+        if self.fail_batch_after_first_sector {
+            self.fail_batch_after_first_sector = false;
+            self.inner.write_sector(first, &sectors[0])?;
+            return Err(io::Error::other("partial batch write injected"));
+        }
+        for (index, sector) in sectors.iter().enumerate() {
+            self.inner.write_sector(first + index as u32, sector)?;
+        }
+        Ok(())
+    }
+    fn sync(&mut self) -> io::Result<()> {
+        self.inner.sync()
+    }
+    fn reopen_rdwr(&mut self, wait: std::time::Duration) -> io::Result<()> {
+        self.inner.reopen_rdwr(wait)
+    }
+}
+
+fn contiguous_test_plan() -> WriteTransactionPlan {
+    let mut plan = WriteTransactionPlan::new(100);
+    for lba in 20..29 {
+        plan.insert(
+            lba,
+            vec![lba as u8; SECTOR],
+            SectorWriteStage::Data,
+            "batch",
+        )
+        .unwrap();
+    }
+    plan.insert(
+        1,
+        vec![0x81; SECTOR],
+        SectorWriteStage::Metadata,
+        "metadata",
+    )
+    .unwrap();
+    plan.insert(0, vec![0xb0; SECTOR], SectorWriteStage::Commit, "mbr")
+        .unwrap();
+    plan
+}
+
+#[test]
+fn batched_file_style_io_preserves_stage_order_sync_and_per_sector_progress() {
+    let mut dev = BatchedFixtureDev::default();
+    let mut events = Vec::new();
+    execute_write_transaction_observed(&mut dev, &contiguous_test_plan(), &mut |e| events.push(e))
+        .unwrap();
+    assert!(dev.write_batches >= 2);
+    assert!(dev.read_batches >= 2);
+    assert_eq!(dev.inner.writes, [20, 21, 22, 23, 24, 25, 26, 27, 28, 1, 0]);
+    assert_eq!(dev.inner.syncs, 2);
+    for phase in [
+        TransactionActivityPhase::Mirror,
+        TransactionActivityPhase::Write,
+        TransactionActivityPhase::Readback,
+    ] {
+        let progress: Vec<_> = events
+            .iter()
+            .filter(|event| event.phase == phase)
+            .map(|event| event.current)
+            .collect();
+        assert_eq!(progress, (0..=11).collect::<Vec<_>>(), "{phase:?}");
+    }
+}
+
+#[test]
+fn partially_written_contiguous_batch_rolls_back_every_planned_sector() {
+    let mut dev = BatchedFixtureDev {
+        fail_batch_after_first_sector: true,
+        ..Default::default()
+    };
+    for lba in [0, 1, 20, 21, 22, 23, 24, 25, 26, 27, 28] {
+        dev.inner.sectors.insert(lba, vec![0x97; SECTOR]);
+    }
+    let before = dev.inner.sectors.clone();
+    let mut events = Vec::new();
+    let error = execute_write_transaction_observed(&mut dev, &contiguous_test_plan(), &mut |e| {
+        events.push(e)
+    })
+    .unwrap_err();
+    assert_eq!(error.code, EXIT_ROLLED_BACK, "{}", error.msg);
+    assert!(error.msg.contains("partial batch write injected"));
+    assert_eq!(dev.inner.sectors, before);
+    assert_eq!(dev.inner.syncs, 2, "preflight + rollback sync");
+    assert!(events
+        .iter()
+        .any(|e| e.phase == TransactionActivityPhase::RollbackReadback && e.current == 11));
+    assert_eq!(
+        dev.inner.writes.last(),
+        Some(&0),
+        "rollback still commits MBR last"
+    );
+}
+
+#[test]
+fn corrupted_contiguous_readback_triggers_exact_rollback() {
+    let mut dev = BatchedFixtureDev {
+        corrupt_first_readback_lba: Some(22),
+        ..Default::default()
+    };
+    for lba in [0, 1, 20, 21, 22, 23, 24, 25, 26, 27, 28] {
+        dev.inner.sectors.insert(lba, vec![0x74; SECTOR]);
+    }
+    let before = dev.inner.sectors.clone();
+    let error = execute_write_transaction(&mut dev, &contiguous_test_plan()).unwrap_err();
+    assert_eq!(error.code, EXIT_ROLLED_BACK, "{}", error.msg);
+    assert!(error.msg.contains("LBA22"), "{}", error.msg);
+    assert_eq!(dev.inner.sectors, before);
+    assert_eq!(dev.inner.syncs, 3, "preflight + write sync + rollback sync");
+}

@@ -1,0 +1,102 @@
+{
+  "schema": 1,
+  "utc": "2026-10-08T09:53:13.791870+00:00",
+  "git": "2042b310f9f7802db00cf232037fccc39acef4c1",
+  "system": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "scope": "Only disposable file-backed transactions; no physical USB",
+  "sizes": {
+    "32768": {
+      "samples": [
+        {
+          "sectors": 32768,
+          "plan_ms": 13.872,
+          "transaction_ms": 149.23,
+          "rss_after_plan_kib": 26592,
+          "peak_rss_kib": 43312,
+          "peak_delta_kib": 16720
+        },
+        {
+          "sectors": 32768,
+          "plan_ms": 5.089,
+          "transaction_ms": 131.143,
+          "rss_after_plan_kib": 26576,
+          "peak_rss_kib": 43296,
+          "peak_delta_kib": 16720
+        },
+        {
+          "sectors": 32768,
+          "plan_ms": 5.211,
+          "transaction_ms": 130.968,
+          "rss_after_plan_kib": 26576,
+          "peak_rss_kib": 43296,
+          "peak_delta_kib": 16720
+        },
+        {
+          "sectors": 32768,
+          "plan_ms": 5.22,
+          "transaction_ms": 129.63,
+          "rss_after_plan_kib": 26592,
+          "peak_rss_kib": 43312,
+          "peak_delta_kib": 16720
+        },
+        {
+          "sectors": 32768,
+          "plan_ms": 5.207,
+          "transaction_ms": 128.806,
+          "rss_after_plan_kib": 26576,
+          "peak_rss_kib": 43296,
+          "peak_delta_kib": 16720
+        }
+      ],
+      "transaction_ms_median": 130.968,
+      "peak_delta_kib_median": 16720
+    },
+    "65536": {
+      "samples": [
+        {
+          "sectors": 65536,
+          "plan_ms": 10.471,
+          "transaction_ms": 249.525,
+          "rss_after_plan_kib": 47712,
+          "peak_rss_kib": 81072,
+          "peak_delta_kib": 33360
+        },
+        {
+          "sectors": 65536,
+          "plan_ms": 10.876,
+          "transaction_ms": 249.165,
+          "rss_after_plan_kib": 47712,
+          "peak_rss_kib": 81072,
+          "peak_delta_kib": 33360
+        },
+        {
+          "sectors": 65536,
+          "plan_ms": 10.599,
+          "transaction_ms": 250.043,
+          "rss_after_plan_kib": 47712,
+          "peak_rss_kib": 81072,
+          "peak_delta_kib": 33360
+        },
+        {
+          "sectors": 65536,
+          "plan_ms": 10.943,
+          "transaction_ms": 251.336,
+          "rss_after_plan_kib": 47696,
+          "peak_rss_kib": 81056,
+          "peak_delta_kib": 33360
+        },
+        {
+          "sectors": 65536,
+          "plan_ms": 10.896,
+          "transaction_ms": 251.466,
+          "rss_after_plan_kib": 47728,
+          "peak_rss_kib": 81088,
+          "peak_delta_kib": 33360
+        }
+      ],
+      "transaction_ms_median": 250.043,
+      "peak_delta_kib_median": 33360
+    }
+  },
+  "caveat": "Maximum RSS is process high-water, not instantaneous allocator usage; compare same host and toolchain only."
+}

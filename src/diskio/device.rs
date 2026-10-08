@@ -185,6 +185,58 @@ impl SectorDev for FileDev {
         self.read_exact_sector(u64::from(lba), out)
     }
 
+    fn max_contiguous_sectors(&self) -> usize {
+        // Never enable batched writes for raw USB/disk devices without a
+        // separate hardware failure-injection acceptance gate.
+        if crate::platform::is_raw_device_path(&self.path) {
+            1
+        } else {
+            128
+        }
+    }
+
+    fn read_contiguous_sectors_into(
+        &mut self,
+        first_lba: u32,
+        sectors: &mut [[u8; SECTOR]],
+    ) -> io::Result<()> {
+        if crate::platform::is_raw_device_path(&self.path) {
+            for (index, sector) in sectors.iter_mut().enumerate() {
+                let lba = first_lba
+                    .checked_add(index as u32)
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "LBA 溢出"))?;
+                self.read_sector_into(lba, sector)?;
+            }
+            return Ok(());
+        }
+        self.read_exact_sector(u64::from(first_lba), sectors.as_flattened_mut())
+    }
+
+    fn write_contiguous_sectors(
+        &mut self,
+        first_lba: u32,
+        sectors: &[[u8; SECTOR]],
+    ) -> io::Result<()> {
+        if crate::platform::is_raw_device_path(&self.path) {
+            for (index, sector) in sectors.iter().enumerate() {
+                let lba = first_lba
+                    .checked_add(index as u32)
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "LBA 溢出"))?;
+                self.write_sector(lba, sector)?;
+            }
+            return Ok(());
+        }
+        if !self.writable {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{} 以只读打开(未到写阶段)", self.path),
+            ));
+        }
+        self.file
+            .seek(SeekFrom::Start(u64::from(first_lba) * SECTOR as u64))?;
+        self.file.write_all(sectors.as_flattened())
+    }
+
     fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()> {
         if !self.writable {
             return Err(io::Error::new(
@@ -209,3 +261,41 @@ impl SectorDev for FileDev {
 // ══════════════════════════════════════════════════════════════════
 // 1. 原子写入(全有或全无)
 // ══════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod contiguous_batch_tests {
+    use super::*;
+
+    #[test]
+    fn batch_io_is_opted_in_only_for_regular_files_not_raw_paths() -> io::Result<()> {
+        let path = std::env::temp_dir().join(format!(
+            "edpcli-file-batch-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        File::create(&path)?.set_len(10 * SECTOR as u64)?;
+        let path_text = path
+            .to_str()
+            .ok_or_else(|| io::Error::other("non-UTF8 temporary path"))?;
+        let mut dev = FileDev::open_rdwr(path_text, Duration::ZERO)?;
+        assert_eq!(SectorDev::max_contiguous_sectors(&dev), 128);
+        let two = [[0x15_u8; SECTOR], [0xb2_u8; SECTOR]];
+        dev.write_contiguous_sectors(3, &two)?;
+        let mut read = [[0_u8; SECTOR]; 2];
+        dev.read_contiguous_sectors_into(3, &mut read)?;
+        assert_eq!(read, two);
+        // Swap only the string used for path classification; the underlying
+        // file descriptor still points to our disposable ordinary file.
+        dev.path = crate::platform::raw_disk_path(99);
+        assert_eq!(SectorDev::max_contiguous_sectors(&dev), 1);
+        dev.write_contiguous_sectors(5, &two)?;
+        dev.read_contiguous_sectors_into(5, &mut read)?;
+        assert_eq!(read, two);
+        drop(dev);
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+}

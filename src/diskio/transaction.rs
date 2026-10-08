@@ -1,5 +1,19 @@
 use super::*;
 
+// A small, bounded contiguous batch; never crosses gaps or wraps u32 LBA.
+const MAX_TRANSACTION_IO_BATCH_SECTORS: usize = 128;
+
+fn contiguous_run(lbas: &[u32], start: usize, maximum: usize) -> usize {
+    let mut count = 1;
+    while count < maximum
+        && start + count < lbas.len()
+        && lbas[start + count - 1].checked_add(1) == Some(lbas[start + count])
+    {
+        count += 1;
+    }
+    count
+}
+
 fn write_and_verify<'a>(
     dev: &mut dyn SectorDev,
     sector: impl Fn(u32) -> Option<&'a [u8]>,
@@ -20,24 +34,63 @@ fn write_and_verify<'a>(
             total: order.len() as u64,
         },
     );
-    for (index, &lba) in order.iter().enumerate() {
-        let bytes =
-            sector(lba).ok_or_else(|| io::Error::other(format!("写入计划缺少 LBA{lba}")))?;
-        dev.write_sector(lba, bytes).map_err(|error| {
-            io::Error::new(error.kind(), format!("写入 LBA{lba} 失败: {error}"))
-        })?;
-        notify_activity(
-            observer,
-            TransactionActivity {
-                phase: if rollback {
-                    TransactionActivityPhase::RollbackWrite
-                } else {
-                    TransactionActivityPhase::Write
+    let max_batch = dev
+        .max_contiguous_sectors()
+        .clamp(1, MAX_TRANSACTION_IO_BATCH_SECTORS);
+    let mut buffer = if max_batch > 1 {
+        vec![[0_u8; SECTOR]; max_batch]
+    } else {
+        Vec::new()
+    };
+    let mut index = 0;
+    while index < order.len() {
+        let count = contiguous_run(order, index, max_batch);
+        let first = order[index];
+        if count == 1 {
+            let bytes = sector(first)
+                .ok_or_else(|| io::Error::other(format!("写入计划缺少 LBA{first}")))?;
+            dev.write_sector(first, bytes).map_err(|error| {
+                io::Error::new(error.kind(), format!("写入 LBA{first} 失败: {error}"))
+            })?;
+        } else {
+            for (offset, &lba) in order[index..index + count].iter().enumerate() {
+                let bytes = sector(lba)
+                    .ok_or_else(|| io::Error::other(format!("写入计划缺少 LBA{lba}")))?;
+                if bytes.len() != SECTOR {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("写入 LBA{lba} 数据不足 {SECTOR}B"),
+                    ));
+                }
+                buffer[offset].copy_from_slice(bytes);
+            }
+            dev.write_contiguous_sectors(first, &buffer[..count])
+                .map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!(
+                            "连续写入 LBA{first}-{} 失败: {error}",
+                            order[index + count - 1]
+                        ),
+                    )
+                })?;
+        }
+        // Publish exact sector counts only after the bounded batch succeeds.
+        for completed in index..index + count {
+            notify_activity(
+                observer,
+                TransactionActivity {
+                    phase: if rollback {
+                        TransactionActivityPhase::RollbackWrite
+                    } else {
+                        TransactionActivityPhase::Write
+                    },
+                    current: completed as u64 + 1,
+                    total: order.len() as u64,
                 },
-                current: index as u64 + 1,
-                total: order.len() as u64,
-            },
-        );
+            );
+        }
+        index += count;
     }
     // 读回前先把写缓存提交到介质；否则紧随其后的 pread 可能只验证到内核缓存。
     notify_activity(
@@ -67,27 +120,52 @@ fn write_and_verify<'a>(
         },
     );
     let mut checked = [0_u8; SECTOR];
-    for (index, &lba) in readback_order.iter().enumerate() {
-        dev.read_sector_into(lba, &mut checked).map_err(|error| {
-            io::Error::new(error.kind(), format!("读回 LBA{lba} 失败: {error}"))
-        })?;
-        let expected =
-            sector(lba).ok_or_else(|| io::Error::other(format!("读回计划缺少 LBA{lba}")))?;
-        if checked.as_slice() != expected {
-            return Err(io::Error::other(format!("LBA{} 读回校验不符", lba)));
+    let mut index = 0;
+    while index < readback_order.len() {
+        let count = contiguous_run(readback_order, index, max_batch);
+        let first = readback_order[index];
+        if count == 1 {
+            dev.read_sector_into(first, &mut checked).map_err(|error| {
+                io::Error::new(error.kind(), format!("读回 LBA{first} 失败: {error}"))
+            })?;
+        } else {
+            dev.read_contiguous_sectors_into(first, &mut buffer[..count])
+                .map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!(
+                            "连续读回 LBA{first}-{} 失败: {error}",
+                            readback_order[index + count - 1]
+                        ),
+                    )
+                })?;
         }
-        notify_activity(
-            observer,
-            TransactionActivity {
-                phase: if rollback {
-                    TransactionActivityPhase::RollbackReadback
-                } else {
-                    TransactionActivityPhase::Readback
+        for offset in 0..count {
+            let lba = readback_order[index + offset];
+            let bytes = if count == 1 {
+                checked.as_slice()
+            } else {
+                buffer[offset].as_slice()
+            };
+            let expected =
+                sector(lba).ok_or_else(|| io::Error::other(format!("读回计划缺少 LBA{lba}")))?;
+            if bytes != expected {
+                return Err(io::Error::other(format!("LBA{} 读回校验不符", lba)));
+            }
+            notify_activity(
+                observer,
+                TransactionActivity {
+                    phase: if rollback {
+                        TransactionActivityPhase::RollbackReadback
+                    } else {
+                        TransactionActivityPhase::Readback
+                    },
+                    current: (index + offset) as u64 + 1,
+                    total: readback_order.len() as u64,
                 },
-                current: index as u64 + 1,
-                total: readback_order.len() as u64,
-            },
-        );
+            );
+        }
+        index += count;
     }
     Ok(())
 }
@@ -374,23 +452,45 @@ fn execute_sector_transaction_observed<'a>(
             total: readback_order.len() as u64,
         },
     );
-    for (index, &lba) in readback_order.iter().enumerate() {
-        let mut old = [0_u8; SECTOR];
-        dev.read_sector_into(lba, &mut old).map_err(|e| {
-            EdpCliError::new(
-                EXIT_IO,
-                format!("错误: 回滚镜像读取 LBA{lba} 失败: {e}；尚未写入介质"),
-            )
-        })?;
-        mirror.push(old);
-        notify_activity(
-            observer,
-            TransactionActivity {
-                phase: TransactionActivityPhase::Mirror,
-                current: index as u64 + 1,
-                total: readback_order.len() as u64,
-            },
-        );
+    mirror.resize(readback_order.len(), [0_u8; SECTOR]);
+    let max_batch = dev
+        .max_contiguous_sectors()
+        .clamp(1, MAX_TRANSACTION_IO_BATCH_SECTORS);
+    let mut index = 0;
+    while index < readback_order.len() {
+        let count = contiguous_run(readback_order, index, max_batch);
+        let first = readback_order[index];
+        if count == 1 {
+            dev.read_sector_into(first, &mut mirror[index])
+                .map_err(|error| {
+                    EdpCliError::new(
+                        EXIT_IO,
+                        format!("错误: 回滚镜像读取 LBA{first} 失败: {error}；尚未写入介质"),
+                    )
+                })?;
+        } else {
+            dev.read_contiguous_sectors_into(first, &mut mirror[index..index + count])
+                .map_err(|error| {
+                    EdpCliError::new(
+                        EXIT_IO,
+                        format!(
+                            "错误: 回滚镜像连续读取 LBA{first}-{} 失败: {error}；尚未写入介质",
+                            readback_order[index + count - 1],
+                        ),
+                    )
+                })?;
+        }
+        for done in index..index + count {
+            notify_activity(
+                observer,
+                TransactionActivity {
+                    phase: TransactionActivityPhase::Mirror,
+                    current: done as u64 + 1,
+                    total: readback_order.len() as u64,
+                },
+            );
+        }
+        index += count;
     }
 
     match write_and_verify(dev, &sector, order, readback_order, false, observer) {

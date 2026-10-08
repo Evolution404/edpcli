@@ -62,6 +62,40 @@ pub trait SectorDev {
         Ok(())
     }
     fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()>;
+    /// Optional contiguous I/O hint. Defaults to one sector to preserve all
+    /// physical-device and fault-injection implementations unmodified.
+    fn max_contiguous_sectors(&self) -> usize {
+        1
+    }
+    /// Read adjacent sectors to a bounded reusable caller-owned buffer.
+    fn read_contiguous_sectors_into(
+        &mut self,
+        first_lba: u32,
+        sectors: &mut [[u8; crate::common::SECTOR]],
+    ) -> io::Result<()> {
+        for (index, sector) in sectors.iter_mut().enumerate() {
+            let lba = first_lba
+                .checked_add(index as u32)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "连续读取 LBA 溢出"))?;
+            self.read_sector_into(lba, sector)?;
+        }
+        Ok(())
+    }
+    /// All-or-error adjacent write. A provider may partially mutate a failed
+    /// batch; the transaction still rolls back its entire touched-sector set.
+    fn write_contiguous_sectors(
+        &mut self,
+        first_lba: u32,
+        sectors: &[[u8; crate::common::SECTOR]],
+    ) -> io::Result<()> {
+        for (index, sector) in sectors.iter().enumerate() {
+            let lba = first_lba
+                .checked_add(index as u32)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "连续写入 LBA 溢出"))?;
+            self.write_sector(lba, sector)?;
+        }
+        Ok(())
+    }
     /// Complete durable synchronization, or return an error.
     fn sync(&mut self) -> io::Result<()>;
     /// Reopen with write access, or return an error.
