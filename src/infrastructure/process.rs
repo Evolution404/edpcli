@@ -269,7 +269,10 @@ mod tests {
     }
     #[cfg(windows)]
     fn windows_test_command(fixture: &str) -> (String, String) {
-        let executable = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+        let executable = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         let name = format!("infrastructure::process::tests::{fixture}");
         (executable, name)
     }
@@ -296,10 +299,8 @@ mod tests {
         #[cfg(unix)]
         let outcome = run_command(&shell(script), Duration::from_secs(15)).unwrap();
         #[cfg(windows)]
-        let outcome = run_windows_test_command(
-            "windows_fixture_stderr_exit7",
-            Duration::from_secs(15),
-        );
+        let outcome =
+            run_windows_test_command("windows_fixture_stderr_exit7", Duration::from_secs(15));
         assert_eq!(
             outcome.completion,
             CommandCompletion::Exited {
@@ -334,10 +335,8 @@ mod tests {
         )
         .unwrap();
         #[cfg(windows)]
-        let outcome = run_windows_test_command(
-            "windows_fixture_stderr_limit",
-            Duration::from_secs(15),
-        );
+        let outcome =
+            run_windows_test_command("windows_fixture_stderr_limit", Duration::from_secs(15));
         assert!(matches!(
             outcome.completion,
             CommandCompletion::Exited { success: true, .. }
@@ -414,16 +413,12 @@ mod tests {
         // Native test-binary fixtures avoid nondeterministic PowerShell
         // startup on overloaded CI runners while retaining the actual
         // pipe-closure, deadline and output-budget behavior.
-        let outcome = run_windows_test_command(
-            "windows_fixture_closed_pipes",
-            Duration::from_secs(10),
-        );
+        let outcome =
+            run_windows_test_command("windows_fixture_closed_pipes", Duration::from_secs(10));
         assert_eq!(outcome.completion, CommandCompletion::TimedOut);
         assert!(outcome.stdout.contains("ready"));
-        let outcome = run_windows_test_command(
-            "windows_fixture_stdout_limit",
-            Duration::from_secs(20),
-        );
+        let outcome =
+            run_windows_test_command("windows_fixture_stdout_limit", Duration::from_secs(20));
         assert_eq!(outcome.completion, CommandCompletion::OutputLimit);
         assert!(outcome.stdout_truncated);
     }
