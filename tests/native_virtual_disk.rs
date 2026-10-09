@@ -137,8 +137,222 @@ fn write_fat_file(file: &mut File, index: usize) -> (u64, u64, Vec<u8>, u32) {
     (root_lba, payload_lba, payload, cluster)
 }
 
+/// exFAT independent virtual-only file authoring. Exercises the primary
+/// directory entry, stream extension, UTF16 filename, FAT chain and bitmap.
+/// This is test fixture I/O to a *newly created regular file*, not a
+/// filesystem writer, host mount, or production disk transaction.
+struct ExfatSample {
+    root_lba: u64,
+    bitmap_lba: u64,
+    fat_lba: u64,
+    first_cluster: u32,
+    sectors_per_cluster: u64,
+    heap_lba: u64,
+    payload: Vec<u8>,
+}
+
+fn exfat_set_checksum(entries: &[u8]) -> u16 {
+    entries
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !matches!(index, 2 | 3))
+        .fold(0u16, |sum, (_, byte)| {
+            sum.rotate_right(1).wrapping_add(u16::from(*byte))
+        })
+}
+
+fn exfat_filename_hash(name: &[u16]) -> u16 {
+    // The fixture uses already-uppercase ASCII, which maps to itself in
+    // the on-disk exFAT Upcase table.
+    name.iter()
+        .flat_map(|c| c.to_le_bytes())
+        .fold(0u16, |sum, byte| {
+            sum.rotate_right(1).wrapping_add(u16::from(byte))
+        })
+}
+
+fn write_exfat_file(file: &mut File) -> ExfatSample {
+    let (start, count, kind) = PARTITIONS[3];
+    assert_eq!(kind, FilesystemKind::ExFat);
+    let boot = read_block(file, start);
+    assert_eq!(&boot[3..11], b"EXFAT   ");
+    assert_eq!(boot[108], 12);
+    let spc = 1u64 << boot[109];
+    let cluster_bytes = spc * BPS;
+    let fat_lba = start + u64::from(u32le(&boot, 80));
+    let heap_lba = start + u64::from(u32le(&boot, 88));
+    let cluster_count = u32le(&boot, 92);
+    assert_eq!(u64::from(u32le(&boot, 96)), 2);
+    let root_lba = heap_lba;
+    let root = read_block(file, root_lba);
+    assert_eq!(root[0], 0x81);
+    assert_eq!(root[32], 0x82);
+    assert_eq!(root[64], 0x83);
+    let bitmap_cluster = u32le(&root, 20);
+    let upcase_cluster = u32le(&root, 52);
+    let upcase_length = u64::from_le_bytes(root[56..64].try_into().unwrap());
+    let upcase_clusters = upcase_length.div_ceil(cluster_bytes);
+    let first_cluster = upcase_cluster + upcase_clusters as u32;
+    assert_eq!(bitmap_cluster, 3);
+    assert!(u64::from(first_cluster) + 1 < u64::from(cluster_count) + 2);
+    let bitmap_lba = heap_lba + u64::from(bitmap_cluster - 2) * spc;
+    let payload = b"EDPCLI: EXFAT NATIVE 4096B FILE AND FAT CHAIN HASH CHECK\n"
+        .repeat((2 * cluster_bytes as usize) / 50)
+        .into_iter()
+        .take(2 * cluster_bytes as usize - 71)
+        .collect::<Vec<u8>>();
+    assert!(payload.len() as u64 > cluster_bytes);
+    assert!((payload.len() as u64) < 2 * cluster_bytes);
+
+    // Allocate two clusters and mark their chained values in the single FAT.
+    let fat_entries_per_block = BPS / 4;
+    for (index, next) in [(0u32, first_cluster + 1), (1, 0xffff_ffff)] {
+        let cluster = first_cluster + index;
+        let fat_sector = fat_lba + u64::from(cluster) / fat_entries_per_block;
+        let mut fat = read_block(file, fat_sector);
+        let offset = (u64::from(cluster) % fat_entries_per_block) as usize * 4;
+        assert_eq!(u32le(&fat, offset), 0);
+        fat[offset..offset + 4].copy_from_slice(&next.to_le_bytes());
+        write_block(file, fat_sector, &fat);
+    }
+    let mut bitmap = read_block(file, bitmap_lba);
+    for cluster in [first_cluster, first_cluster + 1] {
+        let bit = cluster - 2;
+        let index = (bit / 8) as usize;
+        let mask = 1u8 << (bit % 8);
+        assert_eq!(bitmap[index] & mask, 0);
+        bitmap[index] |= mask;
+    }
+    write_block(file, bitmap_lba, &bitmap);
+
+    // Add exactly three directory entries following the volume metadata.
+    let mut directory = read_block(file, root_lba);
+    let start_entry = 96usize;
+    assert_eq!(directory[start_entry], 0);
+    let records = &mut directory[start_entry..start_entry + 96];
+    records[0] = 0x85;
+    records[1] = 2;
+    records[4..6].copy_from_slice(&0x20u16.to_le_bytes()); // archive
+    records[32] = 0xC0;
+    records[33] = 0; // FAT chain in use (no NoFatChain flag)
+    let name: Vec<u16> = "HELLO.TXT".encode_utf16().collect();
+    records[35] = name.len() as u8;
+    records[36..38].copy_from_slice(&exfat_filename_hash(&name).to_le_bytes());
+    records[40..48].copy_from_slice(&(payload.len() as u64).to_le_bytes()); // valid length
+    records[52..56].copy_from_slice(&first_cluster.to_le_bytes());
+    records[56..64].copy_from_slice(&(payload.len() as u64).to_le_bytes());
+    records[64] = 0xC1;
+    for (i, ch) in name.iter().enumerate() {
+        let index = 66 + 2 * i;
+        records[index..index + 2].copy_from_slice(&ch.to_le_bytes());
+    }
+    let checksum = exfat_set_checksum(records);
+    records[2..4].copy_from_slice(&checksum.to_le_bytes());
+    write_block(file, root_lba, &directory);
+
+    for (index, chunk) in payload.chunks(BPS as usize).enumerate() {
+        let cluster_index = index as u64 / spc;
+        assert!(cluster_index < 2);
+        let sector_offset = index as u64 % spc;
+        let lba = heap_lba + (u64::from(first_cluster - 2) + cluster_index) * spc + sector_offset;
+        assert!(lba < start + count);
+        let mut sector = vec![0u8; BPS as usize];
+        sector[..chunk.len()].copy_from_slice(chunk);
+        write_block(file, lba, &sector);
+    }
+    ExfatSample {
+        root_lba,
+        bitmap_lba,
+        fat_lba,
+        first_cluster,
+        sectors_per_cluster: spc,
+        heap_lba,
+        payload,
+    }
+}
+
+fn verify_exfat_file(file: &mut File, sample: &ExfatSample) {
+    let directory = read_block(file, sample.root_lba);
+    let records = &directory[96..192];
+    assert_eq!(&[records[0], records[32], records[64]], &[0x85, 0xC0, 0xC1]);
+    assert_eq!(records[1], 2);
+    assert_eq!(u16le(records, 2), exfat_set_checksum(records));
+    assert_eq!(records[33] & 0x02, 0); // data stream is FAT chained
+    let name_len = records[35] as usize;
+    let name = (0..name_len)
+        .map(|i| u16le(records, 66 + 2 * i))
+        .collect::<Vec<_>>();
+    assert_eq!(String::from_utf16(&name).unwrap(), "HELLO.TXT");
+    assert_eq!(u16le(records, 36), exfat_filename_hash(&name));
+    let length = u64::from_le_bytes(records[56..64].try_into().unwrap());
+    let valid_length = u64::from_le_bytes(records[40..48].try_into().unwrap());
+    assert_eq!(length, sample.payload.len() as u64);
+    assert_eq!(valid_length, length);
+    let first_cluster = u32le(records, 52);
+    assert_eq!(first_cluster, sample.first_cluster);
+
+    let bitmap = read_block(file, sample.bitmap_lba);
+    // Upcase metadata must survive file creation unchanged, including the
+    // separate root metadata checksum (not the file entry-set checksum).
+    let root_meta = read_block(file, sample.root_lba);
+    let upcase_first = u32le(&root_meta, 52);
+    let upcase_size = u64::from_le_bytes(root_meta[56..64].try_into().unwrap());
+    assert!(upcase_size > 0);
+    let mut upcase = Vec::new();
+    for lba_offset in 0..upcase_size.div_ceil(BPS) {
+        upcase.extend_from_slice(&read_block(
+            file,
+            sample.heap_lba + u64::from(upcase_first - 2) * sample.sectors_per_cluster + lba_offset,
+        ));
+    }
+    upcase.truncate(upcase_size as usize);
+    let checksum = upcase.iter().fold(0u32, |sum, byte| {
+        sum.rotate_right(1).wrapping_add(u32::from(*byte))
+    });
+    assert_eq!(u32le(&root_meta, 36), checksum);
+    let mut data = Vec::new();
+    let mut cluster = first_cluster;
+    for hop in 0..2u32 {
+        let bit = cluster - 2;
+        assert_ne!(bitmap[(bit / 8) as usize] & (1 << (bit % 8)), 0);
+        for sector in 0..sample.sectors_per_cluster {
+            let lba =
+                sample.heap_lba + u64::from(cluster - 2) * sample.sectors_per_cluster + sector;
+            data.extend_from_slice(&read_block(file, lba));
+        }
+        let fat_sector = sample.fat_lba + u64::from(cluster) / (BPS / 4);
+        let fat = read_block(file, fat_sector);
+        let next = u32le(&fat, (u64::from(cluster) % (BPS / 4)) as usize * 4);
+        if hop == 0 {
+            assert_eq!(next, cluster + 1);
+            cluster = next;
+        } else {
+            assert!(next >= 0xffff_fff8);
+        }
+    }
+    data.truncate(length as usize);
+    assert_eq!(
+        Sha256::digest(&data)[..],
+        Sha256::digest(&sample.payload)[..]
+    );
+    // Deliberate corruption probes: a validator must reject damaged entry
+    // metadata and user data, without modifying the saved source file.
+    let mut tampered_records = records.to_vec();
+    tampered_records[66] ^= 1;
+    assert_ne!(
+        u16le(&tampered_records, 2),
+        exfat_set_checksum(&tampered_records)
+    );
+    let mut tampered_payload = data;
+    tampered_payload[0] ^= 1;
+    assert_ne!(
+        Sha256::digest(&tampered_payload)[..],
+        Sha256::digest(&sample.payload)[..]
+    );
+}
+
 #[test]
-fn four_kn_full_disk_native_mbr_four_partition_readback_and_fat12_file_hash() {
+fn four_kn_full_disk_four_filesystem_file_roundtrips() {
     let plans = plans();
     let composite = NativeVirtualDiskPlan::assemble(TOTAL, 4096, &plans).unwrap();
     assert_eq!(composite.total_sectors, TOTAL);
@@ -255,6 +469,7 @@ fn four_kn_full_disk_native_mbr_four_partition_readback_and_fat12_file_hash() {
     write_block(&mut file, data_lba, &data);
     let fat16_sample = write_fat_file(&mut file, 1);
     let fat32_sample = write_fat_file(&mut file, 2);
+    let exfat_sample = write_exfat_file(&mut file);
     file.sync_all().unwrap();
     drop(file);
 
@@ -287,6 +502,7 @@ fn four_kn_full_disk_native_mbr_four_partition_readback_and_fat12_file_hash() {
         data.truncate(size);
         assert_eq!(Sha256::digest(&data)[..], Sha256::digest(expected)[..]);
     }
+    verify_exfat_file(&mut file, &exfat_sample);
     if external.is_none() {
         drop(file);
         std::fs::remove_file(&path).unwrap();
