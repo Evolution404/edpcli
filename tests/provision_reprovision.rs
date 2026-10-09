@@ -2006,3 +2006,82 @@ fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
         );
     }
 }
+
+/// The source profile was observed read-only on physical U391:
+/// 4096B logical sectors, mode0, encrypt_mode=3 on both encrypted entries.
+/// The material here is SYNTHETIC and deliberately contains no real keys.
+#[test]
+fn native_4kn_aes3_edpf_source_record_matches_real_u391_wrap_profile() {
+    use edpcli::protocol::image::NativeProtocolImage;
+    let (_, image, did) = generated_source(OfficialPartitionMode::DefaultThreePartition);
+    let crc = crc32_bare(did.as_bytes());
+    let mut projection = image.as_bytes().to_vec();
+    let mut decrypted7 = xor_rolling(&projection[7 * 512..8 * 512], (crc & 0xffff) ^ (crc >> 16));
+    let mut decrypted12 = a6b0_full(&projection[12 * 512..13 * 512], &crc.to_le_bytes(), 0);
+    assert_eq!(
+        u32::from_le_bytes(decrypted12[8..12].try_into().unwrap()),
+        3
+    );
+    for index in 0..3 {
+        let off7 = 0x40 * index;
+        let off12 = 0x60 * index;
+        decrypted7[off7 + 0x20..off7 + 0x28].copy_from_slice(&4096u64.to_le_bytes());
+        decrypted12[off12 + 0x20..off12 + 0x28].copy_from_slice(&4096u64.to_le_bytes());
+        let old_size =
+            u64::from_le_bytes(decrypted12[off12 + 0x28..off12 + 0x30].try_into().unwrap());
+        let native_bytes = (old_size / 4096).max(1) * 4096;
+        decrypted12[off12 + 0x28..off12 + 0x30].copy_from_slice(&native_bytes.to_le_bytes());
+        if index == 0 {
+            decrypted7[off7 + 0x28..off7 + 0x30].copy_from_slice(&native_bytes.to_le_bytes());
+            projection[458..462].copy_from_slice(&((native_bytes / 4096) as u32).to_le_bytes());
+        } else {
+            let key = wrap_file_key(
+                b"NativeAesFixturePass",
+                [0x27; 16],
+                FileKeyWrapMode::Aes128Ecb,
+            );
+            decrypted12[off12 + 0x30..off12 + 0x34]
+                .copy_from_slice(&key.user_key_crc.to_le_bytes());
+            decrypted12[off12 + 0x34..off12 + 0x38]
+                .copy_from_slice(&key.file_key_crc.to_le_bytes());
+            decrypted12[off12 + 0x38..off12 + 0x48].copy_from_slice(&key.wrapped_file_key);
+            decrypted12[off12 + 0x58] = 3;
+        }
+    }
+    projection[7 * 512..8 * 512]
+        .copy_from_slice(&xor_rolling(&decrypted7, (crc & 0xffff) ^ (crc >> 16)));
+    projection[12 * 512..13 * 512].copy_from_slice(&edpcli::protocol::crypto::a7f0_full(
+        &decrypted12,
+        &crc.to_le_bytes(),
+        0,
+    ));
+    let native = NativeProtocolImage::from_protocol_zero_tailed(&projection, 4096).unwrap();
+    let parsed = parse_existing_provision_native(&native, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        parsed.profile.source_mode,
+        OfficialPartitionMode::DefaultThreePartition
+    );
+    for domain in [KeyDomainRole::Share, KeyDomainRole::Encrypt] {
+        let record = parsed.record_for_domain(domain).unwrap();
+        assert_eq!(record.lba12.encrypt_mode, FileKeyWrapMode::Aes128Ecb.raw());
+        assert_eq!(record.lba12.sector_size, 4096);
+        assert_eq!(
+            record.verified_file_key(Some(b"NativeAesFixturePass")),
+            Ok([0x27; 16])
+        );
+        assert!(record.verified_file_key(Some(b"wrong password")).is_err());
+        assert!(record
+            .verified_sm4_file_key(b"NativeAesFixturePass")
+            .is_err());
+    }
+    assert_eq!(
+        native.protocol_projection().as_slice(),
+        projection.as_slice()
+    );
+    let mut corrupted = projection.clone();
+    corrupted[458..462].copy_from_slice(&1u32.to_le_bytes());
+    let corrupted = NativeProtocolImage::from_protocol_zero_tailed(&corrupted, 4096).unwrap();
+    assert!(parse_existing_provision_native(&corrupted, &did, 16_777_216).is_err());
+}

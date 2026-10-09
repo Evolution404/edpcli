@@ -59,6 +59,29 @@ fn native_registration_on_disk(
     Ok((kind, Some(parsed)))
 }
 
+/// The native U391 source uses EncryptMode=3 (AES-128-ECB), unlike the
+/// first-party 512B SM4 writer. The existing EDPF key-record verifier already
+/// covers all documented wrap modes and validates both password and FileKey
+/// CRC; native READ ONLY probing must honor the source record's actual mode.
+fn verified_native_source_password(
+    record: crate::provision::ExistingPartitionRecord,
+    password: &[u8],
+) -> Result<SourcePasswordKnowledge, String> {
+    if record.lba12.need_encrypt == 0
+        || FileKeyWrapMode::from_raw(record.lba12.encrypt_mode).is_none()
+    {
+        return Err("来源密码域使用未认证的 FileKey 封装类型".into());
+    }
+    record
+        .verified_file_key(Some(password))
+        .map_err(|error| error.to_string())?;
+    Ok(if password == DEFAULT_KEY_DOMAIN_PASSWORD {
+        SourcePasswordKnowledge::DefaultVerified
+    } else {
+        SourcePasswordKnowledge::UserVerified
+    })
+}
+
 fn native_key_probe_on_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<ProvisionKeyProbe> {
     let (source_kind, parsed) = native_registration_on_disk(runner, disk)?;
     let classify = |domain: KeyDomainRole| {
@@ -68,17 +91,13 @@ fn native_key_probe_on_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<P
         let Some(record) = record else {
             return (None, false);
         };
+        // Source AES-128-ECB can be *password-verified* but the first-party
+        // target write/sector-crypto contract remains SM4-only. Keep the
+        // opaque-compatibility warning for AES; never imply write support.
         let supported = record.lba12.need_encrypt != 0
             && FileKeyWrapMode::from_raw(record.lba12.encrypt_mode) == Some(FileKeyWrapMode::Sm4);
-        let knowledge = if supported
-            && record
-                .verified_sm4_file_key(DEFAULT_KEY_DOMAIN_PASSWORD)
-                .is_ok()
-        {
-            SourcePasswordKnowledge::DefaultVerified
-        } else {
-            SourcePasswordKnowledge::Unknown
-        };
+        let knowledge = verified_native_source_password(*record, DEFAULT_KEY_DOMAIN_PASSWORD)
+            .unwrap_or(SourcePasswordKnowledge::Unknown);
         (Some(knowledge), !supported)
     };
     let (share, share_opaque_profile) = classify(KeyDomainRole::Share);
@@ -104,16 +123,11 @@ fn native_source_password_on_disk(
     let record = source
         .record_for_domain(domain)
         .ok_or_else(|| err(EXIT_TARGET, "错误: 4Kn来源模式不包含指定密码域"))?;
-    record.verified_sm4_file_key(password).map_err(|message| {
+    verified_native_source_password(*record, password).map_err(|message| {
         err(
             EXIT_TARGET,
-            format!("错误: 4Kn来源原密码/SM4 FileKey校验失败: {message}"),
+            format!("错误: 4Kn来源原密码/FileKey校验失败: {message}"),
         )
-    })?;
-    Ok(if password == DEFAULT_KEY_DOMAIN_PASSWORD {
-        SourcePasswordKnowledge::DefaultVerified
-    } else {
-        SourcePasswordKnowledge::UserVerified
     })
 }
 
@@ -266,6 +280,98 @@ pub fn verify_provision_source_password_on_disk(
 #[cfg(test)]
 mod native_sector_probe_policy_tests {
     use super::*;
+
+    #[test]
+    fn native_wrap_mode_auto_probe_accepts_real_u391_aes3_and_rejects_wrong_password() {
+        use crate::protocol::edpf::{EdpfEntry64, EdpfEntry96};
+        use crate::provision::{wrap_file_key, ExistingPartitionRecord};
+        for mode in [
+            FileKeyWrapMode::A7f0,
+            FileKeyWrapMode::Sm4,
+            FileKeyWrapMode::Aes128Ecb, // Real U391 AES-128-ECB profile
+        ] {
+            let material = wrap_file_key(DEFAULT_KEY_DOMAIN_PASSWORD, [0x49; 16], mode);
+            let record = ExistingPartitionRecord {
+                lba7: EdpfEntry64 {
+                    version: 0x0206,
+                    partition_count: 2,
+                    partition_type: 2,
+                    need_disturb: 0,
+                    need_encrypt: 1,
+                    start_sector: 2560,
+                    sector_size: 4096,
+                    partition_size: 4096 * 1024,
+                    user_key_crc: 0,
+                    file_key_crc: 0,
+                    encrypted_file_key: [0; 8],
+                },
+                lba12: EdpfEntry96 {
+                    version: 0x0206,
+                    partition_count: 2,
+                    partition_type: 2,
+                    need_disturb: 0,
+                    need_encrypt: 1,
+                    start_sector: 2560,
+                    sector_size: 4096,
+                    partition_size: 4096 * 1024,
+                    user_key_crc: material.user_key_crc,
+                    file_key_crc: material.file_key_crc,
+                    encrypted_file_key: material.wrapped_file_key,
+                    compatibility_key: [0; 16],
+                    encrypt_mode: mode.raw(),
+                    reserved: [0; 7],
+                },
+            };
+            assert_eq!(
+                verified_native_source_password(record, DEFAULT_KEY_DOMAIN_PASSWORD),
+                Ok(SourcePasswordKnowledge::DefaultVerified),
+            );
+            assert!(verified_native_source_password(record, b"wrong").is_err());
+            let user_wrapped = wrap_file_key(b"NamedUserPass", [0x49; 16], mode);
+            let named = ExistingPartitionRecord {
+                lba12: EdpfEntry96 {
+                    user_key_crc: user_wrapped.user_key_crc,
+                    file_key_crc: user_wrapped.file_key_crc,
+                    encrypted_file_key: user_wrapped.wrapped_file_key,
+                    ..record.lba12
+                },
+                ..record
+            };
+            assert_eq!(
+                verified_native_source_password(named, b"NamedUserPass"),
+                Ok(SourcePasswordKnowledge::UserVerified),
+            );
+            let damaged = ExistingPartitionRecord {
+                lba12: EdpfEntry96 {
+                    file_key_crc: record.lba12.file_key_crc ^ 1,
+                    ..record.lba12
+                },
+                ..record
+            };
+            assert!(verified_native_source_password(damaged, DEFAULT_KEY_DOMAIN_PASSWORD).is_err());
+            for malformed in [
+                ExistingPartitionRecord {
+                    lba12: EdpfEntry96 {
+                        need_encrypt: 0,
+                        ..record.lba12
+                    },
+                    ..record
+                },
+                ExistingPartitionRecord {
+                    lba12: EdpfEntry96 {
+                        encrypt_mode: 99,
+                        ..record.lba12
+                    },
+                    ..record
+                },
+            ] {
+                assert!(
+                    verified_native_source_password(malformed, DEFAULT_KEY_DOMAIN_PASSWORD)
+                        .is_err()
+                );
+            }
+        }
+    }
 
     #[test]
     fn observed_sector_size_routes_4kn_only_and_fails_closed_for_other_sizes() {
