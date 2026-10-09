@@ -1000,6 +1000,26 @@ fn native_four_kn_exfat_real_file_roundtrip_all_official_data_ciphers() {
         .unwrap();
         assert_ne!(tampered_plain, plaintext_file_sector);
 
+        // A real independent reader must reject corrupted ciphertext after
+        // decryption, not merely observe a byte difference in the block.
+        let mut damaged = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&decoded_path)
+            .unwrap();
+        write_block(&mut damaged, first_file_lba, &tampered_plain);
+        damaged.sync_all().unwrap();
+        let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            verify_exfat_file(&mut damaged, &sample);
+        }));
+        assert!(
+            rejected.is_err(),
+            "corrupted ciphertext passed exFAT file SHA-256 validation"
+        );
+        write_block(&mut damaged, first_file_lba, &plaintext_file_sector);
+        damaged.sync_all().unwrap();
+        drop(damaged);
+
         drop(cipher);
         drop(decoded);
         std::fs::remove_file(&cipher_path).unwrap();
