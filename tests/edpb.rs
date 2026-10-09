@@ -823,9 +823,11 @@ fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
     alias.source_extent_ids = vec![conflicting_extent.into()];
     alias.data = vec![0x55; 4096]; // independent, valid-sized and conflicting data
     overlap.artifacts.push(alias);
-    let overlap_error =
-        write_metadata_backup(&tmp.0.join("overlap.edpb"), &overlap).unwrap_err();
-    assert!(overlap_error.contains("source extents overlap"), "{overlap_error}");
+    let overlap_error = write_metadata_backup(&tmp.0.join("overlap.edpb"), &overlap).unwrap_err();
+    assert!(
+        overlap_error.contains("source extents overlap"),
+        "{overlap_error}"
+    );
 
     // Extent adjacency is not overlap: this extra source block may be saved,
     // but the LCE pointer still determines which exact LBA is the real LCE.
@@ -838,15 +840,51 @@ fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
         semantic_status: SemanticStatus::Identified,
     });
     adjacent.extents.last_mut().unwrap().start_lba = 10_001;
-    adjacent.extents.last_mut().unwrap().region_id =
-        "region.synthetic.additional".into();
+    adjacent.extents.last_mut().unwrap().region_id = "region.synthetic.additional".into();
     let adjacent_path = tmp.0.join("adjacent.edpb");
     write_metadata_backup(&adjacent_path, &adjacent).unwrap();
-    let adjacent_source = edpcli::application::evidence::EvidenceSource::open_backup(
-        &adjacent_path,
-    )
-    .unwrap();
+    let adjacent_source =
+        edpcli::application::evidence::EvidenceSource::open_backup(&adjacent_path).unwrap();
     assert_eq!(adjacent_source.total_sectors(), 12_000);
+
+    // Invalid v4 metadata never acquires a deterministic native source mapping.
+    let mut missing = adjacent.clone();
+    missing.extents.pop();
+    assert!(write_metadata_backup(&tmp.0.join("missing-source.edpb"), &missing).is_err());
+
+    let mut zero = adjacent.clone();
+    zero.extents.last_mut().unwrap().sector_count = 0;
+    assert!(
+        write_metadata_backup(&tmp.0.join("empty-source.edpb"), &zero)
+            .unwrap_err()
+            .contains("cannot be empty")
+    );
+
+    let mut overflowing = adjacent.clone();
+    overflowing.extents.last_mut().unwrap().start_lba = u64::MAX;
+    overflowing.extents.last_mut().unwrap().sector_count = 2;
+    assert!(write_metadata_backup(&tmp.0.join("overflow-source.edpb"), &overflowing).is_err());
+
+    let mut outside = adjacent.clone();
+    outside.extents.last_mut().unwrap().start_lba = 12_000;
+    assert!(
+        write_metadata_backup(&tmp.0.join("outside-source.edpb"), &outside)
+            .unwrap_err()
+            .contains("source device geometry")
+    );
+
+    let mut ambiguous = adjacent.clone();
+    ambiguous
+        .artifacts
+        .last_mut()
+        .unwrap()
+        .source_extent_ids
+        .push("extent.synthetic.lce_alias".into());
+    assert!(
+        write_metadata_backup(&tmp.0.join("ambiguous-source.edpb"), &ambiguous)
+            .unwrap_err()
+            .contains("exactly one source extent")
+    );
 
     extra[0].restore_policy = RestorePolicy::Restorable;
     assert!(write_metadata_backup(&tmp.0.join("forbidden.edpb"), &build(&extra)).is_err());
