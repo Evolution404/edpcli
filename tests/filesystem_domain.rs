@@ -479,7 +479,7 @@ fn fat16_native_4kn_formats_virtual_file_and_independent_layout_parser() {
         std::env::temp_dir().join(format!(
             "edpcli-fat16-4kn-{}-{}.img",
             std::process::id(),
-            std::thread::current().name().unwrap_or("test"),
+            std::thread::current().name().unwrap_or("test").replace(':', "_"),
         ))
     };
     let mut file = std::fs::OpenOptions::new()
