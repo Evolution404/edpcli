@@ -572,8 +572,10 @@ fn native_full_disk_512b_compatibility_and_4kn_independent_block_sizes() {
 #[test]
 fn aes_cross_native_four_kn_virtual_exfat_file_roundtrip() {
     use edpcli::application::filesystem::detect_native_boot_sector;
-    use edpcli::application::inspect::decrypt_mode3_native;
-    use edpcli::protocol::crypto::aes128_ecb_encrypt_block;
+    use edpcli::application::inspect::{
+        decrypt_mode3_native, transform_native_sector_offline, NativeCipherDirection,
+        NativePartitionDataCipher,
+    };
 
     let key = std::array::from_fn(|index| index as u8);
     let (start, count, fs) = PARTITIONS[3];
@@ -598,14 +600,16 @@ fn aes_cross_native_four_kn_virtual_exfat_file_roundtrip() {
         .unwrap();
     assert!(file.metadata().unwrap().is_file());
     file.set_len(TOTAL * BPS).unwrap();
-    let encrypt = |plain: &[u8]| {
-        assert_eq!(plain.len(), BPS as usize);
-        plain
-            .as_chunks::<16>()
-            .0
-            .iter()
-            .flat_map(|block| aes128_ecb_encrypt_block(block, &key))
-            .collect::<Vec<u8>>()
+    let encrypt = |plain: &[u8], native_lba: u64| {
+        transform_native_sector_offline(
+            NativePartitionDataCipher::AesCrossEcb,
+            NativeCipherDirection::Encrypt,
+            plain,
+            &key,
+            native_lba,
+            BPS as u32,
+        )
+        .unwrap()
     };
     // The generator emits the MBR last, after every encrypted partition block.
     assert_eq!(composite.writes.last().unwrap().relative_lba, 0);
@@ -613,7 +617,7 @@ fn aes_cross_native_four_kn_virtual_exfat_file_roundtrip() {
         let inside = (start..start + count).contains(&write.relative_lba);
         let payload = if inside {
             written_encrypted += 1;
-            encrypt(&write.data)
+            encrypt(&write.data, write.relative_lba)
         } else {
             write.data.clone()
         };
@@ -661,4 +665,154 @@ fn aes_cross_native_four_kn_virtual_exfat_file_roundtrip() {
     assert!(decrypt_mode3_native(&boot_raw[..4095], &key).is_err());
     drop(verify);
     std::fs::remove_file(&scratch).unwrap();
+}
+
+/// Fault injection and rollback of a virtual, encrypted 4Kn ordinary file.
+/// This is deliberately a test-owned transaction harness, not a new physical
+/// block writer or physical rollback implementation.
+#[test]
+fn native_encrypted_virtual_transaction_injects_faults_and_restores_exact_blocks() {
+    use edpcli::application::inspect::{
+        transform_native_sector_offline, NativeCipherDirection, NativePartitionDataCipher,
+    };
+
+    let composite = NativeVirtualDiskPlan::assemble(TOTAL, 4096, &plans()).unwrap();
+    assert_eq!(composite.writes.last().unwrap().relative_lba, 0);
+    let (start, count, _) = PARTITIONS[3];
+    let key = [0x35; 16];
+    let planned = composite
+        .writes
+        .iter()
+        .map(|write| {
+            let data = if (start..start + count).contains(&write.relative_lba) {
+                transform_native_sector_offline(
+                    NativePartitionDataCipher::AesCrossEcb,
+                    NativeCipherDirection::Encrypt,
+                    &write.data,
+                    &key,
+                    write.relative_lba,
+                    BPS as u32,
+                )
+                .unwrap()
+            } else {
+                write.data.clone()
+            };
+            (write.relative_lba, data)
+        })
+        .collect::<Vec<_>>();
+    assert!(planned.len() > 10);
+    assert_eq!(planned.last().unwrap().0, 0);
+
+    // The same complete native writes go through an injected failure at
+    // multiple points, including *after* publishing the MBR. Each scenario
+    // opens a fresh file with create_new and a known nonempty source state.
+    for (scenario, after_write_count) in [
+        Some(0),
+        Some(1),
+        Some(planned.len() / 2),
+        Some(planned.len() - 1),
+        Some(planned.len()),
+        None,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let scratch = std::env::temp_dir().join(format!(
+            "edpcli-native-txn-fault-{}-{}-{}.img",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            scenario
+        ));
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&scratch)
+            .unwrap();
+        assert!(file.metadata().unwrap().is_file());
+        file.set_len(TOTAL * BPS).unwrap();
+
+        let original = planned
+            .iter()
+            .enumerate()
+            .map(|(index, (lba, _))| {
+                let mut bytes = (0..BPS as usize)
+                    .map(|i| (i as u8).wrapping_add(index as u8).wrapping_add(0x3a))
+                    .collect::<Vec<_>>();
+                // The existing source is deliberately NOT a valid MBR.
+                if *lba == 0 {
+                    bytes[510..512].copy_from_slice(&[0, 0]);
+                }
+                write_block(&mut file, *lba, &bytes);
+                (*lba, bytes)
+            })
+            .collect::<Vec<_>>();
+        file.sync_all().unwrap();
+        assert_ne!(&read_block(&mut file, 0)[510..512], &[0x55, 0xaa]);
+
+        let mut journal = Vec::new();
+        let mut injected = false;
+        for (index, (lba, encrypted)) in planned.iter().enumerate() {
+            if after_write_count == Some(index) {
+                injected = true;
+                break;
+            }
+            journal.push((*lba, read_block(&mut file, *lba)));
+            write_block(&mut file, *lba, encrypted);
+        }
+        if after_write_count == Some(planned.len()) {
+            // Late failure after the final MBR write, before durable commit.
+            injected = true;
+        }
+        if injected {
+            for (lba, saved) in journal.iter().rev() {
+                write_block(&mut file, *lba, saved);
+            }
+            file.sync_all().unwrap();
+            drop(file);
+            let mut verify = OpenOptions::new().read(true).open(&scratch).unwrap();
+            for (lba, saved) in &original {
+                assert_eq!(
+                    read_block(&mut verify, *lba),
+                    *saved,
+                    "rollback should restore original native LBA{lba}"
+                );
+            }
+            assert_ne!(&read_block(&mut verify, 0)[510..512], &[0x55, 0xaa]);
+        } else {
+            assert!(after_write_count.is_none());
+            file.sync_all().unwrap();
+            drop(file);
+            let mut verify = OpenOptions::new().read(true).open(&scratch).unwrap();
+            for (lba, expected) in &planned {
+                assert_eq!(
+                    read_block(&mut verify, *lba),
+                    *expected,
+                    "virtual native sector write/readback LBA{lba}"
+                );
+            }
+            assert_eq!(&read_block(&mut verify, 0)[510..512], &[0x55, 0xaa]);
+            let cipher_boot = read_block(&mut verify, start);
+            let plain_boot = transform_native_sector_offline(
+                NativePartitionDataCipher::AesCrossEcb,
+                NativeCipherDirection::Decrypt,
+                &cipher_boot,
+                &key,
+                start,
+                BPS as u32,
+            )
+            .unwrap();
+            assert!(edpcli::application::filesystem::detect_native_boot_sector(
+                &plain_boot,
+                count,
+                4096
+            )
+            .unwrap()
+            .is_some());
+        }
+        std::fs::remove_file(&scratch).unwrap();
+    }
 }
