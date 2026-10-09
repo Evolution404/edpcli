@@ -18,6 +18,7 @@ pub(crate) use limits::MAX_CONTAINER_BYTES;
 mod model;
 mod read;
 mod validate;
+mod validate_native;
 mod write;
 
 pub use crate::sha256::{sha256_hex, sha256_reader_hex};

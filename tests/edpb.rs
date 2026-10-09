@@ -488,3 +488,175 @@ fn writer_rejects_user_payload_restore_and_excessive_manifest() {
     assert!(write_metadata_backup(&path, &metadata).is_err());
     assert!(!path.exists());
 }
+
+// Virtual 4Kn EDP media: encrypted fixed 512B protocol payload in each
+// native sector and a separate 4096B LCE block. No physical writes.
+fn virtual_native_4kn_metadata() -> (Vec<u8>, Vec<u8>) {
+    use edpcli::protocol::crypto::{a7f0_full, crc32_bare, xor_rolling};
+    let did = "disk&ven_test&prod_native";
+    let mut projection = vec![0u8; 13 * 512];
+    let crc = crc32_bare(did.as_bytes());
+    let mut lba7 = [0u8; 512];
+    let mut lba12 = [0u8; 512];
+    for (index, (kind, start, blocks)) in [(1u32, 63u64, 400u64), (2, 512, 1500), (4, 2012, 1000)]
+        .into_iter()
+        .enumerate()
+    {
+        let p = index * 0x60;
+        lba12[p..p + 4].copy_from_slice(b"EDPF");
+        lba12[p + 8..p + 12].copy_from_slice(&3u32.to_le_bytes());
+        lba12[p + 12..p + 16].copy_from_slice(&kind.to_le_bytes());
+        lba12[p + 24..p + 32].copy_from_slice(&start.to_le_bytes());
+        lba12[p + 32..p + 40].copy_from_slice(&4096u64.to_le_bytes());
+        lba12[p + 40..p + 48].copy_from_slice(&(blocks * 4096).to_le_bytes());
+        let q = index * 0x40;
+        lba7[q..q + 4].copy_from_slice(b"EDPF");
+        lba7[q + 8..q + 12].copy_from_slice(&3u32.to_le_bytes());
+        lba7[q + 12..q + 16].copy_from_slice(&kind.to_le_bytes());
+        lba7[q + 24..q + 32]
+            .copy_from_slice(&(if index == 0 { 63u64 } else { 10_000u64 }).to_le_bytes());
+        lba7[q + 32..q + 40].copy_from_slice(&4096u64.to_le_bytes());
+        lba7[q + 40..q + 48]
+            .copy_from_slice(&(if index == 0 { 400u64 * 4096 } else { 4096u64 }).to_le_bytes());
+    }
+    projection[7 * 512..8 * 512].copy_from_slice(&xor_rolling(&lba7, (crc & 0xffff) ^ (crc >> 16)));
+    projection[12 * 512..13 * 512].copy_from_slice(&a7f0_full(&lba12, &crc.to_le_bytes(), 0));
+    let mut native =
+        edpcli::protocol::image::NativeProtocolImage::from_protocol_zero_tailed(&projection, 4096)
+            .unwrap();
+    let mut entire = native.native_bytes().to_vec();
+    entire[11 * 4096 + 512..12 * 4096].fill(0x5d); // opaque official LBA11 tail must survive
+    native = edpcli::protocol::image::NativeProtocolImage::from_native_bytes(4096, entire).unwrap();
+    (native.native_bytes().to_vec(), vec![0xe7; 4096])
+}
+
+#[test]
+fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
+    use edpcli::edpb::{
+        write_metadata_backup, ArtifactCompleteness, ArtifactInput, Extent, MetadataCapture,
+        Region, RestorePolicy, SemanticStatus, VerifiedBackupReader,
+    };
+    let tmp = TempDir::new("native4kn_evidence");
+    let path = tmp.0.join("native.edpb");
+    let (protocol, lce) = virtual_native_4kn_metadata();
+    let core = CoreCapture {
+        snapshot_id: "virtual-native-4kn".into(),
+        created_epoch: 1_790_000_000,
+        disk_number: None,
+        vid: "3535".into(),
+        pid: "0901".into(),
+        device_id: "disk&ven_test&prod_native".into(),
+        onlyid: None,
+        total_sectors: Some(12_000),
+        logical_sector_size: 4096,
+        edpcli_version: env!("CARGO_PKG_VERSION").into(),
+        device_state: "edp".into(),
+        lba0_12: &protocol,
+    };
+    let region = Region {
+        id: "region.lba7_compatibility_extent".into(),
+        role: "lba7_legacy_partition_compatibility_extent".into(),
+        start_lba: Some(10_000),
+        sector_count: Some(1),
+        semantic_status: SemanticStatus::Identified,
+    };
+    let extent = Extent {
+        id: "extent.lba7_compatibility".into(),
+        region_id: region.id.clone(),
+        start_lba: 10_000,
+        sector_count: 1,
+        purpose: "lba7_compatibility_extent_ciphertext".into(),
+    };
+    let artifact = ArtifactInput {
+        id: "raw.lba7_compatibility".into(),
+        kind: "raw_sectors".into(),
+        media_type: "application/octet-stream".into(),
+        source_extent_ids: vec![extent.id.clone()],
+        derivation: None,
+        restore_policy: RestorePolicy::EvidenceOnly,
+        completeness: ArtifactCompleteness::Complete,
+        data: lce.clone(),
+    };
+    let mut extra = [artifact];
+    let build = |artifact: &[ArtifactInput]| MetadataCapture {
+        core: core.clone(),
+        partitions: vec![],
+        regions: vec![region.clone()],
+        extents: vec![extent.clone()],
+        artifacts: artifact.to_vec(),
+        notes: vec![],
+    };
+    let manifest = write_metadata_backup(&path, &build(&extra)).expect("4Kn v4 write evidence");
+    assert_eq!(manifest.schema, "edpb.manifest.v4");
+    assert_eq!(manifest.geometry.logical_sector_size, 4096);
+    assert!(!manifest.restore_contract.restores_edp_protocol);
+    assert!(!manifest.restore_contract.restores_partition_structure);
+    assert!(manifest
+        .artifacts
+        .iter()
+        .all(|item| item.restore_policy != RestorePolicy::Restorable));
+    let verified = VerifiedBackupReader::open(&path).expect("reopen and hash-verify v4");
+    assert_eq!(verified.read_raw_protocol().unwrap(), protocol);
+    assert_eq!(
+        verified.read_artifact("raw.lba7_compatibility").unwrap(),
+        lce
+    );
+    assert!(
+        verified.read_raw_protocol().unwrap()[11 * 4096 + 512..12 * 4096]
+            .iter()
+            .all(|b| *b == 0x5d)
+    );
+    let entry = edpcli::infrastructure::backup_store::catalog::scan_backup_file(&path).unwrap();
+    assert!(entry.size_ok);
+    assert!(matches!(
+        entry.integrity_status,
+        edpcli::infrastructure::backup_store::catalog::BackupIntegrityStatus::Verified
+    ));
+    assert_eq!(entry.provision_kind, Some(DiskProvisionKind::Mode0));
+    use edpcli::application::evidence::{EvidenceSource, SectorReader};
+    let mut source = EvidenceSource::open_backup(&path).expect("read-only v4 Inspect backing");
+    assert_eq!(source.total_sectors(), 12_000);
+    assert_eq!(source.logical_sector_bytes(), 4096);
+    assert_eq!(
+        source.protocol(),
+        edpcli::protocol::image::NativeProtocolImage::from_native_bytes(4096, protocol.clone())
+            .unwrap()
+            .protocol_projection()
+    );
+    assert_eq!(
+        source.read_native_sector(11).unwrap(),
+        &protocol[11 * 4096..12 * 4096]
+    );
+    assert_eq!(
+        source.read_sector(11).unwrap(),
+        &protocol[11 * 4096..11 * 4096 + 512]
+    );
+    assert_eq!(source.read_native_sector(10_000).unwrap(), lce);
+    assert!(source.read_native_sector(10_001).is_err());
+    let bad = tmp.0.join("tampered.edpb");
+    let mut altered = fs::read(&path).unwrap();
+    let payload = verified
+        .verified()
+        .manifest
+        .artifacts
+        .iter()
+        .find(|a| a.id == "raw.lba7_compatibility")
+        .unwrap();
+    altered[payload.storage.data_offset as usize + 500] ^= 0x01;
+    fs::write(&bad, &altered).unwrap();
+    assert!(VerifiedBackupReader::open(&bad)
+        .unwrap_err()
+        .contains("SHA-256"));
+    extra[0].restore_policy = RestorePolicy::Restorable;
+    assert!(write_metadata_backup(&tmp.0.join("forbidden.edpb"), &build(&extra)).is_err());
+    assert!(write_metadata_backup(&tmp.0.join("missing.edpb"), &build(&[])).is_err());
+    extra[0].restore_policy = RestorePolicy::EvidenceOnly;
+    let mut corrupted = protocol.clone();
+    corrupted[7 * 4096] ^= 0x01;
+    let mut invalid = build(&extra);
+    invalid.core.lba0_12 = &corrupted;
+    assert!(write_metadata_backup(&tmp.0.join("invalid-pointer.edpb"), &invalid).is_err());
+    let mut invalid_size = build(&extra);
+    invalid_size.core.logical_sector_size = 512;
+    assert!(write_metadata_backup(&tmp.0.join("invalid-size.edpb"), &invalid_size).is_err());
+}

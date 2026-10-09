@@ -10,9 +10,15 @@ pub(super) fn base_manifest(
     let typed_identity = identity
         .map(manifest_identity_from_snapshot)
         .unwrap_or_else(|| inferred_manifest_identity(capture));
+    let native_evidence = capture.logical_sector_size == 4096;
     let restores_edp_protocol = !capture.device_state.eq_ignore_ascii_case("plain");
     Manifest {
-        schema: "edpb.manifest.v3".into(),
+        schema: if native_evidence {
+            "edpb.manifest.v4"
+        } else {
+            "edpb.manifest.v3"
+        }
+        .into(),
         container_version: ContainerVersion {
             major: FORMAT_MAJOR,
             minor: FORMAT_MINOR,
@@ -24,7 +30,17 @@ pub(super) fn base_manifest(
             device_state: capture.device_state.clone(),
         },
         backup_purpose: BackupPurpose::MetadataOnly,
-        restore_contract: RestoreContract::metadata_only(restores_edp_protocol),
+        restore_contract: if native_evidence {
+            RestoreContract {
+                restores_partition_structure: false,
+                restores_edp_protocol: false,
+                restores_filesystem: false,
+                restores_user_data: false,
+                post_restore_assessment_required: true,
+            }
+        } else {
+            RestoreContract::metadata_only(restores_edp_protocol)
+        },
         device: DeviceIdentity {
             vid: capture.vid.clone(),
             pid: capture.pid.clone(),
@@ -68,8 +84,13 @@ pub(super) fn base_manifest(
 }
 
 pub(super) fn validate_core_capture(capture: &CoreCapture<'_>) -> Result<(), String> {
-    if capture.logical_sector_size == 0 {
-        return Err("logical_sector_size must not be zero".into());
+    if capture.logical_sector_size != 512 && capture.logical_sector_size != 4096 {
+        return Err(
+            "EDPB only supports verified 512B legacy or 4096B read-only evidence geometry".into(),
+        );
+    }
+    if capture.logical_sector_size == 4096 && capture.device_state.eq_ignore_ascii_case("plain") {
+        return Err("4Kn Plain metadata capture not yet verified".into());
     }
     let expected_len = 13usize
         .checked_mul(capture.logical_sector_size as usize)
@@ -98,6 +119,16 @@ pub(super) fn write_container(
     identity: Option<&crate::media_identity::MediaIdentitySnapshot>,
 ) -> Result<Manifest, String> {
     validate_core_capture(capture)?;
+    if capture.logical_sector_size == 4096
+        && (capture_level != CaptureLevel::Metadata
+            || extra_artifacts
+                .iter()
+                .any(|artifact| artifact.restore_policy == RestorePolicy::Restorable))
+    {
+        return Err(
+            "4Kn evidence is read-only metadata; no restorable extents or core-only files".into(),
+        );
+    }
     if path.extension().and_then(|v| v.to_str()) != Some(EXTENSION) {
         return Err(format!("EDPB file must use .{EXTENSION} extension"));
     }
@@ -138,7 +169,11 @@ pub(super) fn write_container(
                 media_type: "application/octet-stream".into(),
                 source_extent_ids: vec![RAW_PROTOCOL_EXTENT_ID.into()],
                 derivation: None,
-                restore_policy: RestorePolicy::Restorable,
+                restore_policy: if capture.logical_sector_size == 4096 {
+                    RestorePolicy::EvidenceOnly
+                } else {
+                    RestorePolicy::Restorable
+                },
                 completeness: ArtifactCompleteness::Complete,
                 data: capture.lba0_12.to_vec(),
             });

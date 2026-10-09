@@ -5,24 +5,9 @@ pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String>
     super::limits::validate_payload_lengths(
         manifest.artifacts.iter().map(|a| a.storage.stored_length),
     )?;
-    if manifest.geometry.logical_sector_size != 512 {
-        return Err("EDPB restore requires 512-byte sectors".into());
-    }
-    if manifest.backup_purpose != BackupPurpose::MetadataOnly {
-        return Err("EDPB manifest v3 must declare metadata_only backup purpose".into());
-    }
-    let contract = &manifest.restore_contract;
-    if !contract.restores_partition_structure
-        || contract.restores_filesystem
-        || contract.restores_user_data
-        || !contract.post_restore_assessment_required
-    {
-        return Err("EDPB manifest v3 restore contract violates metadata-only semantics".into());
-    }
+    let native_evidence = manifest.schema == "edpb.manifest.v4";
     let plain = manifest.snapshot.device_state.eq_ignore_ascii_case("plain");
-    if contract.restores_edp_protocol == plain {
-        return Err("EDPB manifest v3 EDP restore contract conflicts with device state".into());
-    }
+    super::validate_native::validate_schema(manifest)?;
     if manifest.container_version.major != FORMAT_MAJOR {
         return Err(format!(
             "unsupported EDPB major version: {}",
@@ -172,8 +157,13 @@ pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String>
         let expected_protocol_bytes = 13u64
             .checked_mul(manifest.geometry.logical_sector_size as u64)
             .ok_or_else(|| "EDPB protocol byte length overflow".to_string())?;
+        let required_policy = if native_evidence {
+            RestorePolicy::EvidenceOnly
+        } else {
+            RestorePolicy::Restorable
+        };
         if raw_protocol.storage.original_length != expected_protocol_bytes
-            || raw_protocol.restore_policy != RestorePolicy::Restorable
+            || raw_protocol.restore_policy != required_policy
         {
             return Err("EDPB raw protocol Artifact contract mismatch".into());
         }
@@ -196,6 +186,9 @@ pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String>
                 ));
             }
         }
+    }
+    if native_evidence {
+        super::validate_native::validate_required_lce(manifest)?;
     }
     let mut restore_ranges = Vec::new();
     for artifact in manifest
@@ -297,6 +290,9 @@ pub(super) fn validate_restore_evidence<'a>(
     manifest: &Manifest,
     mut read: impl FnMut(&str) -> Result<&'a [u8], String>,
 ) -> Result<(), String> {
+    if manifest.schema == "edpb.manifest.v4" {
+        return super::validate_native::validate_native_evidence(manifest, &mut read);
+    }
     let plain = manifest.snapshot.device_state.eq_ignore_ascii_case("plain");
     if plain && manifest.snapshot.capture_level == CaptureLevel::Metadata {
         let total = manifest

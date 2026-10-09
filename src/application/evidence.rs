@@ -134,6 +134,7 @@ struct BackupSectorReader {
     snapshot: crate::edpb::VerifiedBackupReader,
     protocol: Vec<u8>,
     has_full_protocol: bool,
+    native_protocol: Option<crate::protocol::image::NativeProtocolImage>,
 }
 
 impl BackupSectorReader {
@@ -175,7 +176,58 @@ impl BackupSectorReader {
 }
 
 impl SectorReader for BackupSectorReader {
+    fn logical_sector_bytes(&self) -> u32 {
+        self.manifest().geometry.logical_sector_size
+    }
+
+    fn read_native_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        if let Some(image) = &self.native_protocol {
+            if let Some(block) = usize::try_from(lba)
+                .ok()
+                .and_then(|index| image.block(index))
+            {
+                return Ok(block.to_vec());
+            }
+        }
+        let size = usize::try_from(self.logical_sector_bytes())
+            .map_err(|_| io::Error::other("EDPB native block size overflow"))?;
+        let located = self
+            .manifest()
+            .extents
+            .iter()
+            .find_map(|extent| {
+                let end = extent.start_lba.checked_add(extent.sector_count)?;
+                if lba < extent.start_lba || lba >= end {
+                    return None;
+                }
+                let artifact = self.manifest().artifacts.iter().find(|artifact| {
+                    artifact.kind == "raw_sectors"
+                        && artifact.source_extent_ids.iter().any(|id| id == &extent.id)
+                })?;
+                Some((extent.start_lba, artifact.id.clone()))
+            })
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "EDPB 未采集该原生 LBA"))?;
+        let bytes = self
+            .read_artifact(&located.1)?
+            .ok_or_else(|| io::Error::other("EDPB artifact 缺失"))?;
+        let start = usize::try_from(lba - located.0)
+            .ok()
+            .and_then(|offset| offset.checked_mul(size))
+            .ok_or_else(|| io::Error::other("EDPB 原生 LBA 偏移溢出"))?;
+        let end = start
+            .checked_add(size)
+            .ok_or_else(|| io::Error::other("EDPB 原生块结束偏移溢出"))?;
+        bytes
+            .get(start..end)
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "EDPB 原生块截断"))
+    }
+
     fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        if self.native_protocol.is_some() {
+            let block = self.read_native_sector(lba)?;
+            return Ok(block[..SECTOR].to_vec());
+        }
         if self.has_full_protocol && lba < METADATA_SECTOR_COUNT as u64 {
             let start = usize::try_from(lba)
                 .ok()
@@ -343,7 +395,30 @@ impl EvidenceSource {
                 message: "Plain v3 metadata-only 不应包含固定 LBA0-12 protocol core".into(),
             });
         }
-        let protocol = if has_full_protocol {
+        let native_evidence = verified.manifest.schema == "edpb.manifest.v4";
+        let native_protocol = if native_evidence {
+            Some(
+                crate::protocol::image::NativeProtocolImage::from_native_bytes(
+                    verified.manifest.geometry.logical_sector_size,
+                    snapshot
+                        .read_raw_protocol()
+                        .map_err(|error| EvidenceError::BackupProtocolRead {
+                            path: path.to_path_buf(),
+                            message: error.to_string(),
+                        })?
+                        .to_vec(),
+                )
+                .map_err(|error| EvidenceError::BackupProtocolRead {
+                    path: path.to_path_buf(),
+                    message: error.to_string(),
+                })?,
+            )
+        } else {
+            None
+        };
+        let protocol = if let Some(native) = &native_protocol {
+            native.protocol_projection().to_vec()
+        } else if has_full_protocol {
             snapshot
                 .read_raw_protocol()
                 .map(<[u8]>::to_vec)
@@ -381,7 +456,16 @@ impl EvidenceSource {
             .provision_kind
             .or_else(|| {
                 effective_device_id.as_deref().and_then(|device_id| {
-                    crate::provision::DiskProvisionKind::from_metadata(&protocol, device_id)
+                    if native_evidence {
+                        crate::provision::DiskProvisionKind::from_sectors_with_logical_size(
+                            protocol.get(7 * SECTOR..8 * SECTOR)?,
+                            protocol.get(12 * SECTOR..13 * SECTOR)?,
+                            device_id,
+                            4096,
+                        )
+                    } else {
+                        crate::provision::DiskProvisionKind::from_metadata(&protocol, device_id)
+                    }
                 })
             })
             .or_else(|| {
@@ -408,12 +492,13 @@ impl EvidenceSource {
             source_label: path.display().to_string(),
             total_sectors,
             protocol: protocol.clone(),
-            native_protocol: None,
+            native_protocol: native_protocol.clone(),
             identity,
             reader: EvidenceReader::Backup(Box::new(BackupSectorReader {
                 snapshot,
                 protocol,
                 has_full_protocol,
+                native_protocol,
             })),
         })
     }
@@ -543,14 +628,14 @@ impl SectorReader for EvidenceSource {
     fn logical_sector_bytes(&self) -> u32 {
         match &self.reader {
             EvidenceReader::Disk(reader) => reader.logical_sector_bytes(),
-            EvidenceReader::Backup(_) => SECTOR as u32,
+            EvidenceReader::Backup(reader) => reader.logical_sector_bytes(),
         }
     }
 
     fn read_native_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
         match &mut self.reader {
             EvidenceReader::Disk(reader) => SectorReader::read_native_sector(reader, lba),
-            EvidenceReader::Backup(reader) => reader.read_sector(lba),
+            EvidenceReader::Backup(reader) => reader.read_native_sector(lba),
         }
     }
 
