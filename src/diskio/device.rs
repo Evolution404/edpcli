@@ -147,6 +147,12 @@ impl FileDev {
 
     /// Returns the entire native block, including unowned bytes beyond the
     /// first 512B. Never writes, truncates, or assumes protocol block length.
+    /// The observed native block length; a 512B file fixture remains 512B.
+    pub fn logical_sector_bytes(&self) -> u32 {
+        self.native_read_geometry
+            .map_or(SECTOR as u32, |g| g.logical_sector_bytes)
+    }
+
     pub fn read_native_sector_u64(&mut self, lba: u64) -> io::Result<Vec<u8>> {
         let geometry = self
             .native_read_geometry

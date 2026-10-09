@@ -4,9 +4,8 @@
 //! 无法确认的区域返回明确错误，绝不把 RAW 静默冒充为 decoded。
 
 use crate::backup_metadata::{
-    parse_lba7_compatibility_geometry, parse_partition_geometry, Lba7CompatibilityGeometry,
-    PartitionGeometry, TAIL_END4_MIRROR_OFFSET_SECTORS, TAIL_METADATA_MIRROR_OFFSET_SECTORS,
-    TAIL_METADATA_MIRROR_SECTORS,
+    Lba7CompatibilityGeometry, PartitionGeometry, TAIL_END4_MIRROR_OFFSET_SECTORS,
+    TAIL_METADATA_MIRROR_OFFSET_SECTORS, TAIL_METADATA_MIRROR_SECTORS,
 };
 use crate::common::{METADATA_LAST_LBA, SECTOR};
 use crate::filesystem::FilesystemKind;
@@ -148,6 +147,8 @@ pub struct InspectDiskContext {
     pub partitions: Vec<PartitionGeometry>,
     pub lce: Option<Lba7CompatibilityGeometry>,
     pub context_issues: Vec<String>,
+    /// Per-device native logical block size (independent from fixed protocol fields).
+    pub logical_sector_bytes: u32,
 }
 
 impl InspectDiskContext {
@@ -200,9 +201,34 @@ impl InspectDiskContext {
         partition_table: Option<crate::partition_table::PartitionTableSnapshot>,
         partition_table_issue: Option<String>,
     ) -> Self {
+        Self::new_with_partition_table_and_sector_bytes(
+            protocol_image,
+            device_id,
+            total_sectors,
+            provision_kind,
+            partition_table,
+            partition_table_issue,
+            SECTOR as u32,
+        )
+    }
+
+    pub fn new_with_partition_table_and_sector_bytes(
+        protocol_image: Vec<u8>,
+        device_id: Option<String>,
+        total_sectors: u64,
+        provision_kind: Option<crate::provision::DiskProvisionKind>,
+        partition_table: Option<crate::partition_table::PartitionTableSnapshot>,
+        partition_table_issue: Option<String>,
+        logical_sector_bytes: u32,
+    ) -> Self {
         let provision_kind = provision_kind.or_else(|| {
             device_id.as_deref().and_then(|did| {
-                crate::provision::DiskProvisionKind::from_metadata(&protocol_image, did)
+                crate::provision::DiskProvisionKind::from_sectors_with_logical_size(
+                    protocol_image.get(7 * SECTOR..8 * SECTOR)?,
+                    protocol_image.get(12 * SECTOR..13 * SECTOR)?,
+                    did,
+                    logical_sector_bytes,
+                )
             })
         });
         let mut partitions = Vec::new();
@@ -215,11 +241,21 @@ impl InspectDiskContext {
             }
         } else if provision_kind.is_some() || device_id.is_some() {
             if let Some(did) = device_id.as_deref() {
-                match parse_partition_geometry(&protocol_image, did, total_sectors) {
+                match crate::domain::geometry::parse_partition_geometry_with_sector_bytes(
+                    &protocol_image,
+                    did,
+                    total_sectors,
+                    logical_sector_bytes,
+                ) {
                     Ok(value) => partitions = value,
                     Err(error) => context_issues.push(format!("LBA12 分区几何不可用: {error}")),
                 }
-                match parse_lba7_compatibility_geometry(&protocol_image, did, total_sectors) {
+                match crate::domain::geometry::parse_lba7_compatibility_geometry_with_sector_bytes(
+                    &protocol_image,
+                    did,
+                    total_sectors,
+                    logical_sector_bytes,
+                ) {
                     Ok(value) => lce = Some(value),
                     Err(error) => context_issues.push(format!("LCE 几何不可用: {error}")),
                 }
@@ -239,6 +275,7 @@ impl InspectDiskContext {
             partitions,
             lce,
             context_issues,
+            logical_sector_bytes,
         }
     }
 
@@ -343,14 +380,18 @@ impl InspectDiskContext {
             }
         }
 
-        if self.has_edp_protocol() && self.total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS {
+        if self.logical_sector_bytes == SECTOR as u32
+            && self.has_edp_protocol()
+            && self.total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS
+        {
             let start = self.total_sectors - TAIL_METADATA_MIRROR_OFFSET_SECTORS;
             if lba >= start && lba < start + TAIL_METADATA_MIRROR_SECTORS {
                 out.push(SectorRegion::TailMetadataMirror { index: lba - start });
             }
         }
 
-        if self.has_edp_protocol()
+        if self.logical_sector_bytes == SECTOR as u32
+            && self.has_edp_protocol()
             && self.total_sectors > TAIL_END4_MIRROR_OFFSET_SECTORS
             && lba == self.total_sectors - TAIL_END4_MIRROR_OFFSET_SECTORS
         {

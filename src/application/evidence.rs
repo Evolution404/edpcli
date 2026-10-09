@@ -70,6 +70,16 @@ impl std::error::Error for EvidenceError {}
 pub trait SectorReader {
     fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>>;
 
+    /// Keep the legacy 512B protocol projection as the existing contract.
+    fn logical_sector_bytes(&self) -> u32 {
+        SECTOR as u32
+    }
+
+    /// Full device-native block; defaults to 512B for existing/backup readers.
+    fn read_native_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        self.read_sector(lba)
+    }
+
     fn read_range(&mut self, start_lba: u64, sector_count: usize) -> io::Result<Vec<u8>> {
         let capacity = sector_count
             .checked_mul(SECTOR)
@@ -95,6 +105,18 @@ pub trait SectorReader {
 impl SectorReader for FileDev {
     fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
         self.read_sector_u64(lba)
+    }
+
+    fn logical_sector_bytes(&self) -> u32 {
+        FileDev::logical_sector_bytes(self)
+    }
+
+    fn read_native_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        if self.logical_sector_bytes() == SECTOR as u32 {
+            self.read_sector_u64(lba)
+        } else {
+            self.read_native_sector_u64(lba)
+        }
     }
 }
 
@@ -478,6 +500,20 @@ impl EvidenceSource {
 }
 
 impl SectorReader for EvidenceSource {
+    fn logical_sector_bytes(&self) -> u32 {
+        match &self.reader {
+            EvidenceReader::Disk(reader) => reader.logical_sector_bytes(),
+            EvidenceReader::Backup(_) => SECTOR as u32,
+        }
+    }
+
+    fn read_native_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        match &mut self.reader {
+            EvidenceReader::Disk(reader) => SectorReader::read_native_sector(reader, lba),
+            EvidenceReader::Backup(reader) => reader.read_sector(lba),
+        }
+    }
+
     fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
         match &mut self.reader {
             EvidenceReader::Disk(reader) => SectorReader::read_sector(reader, lba),

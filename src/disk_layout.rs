@@ -450,11 +450,12 @@ impl DiskLayoutModel {
             .lce
             .as_ref()
             .ok_or_else(|| "LBA7 LCE 几何尚未确认".to_string())?;
-        Self::canonical_edp(
+        Self::canonical_edp_with_sector_bytes(
             context.total_sectors,
             partitions,
             lce.start_lba,
             lce.sector_count,
+            context.logical_sector_bytes,
         )
     }
 

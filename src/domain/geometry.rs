@@ -73,6 +73,20 @@ pub fn parse_partition_geometry(
     device_id: &str,
     total_sectors: u64,
 ) -> Result<Vec<PartitionGeometry>, String> {
+    parse_partition_geometry_with_sector_bytes(lba0_12, device_id, total_sectors, SECTOR as u32)
+}
+
+/// Parse the fixed 512B LBA12 EDP payload against a separately observed
+/// native logical sector size; never infer device geometry from ciphertext.
+pub fn parse_partition_geometry_with_sector_bytes(
+    lba0_12: &[u8],
+    device_id: &str,
+    total_sectors: u64,
+    logical_sector_bytes: u32,
+) -> Result<Vec<PartitionGeometry>, String> {
+    if !(512..=65_536).contains(&logical_sector_bytes) || !logical_sector_bytes.is_power_of_two() {
+        return Err(format!("设备逻辑扇区大小 {logical_sector_bytes}B 无效"));
+    }
     if lba0_12.len() != 13 * SECTOR {
         return Err(format!(
             "metadata planning requires 6656B LBA0-12, got {}B",
@@ -100,7 +114,7 @@ pub fn parse_partition_geometry(
             .expect("EDPF entry bounds");
         let entry =
             EdpfEntry96::parse(raw).map_err(|e| format!("parse LBA12 entry{index}: {e}"))?;
-        if entry.sector_size != SECTOR as u64 {
+        if entry.sector_size != u64::from(logical_sector_bytes) {
             return Err(format!(
                 "LBA12 entry{index} sector_size={} is unsupported",
                 entry.sector_size
