@@ -1946,6 +1946,131 @@ fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
             .unwrap();
         assert_eq!(source.profile.source_mode, mode);
         assert_eq!(source.total_sectors, 16_777_216);
+        // P25: bind all native EDPF partitions to independently confirmed
+        // geometry BEFORE staging a purely offline protocol/LCE replay.
+        // Synthetic 4Kn adapted from legacy official generator; not a new
+        // manufacturer's native writer golden.
+        let target_parts = source
+            .profile
+            .partitions
+            .iter()
+            .map(|part| {
+                let mut geometry = part.as_target();
+                geometry.filesystem = if part.role == PartitionRole::CompatibilityReserve {
+                    None
+                } else {
+                    Some(match part.role {
+                        PartitionRole::Boot => FilesystemKind::Fat16,
+                        PartitionRole::BootShareCombined => FilesystemKind::ExFat,
+                        PartitionRole::Share | PartitionRole::Encrypt => FilesystemKind::ExFat,
+                        PartitionRole::CompatibilityReserve => unreachable!(),
+                    })
+                };
+                geometry
+            })
+            .collect::<Vec<_>>();
+        let lce_start = target_parts
+            .iter()
+            .map(|part| part.start_lba + part.sector_count)
+            .max()
+            .unwrap()
+            + 1;
+        assert!(
+            lce_start + 1 < 16_777_216,
+            "synthetic source must have a free LCE block"
+        );
+        let native_layout = edpcli::provision::NativeEdpLayoutPlan::from_confirmed_geometry(
+            mode,
+            16_777_216,
+            4096,
+            &target_parts,
+            lce_start,
+            1,
+        )
+        .unwrap();
+        let source_lce = [vec![0x69; 4096]];
+        let staged = native_layout
+            .verified_source_replay_native_blocks(&native, &did, &source_lce)
+            .unwrap();
+        assert_eq!(staged.len(), 14);
+        assert_eq!(staged.last().unwrap().relative_lba, 0);
+        assert_eq!(staged.last().unwrap().data, raw[..4096]);
+        assert_eq!(staged[12].relative_lba, lce_start);
+        assert_eq!(staged[12].data, source_lce[0]);
+        for native_lba in 1..13usize {
+            assert_eq!(staged[native_lba - 1].relative_lba, native_lba as u64);
+            assert_eq!(
+                staged[native_lba - 1].data,
+                raw[native_lba * 4096..(native_lba + 1) * 4096]
+            );
+        }
+        assert!(!native_layout.may_write());
+        // Independently reconstruct all 13 native blocks from the staged
+        // virtual plan. This is consumer validation, never a device write.
+        let mut reconstructed = vec![0u8; 13 * 4096];
+        for block in &staged {
+            if block.relative_lba < 13 {
+                let offset = block.relative_lba as usize * 4096;
+                reconstructed[offset..offset + 4096].copy_from_slice(&block.data);
+            }
+        }
+        assert_eq!(reconstructed, raw, "including all opaque native tails");
+        let replayed_native =
+            edpcli::protocol::image::NativeProtocolImage::from_native_bytes(4096, reconstructed)
+                .unwrap();
+        let replayed = parse_existing_provision_native(&replayed_native, &did, 16_777_216)
+            .unwrap()
+            .unwrap();
+        assert_eq!(replayed.profile, source.profile);
+        assert_eq!(replayed.records, source.records);
+        assert_eq!(
+            replayed_native.protocol_projection(),
+            native.protocol_projection()
+        );
+        assert!(native_layout
+            .verified_source_replay_native_blocks(&native, "wrong_device_id", &source_lce,)
+            .is_err());
+        assert!(native_layout
+            .verified_source_replay_native_blocks(&native, "", &source_lce,)
+            .is_err());
+        assert!(native_layout
+            .verified_source_replay_native_blocks(&native, &did, &[vec![0; 512]],)
+            .is_err());
+
+        // A stale second partition is invisible to an MBR-only preflight.
+        // The strict EDPF+all-partitions entry must reject it.
+        let mut corrupted_plain12 = plain12.clone();
+        let second_size = 0x60 + 0x28;
+        let current_bytes = u64::from_le_bytes(
+            corrupted_plain12[second_size..second_size + 8]
+                .try_into()
+                .unwrap(),
+        );
+        assert!(current_bytes >= 2 * 4096);
+        corrupted_plain12[second_size..second_size + 8]
+            .copy_from_slice(&(current_bytes - 4096).to_le_bytes());
+        let mut stale_native = native.native_bytes().to_vec();
+        stale_native[12 * 4096..12 * 4096 + 512].copy_from_slice(&a7f0_full(
+            &corrupted_plain12,
+            &crc.to_le_bytes(),
+            0,
+        ));
+        let stale_native =
+            edpcli::protocol::image::NativeProtocolImage::from_native_bytes(4096, stale_native)
+                .unwrap();
+        assert!(
+            native_layout
+                .source_replay_native_blocks(&stale_native, &source_lce)
+                .is_ok(),
+            "legacy MBR-only preflight cannot see stale LBA12 secondary extent"
+        );
+        assert!(
+            native_layout
+                .verified_source_replay_native_blocks(&stale_native, &did, &source_lce,)
+                .is_err(),
+            "strict source replay must reject an unchanged MBR with a stale secondary extent"
+        );
+
         for record in &source.records {
             assert_eq!(record.lba7.sector_size, 4096);
             assert_eq!(record.lba12.sector_size, 4096);

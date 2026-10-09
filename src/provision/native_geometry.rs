@@ -165,6 +165,56 @@ impl NativeEdpLayoutPlan {
         false
     }
 
+    /// Require the source EDPF consumer to authenticate both protocol blocks
+    /// against the same device identity, then bind **every** source partition
+    /// to independently confirmed native geometry before staging a virtual
+    /// source replay. Unlike the legacy MBR-only preflight below, this rejects
+    /// stale LBA12 secondary partition geometry even when LBA0 looks valid.
+    ///
+    /// This operation is wholly in memory; it preserves opaque native tails
+    /// verbatim and DOES NOT certify newly generated 4Kn protocol or enable
+    /// physical writes.
+    pub fn verified_source_replay_native_blocks(
+        &self,
+        protocol: &NativeProtocolImage,
+        device_id: &str,
+        source_lce: &[Vec<u8>],
+    ) -> Result<Vec<NativeFilesystemWrite>, String> {
+        if device_id.is_empty() {
+            return Err("来源device_id为空，无法认证协议重放".into());
+        }
+        if protocol.logical_sector_bytes() != self.logical_sector_bytes {
+            return Err("来源协议原生扇区宽度与确认布局不匹配".into());
+        }
+        let parsed =
+            super::parse_existing_provision_native(protocol, device_id, self.total_sectors)?
+                .ok_or("来源没有可确认的成对LBA7/LBA12 EDPF记录")?;
+        if parsed.profile.source_mode != self.mode
+            || parsed.profile.partitions.len() != self.partitions.len()
+            || parsed.records.len() != self.partitions.len()
+        {
+            return Err("来源EDPF制盘模式或分区数量与确认布局不匹配".into());
+        }
+        for (slot, (source, target)) in parsed
+            .profile
+            .partitions
+            .iter()
+            .zip(&self.partitions)
+            .enumerate()
+        {
+            let target = &target.geometry;
+            if source.role != target.role
+                || source.partition_type != target.partition_type
+                || source.start_lba != target.start_lba
+                || source.sector_count != target.sector_count
+                || source.physically_encrypted != target.physically_encrypted
+            {
+                return Err(format!("来源EDPF slot{slot}与确认的全部原生分区几何不一致"));
+            }
+        }
+        self.source_replay_native_blocks(protocol, source_lce)
+    }
+
     /// Stage an exact existing-source protocol+LCE replay into a *virtual*
     /// image. This is not protocol generation or an authorized disk write.
     /// All native opaque tails are copied unchanged, including LBA11.
