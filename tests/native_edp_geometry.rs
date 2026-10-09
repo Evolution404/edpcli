@@ -377,8 +377,14 @@ fn offline_cipher_matrix_four_layouts_two_native_sector_widths() {
             let (total, lce_start, parts) = sample(mode, native_bytes);
             let lce_count = if native_bytes == 4096 { 1 } else { 6 };
             let plan = NativeEdpLayoutPlan::from_confirmed_geometry(
-                mode, total, native_bytes, &parts, lce_start, lce_count
-            ).unwrap();
+                mode,
+                total,
+                native_bytes,
+                &parts,
+                lce_start,
+                lce_count,
+            )
+            .unwrap();
             assert!(!plan.may_write());
             for partition in &plan.partitions {
                 let sample_plain = (0..native_bytes as usize)
@@ -396,14 +402,24 @@ fn offline_cipher_matrix_four_layouts_two_native_sector_widths() {
                     let algorithm =
                         NativePartitionDataCipher::from_encrypt_mode(encrypt_mode).unwrap();
                     let ciphertext = transform_native_sector_offline(
-                        algorithm, NativeCipherDirection::Encrypt, &sample_plain, &key,
-                        partition.geometry.start_lba, native_bytes
-                    ).unwrap();
+                        algorithm,
+                        NativeCipherDirection::Encrypt,
+                        &sample_plain,
+                        &key,
+                        partition.geometry.start_lba,
+                        native_bytes,
+                    )
+                    .unwrap();
                     assert_ne!(ciphertext, sample_plain);
                     let recovered = transform_native_sector_offline(
-                        algorithm, NativeCipherDirection::Decrypt, &ciphertext, &key,
-                        partition.geometry.start_lba, native_bytes
-                    ).unwrap();
+                        algorithm,
+                        NativeCipherDirection::Decrypt,
+                        &ciphertext,
+                        &key,
+                        partition.geometry.start_lba,
+                        native_bytes,
+                    )
+                    .unwrap();
                     assert_eq!(recovered, sample_plain);
                     visited += 1;
                 }
@@ -414,5 +430,8 @@ fn offline_cipher_matrix_four_layouts_two_native_sector_widths() {
         }
     }
     assert!(visited >= 24, "the matrix must exercise encrypted regions");
-    assert!(unencrypted >= 4, "the matrix must exercise physical plaintext regions");
+    assert!(
+        unencrypted >= 4,
+        "the matrix must exercise physical plaintext regions"
+    );
 }
