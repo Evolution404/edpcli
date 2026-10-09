@@ -689,6 +689,42 @@ fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
     assert!(!plan.may_write());
     let verified_writes = source.verified_native_replay(&plan).unwrap();
     assert_eq!(verified_writes.len(), 14);
+
+    // The UI may display a diagnostic device_id override. It must NEVER
+    // become the authentication identity for EDPF decode/FileKey checks.
+    // Compare a real EDPB v4 consumer read against an overridden display:
+    // the decoded fields and bytes must be invariant under the override.
+    use edpcli::application::inspect::{
+        load_backup_advanced_inspect, AdvancedInspectMode, AdvancedInspectRequest,
+    };
+    let inspect = AdvancedInspectRequest {
+        mode: AdvancedInspectMode::Decode,
+        lbas: vec![12],
+        export_dir: None,
+        device_id_override: None,
+        fail_soft_decode: true,
+    };
+    let observed = load_backup_advanced_inspect(&path, &inspect).unwrap();
+    let mut display_override = inspect.clone();
+    display_override.device_id_override = Some("disk&ven_fake&prod_untrusted".into());
+    let diagnostic = load_backup_advanced_inspect(&path, &display_override).unwrap();
+    assert_eq!(observed.items.len(), 1);
+    assert_eq!(diagnostic.items.len(), 1);
+    assert_eq!(
+        diagnostic.meta.device_id.as_deref(),
+        Some("disk&ven_fake&prod_untrusted")
+    );
+    assert_eq!(observed.items[0].decoded, diagnostic.items[0].decoded);
+    assert_eq!(
+        observed.items[0].decoded_sha256,
+        diagnostic.items[0].decoded_sha256
+    );
+    assert_eq!(observed.items[0].fields, diagnostic.items[0].fields);
+    assert!(diagnostic.items[0]
+        .notes
+        .iter()
+        .any(|note| note.contains("仅用于诊断显示")));
+
     assert_eq!(verified_writes.last().unwrap().relative_lba, 0);
     for native_lba in 0..13u64 {
         let block = verified_writes
