@@ -806,6 +806,39 @@ fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
     assert!(VerifiedBackupReader::open(&bad)
         .unwrap_err()
         .contains("SHA-256"));
+    // A manifest can hold individually valid, SHA-verified artifacts and
+    // still be ambiguous if two raw extents claim the same native LBA.
+    // The EDPB v4 source reader must never pick one by artifact ordering.
+    let mut overlap = build(&extra);
+    let conflicting_extent = "extent.synthetic.lce_alias";
+    overlap.extents.push(Extent {
+        id: conflicting_extent.into(),
+        region_id: region.id.clone(),
+        start_lba: 10_000,
+        sector_count: 1,
+        purpose: "ambiguous_lce_alias".into(),
+    });
+    let mut alias = extra[0].clone();
+    alias.id = "raw.synthetic.lce_alias".into();
+    alias.source_extent_ids = vec![conflicting_extent.into()];
+    alias.data = vec![0x55; 4096]; // independent, valid-sized and conflicting data
+    overlap.artifacts.push(alias);
+    let overlap_error =
+        write_metadata_backup(&tmp.0.join("overlap.edpb"), &overlap).unwrap_err();
+    assert!(overlap_error.contains("source extents overlap"), "{overlap_error}");
+
+    // Extent adjacency is not overlap: this extra source block may be saved,
+    // but the LCE pointer still determines which exact LBA is the real LCE.
+    let mut adjacent = overlap;
+    adjacent.extents.last_mut().unwrap().start_lba = 10_001;
+    let adjacent_path = tmp.0.join("adjacent.edpb");
+    write_metadata_backup(&adjacent_path, &adjacent).unwrap();
+    let adjacent_source = edpcli::application::evidence::EvidenceSource::open_backup(
+        &adjacent_path,
+    )
+    .unwrap();
+    assert_eq!(adjacent_source.total_sectors(), 12_000);
+
     extra[0].restore_policy = RestorePolicy::Restorable;
     assert!(write_metadata_backup(&tmp.0.join("forbidden.edpb"), &build(&extra)).is_err());
     assert!(write_metadata_backup(&tmp.0.join("missing.edpb"), &build(&[])).is_err());
