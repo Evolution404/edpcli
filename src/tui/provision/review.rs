@@ -504,8 +504,8 @@ impl ProvisionConfirmationViewModel {
             layout,
             overall,
             algorithm: match prepared {
-                crate::application::provision::PreparedProvision::Official(_) => {
-                    Some(crate::provision::OfficialLabelAlgorithm::Sms4)
+                crate::application::provision::PreparedProvision::Official(official) => {
+                    Some(official.algorithm)
                 }
                 crate::application::provision::PreparedProvision::Plain(_) => None,
             },

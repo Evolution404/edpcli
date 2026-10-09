@@ -388,6 +388,7 @@ fn manufacturer_lba3_is_copied_verbatim_into_the_write_plan() {
         device_id: "disk&ven_netac&prod_onlydisk".into(),
         source_kind: DiskProvisionKind::Mode1,
         mode: OfficialPartitionMode::BootShareCombined,
+        algorithm: crate::provision::OfficialLabelAlgorithm::Sms4,
         force_change_password: false,
         pass_info_policy: PassInfoPolicy::default(),
         lce_start_lba: 900,
@@ -740,6 +741,7 @@ fn sparse_export_includes_selected_format_images() {
         device_id: "disk&ven_aigo&prod_u335".into(),
         source_kind: DiskProvisionKind::Mode0,
         mode: plan.mode,
+        algorithm: crate::provision::OfficialLabelAlgorithm::Sms4,
         force_change_password: false,
         pass_info_policy: PassInfoPolicy::default(),
         lce_start_lba: plan.lba7_compatibility_extent.start_lba,
@@ -864,6 +866,7 @@ fn protocol_readback_fixture() -> (PreparedNewProvision, MemoryDev) {
         device_id,
         source_kind: DiskProvisionKind::Mode0,
         mode: plan.mode,
+        algorithm: crate::provision::OfficialLabelAlgorithm::Sms4,
         force_change_password: false,
         pass_info_policy: PassInfoPolicy::default(),
         lce_start_lba: plan.lba7_compatibility_extent.start_lba,
@@ -980,6 +983,85 @@ fn writable_filesystem_validation_only_applies_to_selected_format_actions() {
 }
 
 #[test]
+fn non_sms4_application_prepare_is_rejected_before_any_device_access() {
+    // Use a fake disk number that must never be probed. Rejection is an
+    // application API invariant, not merely a TUI form constraint.
+    let mut request = OfficialProvisionRequest {
+        target: ProvisionTarget::Official(OfficialPartitionMode::DefaultThreePartition),
+        algorithm: crate::provision::OfficialLabelAlgorithm::Sms4,
+        boot_start_lba: None,
+        share_start_lba: None,
+        encrypt_start_lba: None,
+        boot_mib: None,
+        boot_sectors: None,
+        share_mib: None,
+        share_sectors: None,
+        encrypt_mib: None,
+        encrypt_sectors: None,
+        label_id: String::new(),
+        user: String::new(),
+        dept: String::new(),
+        label: String::new(),
+        lba8_identity: crate::provision::Lba8Identity::default(),
+        key_domains: KeyDomainSecrets::default(),
+        volume_label: String::new(),
+        format: FormatOptions::default(),
+        force_change_password: None,
+        cancel_password_complexity_check: None,
+        max_share_password_errors: None,
+        max_encrypt_password_errors: None,
+    };
+    for (algorithm, crypt, mode) in [
+        (crate::provision::OfficialLabelAlgorithm::Aes, 1, 1),
+        (crate::provision::OfficialLabelAlgorithm::AesCross, 2, 3),
+    ] {
+        request.algorithm = algorithm;
+        let mut dev = MemoryDev::default();
+        let failure = prepare_target_provision(
+            &crate::platform::system::SysRunner,
+            u32::MAX,
+            &request,
+            &mut dev,
+        )
+        .unwrap_err();
+        assert_eq!(failure.code, EXIT_TARGET);
+        assert!(
+            failure.msg.contains(&format!("crypt={crypt}")),
+            "{}",
+            failure.msg
+        );
+        assert!(
+            failure.msg.contains(&format!("EncryptMode={mode}")),
+            "{}",
+            failure.msg
+        );
+        assert!(dev.sectors.is_empty(), "rejected request must not write");
+    }
+}
+
+#[test]
+fn non_sms4_prepared_plan_cannot_reach_device_commit_even_when_mutated() {
+    let (mut prepared, mut dev) = protocol_readback_fixture();
+    let before = dev.sectors.clone();
+    for algorithm in [
+        crate::provision::OfficialLabelAlgorithm::Aes,
+        crate::provision::OfficialLabelAlgorithm::AesCross,
+    ] {
+        prepared.algorithm = algorithm;
+        let failure = super::commit::commit_new_provision_with_progress(
+            &crate::platform::system::SysRunner,
+            &mut dev,
+            &prepared,
+            &mut |_, _, _| panic!("rejected plan must not announce device IO"),
+        )
+        .unwrap_err();
+        assert_eq!(failure.code, EXIT_TARGET);
+        assert!(failure.msg.contains("仅认证SMS4写入"));
+        assert_eq!(dev.sectors, before, "no writes can be performed");
+    }
+}
+
+#[test]
 fn application_size_errors_use_the_current_partition_name() {
     for mode in [
         OfficialPartitionMode::DefaultThreePartition,
@@ -987,6 +1069,7 @@ fn application_size_errors_use_the_current_partition_name() {
     ] {
         let mut request = OfficialProvisionRequest {
             target: ProvisionTarget::Official(mode),
+            algorithm: crate::provision::OfficialLabelAlgorithm::Sms4,
             boot_start_lba: None,
             share_start_lba: None,
             encrypt_start_lba: None,

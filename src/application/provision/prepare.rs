@@ -49,6 +49,12 @@ pub fn prepare_target_provision(
     request: &OfficialProvisionRequest,
     dev: &mut dyn SectorDev,
 ) -> EdpCliResult<PreparedNewProvision> {
+    // The official algorithm must survive TUI/CLI -> application -> commit.
+    // Reject unverified ciphers before probing, unmounting or reading a disk.
+    request
+        .algorithm
+        .validate_first_party_write()
+        .map_err(|message| err(EXIT_TARGET, format!("错误: {message}")))?;
     let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
     let geometry = target_session.writable_geometry()?;
     let total_sectors = geometry
@@ -479,6 +485,7 @@ pub fn prepare_target_provision(
         device_id,
         source_kind,
         mode: selected_mode,
+        algorithm: request.algorithm,
         force_change_password,
         pass_info_policy,
         lce_start_lba: compatibility.start_lba,

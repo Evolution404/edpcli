@@ -460,6 +460,7 @@ impl AppState {
         )?;
         Ok(crate::application::provision::OfficialProvisionRequest {
             target: self.provision.kind.target(),
+            algorithm: self.provision.form.encryption_algorithm,
             boot_start_lba: matches!(mode, 0 | 3)
                 .then_some(resolved.boot_start_lba)
                 .flatten(),

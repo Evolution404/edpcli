@@ -50,6 +50,8 @@ fn err(code: i32, message: impl Into<String>) -> EdpCliError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OfficialProvisionRequest {
     pub target: ProvisionTarget,
+    /// Manufacturer global algorithm selector; not an independent FileKey mode.
+    pub algorithm: crate::provision::OfficialLabelAlgorithm,
     pub boot_start_lba: Option<u64>,
     pub share_start_lba: Option<u64>,
     pub encrypt_start_lba: Option<u64>,
@@ -444,6 +446,7 @@ pub struct PreparedNewProvision {
     pub(crate) device_id: String,
     pub(crate) source_kind: crate::provision::DiskProvisionKind,
     pub(crate) mode: OfficialPartitionMode,
+    pub(crate) algorithm: crate::provision::OfficialLabelAlgorithm,
     pub(crate) force_change_password: bool,
     pub(crate) pass_info_policy: PassInfoPolicy,
     pub(crate) lce_start_lba: u64,
@@ -497,6 +500,7 @@ impl std::fmt::Debug for PreparedNewProvision {
             .field("device_id", &self.device_id)
             .field("source_kind", &self.source_kind)
             .field("mode", &self.mode)
+            .field("algorithm", &self.algorithm)
             .field("force_change_password", &self.force_change_password)
             .field("pass_info_policy", &self.pass_info_policy)
             .field("lce_start_lba", &self.lce_start_lba)

@@ -14,6 +14,7 @@ fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::
             crate::application::provision::ProvisionRequest::Official(Box::new(
                 crate::application::provision::OfficialProvisionRequest {
                     target: opts.target,
+                    algorithm: crate::provision::OfficialLabelAlgorithm::Sms4,
                     boot_start_lba: opts.boot_start_lba,
                     share_start_lba: opts.share_start_lba,
                     encrypt_start_lba: opts.encrypt_start_lba,
