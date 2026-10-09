@@ -642,13 +642,8 @@ impl EvidenceSource {
             }
             None => return Err("原生来源缺少完整协议扇区快照".into()),
         };
-        verified_native_source_replay(
-            self,
-            plan,
-            &snapshot,
-            &device_id,
-            self.total_sectors,
-        )
+        let source_total_sectors = self.total_sectors;
+        verified_native_source_replay(self, plan, &snapshot, &device_id, source_total_sectors)
     }
 
     pub fn read_artifact(&mut self, artifact_id: &str) -> io::Result<Option<Vec<u8>>> {
