@@ -419,3 +419,130 @@ fn signed_onlyid_round_trips_through_generated_lba4() {
     assert!(lba4.method.contains("labelOnlyId=-1833210541"));
     assert_eq!(&lba4.decoded[0x39..0x3d], b"LLGB");
 }
+
+#[test]
+fn native_4kn_projection_keeps_official_512b_long_identity_field_rules() {
+    use edpcli::protocol::image::NativeProtocolImage;
+    use edpcli::protocol::profile::DeptLayout;
+
+    // Fixed official SAFE6 field limits are GBK-byte lengths, not native
+    // logical-sector lengths. New 4Kn protocol tails are not an extension.
+    for (dept_len, user_len) in [
+        (63usize, 1usize),
+        (64, 1),
+        (187, 1),
+        (1, 31),
+        (1, 32),
+        (1, 155),
+    ] {
+        let dept = "D".repeat(dept_len);
+        let user = "U".repeat(user_len);
+        let metadata = ProvisionMetadata::new(
+            OnlyId::parse("1402259934").unwrap(),
+            user.clone(),
+            dept.clone(),
+            "SAFE6",
+        )
+        .unwrap();
+        let spec =
+            ProvisionSpec::new(target(), metadata, ProvisionProfile::canonical_v1()).unwrap();
+        let image =
+            generate_official_image(&spec, &entropy(), &official_metadata_plan(&spec)).unwrap();
+        let original = image.as_bytes();
+        let native = NativeProtocolImage::from_protocol_zero_tailed(original, 4096).unwrap();
+        assert_eq!(native.protocol_projection().as_slice(), original);
+        let block6 = native.block(6).unwrap();
+        let block9 = native.block(9).unwrap();
+        assert_eq!(&block6[..512], sector(original, 6));
+        assert_eq!(&block9[..512], sector(original, 9));
+        assert!(block6[512..].iter().all(|b| *b == 0));
+        assert!(block9[512..].iter().all(|b| *b == 0));
+
+        let six = parse_lba6(block6[..512].try_into().unwrap()).unwrap();
+        let nine = parse_lba9(
+            block9[..512].try_into().unwrap(),
+            six.device_crc,
+            six.dept_profile(),
+            six.has_long_user(),
+        )
+        .unwrap();
+        assert_eq!(reconstruct_dept(&six, &nine).unwrap(), dept.as_bytes());
+        assert_eq!(reconstruct_user(&six, &nine).unwrap(), user.as_bytes());
+        assert_eq!(
+            six.dept_profile(),
+            if dept_len <= 63 {
+                DeptLayout::Short
+            } else {
+                DeptLayout::Join60
+            }
+        );
+        assert_eq!(six.has_long_user(), user_len >= 32);
+        if dept_len >= 64 {
+            assert_eq!(
+                &nine.reconstruct()[0x80..0x80 + dept_len - 60],
+                &dept.as_bytes()[60..]
+            );
+            assert_eq!(nine.reconstruct()[0x80 + dept_len - 60], 0);
+        }
+        if user_len >= 32 {
+            assert_eq!(
+                &nine.reconstruct()[0x100..0x100 + user_len - 28],
+                &user.as_bytes()[28..]
+            );
+            assert_eq!(nine.reconstruct()[0x100 + user_len - 28], 0);
+        }
+    }
+}
+
+#[test]
+fn native_4kn_official_identity_boundaries_never_use_unowned_tail_capacity() {
+    use edpcli::protocol::image::NativeProtocolImage;
+
+    for (department, user) in [
+        ("D".repeat(188), "U".to_string()),
+        ("D".to_string(), "U".repeat(156)),
+    ] {
+        assert!(
+            ProvisionMetadata::new(
+                OnlyId::parse("1402259934").unwrap(),
+                user,
+                department,
+                "SAFE6",
+            )
+            .is_err(),
+            "4Kn must not raise official GBK-byte field maximums"
+        );
+    }
+
+    let metadata = ProvisionMetadata::new(
+        OnlyId::parse("1402259934").unwrap(),
+        "U".repeat(155),
+        "D",
+        "SAFE6",
+    )
+    .unwrap();
+    let spec = ProvisionSpec::new(target(), metadata, ProvisionProfile::canonical_v1()).unwrap();
+    let original =
+        generate_official_image(&spec, &entropy(), &official_metadata_plan(&spec)).unwrap();
+    // Simulate a native source with nonzero opaque bytes in LBA6/LBA9.
+    // Updating the 512B protocol must not clobber those unowned bytes.
+    let mut source =
+        NativeProtocolImage::from_protocol_zero_tailed(original.as_bytes(), 4096).unwrap();
+    let mut raw = source.native_bytes().to_vec();
+    for lba in [6usize, 9usize] {
+        let start = lba * 4096 + 512;
+        let end = (lba + 1) * 4096;
+        raw[start..end].fill((lba as u8) ^ 0xa5);
+    }
+    source = NativeProtocolImage::from_native_bytes(4096, raw.clone()).unwrap();
+    source
+        .overlay_protocol_preserve_native_tail(original.as_bytes())
+        .unwrap();
+    assert_eq!(source.protocol_projection().as_slice(), original.as_bytes());
+    for lba in [6usize, 9usize] {
+        assert_eq!(
+            &source.block(lba).unwrap()[512..],
+            &raw[lba * 4096 + 512..(lba + 1) * 4096]
+        );
+    }
+}
