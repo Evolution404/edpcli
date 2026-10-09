@@ -94,6 +94,14 @@ pub(super) fn sector_stub(
 }
 
 pub fn field_node(index: usize, field: &InspectField) -> InspectNode {
+    field_node_with_sector_bytes(index, field, crate::common::SECTOR as u32)
+}
+
+pub fn field_node_with_sector_bytes(
+    index: usize,
+    field: &InspectField,
+    native_bytes: u32,
+) -> InspectNode {
     let is_elabel = field.key == InspectFieldKey::Lba8Elabel;
     let children = if is_elabel {
         field
@@ -110,7 +118,10 @@ pub fn field_node(index: usize, field: &InspectField) -> InspectNode {
                     id: format!("child.{child_index}"),
                     label: format!("{label}  {}", child.value),
                     kind: InspectNodeKind::Field,
-                    range: InspectNodeRange::from_bytes(field.range),
+                    range: InspectNodeRange::from_bytes_with_sector_bytes(
+                        field.range,
+                        native_bytes,
+                    ),
                     children: InspectChildren::None,
                     decoder: None,
                     status: SemanticStatus::Identified,
@@ -129,7 +140,7 @@ pub fn field_node(index: usize, field: &InspectField) -> InspectNode {
             field.label.clone()
         },
         kind: InspectNodeKind::Field,
-        range: InspectNodeRange::from_bytes(field.range),
+        range: InspectNodeRange::from_bytes_with_sector_bytes(field.range, native_bytes),
         children: if children.is_empty() {
             InspectChildren::None
         } else {
@@ -151,6 +162,22 @@ pub fn standalone_sector_node_with_fields(
     status: SemanticStatus,
     fields: &[InspectField],
 ) -> InspectNode {
+    standalone_sector_node_with_fields_and_sector_bytes(
+        lba,
+        decoder,
+        status,
+        fields,
+        crate::common::SECTOR as u32,
+    )
+}
+
+pub fn standalone_sector_node_with_fields_and_sector_bytes(
+    lba: u64,
+    decoder: Option<InspectDecoderKind>,
+    status: SemanticStatus,
+    fields: &[InspectField],
+    native_bytes: u32,
+) -> InspectNode {
     let mut node = sector_stub(lba, decoder, status);
     let mut children = match node.children {
         InspectChildren::Materialized(children) => children,
@@ -160,7 +187,7 @@ pub fn standalone_sector_node_with_fields(
         fields
             .iter()
             .enumerate()
-            .map(|(index, field)| field_node(index, field)),
+            .map(|(index, field)| field_node_with_sector_bytes(index, field, native_bytes)),
     );
     node.children = if children.is_empty() {
         InspectChildren::None
@@ -174,7 +201,15 @@ pub fn standalone_sector_node_with_fields(
 ///
 /// The topology owns id/label/kind/range/decoder/status/region_semantic. Decode hydration may
 /// only replace Field children; structural children such as the LBA0 MBR table are preserved.
-pub fn enrich_sector_node(mut node: InspectNode, fields: &[InspectField]) -> InspectNode {
+pub fn enrich_sector_node(node: InspectNode, fields: &[InspectField]) -> InspectNode {
+    enrich_sector_node_with_sector_bytes(node, fields, crate::common::SECTOR as u32)
+}
+
+pub fn enrich_sector_node_with_sector_bytes(
+    mut node: InspectNode,
+    fields: &[InspectField],
+    native_bytes: u32,
+) -> InspectNode {
     if node.kind != InspectNodeKind::Sector {
         return node;
     }
@@ -195,7 +230,7 @@ pub fn enrich_sector_node(mut node: InspectNode, fields: &[InspectField]) -> Ins
         fields
             .iter()
             .enumerate()
-            .map(|(index, field)| field_node(index, field)),
+            .map(|(index, field)| field_node_with_sector_bytes(index, field, native_bytes)),
     );
     node.children = if children.is_empty() {
         InspectChildren::None

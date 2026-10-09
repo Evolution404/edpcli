@@ -13,13 +13,17 @@ mod search;
 mod topology;
 
 use build::sector_stub;
-pub use build::{enrich_sector_node, field_node, standalone_sector_node_with_fields};
+pub use build::{
+    enrich_sector_node, enrich_sector_node_with_sector_bytes, field_node,
+    field_node_with_sector_bytes, standalone_sector_node_with_fields,
+    standalone_sector_node_with_fields_and_sector_bytes,
+};
 use model::node_paths_match;
 pub use model::{
     format_lba_closed_range, DiskRegionSemantic, InspectChildren, InspectLazySectorLocation,
     InspectNode, InspectNodeKind, InspectNodeRange, InspectTopology,
 };
-pub use search::find_sector_structured_paths;
+pub use search::{find_sector_structured_paths, find_sector_structured_paths_with_sector_bytes};
 pub use topology::build_inspect_topology;
 #[cfg(test)]
 mod tests;

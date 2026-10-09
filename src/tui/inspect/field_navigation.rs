@@ -50,7 +50,19 @@ impl AppState {
         let Some(field) = self.advanced_inspect_selected_field() else {
             return false;
         };
-        let lba = field.range.start_lba();
+        let lba = self
+            .inspect
+            .advanced
+            .as_ref()
+            .and_then(|state| state.result.as_ref())
+            .and_then(|workspace| {
+                workspace.items.iter().find(|item| {
+                    item.fields
+                        .iter()
+                        .any(|candidate| candidate.range == field.range)
+                })
+            })
+            .map_or_else(|| field.range.start_lba(), |item| item.lba);
         if self.advanced_inspect_jump_lba(lba).is_err() {
             return false;
         }
@@ -99,8 +111,9 @@ impl AppState {
         field: crate::application::inspect::InspectField,
         absolute: u64,
     ) -> Option<(AdvancedInspectSource, u64)> {
-        let lba = absolute / crate::common::SECTOR as u64;
-        let cursor = (absolute % crate::common::SECTOR as u64) as usize;
+        let block_bytes = self.advanced_inspect_native_sector_bytes() as u64;
+        let lba = absolute / block_bytes;
+        let cursor = (absolute % block_bytes) as usize;
         let (panel, tree_selection, pane_focus) = {
             let state = self.inspect.advanced.as_ref()?;
             (state.panel, state.tree_selected, state.pane_focus.clone())

@@ -45,6 +45,7 @@ fn context(total: u64) -> InspectDiskContext {
             chs_expected_start_lba: None,
         }),
         context_issues: Vec::new(),
+        logical_sector_bytes: SECTOR as u32,
     }
 }
 
@@ -412,4 +413,16 @@ fn field_nodes_keep_cross_sector_absolute_ranges() {
     assert_eq!(node.range.start_lba, 100);
     assert_eq!(node.range.sector_count, 2);
     assert!(node.range.byte_range.unwrap().spans_sectors());
+}
+
+#[test]
+fn native_4kn_field_byte_range_maps_to_native_lba_not_512b_alias() {
+    let range = crate::application::inspect::AbsoluteByteRange {
+        start: 11 * 4096 + 0x100,
+        end_exclusive: 11 * 4096 + 0x104,
+    };
+    let native = InspectNodeRange::from_bytes_with_sector_bytes(range, 4096);
+    assert_eq!(native.start_lba, 11);
+    assert_eq!(native.sector_count, 1);
+    assert_eq!(InspectNodeRange::from_bytes(range).start_lba, 88);
 }

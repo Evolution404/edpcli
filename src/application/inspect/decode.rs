@@ -6,8 +6,18 @@ pub(super) fn materialize_protocol_fields(
     decoded: &[u8],
     fields: &[crate::inspect_adapter::SectorField],
 ) -> Result<Vec<InspectField>, InspectError> {
+    materialize_protocol_fields_with_sector_bytes(lba, raw, decoded, fields, SECTOR as u32)
+}
+
+pub(super) fn materialize_protocol_fields_with_sector_bytes(
+    lba: u64,
+    raw: &[u8],
+    decoded: &[u8],
+    fields: &[crate::inspect_adapter::SectorField],
+    native_sector_bytes: u32,
+) -> Result<Vec<InspectField>, InspectError> {
     let base = lba
-        .checked_mul(SECTOR as u64)
+        .checked_mul(u64::from(native_sector_bytes))
         .ok_or_else(|| InspectError::decode(format!("LBA{lba} 字段绝对字节偏移溢出")))?;
     fields
         .iter()

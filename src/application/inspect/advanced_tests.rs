@@ -236,3 +236,66 @@ fn advanced_mode_cycles_without_hidden_state() {
         AdvancedInspectMode::Decode
     );
 }
+
+#[test]
+fn native_4kn_raw_inspect_preserves_unowned_tail_and_rejects_unknown_decode() {
+    struct NativeReader(Vec<u8>);
+    impl SectorReader for NativeReader {
+        fn logical_sector_bytes(&self) -> u32 {
+            4096
+        }
+        fn read_sector(&mut self, _lba: u64) -> io::Result<Vec<u8>> {
+            Ok(self.0[..SECTOR].to_vec())
+        }
+        fn read_native_sector(&mut self, _lba: u64) -> io::Result<Vec<u8>> {
+            Ok(self.0.clone())
+        }
+    }
+    let mut full = vec![0u8; 4096];
+    full[..4].copy_from_slice(b"DRKB");
+    full[SECTOR..].fill(0xa7);
+    let context =
+        crate::inspect_target::InspectDiskContext::new_with_partition_table_and_sector_bytes(
+            vec![0; METADATA_IMAGE_LEN],
+            None,
+            100,
+            None,
+            None,
+            None,
+            4096,
+        );
+    let request = AdvancedInspectRequest {
+        mode: AdvancedInspectMode::Raw,
+        lbas: vec![11],
+        export_dir: None,
+        device_id_override: None,
+        fail_soft_decode: false,
+    };
+    let workspace = run_advanced_source(
+        "virtual-4kn".into(),
+        InspectMeta::default(),
+        context.clone(),
+        &request,
+        &mut NativeReader(full.clone()),
+    )
+    .expect("native block read");
+    let item = &workspace.items[0];
+    assert_eq!(item.raw, full);
+    assert_eq!(item.raw_nonzero, 4 + 3584);
+    assert_eq!(item.raw_sha256, crate::sha256::sha256_hex(&full));
+    assert!(item.notes.iter().any(|note| note.contains("3584B")));
+    let decode = AdvancedInspectRequest {
+        mode: AdvancedInspectMode::Decode,
+        ..request
+    };
+    let error = run_advanced_source(
+        "virtual-4kn".into(),
+        InspectMeta::default(),
+        context,
+        &decode,
+        &mut NativeReader(full),
+    )
+    .expect_err("unknown 4kn region must fail closed");
+    assert_eq!(error.kind(), InspectErrorKind::Decode);
+    assert!(error.message().contains("4Kn"));
+}

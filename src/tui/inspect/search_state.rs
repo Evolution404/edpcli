@@ -212,15 +212,18 @@ impl AppState {
                 .collect::<Vec<_>>();
             for item in &workspace.items {
                 let region = workspace.topology.primary_region_for_lba(item.lba);
-                for relative_path in crate::application::inspect_tree::find_sector_structured_paths(
-                    item.lba,
-                    region.and_then(|value| value.decoder),
-                    region
-                        .map(|value| value.status)
-                        .unwrap_or(crate::edpb::SemanticStatus::Unknown),
-                    &item.fields,
-                    query,
-                ) {
+                for relative_path in
+                    crate::application::inspect_tree::find_sector_structured_paths_with_sector_bytes(
+                        item.lba,
+                        region.and_then(|value| value.decoder),
+                        region
+                            .map(|value| value.status)
+                            .unwrap_or(crate::edpb::SemanticStatus::Unknown),
+                        &item.fields,
+                        query,
+                        item.raw.len() as u32,
+                    )
+                {
                     matches.push(AdvancedInspectSearchTarget::CachedSector {
                         lba: item.lba,
                         relative_path,

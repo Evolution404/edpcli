@@ -29,22 +29,26 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
         context
             .validate_lba(lba)
             .map_err(InspectError::out_of_range)?;
+        let native_bytes = reader.logical_sector_bytes() as usize;
         let raw = reader
-            .read_sector(lba)
-            .map_err(|error| InspectError::io(format!("读取 LBA{lba} 失败: {error}")))?;
-        if raw.len() != SECTOR {
+            .read_native_sector(lba)
+            .map_err(|error| InspectError::io(format!("读取原生 LBA{lba} 失败: {error}")))?;
+        if native_bytes < SECTOR || raw.len() != native_bytes {
             return Err(InspectError::io(format!(
-                "LBA{lba} 返回 {}B，预期 {SECTOR}B",
+                "LBA{lba} 返回 {}B，预期完整原生块 {native_bytes}B",
                 raw.len()
             )));
         }
+        // All existing protocol decoders are specified over the first 512B;
+        // keep remaining native bytes byte-for-byte opaque, including LBA11.
+        let protocol_raw = &raw[..SECTOR];
 
         let mut partition_boot = None;
         let mut partition_boot_issue = None;
         if request.mode != AdvancedInspectMode::Raw {
             if let Some(partition_start) = context.partition_start_for_lba(lba) {
                 if partition_start == lba {
-                    partition_boot = Some(raw.clone());
+                    partition_boot = Some(protocol_raw.to_vec());
                 } else {
                     match reader.read_sector(partition_start) {
                         Ok(boot) if boot.len() == SECTOR => partition_boot = Some(boot),
@@ -78,18 +82,27 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
                 .map_err(|_| InspectError::out_of_range(format!("LBA{lba} 超出协议解析器范围")))?;
             Some(inspect::analyze_sector_with_context(
                 lba32,
-                &raw,
+                protocol_raw,
                 &meta,
                 Some(&context.protocol_image),
             ))
         } else if context.is_plain() && lba == 0 {
-            Some(inspect::analyze_mbr_sector(&raw))
+            Some(inspect::analyze_mbr_sector(protocol_raw))
         } else {
             None
         };
 
         let fields = match protocol_view.as_ref() {
-            Some(view) => materialize_protocol_fields(lba, &raw, &view.decoded, &view.fields)?,
+            Some(view) if native_bytes == SECTOR => {
+                materialize_protocol_fields(lba, protocol_raw, &view.decoded, &view.fields)?
+            }
+            Some(view) => materialize_protocol_fields_with_sector_bytes(
+                lba,
+                protocol_raw,
+                &view.decoded,
+                &view.fields,
+                native_bytes as u32,
+            )?,
             None => Vec::new(),
         };
         let mut item = AdvancedInspectItem {
@@ -121,6 +134,12 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
             meta_text: None,
         };
 
+        if native_bytes > SECTOR {
+            item.notes.push(format!(
+                "原生扇区 {native_bytes}B：前512B按已知协议处理，余下 {}B 未归属，原样保留",
+                native_bytes - SECTOR,
+            ));
+        }
         match request.mode {
             AdvancedInspectMode::Raw => {
                 if let Some(dir) = &export_dir {
@@ -139,11 +158,27 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
                                 .unwrap_or_else(|| "canonical protocol decoder unavailable".into()),
                         ))
                     }
+                } else if native_bytes > SECTOR {
+                    Err(InspectError::decode(format!(
+                        "LBA{lba} 4Kn 分区数据尚无完整原生块解密证据；仅允许 raw，只能解码已验证的前512B协议字段"
+                    )))
                 } else {
-                    decode_sector(&context, &meta, lba, &raw, partition_boot.as_deref())
+                    decode_sector(
+                        &context,
+                        &meta,
+                        lba,
+                        protocol_raw,
+                        partition_boot.as_deref(),
+                    )
                 };
                 match decoded {
-                    Ok((decoded, method, decode_ranges)) => {
+                    Ok((mut decoded, method, decode_ranges)) => {
+                        if native_bytes > SECTOR {
+                            if decoded.len() != SECTOR {
+                                return Err(InspectError::decode("协议解析器未返回512B固定负载"));
+                            }
+                            decoded.extend_from_slice(&raw[SECTOR..]);
+                        }
                         item.decoded_sha256 = Some(crate::sha256::sha256_hex(&decoded));
                         item.method = Some(method);
                         item.decode_ranges = decode_ranges;
@@ -169,7 +204,7 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
                     &context,
                     &meta,
                     lba,
-                    &raw,
+                    protocol_raw,
                     partition_boot.as_deref(),
                     partition_boot_issue.as_deref(),
                 )?;
@@ -245,14 +280,17 @@ pub(super) fn run_evidence_source(
     } else {
         (None, None)
     };
-    let context = crate::inspect_target::InspectDiskContext::new_with_partition_table(
-        evidence.protocol().to_vec(),
-        meta.device_id.clone(),
-        evidence.total_sectors(),
-        provision_kind,
-        partition_table,
-        partition_table_issue,
-    );
+    let logical_sector_bytes = evidence.logical_sector_bytes();
+    let context =
+        crate::inspect_target::InspectDiskContext::new_with_partition_table_and_sector_bytes(
+            evidence.protocol().to_vec(),
+            meta.device_id.clone(),
+            evidence.total_sectors(),
+            provision_kind,
+            partition_table,
+            partition_table_issue,
+            logical_sector_bytes,
+        );
     let source = evidence.source_label().to_string();
     let mut workspace = run_advanced_source(source, meta, context, request, &mut evidence)?;
     workspace.backup_manifest = backup_manifest;

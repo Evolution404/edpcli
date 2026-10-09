@@ -1614,3 +1614,46 @@ fn inspect_field_table_sort_preserves_selected_field_identity() {
         .expect("selected row after descending sort");
     assert_eq!((after.field_index, after.child_index, after.range), key);
 }
+
+#[test]
+fn native_4kn_hex_inspector_reaches_final_byte_without_512b_cursor_limit() {
+    let mut native = item(0, true);
+    native.raw.resize(4096, 0xa7);
+    native.decoded.as_mut().expect("decoded").resize(4096, 0xa7);
+    let mut state = AppState::new();
+    assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
+    state.advanced_inspect_finish(Ok(workspace(vec![native])));
+    select_protocol_lba0(&mut state);
+    // Already decoded/cached: entering Hex returns no asynchronous request.
+    assert!(state.advanced_inspect_open_selected_sector().is_none());
+    assert!(state.advanced_inspect_sector().is_some());
+    assert_eq!(state.advanced_inspect_native_sector_bytes(), 4096);
+    state.advanced_inspect_sector_bottom();
+    assert_eq!(
+        state.advanced_inspect_sector().expect("sector").cursor,
+        4095
+    );
+    state.advanced_inspect_sector_move_cursor(20);
+    assert_eq!(
+        state.advanced_inspect_sector().expect("sector").cursor,
+        4095
+    );
+    let mut terminal = Terminal::new(TestBackend::new(240, 60)).expect("backend");
+    terminal
+        .draw(|frame| render::draw(frame, &state))
+        .expect("draw");
+    let visible = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(
+        visible.contains("+0xFF0"),
+        "last native 4K row must be reachable"
+    );
+    state.advanced_inspect_sector_top();
+    assert_eq!(state.advanced_inspect_sector().expect("sector").cursor, 0);
+}

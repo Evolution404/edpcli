@@ -15,8 +15,8 @@ mod service;
 mod source;
 
 pub use super::inspect_text::render_fields_plain;
-use decode::materialize_protocol_fields;
 pub use decode::{decode_sector, sector_meta_text};
+use decode::{materialize_protocol_fields, materialize_protocol_fields_with_sector_bytes};
 use export::{export_advanced_bytes, export_advanced_meta};
 pub use model::*;
 pub use service::{load_backup_advanced_inspect, load_disk_advanced_inspect};
