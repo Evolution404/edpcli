@@ -147,13 +147,18 @@ pub(super) fn create_native_evidence_on_disk(
                 crate::provision::PartitionRole::BootShareCombined => "boot_share_combined",
                 crate::provision::PartitionRole::CompatibilityReserve => "compatibility_reserve",
             };
+        let filesystem_hint =
+            crate::filesystem::detect_native_boot_sector(&block, p.sector_count, 4096)
+                .ok()
+                .flatten()
+                .map(|kind| kind.display_name().to_string());
         manifest_partitions.push(ManifestPartition {
             index: (p.index + 1) as u32,
             role: Some(role.into()),
             partition_type: Some(p.partition_type.to_string()),
             start_lba: p.start_sector,
             sector_count: p.sector_count,
-            filesystem_hint: None,
+            filesystem_hint,
             volume_label_hint: None,
         });
         let region_id = format!("region.partition_header.{}", p.index);

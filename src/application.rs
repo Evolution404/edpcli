@@ -43,15 +43,16 @@ pub mod filesystem {
     pub use crate::filesystem::{
         analysis, build_empty_exfat, build_empty_fat16, build_empty_fat32, build_empty_filesystem,
         build_empty_filesystem_typed, default_registry, detect_boot_sector,
-        detect_boot_sector_with_geometry, estimate_format_resources, is_writable_filesystem,
-        registry, shift_writable_filesystem, validate_volume_label, validate_volume_label_typed,
-        validate_writable_filesystem, BootSectorReader, DetectedFilesystem, DetectionConfidence,
-        DetectionResult, DriverRegistry, ExFatDriver, Fat12Driver, Fat16Driver, Fat32Driver,
-        FilesystemCapabilities, FilesystemDriver, FilesystemError, FilesystemErrorKind,
-        FilesystemGeometry, FilesystemKind, FilesystemMetadata, FilesystemReader, FilesystemWrite,
-        FormatPlan, FormatRequest, FormatResourceBudget, FormatResourceEstimate,
-        FormatVerification, NtfsDriver, SparseFilesystemImage, EXFAT_DRIVER, FAT12_DRIVER,
-        FAT16_DRIVER, FAT32_DRIVER, NTFS_DRIVER, WRITABLE_FILESYSTEMS,
+        detect_boot_sector_with_geometry, detect_native_boot_sector, estimate_format_resources,
+        is_writable_filesystem, registry, shift_writable_filesystem, validate_volume_label,
+        validate_volume_label_typed, validate_writable_filesystem, BootSectorReader,
+        DetectedFilesystem, DetectionConfidence, DetectionResult, DriverRegistry, ExFatDriver,
+        Fat12Driver, Fat16Driver, Fat32Driver, FilesystemCapabilities, FilesystemDriver,
+        FilesystemError, FilesystemErrorKind, FilesystemGeometry, FilesystemKind,
+        FilesystemMetadata, FilesystemReader, FilesystemWrite, FormatPlan, FormatRequest,
+        FormatResourceBudget, FormatResourceEstimate, FormatVerification, NtfsDriver,
+        SparseFilesystemImage, EXFAT_DRIVER, FAT12_DRIVER, FAT16_DRIVER, FAT32_DRIVER, NTFS_DRIVER,
+        WRITABLE_FILESYSTEMS,
     };
 }
 
