@@ -566,6 +566,7 @@ fn edpb_container_is_split_by_protocol_responsibility() {
         "src/edpb/write.rs",
         "src/edpb/read.rs",
         "src/edpb/validate.rs",
+        "src/edpb/validate_raw_extents.rs",
     ] {
         exists(path);
     }

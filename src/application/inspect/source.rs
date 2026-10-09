@@ -266,16 +266,16 @@ pub(super) fn run_evidence_source(
 ) -> Result<AdvancedInspectWorkspace, InspectError> {
     let backup_manifest = evidence.backup_manifest().cloned().map(std::sync::Arc::new);
     let identity = evidence.identity().clone();
-    let mut meta = InspectMeta {
+    // Only source-observed/canonical identity may influence protocol decode,
+    // partition geometry, FileKeyCRC, or decrypted filesystem inference.
+    // A caller-supplied override is diagnostic text, not trusted evidence.
+    let meta = InspectMeta {
         device_id: identity.device_id,
         vid: identity.vid,
         pid: identity.pid,
         size_bytes: identity.size_bytes,
         onlyid: identity.onlyid,
     };
-    if let Some(device_id) = request.device_id_override.as_ref() {
-        meta.device_id = Some(device_id.clone());
-    }
     let provision_kind = identity.provision_kind;
     let (partition_table, partition_table_issue) = if provision_kind
         == Some(crate::provision::DiskProvisionKind::Plain)
@@ -314,6 +314,17 @@ pub(super) fn run_evidence_source(
         );
     let source = evidence.source_label().to_string();
     let mut workspace = run_advanced_source(source, meta, context, request, &mut evidence)?;
+    if let Some(override_id) = &request.device_id_override {
+        if workspace.meta.device_id.as_deref() != Some(override_id.as_str()) {
+            for item in &mut workspace.items {
+                item.notes.push(
+                    "请求的device_id覆盖值仅用于诊断显示；协议解码、来源身份及FileKey验证仍使用已采集身份"
+                        .into(),
+                );
+            }
+        }
+        workspace.meta.device_id = Some(override_id.clone());
+    }
     workspace.backup_manifest = backup_manifest;
     Ok(workspace)
 }
