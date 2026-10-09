@@ -180,6 +180,17 @@ impl NativeEdpLayoutPlan {
         device_id: &str,
         source_lce: &[Vec<u8>],
     ) -> Result<Vec<NativeFilesystemWrite>, String> {
+        self.verify_source_protocol_geometry(protocol, device_id)?;
+        self.source_replay_native_blocks(protocol, source_lce)
+    }
+
+    /// Validate metadata and LCE pointer geometry *before* reading the LCE
+    /// payload from any source. This check never accesses physical media.
+    fn verify_source_protocol_geometry(
+        &self,
+        protocol: &NativeProtocolImage,
+        device_id: &str,
+    ) -> Result<(), String> {
         if device_id.is_empty() {
             return Err("来源device_id为空，无法认证协议重放".into());
         }
@@ -231,7 +242,79 @@ impl NativeEdpLayoutPlan {
         }
         // This authenticates pointer/geometry consistency, NOT the LCE
         // ciphertext content, which remains opaque and source-preserved.
-        self.source_replay_native_blocks(protocol, source_lce)
+        Ok(())
+    }
+
+    /// MBR is an independent source of the first partition geometry and
+    /// must be checked *before* reading any LCE payload.
+    fn verify_source_visible_mbr(&self, mbr: &[u8]) -> Result<(), String> {
+        if mbr.len() < 512 || mbr[510..512] != [0x55, 0xaa] || mbr[446 + 4] != self.visible_mbr_type
+        {
+            return Err("来源 LBA0 MBR 签名或分区类型不匹配".into());
+        }
+        let start = u32::from_le_bytes(mbr[454..458].try_into().unwrap()) as u64;
+        let count = u32::from_le_bytes(mbr[458..462].try_into().unwrap()) as u64;
+        if start != self.partitions[0].geometry.start_lba
+            || count != self.partitions[0].geometry.sector_count
+        {
+            return Err("来源 LBA0 MBR 首分区原生起点/容量与已确认布局不一致".into());
+        }
+        Ok(())
+    }
+
+    /// Reconstruct an offline replay from ONE read-only source of complete
+    /// native sectors. The protocol and the LCE are sampled through the same
+    /// caller-supplied reader; callers cannot accidentally substitute an
+    /// unrelated, correctly sized LCE buffer into an authenticated plan.
+    ///
+    /// After reading LBA0..12, validate EDPF identity, all partition geometry,
+    /// and every LBA7 LCE pointer BEFORE requesting any LCE sector. Reject
+    /// truncated sectors and read errors. The data remain opaque: this proves
+    /// read provenance/byte preservation, NOT LCE cryptographic authenticity.
+    /// The returned plan has no physical write capability.
+    pub fn verified_source_replay_from_reader<F>(
+        &self,
+        device_id: &str,
+        mut read_native: F,
+    ) -> Result<Vec<NativeFilesystemWrite>, String>
+    where
+        F: FnMut(u64) -> Result<Vec<u8>, String>,
+    {
+        if device_id.is_empty() {
+            return Err("来源device_id为空，拒绝读取原生协议".into());
+        }
+        let sector_bytes = self.logical_sector_bytes as usize;
+        let mut protocol_bytes = Vec::with_capacity(13 * sector_bytes);
+        for lba in 0..13u64 {
+            let block = read_native(lba)
+                .map_err(|message| format!("来源协议LBA{lba}读取失败: {message}"))?;
+            if block.len() != sector_bytes {
+                return Err(format!("来源协议LBA{lba}不是完整原生扇区"));
+            }
+            protocol_bytes.extend_from_slice(&block);
+        }
+        let image =
+            NativeProtocolImage::from_native_bytes(self.logical_sector_bytes, protocol_bytes)
+                .map_err(|error| format!("来源原生协议构造失败: {error}"))?;
+        self.verify_source_protocol_geometry(&image, device_id)?;
+        let source_mbr = image.block(0).ok_or("来源缺少 LBA0 原生块")?;
+        self.verify_source_visible_mbr(source_mbr)?;
+
+        let mut source_lce = Vec::with_capacity(self.lce.sector_count as usize);
+        for index in 0..self.lce.sector_count {
+            let lba = self
+                .lce
+                .start_lba
+                .checked_add(index)
+                .ok_or("LCE 来源扇区号溢出")?;
+            let block = read_native(lba)
+                .map_err(|message| format!("来源LCE LBA{lba}读取失败: {message}"))?;
+            if block.len() != sector_bytes {
+                return Err(format!("来源LCE LBA{lba}不是完整原生扇区"));
+            }
+            source_lce.push(block);
+        }
+        self.source_replay_native_blocks(&image, &source_lce)
     }
 
     /// Compare every observed complete native block against a freshly
@@ -299,16 +382,7 @@ impl NativeEdpLayoutPlan {
             return Err("来源协议/LCE 原生逻辑扇区几何不匹配".into());
         }
         let mbr = protocol.block(0).ok_or("来源缺少 LBA0 原生块")?;
-        if mbr[510..512] != [0x55, 0xaa] || mbr[446 + 4] != self.visible_mbr_type {
-            return Err("来源 LBA0 MBR 签名或分区类型不匹配".into());
-        }
-        let start = u32::from_le_bytes(mbr[454..458].try_into().unwrap()) as u64;
-        let count = u32::from_le_bytes(mbr[458..462].try_into().unwrap()) as u64;
-        if start != self.partitions[0].geometry.start_lba
-            || count != self.partitions[0].geometry.sector_count
-        {
-            return Err("来源 LBA0 MBR 首分区原生起点/容量与已确认布局不一致".into());
-        }
+        self.verify_source_visible_mbr(mbr)?;
         let mut output = Vec::with_capacity(13 + source_lce.len());
         for lba in 1..13 {
             output.push(NativeFilesystemWrite {
