@@ -267,15 +267,48 @@ mod tests {
     fn shell(script: &str) -> Vec<&str> {
         vec!["/bin/sh", "-c", script]
     }
+    // Spawn this same compiled test executable as a native child fixture.
+    // PowerShell startup and Add-Type compilation can exceed a fixed timeout
+    // on an oversubscribed Windows runner *before* the tested pipe operation.
     #[cfg(windows)]
-    fn shell(script: &str) -> Vec<&str> {
-        vec![
-            "powershell.exe",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            script,
-        ]
+    fn native_fixture_args(name: &str) -> io::Result<(std::path::PathBuf, String)> {
+        let executable = std::env::current_exe()?;
+        Ok((
+            executable,
+            format!("infrastructure::process::tests::{name}"),
+        ))
+    }
+    #[cfg(windows)]
+    fn run_native_fixture(name: &str, timeout: Duration) -> io::Result<CommandOutcome> {
+        let (executable, fixture) = native_fixture_args(name)?;
+        run_command(
+            &[
+                executable.to_str().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "fixture exe path is not UTF-8")
+                })?,
+                "--exact",
+                &fixture,
+                "--ignored",
+                "--nocapture",
+            ],
+            timeout,
+        )
+    }
+    #[cfg(windows)]
+    fn check_native_fixture(name: &str, timeout: Duration) -> io::Result<String> {
+        let (executable, fixture) = native_fixture_args(name)?;
+        check_output(
+            &[
+                executable.to_str().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "fixture exe path is not UTF-8")
+                })?,
+                "--exact",
+                &fixture,
+                "--ignored",
+                "--nocapture",
+            ],
+            timeout,
+        )
     }
     #[test]
     fn empty_command_is_invalid() {
@@ -288,9 +321,11 @@ mod tests {
     fn preserves_bounded_stderr_and_exit_status() {
         #[cfg(unix)]
         let script = "printf abc; printf denied >&2; exit 7";
-        #[cfg(windows)]
-        let script = "[Console]::Out.Write('abc'); [Console]::Error.Write('denied'); exit 7";
+        #[cfg(unix)]
         let outcome = run_command(&shell(script), Duration::from_secs(15)).unwrap();
+        #[cfg(windows)]
+        let outcome =
+            run_native_fixture("windows_native_exit_fixture", Duration::from_secs(15)).unwrap();
         assert_eq!(
             outcome.completion,
             CommandCompletion::Exited {
@@ -298,20 +333,33 @@ mod tests {
                 code: Some(7)
             }
         );
+        #[cfg(unix)]
         assert_eq!(outcome.stdout, "abc");
+        #[cfg(windows)]
+        assert!(
+            outcome.stdout.trim_end().ends_with("abc"),
+            "native fixture readiness output missing: {:?}",
+            outcome.stdout
+        );
         assert_eq!(outcome.stderr, "denied");
-        assert!(check_output(&shell(script), Duration::from_secs(15))
-            .unwrap_err()
-            .to_string()
-            .contains("denied"));
+        #[cfg(unix)]
+        let failure = check_output(&shell(script), Duration::from_secs(15)).unwrap_err();
+        #[cfg(windows)]
+        let failure =
+            check_native_fixture("windows_native_exit_fixture", Duration::from_secs(15))
+                .unwrap_err();
+        assert!(failure.to_string().contains("denied"));
     }
     #[test]
     fn stderr_only_output_cannot_block_or_exceed_retained_diagnostic_budget() {
         #[cfg(unix)]
         let script = "head -c 100000 /dev/zero >&2";
-        #[cfg(windows)]
-        let script = "[Console]::Error.Write(('x' * 100000))";
+        #[cfg(unix)]
         let outcome = run_command(&shell(script), Duration::from_secs(15)).unwrap();
+        #[cfg(windows)]
+        let outcome =
+            run_native_fixture("windows_native_stderr_limit_fixture", Duration::from_secs(15))
+                .unwrap();
         assert!(matches!(
             outcome.completion,
             CommandCompletion::Exited { success: true, .. }
@@ -336,17 +384,83 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_deadline_survives_closed_pipes_and_output_limit_is_typed() {
-        let script = r#"Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class Pipes { [DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int n); [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h); }'; [Console]::Out.Write('ready'); [Console]::Out.Flush(); [Pipes]::CloseHandle([Pipes]::GetStdHandle(-11)) | Out-Null; [Pipes]::CloseHandle([Pipes]::GetStdHandle(-12)) | Out-Null; Start-Sleep 60"#;
-        let outcome = run_command(&shell(script), Duration::from_secs(10)).unwrap();
+        let outcome =
+            run_native_fixture("windows_native_closed_pipes_fixture", Duration::from_secs(10))
+                .unwrap();
         assert_eq!(outcome.completion, CommandCompletion::TimedOut);
-        assert_eq!(outcome.stdout, "ready");
-        let outcome = run_command(
-            &shell("[Console]::Out.Write(('x' * 9000000))"),
+        assert!(
+            outcome.stdout.trim_end().ends_with("ready"),
+            "native fixture did not flush the readiness marker: {:?}",
+            outcome.stdout
+        );
+        let outcome = run_native_fixture(
+            "windows_native_stdout_limit_fixture",
             Duration::from_secs(20),
         )
         .unwrap();
         assert_eq!(outcome.completion, CommandCompletion::OutputLimit);
         assert!(outcome.stdout_truncated);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "subprocess fixture for the exit-code and stderr regression"]
+    fn windows_native_exit_fixture() {
+        use std::io::Write;
+        let mut stdout = std::io::stdout();
+        stdout.write_all(b"abc").unwrap();
+        stdout.flush().unwrap();
+        let mut stderr = std::io::stderr();
+        stderr.write_all(b"denied").unwrap();
+        stderr.flush().unwrap();
+        std::process::exit(7);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "subprocess fixture for bounded stderr collection"]
+    fn windows_native_stderr_limit_fixture() {
+        use std::io::Write;
+        let mut stderr = std::io::stderr();
+        stderr.write_all(&vec![b'x'; 100_000]).unwrap();
+        stderr.flush().unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "subprocess fixture for the stdout output limit"]
+    fn windows_native_stdout_limit_fixture() {
+        use std::io::Write;
+        let mut stdout = std::io::stdout();
+        stdout.write_all(&vec![b'x'; 9_000_000]).unwrap();
+        stdout.flush().unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "subprocess fixture for a timed-out child with closed pipes"]
+    fn windows_native_closed_pipes_fixture() {
+        use std::io::Write;
+        let mut stdout = std::io::stdout();
+        stdout.write_all(b"ready").unwrap();
+        stdout.flush().unwrap();
+        // This deliberately closes the actual Windows process handles, not
+        // just the Rust Stdout wrapper. The sleeping native test process must
+        // remain alive until run_command enforces its deadline/job cleanup.
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetStdHandle(handle_type: u32) -> *mut core::ffi::c_void;
+            fn CloseHandle(handle: *mut core::ffi::c_void) -> i32;
+        }
+        // SAFETY: both handles come from the current child process's own
+        // standard streams; this test intentionally relinquishes them.
+        unsafe {
+            let stdout_handle = GetStdHandle((-11i32) as u32);
+            let stderr_handle = GetStdHandle((-12i32) as u32);
+            assert_ne!(CloseHandle(stdout_handle), 0);
+            assert_ne!(CloseHandle(stderr_handle), 0);
+        }
+        std::thread::sleep(Duration::from_secs(60));
     }
     #[cfg(windows)]
     #[allow(
