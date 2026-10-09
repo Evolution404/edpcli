@@ -148,7 +148,6 @@ pub trait SectorReader {
         }
         Ok(result)
     }
-
 }
 
 impl SectorReader for FileDev {
