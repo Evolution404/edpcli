@@ -77,6 +77,23 @@ impl AppState {
         }
         match result {
             Ok(probe) => {
+                self.provision.form.share_source_algorithm = probe.share_source_algorithm;
+                self.provision.form.encrypt_source_algorithm = probe.encrypt_source_algorithm;
+                self.provision.form.source_algorithm_mixed = matches!(
+                    (probe.share_source_algorithm, probe.encrypt_source_algorithm),
+                    (Some(share), Some(encrypt)) if share != encrypt
+                );
+                if !self.provision.form.algorithm_user_edited {
+                    match (probe.share_source_algorithm, probe.encrypt_source_algorithm) {
+                        (Some(share), Some(encrypt)) if share == encrypt => {
+                            self.provision.form.encryption_algorithm = share;
+                        }
+                        (Some(share), None) | (None, Some(share)) => {
+                            self.provision.form.encryption_algorithm = share;
+                        }
+                        _ => {}
+                    }
+                }
                 self.provision.form.share_opaque_profile = probe.share_opaque_profile;
                 self.provision.form.encrypt_opaque_profile = probe.encrypt_opaque_profile;
                 if let Some(knowledge) = probe.share {
@@ -120,6 +137,9 @@ impl AppState {
                     crate::provision::KeyDomainRole::Encrypt,
                 );
                 self.provision.message = None;
+                if self.provision.form.source_algorithm_mixed {
+                    self.set_warning_notice("源盘交换区和保密区的加密算法不同；当前官方制盘目标仅有全局算法，不能同时透传两个不同算法的区域");
+                }
                 self.provision_sync_cursor_to_end();
             }
             Err(message) => {

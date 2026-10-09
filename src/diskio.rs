@@ -20,6 +20,11 @@ use crate::common::{
 
 mod device;
 mod transaction;
+// Generic native-block transaction port has no raw-device implementation.
+mod native_transaction;
+pub use native_transaction::{
+    execute_native_transaction, NativeBlockDevice, NativeTransactionFailure,
+};
 
 pub use device::*;
 pub use transaction::*;

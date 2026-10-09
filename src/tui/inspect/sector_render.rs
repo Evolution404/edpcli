@@ -32,7 +32,7 @@ fn byte_field_status(
 ) -> Option<crate::application::inspect::InspectFieldStatus> {
     let absolute = item
         .lba
-        .saturating_mul(crate::common::SECTOR as u64)
+        .saturating_mul(item.raw.len() as u64)
         .saturating_add(offset as u64);
     item.fields
         .iter()
@@ -75,7 +75,8 @@ pub(super) fn draw_sector_inspector(
     };
     let item = state.advanced_inspect_sector_item();
     let active_field = state.advanced_inspect_sector_active_field();
-    let absolute = (sector.lba as u128) * crate::common::SECTOR as u128 + sector.cursor as u128;
+    let block_bytes = state.advanced_inspect_native_sector_bytes();
+    let absolute = (sector.lba as u128) * block_bytes as u128 + sector.cursor as u128;
     let decode_issue = item.and_then(|item| item.decode_error.as_deref());
     let breadcrumb = state.advanced_inspect_breadcrumb();
     let header = vec![
@@ -89,10 +90,11 @@ pub(super) fn draw_sector_inspector(
                 secondary().add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!(
-                "  · 字节 +0x{:03X} · 绝对偏移 0x{:X} · 行 {:02}/32{}",
+                "  · 字节 +0x{:03X} · 绝对偏移 0x{:X} · 行 {:03}/{}{}",
                 sector.cursor,
                 absolute,
                 sector.cursor / 16 + 1,
+                block_bytes.div_ceil(16),
                 if sector.pending { " · 读取中" } else { "" }
             )),
         ]),
@@ -150,9 +152,9 @@ pub(super) fn draw_sector_inspector(
                 decoded.unwrap_or(item.raw.as_slice())
             }
         };
-        for row in 0..32usize {
+        for row in 0..display.len().div_ceil(16) {
             let offset = row * 16;
-            let row_abs = (sector.lba as u128) * crate::common::SECTOR as u128 + offset as u128;
+            let row_abs = (sector.lba as u128) * block_bytes as u128 + offset as u128;
             let mut spans = vec![
                 Span::styled(format!("+0x{offset:03X}  "), muted()),
                 Span::styled(format!("0x{row_abs:012X}  "), muted()),
@@ -190,7 +192,7 @@ pub(super) fn draw_sector_inspector(
     }
     let visible_rows = main.0.height.saturating_sub(2).max(1) as usize;
     let cursor_row = sector.cursor / 16;
-    let max_scroll = 32usize.saturating_sub(visible_rows);
+    let max_scroll = hex_lines.len().saturating_sub(visible_rows);
     let scroll = cursor_row
         .saturating_sub(visible_rows / 2)
         .min(max_scroll)
@@ -200,7 +202,7 @@ pub(super) fn draw_sector_inspector(
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("32 × 16 Hex + ASCII"),
+                    .title(format!("{} × 16 Hex + ASCII", block_bytes.div_ceil(16))),
             )
             .scroll((scroll, 0)),
         main.0,
@@ -254,7 +256,7 @@ pub(super) fn draw_sector_inspector(
                 Span::styled(safe(&field.label), secondary().add_modifier(Modifier::BOLD)),
                 Span::raw(format!(" · {}", safe(&field.value))),
             ]));
-            let sector_base = sector.lba.saturating_mul(crate::common::SECTOR as u64);
+            let sector_base = sector.lba.saturating_mul(block_bytes as u64);
             details.push(Line::from(vec![
                 Span::raw(format!(
                     "{:?} · 范围 +0x{:03X}..+0x{:03X} · ",

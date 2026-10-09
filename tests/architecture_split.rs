@@ -566,6 +566,7 @@ fn edpb_container_is_split_by_protocol_responsibility() {
         "src/edpb/write.rs",
         "src/edpb/read.rs",
         "src/edpb/validate.rs",
+        "src/edpb/validate_raw_extents.rs",
     ] {
         exists(path);
     }
@@ -1846,4 +1847,47 @@ fn restore_result_has_one_selection_source_of_truth() {
         render.contains("WizardStage::PostRestore => unreachable!"),
         "legacy inline PostRestore renderer must remain unreachable"
     );
+}
+
+/// Prevent application code from accidentally promoting the MBR-only source
+/// replay preflight to a trusted EDPF/LCE replay. Production consumers must
+/// enter through the identity+snapshot-bound application evidence adapter.
+/// The domain's internal compatibility helper remains available to tests,
+/// but must never be called directly from a production consumer.
+#[test]
+fn native_replay_must_not_bypass_evidence_source() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut checked = 0usize;
+    for path in rust_sources_under("src") {
+        let relative = path.strip_prefix(root).expect("source within repository");
+        if relative == Path::new("src/provision/native_geometry.rs") {
+            continue;
+        }
+        let content = fs::read_to_string(&path).expect("read production Rust");
+        for forbidden in [
+            ".source_replay_native_blocks(",
+            ".verified_source_replay_native_blocks(",
+        ] {
+            assert!(
+                !content.contains(forbidden),
+                "{} directly bypasses strict native source-reader provenance via {forbidden}",
+                relative.display(),
+            );
+        }
+        if content.contains(".verified_source_replay_from_reader(") {
+            assert_eq!(
+                relative,
+                Path::new("src/application/evidence.rs"),
+                "{} bypasses the application EvidenceSource identity/snapshot boundary",
+                relative.display(),
+            );
+        }
+        checked += 1;
+    }
+    assert!(checked > 50, "scan must cover production Rust source tree");
+    let evidence = read_source("src/application/evidence.rs");
+    assert!(evidence.contains("pub fn verified_native_replay("));
+    assert!(evidence.contains("pub fn verified_native_source_replay<"));
+    assert!(evidence.contains("source_protocol.block(lba as usize)"));
+    assert!(evidence.contains("verified_source_replay_from_reader("));
 }

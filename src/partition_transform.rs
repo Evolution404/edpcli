@@ -88,6 +88,114 @@ impl PartitionTransform for EdpSm4Transform {
     }
 }
 
+/// Data-layer cipher from the EDPF EncryptMode byte, NOT the FileKey
+/// password wrapping algorithm, nor the four official partition layouts.
+/// No raw FileKey is retained by this policy value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativePartitionDataCipher {
+    /// Manufacturer's physical-byte-offset-dependent AES variant.
+    AesOffset,
+    /// Standard SM4-128-ECB, Windows driver EncryptMode=2.
+    Sm4Ecb,
+    /// Standard AES-128-ECB, Windows driver EncryptMode=3.
+    AesCrossEcb,
+}
+
+impl NativePartitionDataCipher {
+    pub fn from_encrypt_mode(mode: u8) -> Result<Self, String> {
+        match mode {
+            1 => Ok(Self::AesOffset),
+            2 => Ok(Self::Sm4Ecb),
+            3 => Ok(Self::AesCrossEcb),
+            _ => Err(format!("EncryptMode={mode}无已认证原生分区数据算法")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeCipherDirection {
+    Encrypt,
+    Decrypt,
+}
+
+/// Offline memory-only native-sector cipher. Caller supplies the *absolute*
+/// logical LBA and its native byte width, never a partition-relative 512B LBA.
+/// Never opens a disk or grants physical-write capability. These primitives
+/// have independent official Windows-driver ciphertext regression goldens.
+pub fn transform_native_sector_offline(
+    algorithm: NativePartitionDataCipher,
+    direction: NativeCipherDirection,
+    source: &[u8],
+    key: &[u8; 16],
+    absolute_lba: u64,
+    logical_sector_bytes: u32,
+) -> Result<Vec<u8>, String> {
+    if !matches!(logical_sector_bytes, 512 | 4096) || source.len() != logical_sector_bytes as usize
+    {
+        return Err("仅接受完整512B或4096B原生逻辑扇区数据".into());
+    }
+    let initial_byte_offset = absolute_lba
+        .checked_mul(u64::from(logical_sector_bytes))
+        .and_then(|offset| {
+            offset
+                .checked_add(u64::from(logical_sector_bytes))
+                .map(|_| offset)
+        })
+        .ok_or("原生物理字节偏移或完整扇区范围溢出")?;
+    use NativeCipherDirection::{Decrypt, Encrypt};
+    let result = match algorithm {
+        NativePartitionDataCipher::AesOffset => {
+            use crate::protocol::crypto::{a6b0_full, a7f0_full};
+            match direction {
+                Encrypt => a7f0_full(source, key, initial_byte_offset),
+                Decrypt => a6b0_full(source, key, initial_byte_offset),
+            }
+        }
+        NativePartitionDataCipher::Sm4Ecb => {
+            let cipher = Sm4Cipher::new(key);
+            source
+                .as_chunks::<16>()
+                .0
+                .iter()
+                .flat_map(|block| match direction {
+                    Encrypt => cipher.encrypt_block(block),
+                    Decrypt => cipher.decrypt_block(block),
+                })
+                .collect()
+        }
+        NativePartitionDataCipher::AesCrossEcb => {
+            use crate::protocol::crypto::{aes128_ecb_decrypt_block, aes128_ecb_encrypt_block};
+            source
+                .as_chunks::<16>()
+                .0
+                .iter()
+                .flat_map(|block| match direction {
+                    Encrypt => aes128_ecb_encrypt_block(block, key),
+                    Decrypt => aes128_ecb_decrypt_block(block, key),
+                })
+                .collect()
+        }
+    };
+    Ok(result)
+}
+
+/// Read-only AES_CROSS data-sector decoder, independently pinned to the
+/// official Windows driver mode3 (AES-128-ECB). No physical disk I/O here.
+/// Accept exactly one full 512B or 4096B native logical sector.
+pub fn decrypt_mode3_native(data: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, String> {
+    if !matches!(data.len(), 512 | 4096) {
+        return Err("AES_CROSS 只读解密要求完整512B或4096B原生逻辑扇区".into());
+    }
+    transform_native_sector_offline(
+        NativePartitionDataCipher::AesCrossEcb,
+        NativeCipherDirection::Decrypt,
+        data,
+        key,
+        0, // AES_CROSS is offset-independent; source LBA must not affect ECB.
+        data.len() as u32,
+    )
+}
+
 pub fn decrypt_mode2(data: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, String> {
     let (blocks, remainder) = data.as_chunks::<16>();
     if !remainder.is_empty() {
@@ -176,6 +284,183 @@ mod tests {
         let debug = format!("{:?}", EdpSm4Transform::new(key));
         assert_eq!(debug, "EdpSm4Transform { .. }");
         assert_eq!(debug, format!("{:?}", EdpSm4Transform::new([0x18; 16])),);
+    }
+
+    #[test]
+    fn unified_native_cipher_matches_official_driver_independent_goldens() {
+        use super::{
+            transform_native_sector_offline as transform, NativeCipherDirection as Direction,
+            NativePartitionDataCipher as Algorithm,
+        };
+        let key = std::array::from_fn(|index| index as u8);
+        let original_block = hex_bytes_from_public_aes_vector_for_test();
+        let original = original_block.repeat(32);
+        assert_eq!(original.len(), 512);
+        for (lba, expected_sha) in [
+            (
+                0,
+                "b290b2e6e598e027e78453d2db0a91fe5ebb9676b6e05712f986affae34094c9",
+            ),
+            (
+                8,
+                "163d9a5c52dbdde281042fe08272fec8f058c65ebc7eb792f0dded1df9bec66a",
+            ),
+        ] {
+            let encrypted = transform(
+                Algorithm::AesOffset,
+                Direction::Encrypt,
+                &original,
+                &key,
+                lba,
+                512,
+            )
+            .unwrap();
+            assert_eq!(
+                crate::sha256::sha256_hex(&encrypted),
+                expected_sha,
+                "Windows driver mode1 byte offset {}",
+                lba * 512
+            );
+            assert_eq!(
+                transform(
+                    Algorithm::AesOffset,
+                    Direction::Decrypt,
+                    &encrypted,
+                    &key,
+                    lba,
+                    512
+                )
+                .unwrap(),
+                original
+            );
+        }
+        let sm4_key = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54,
+            0x32, 0x10,
+        ];
+        let sm4_plain = (0..512).map(|i| (i * 7 + 89) as u8).collect::<Vec<u8>>();
+        let sm4_cipher = transform(
+            Algorithm::Sm4Ecb,
+            Direction::Encrypt,
+            &sm4_plain,
+            &sm4_key,
+            7,
+            512,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::sha256::sha256_hex(&sm4_cipher),
+            "12afec563ab2f58e81690eab87fc85fd99080662fd96da905ac6310cb15e88a6"
+        );
+        assert_eq!(
+            transform(
+                Algorithm::Sm4Ecb,
+                Direction::Decrypt,
+                &sm4_cipher,
+                &sm4_key,
+                0,
+                512
+            )
+            .unwrap(),
+            sm4_plain
+        );
+        let data = (0..4096).map(|i| (i * 37 + 13) as u8).collect::<Vec<u8>>();
+        for lba in [0, 1, 49_979_648] {
+            let cipher = transform(
+                Algorithm::AesCrossEcb,
+                Direction::Encrypt,
+                &data,
+                &key,
+                lba,
+                4096,
+            )
+            .unwrap();
+            assert_eq!(
+                crate::sha256::sha256_hex(&cipher),
+                "ddb4a6b19a1ccb322887daf997e776e98e90e158141182df47ca741e2d1cef5c"
+            );
+            assert_eq!(
+                transform(
+                    Algorithm::AesCrossEcb,
+                    Direction::Decrypt,
+                    &cipher,
+                    &key,
+                    lba,
+                    4096
+                )
+                .unwrap(),
+                data
+            );
+        }
+        for (raw, expected) in [
+            (1, Algorithm::AesOffset),
+            (2, Algorithm::Sm4Ecb),
+            (3, Algorithm::AesCrossEcb),
+        ] {
+            assert_eq!(Algorithm::from_encrypt_mode(raw).unwrap(), expected);
+        }
+        for raw in [0, 4, 255] {
+            assert!(Algorithm::from_encrypt_mode(raw).is_err());
+        }
+        for size in [0, 16, 511, 513, 1024, 2048, 4095, 8192] {
+            assert!(transform(
+                Algorithm::AesCrossEcb,
+                Direction::Encrypt,
+                &vec![0; size],
+                &key,
+                0,
+                size as u32
+            )
+            .is_err());
+        }
+        for lba in [u64::MAX, u64::MAX / 4096, u64::MAX / 4096 + 1] {
+            assert!(transform(
+                Algorithm::AesOffset,
+                Direction::Encrypt,
+                &data,
+                &key,
+                lba,
+                4096
+            )
+            .is_err());
+        }
+    }
+
+    fn hex_bytes_from_public_aes_vector_for_test() -> Vec<u8> {
+        vec![
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
+            0xee, 0xff,
+        ]
+    }
+
+    #[test]
+    fn mode3_native_read_only_matches_official_driver_4096_sha_golden() {
+        use crate::protocol::crypto::aes128_ecb_encrypt_block;
+        let key = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let source = (0..4096)
+            .map(|index| (index * 37 + 13) as u8)
+            .collect::<Vec<_>>();
+        let mut encrypted = Vec::with_capacity(4096);
+        for block in source.as_chunks::<16>().0 {
+            encrypted.extend_from_slice(&aes128_ecb_encrypt_block(block, &key));
+        }
+        // Produced independently by Unicorn executing official EdpEDisk64.sys
+        // mode3 encrypt @0x160E0, SHA-pinned to driver 724544a96f89... .
+        assert_eq!(
+            crate::sha256::sha256_hex(&encrypted),
+            "ddb4a6b19a1ccb322887daf997e776e98e90e158141182df47ca741e2d1cef5c"
+        );
+        assert_eq!(
+            super::decrypt_mode3_native(&encrypted, &key).unwrap(),
+            source
+        );
+        assert_eq!(
+            super::decrypt_mode3_native(&encrypted[..512], &key).unwrap(),
+            source[..512]
+        );
+        for len in [0, 1, 16, 511, 513, 1024, 4095, 4097] {
+            assert!(super::decrypt_mode3_native(&vec![0; len], &key).is_err());
+        }
     }
 
     #[test]

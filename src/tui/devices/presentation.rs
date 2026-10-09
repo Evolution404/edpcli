@@ -120,8 +120,9 @@ fn tail_detail_lines(
         ),
         field_line(
             "容量",
-            format_bytes(
-                (tail.end_exclusive - tail.start_lba).saturating_mul(crate::common::SECTOR as u64),
+            crate::tui::disk_layout::format_layout_capacity(
+                &model,
+                tail.end_exclusive - tail.start_lba,
             ),
         ),
         Line::from(""),
@@ -132,11 +133,7 @@ fn tail_detail_lines(
             "{}  {}  {}",
             crate::ui::pad_to(&child.label, 20),
             crate::ui::pad_to(&child.closed_range(), 24),
-            format_bytes(
-                child
-                    .sector_count
-                    .saturating_mul(crate::common::SECTOR as u64),
-            )
+            crate::tui::disk_layout::format_layout_capacity(&model, child.sector_count)
         )));
     }
     lines
@@ -179,11 +176,7 @@ fn segment_detail_lines(
         field_line("扇区数量", segment.sector_count.to_string()),
         field_line(
             "容量",
-            format_bytes(
-                segment
-                    .sector_count
-                    .saturating_mul(crate::common::SECTOR as u64),
-            ),
+            crate::tui::disk_layout::format_layout_capacity(&model, segment.sector_count),
         ),
         field_line(
             "占比",
@@ -243,11 +236,9 @@ fn disk_map_selection_card_lines(
                 active.label,
                 active.start_lba,
                 active.end_exclusive.saturating_sub(1),
-                format_bytes(
-                    active
-                        .end_exclusive
-                        .saturating_sub(active.start_lba)
-                        .saturating_mul(crate::common::SECTOR as u64)
+                crate::tui::disk_layout::format_layout_capacity(
+                    model,
+                    active.end_exclusive.saturating_sub(active.start_lba),
                 ),
                 percentage(
                     active.end_exclusive.saturating_sub(active.start_lba),
@@ -261,11 +252,7 @@ fn disk_map_selection_card_lines(
             "全盘布局",
             format!(
                 "{}  │  {} sectors  │  LBA 0..{}",
-                format_bytes(
-                    model
-                        .total_sectors
-                        .saturating_mul(crate::common::SECTOR as u64)
-                ),
+                crate::tui::disk_layout::format_layout_capacity(model, model.total_sectors),
                 model.total_sectors,
                 model.total_sectors.saturating_sub(1)
             ),

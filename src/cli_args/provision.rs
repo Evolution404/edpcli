@@ -530,6 +530,72 @@ fn parse_provision_opts(
     ))
 }
 
+/// A separate offline image grammar, intentionally disconnected from --disk,
+/// elevation and the old fixed-512B live-device preparation path.
+fn parse_native_image_opts(rest: &[String]) -> Result<Parsed, String> {
+    let mut out = None;
+    let mut total_sectors = None;
+    let mut sector_bytes = None;
+    let mut target = None;
+    let mut partitions = Vec::new();
+    let mut i = 0;
+    while i < rest.len() {
+        match flag_name(&rest[i]) {
+            "--out" => {
+                let value = take_value(rest, &mut i, "--out")?;
+                set_once(&mut out, value, "--out")?;
+            }
+            "--total-sectors" => {
+                let value = take_value(rest, &mut i, "--total-sectors")?;
+                set_once(
+                    &mut total_sectors,
+                    parse_positive_u64(&value, "--total-sectors")?,
+                    "--total-sectors",
+                )?;
+            }
+            "--sector-bytes" => {
+                let value = take_value(rest, &mut i, "--sector-bytes")?;
+                let bytes = value
+                    .parse::<u32>()
+                    .map_err(|_| "错误: --sector-bytes 必须是512或4096".to_string())?;
+                if !matches!(bytes, 512 | 4096) {
+                    return Err("错误: --sector-bytes 当前仅认证512和4096".into());
+                }
+                set_once(&mut sector_bytes, bytes, "--sector-bytes")?;
+            }
+            "--target" => {
+                let value = take_value(rest, &mut i, "--target")?;
+                if value != "plain" {
+                    return Err("错误: 离线原生镜像目前仅支持 --target plain".into());
+                }
+                set_once(&mut target, value, "--target")?;
+            }
+            "--partition" => {
+                let value = take_value(rest, &mut i, "--partition")?;
+                if partitions.len() >= crate::provision::MAX_PLAIN_PARTITIONS {
+                    return Err("错误: 普通MBR最多4个分区".into());
+                }
+                partitions.push(parse_plain_partition(&value)?);
+            }
+            other => {
+                return Err(format!(
+                    "错误: 离线原生镜像不接受参数{other}，尤其不允许--disk"
+                ))
+            }
+        }
+        i += 1;
+    }
+    if target.is_none() {
+        return Err("错误: 离线原生镜像必须使用 --target plain".into());
+    }
+    Ok(Parsed::Provision(ProvisionAction::NativeImage {
+        out: out.ok_or("错误: 缺少 --out FILE")?,
+        total_sectors: total_sectors.ok_or("错误: 缺少 --total-sectors N")?,
+        sector_bytes: sector_bytes.ok_or("错误: 缺少 --sector-bytes 512|4096")?,
+        partitions,
+    }))
+}
+
 pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
     if rest.iter().any(|a| a == "-h" || a == "--help") {
         return Ok(Parsed::Help {
@@ -540,6 +606,15 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
         return Err("错误: provision 需要动作 plan / image / write".into());
     };
     let tail = &rest[1..];
+    // Explicit native geometry opts choose the isolated offline-only image
+    // grammar; live USB plans and writes cannot consume these arguments.
+    if action == "image"
+        && tail
+            .iter()
+            .any(|v| matches!(flag_name(v), "--sector-bytes" | "--total-sectors"))
+    {
+        return parse_native_image_opts(tail);
+    }
     match action {
         "plan" | "image" | "write" => {
             let (opts, out, yes, backup_dir) = parse_provision_opts(tail, action)?;

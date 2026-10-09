@@ -353,7 +353,7 @@ dependencies = [
 
 [[package]]
 name = "edpcli"
-version = "2.6.0"
+version = "2.7.0-alpha.0"
 dependencies = [
  "crossterm",
  "encoding_rs",

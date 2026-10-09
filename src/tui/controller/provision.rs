@@ -19,10 +19,19 @@ fn activate_scheme(state: &mut AppState) -> ActionOutcome {
     let kind = state.provision_begin_selected();
     state.provision_enter_form_workspace();
     if kind == ProvisionKind::Plain || state.provision_source_is_plain() {
-        ActionOutcome::handled()
-    } else {
-        ActionOutcome::request(ActionRequest::ProvisionKeyProbe { disk })
+        return ActionOutcome::handled();
     }
+    // 512B and 4096B are both handled by the application-layer read-only
+    // verifier. Physical provisioning authorization is independent.
+    let native_bytes = state
+        .selected_device()
+        .and_then(|row| row.layout_geometry().ok())
+        .map(|geometry| geometry.logical_sector_bytes);
+    if !crate::tui::native_source_password_policy::supports_source_key_verification(native_bytes) {
+        state.set_warning_notice("当前来源逻辑扇区大小未经只读验证认证；不执行密码探测或制盘写入");
+        return ActionOutcome::handled();
+    }
+    ActionOutcome::request(ActionRequest::ProvisionKeyProbe { disk })
 }
 
 pub(super) fn dispatch_provision(

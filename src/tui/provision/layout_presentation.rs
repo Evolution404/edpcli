@@ -35,7 +35,10 @@ impl AppState {
         let Some(device) = self.selected_device() else {
             return vec![Detail::warning("未选择目标盘")];
         };
-        let total = device.size / crate::common::SECTOR as u64;
+        let total = device
+            .layout_geometry()
+            .map(|geometry| geometry.native_sector_count)
+            .unwrap_or_default();
         let model = self.provision_layout_model();
         let visible = match self.disk_layout_tail_expansion() {
             TailExpansion::Collapsed => model.collapsed_tail_model(),
@@ -72,7 +75,10 @@ impl AppState {
                 String,
             ),
         >::new();
-        let mut usable_summary = format!("整盘 {}", Self::format_sector_size(total));
+        let mut usable_summary = format!("整盘 {}", self.provision_display_capacity(total));
+        if model.total_sectors == 0 && total != 0 {
+            return vec![Detail::danger("当前来源几何未经认证，无法生成容量预览")];
+        }
 
         if self.provision.kind == ProvisionKind::Plain {
             let Ok(plan) = self.provision.plain_form.plan(total) else {
@@ -84,8 +90,8 @@ impl AppState {
             let free = plan.gaps.iter().map(|gap| gap.sector_count).sum::<u64>();
             usable_summary = format!(
                 "整盘 {} · 空闲 {}",
-                Self::format_sector_size(total),
-                Self::format_sector_size(free)
+                self.provision_display_capacity(total),
+                self.provision_display_capacity(free)
             );
             for part in &plan.partitions {
                 partition_status.insert(
@@ -120,7 +126,7 @@ impl AppState {
                 crate::provision::OFFICIAL_PARTITION_START_SECTOR,
                 resolved.usable_end_lba.saturating_sub(1),
                 if geometry_validation.is_ok() {
-                    format!("剩余 {}", Self::format_sector_size(unallocated))
+                    format!("剩余 {}", self.provision_display_capacity(unallocated))
                 } else {
                     "当前草稿有冲突".to_string()
                 }
@@ -184,6 +190,11 @@ impl AppState {
         }
 
         rows.push(Detail::muted(usable_summary));
+        if model.logical_sector_bytes == 4096 {
+            rows.push(Detail::warning(
+                "4Kn 原生布局 · 来源密码可独立只读验证 · 实体写盘仍禁用",
+            ));
+        }
         if let Some(note) = super::mode2_geometry_note::editor_note(self) {
             rows.push(Detail::accent(format!("说明  {note}")));
         }
@@ -241,7 +252,7 @@ impl AppState {
                 segment.kind,
                 index == selected,
                 segment.label.clone(),
-                Self::format_sector_size(segment.sector_count),
+                self.provision_display_capacity(segment.sector_count),
                 format!(
                     "LBA {}–{}",
                     segment.start_lba,
@@ -280,7 +291,7 @@ impl AppState {
                 "LBA {}–{} · {}",
                 segment.start_lba,
                 segment.end_exclusive().unwrap_or(segment.start_lba + 1) - 1,
-                Self::format_sector_size(segment.sector_count)
+                self.provision_display_capacity(segment.sector_count)
             )));
 
             if let (Some(role), Ok(Some((limit_role, current, max, ..)))) =
@@ -289,8 +300,8 @@ impl AppState {
                 if role == limit_role {
                     rows.push(Detail::muted(format!(
                         "当前容量 {} · 最大 {}",
-                        Self::format_sector_size(current),
-                        Self::format_sector_size(max)
+                        self.provision_display_capacity(current),
+                        self.provision_display_capacity(max)
                     )));
                 }
             }

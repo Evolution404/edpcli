@@ -9,6 +9,8 @@ mod key_domain;
 mod keys;
 mod layout;
 mod lce;
+mod native_geometry;
+mod native_lce_audit;
 mod partition_format;
 pub(crate) use partition_format::build_official_partition_filesystem_from_plain;
 mod partition_semantics;
@@ -33,7 +35,7 @@ pub use key_domain::{
 pub use keys::{
     default_file_key, default_file_key_checked, unwrap_file_key, unwrap_legacy_lba7_file_key,
     wrap_file_key, wrap_legacy_lba7_file_key, DefaultFileKeyError, ExistingFileKeyError,
-    FileKeyWrapMode, LegacyLba7KeyMaterial, ProvisionKeyMaterial,
+    FileKeyWrapMode, LegacyLba7KeyMaterial, OfficialLabelAlgorithm, ProvisionKeyMaterial,
 };
 pub use layout::{
     build_official_partition_layout, official_format_targets_with_filesystems,
@@ -44,6 +46,10 @@ pub use layout::{
     WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
+pub use native_geometry::{
+    NativeEdpExtent, NativeEdpLayoutPlan, NativeEdpPartition, NativeEdpWriteCapability,
+};
+pub use native_lce_audit::{audit_native_lce_against_legacy_producer, NativeLceProducerAudit};
 pub use partition_format::{build_official_partition_filesystem, PartitionFilesystemImage};
 pub use partition_semantics::{
     official_partition_semantics, physical_partition_encryption_semantics,
@@ -63,11 +69,11 @@ pub use region_mapping::{
 };
 pub use reprovision::{
     apply_target_geometry_overrides, apply_target_geometry_overrides_draft,
-    parse_existing_provision, pass_info_policy_from_sectors, plain_extent_preserve_candidate,
-    prefill_for_target_mode, rekey_existing_partition_image, validate_target_geometry,
-    CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind, ExistingPartition,
-    ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision, PlainSourceExtent,
-    ProvisionPrefill, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
+    parse_existing_provision, parse_existing_provision_native, pass_info_policy_from_sectors,
+    plain_extent_preserve_candidate, prefill_for_target_mode, rekey_existing_partition_image,
+    validate_target_geometry, CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind,
+    ExistingPartition, ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision,
+    PlainSourceExtent, ProvisionPrefill, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
     TargetGeometryOverrides, TargetPartitionGeometry, TargetPartitionPlan, TargetProvisionPlan,
 };
 pub use spec::{Lba8Identity, OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};

@@ -29,15 +29,19 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
         context
             .validate_lba(lba)
             .map_err(InspectError::out_of_range)?;
+        let native_bytes = reader.logical_sector_bytes() as usize;
         let raw = reader
-            .read_sector(lba)
-            .map_err(|error| InspectError::io(format!("读取 LBA{lba} 失败: {error}")))?;
-        if raw.len() != SECTOR {
+            .read_native_sector(lba)
+            .map_err(|error| InspectError::io(format!("读取原生 LBA{lba} 失败: {error}")))?;
+        if native_bytes < SECTOR || raw.len() != native_bytes {
             return Err(InspectError::io(format!(
-                "LBA{lba} 返回 {}B，预期 {SECTOR}B",
+                "LBA{lba} 返回 {}B，预期完整原生块 {native_bytes}B",
                 raw.len()
             )));
         }
+        // All existing protocol decoders are specified over the first 512B;
+        // keep remaining native bytes byte-for-byte opaque, including LBA11.
+        let protocol_raw = &raw[..SECTOR];
 
         let mut partition_boot = None;
         let mut partition_boot_issue = None;
@@ -46,8 +50,8 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
                 if partition_start == lba {
                     partition_boot = Some(raw.clone());
                 } else {
-                    match reader.read_sector(partition_start) {
-                        Ok(boot) if boot.len() == SECTOR => partition_boot = Some(boot),
+                    match reader.read_native_sector(partition_start) {
+                        Ok(boot) if boot.len() == native_bytes => partition_boot = Some(boot),
                         Ok(boot) => {
                             partition_boot_issue = Some(format!(
                                 "分区起始 LBA{} 只读取到 {}B",
@@ -78,18 +82,27 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
                 .map_err(|_| InspectError::out_of_range(format!("LBA{lba} 超出协议解析器范围")))?;
             Some(inspect::analyze_sector_with_context(
                 lba32,
-                &raw,
+                protocol_raw,
                 &meta,
                 Some(&context.protocol_image),
             ))
         } else if context.is_plain() && lba == 0 {
-            Some(inspect::analyze_mbr_sector(&raw))
+            Some(inspect::analyze_mbr_sector(protocol_raw))
         } else {
             None
         };
 
         let fields = match protocol_view.as_ref() {
-            Some(view) => materialize_protocol_fields(lba, &raw, &view.decoded, &view.fields)?,
+            Some(view) if native_bytes == SECTOR => {
+                materialize_protocol_fields(lba, protocol_raw, &view.decoded, &view.fields)?
+            }
+            Some(view) => materialize_protocol_fields_with_sector_bytes(
+                lba,
+                protocol_raw,
+                &view.decoded,
+                &view.fields,
+                native_bytes as u32,
+            )?,
             None => Vec::new(),
         };
         let mut item = AdvancedInspectItem {
@@ -121,6 +134,19 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
             meta_text: None,
         };
 
+        if native_bytes > SECTOR {
+            if protocol_view.is_some() {
+                item.notes.push(format!(
+                    "原生协议扇区 {native_bytes}B：前512B按已知协议处理，余下 {}B 未归属，原样保留",
+                    native_bytes - SECTOR,
+                ));
+            } else {
+                item.notes.push(format!(
+                    "原生数据扇区 {native_bytes}B：RAW完整保留，超出512B的 {}B 不被误判为协议尾部",
+                    native_bytes - SECTOR,
+                ));
+            }
+        }
         match request.mode {
             AdvancedInspectMode::Raw => {
                 if let Some(dir) = &export_dir {
@@ -139,11 +165,41 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
                                 .unwrap_or_else(|| "canonical protocol decoder unavailable".into()),
                         ))
                     }
+                } else if native_bytes > SECTOR {
+                    context
+                        .decode_native_mode3_with_boot(lba, &raw, partition_boot.as_deref())
+                        .map(|(decoded, method)| {
+                            (
+                                decoded,
+                                method,
+                                vec![crate::inspect_adapter::DecodeRange::new(0, native_bytes)],
+                            )
+                        })
+                        .map_err(InspectError::decode)
                 } else {
-                    decode_sector(&context, &meta, lba, &raw, partition_boot.as_deref())
+                    decode_sector(
+                        &context,
+                        &meta,
+                        lba,
+                        protocol_raw,
+                        partition_boot.as_deref(),
+                    )
                 };
                 match decoded {
-                    Ok((decoded, method, decode_ranges)) => {
+                    Ok((mut decoded, method, decode_ranges)) => {
+                        if native_bytes > SECTOR && decoded.len() == SECTOR {
+                            // Only the first 512B are owned by the protocol.
+                            // Native partition sectors instead must be fully
+                            // decoded or rejected, never half-decoded.
+                            if lba > u64::from(crate::common::METADATA_LAST_LBA) {
+                                return Err(InspectError::decode(
+                                    "原生分区只解码前512B，拒绝部分转换",
+                                ));
+                            }
+                            decoded.extend_from_slice(&raw[SECTOR..]);
+                        } else if decoded.len() != native_bytes {
+                            return Err(InspectError::decode("原生解码结果长度与逻辑扇区不符"));
+                        }
                         item.decoded_sha256 = Some(crate::sha256::sha256_hex(&decoded));
                         item.method = Some(method);
                         item.decode_ranges = decode_ranges;
@@ -169,7 +225,7 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
                     &context,
                     &meta,
                     lba,
-                    &raw,
+                    protocol_raw,
                     partition_boot.as_deref(),
                     partition_boot_issue.as_deref(),
                 )?;
@@ -210,16 +266,16 @@ pub(super) fn run_evidence_source(
 ) -> Result<AdvancedInspectWorkspace, InspectError> {
     let backup_manifest = evidence.backup_manifest().cloned().map(std::sync::Arc::new);
     let identity = evidence.identity().clone();
-    let mut meta = InspectMeta {
+    // Only source-observed/canonical identity may influence protocol decode,
+    // partition geometry, FileKeyCRC, or decrypted filesystem inference.
+    // A caller-supplied override is diagnostic text, not trusted evidence.
+    let meta = InspectMeta {
         device_id: identity.device_id,
         vid: identity.vid,
         pid: identity.pid,
         size_bytes: identity.size_bytes,
         onlyid: identity.onlyid,
     };
-    if let Some(device_id) = request.device_id_override.as_ref() {
-        meta.device_id = Some(device_id.clone());
-    }
     let provision_kind = identity.provision_kind;
     let (partition_table, partition_table_issue) = if provision_kind
         == Some(crate::provision::DiskProvisionKind::Plain)
@@ -245,16 +301,30 @@ pub(super) fn run_evidence_source(
     } else {
         (None, None)
     };
-    let context = crate::inspect_target::InspectDiskContext::new_with_partition_table(
-        evidence.protocol().to_vec(),
-        meta.device_id.clone(),
-        evidence.total_sectors(),
-        provision_kind,
-        partition_table,
-        partition_table_issue,
-    );
+    let logical_sector_bytes = evidence.logical_sector_bytes();
+    let context =
+        crate::inspect_target::InspectDiskContext::new_with_partition_table_and_sector_bytes(
+            evidence.protocol().to_vec(),
+            meta.device_id.clone(),
+            evidence.total_sectors(),
+            provision_kind,
+            partition_table,
+            partition_table_issue,
+            logical_sector_bytes,
+        );
     let source = evidence.source_label().to_string();
     let mut workspace = run_advanced_source(source, meta, context, request, &mut evidence)?;
+    if let Some(override_id) = &request.device_id_override {
+        if workspace.meta.device_id.as_deref() != Some(override_id.as_str()) {
+            for item in &mut workspace.items {
+                item.notes.push(
+                    "请求的device_id覆盖值仅用于诊断显示；协议解码、来源身份及FileKey验证仍使用已采集身份"
+                        .into(),
+                );
+            }
+        }
+        workspace.meta.device_id = Some(override_id.clone());
+    }
     workspace.backup_manifest = backup_manifest;
     Ok(workspace)
 }

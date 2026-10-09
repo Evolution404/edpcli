@@ -58,6 +58,13 @@ impl AppState {
                 }
                 true
             }
+            Some(ProvisionFieldId::EncryptionAlgorithm) => {
+                self.provision.form.encryption_algorithm =
+                    self.provision.form.encryption_algorithm.shift(false);
+                self.provision.form.algorithm_user_edited = true;
+                self.provision.message = None;
+                true
+            }
             Some(ProvisionFieldId::ForceChangePassword) => {
                 self.provision.form.force_change_password =
                     !self.provision.form.force_change_password;
@@ -179,6 +186,13 @@ impl AppState {
                         self.provision.message = Some(crate::tui::ui::UiMessage::error(message))
                     }
                 }
+                true
+            }
+            Some(ProvisionFieldId::EncryptionAlgorithm) => {
+                self.provision.form.encryption_algorithm =
+                    self.provision.form.encryption_algorithm.shift(reverse);
+                self.provision.form.algorithm_user_edited = true;
+                self.provision.message = None;
                 true
             }
             Some(ProvisionFieldId::Filesystem(role)) => {

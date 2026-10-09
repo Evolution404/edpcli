@@ -66,7 +66,7 @@ impl AppState {
             } else {
                 "▸ "
             };
-            let sector_start = lba.saturating_mul(crate::common::SECTOR as u64);
+            let sector_start = lba.saturating_mul(item.raw.len() as u64);
             let offset = field.range.start.saturating_sub(sector_start);
             projected.push(InspectDetailRow {
                 cells: [

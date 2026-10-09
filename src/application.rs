@@ -43,15 +43,16 @@ pub mod filesystem {
     pub use crate::filesystem::{
         analysis, build_empty_exfat, build_empty_fat16, build_empty_fat32, build_empty_filesystem,
         build_empty_filesystem_typed, default_registry, detect_boot_sector,
-        detect_boot_sector_with_geometry, estimate_format_resources, is_writable_filesystem,
-        registry, shift_writable_filesystem, validate_volume_label, validate_volume_label_typed,
-        validate_writable_filesystem, BootSectorReader, DetectedFilesystem, DetectionConfidence,
-        DetectionResult, DriverRegistry, ExFatDriver, Fat12Driver, Fat16Driver, Fat32Driver,
-        FilesystemCapabilities, FilesystemDriver, FilesystemError, FilesystemErrorKind,
-        FilesystemGeometry, FilesystemKind, FilesystemMetadata, FilesystemReader, FilesystemWrite,
-        FormatPlan, FormatRequest, FormatResourceBudget, FormatResourceEstimate,
-        FormatVerification, NtfsDriver, SparseFilesystemImage, EXFAT_DRIVER, FAT12_DRIVER,
-        FAT16_DRIVER, FAT32_DRIVER, NTFS_DRIVER, WRITABLE_FILESYSTEMS,
+        detect_boot_sector_with_geometry, detect_native_boot_sector, estimate_format_resources,
+        is_writable_filesystem, registry, shift_writable_filesystem, validate_volume_label,
+        validate_volume_label_typed, validate_writable_filesystem, BootSectorReader,
+        DetectedFilesystem, DetectionConfidence, DetectionResult, DriverRegistry, ExFatDriver,
+        Fat12Driver, Fat16Driver, Fat32Driver, FilesystemCapabilities, FilesystemDriver,
+        FilesystemError, FilesystemErrorKind, FilesystemGeometry, FilesystemKind,
+        FilesystemMetadata, FilesystemReader, FilesystemWrite, FormatPlan, FormatRequest,
+        FormatResourceBudget, FormatResourceEstimate, FormatVerification, NativeFilesystemWrite,
+        NativeFormatPlan, NativeVirtualDiskPlan, NtfsDriver, SparseFilesystemImage, EXFAT_DRIVER,
+        FAT12_DRIVER, FAT16_DRIVER, FAT32_DRIVER, NTFS_DRIVER, WRITABLE_FILESYSTEMS,
     };
 }
 
@@ -146,7 +147,15 @@ fn scan_dashboard_catalog(
         -> Result<Vec<crate::infrastructure::backup_store::catalog::BackupEntry>, String>,
 ) -> Vec<Row> {
     let devices = RefCell::new(diskio::ReadOnlyDiskPool::new(|disk| {
-        FileDev::open_rdonly(&raw_path(disk))
+        let path = raw_path(disk);
+        match crate::platform::system::device_geometry(runner, disk)
+            .and_then(|geometry| geometry.native_read_geometry().ok())
+        {
+            Some(geometry) if geometry.logical_sector_bytes > 512 => {
+                FileDev::open_rdonly_native(&path, geometry)
+            }
+            _ => FileDev::open_rdonly(&path),
+        }
     }));
     let read_disk = |disk: u32, lba: u32| -> io::Result<Vec<u8>> {
         devices.borrow_mut().read_sector(disk, lba)

@@ -138,6 +138,19 @@ pub(super) fn provision_confirmation_details(
         },
     );
 
+    if let Some(algorithm) = view.algorithm {
+        lines.push(confirmation_status_line(
+            "加密算法",
+            format!(
+                "{} · 密钥封装 EncryptMode={}（官方crypt={}）",
+                algorithm.name(),
+                algorithm.file_key_wrap_mode().raw(),
+                algorithm.request_crypt()
+            ),
+            secondary(),
+        ));
+    }
+
     lines.push(if filesystem_changes.is_empty() {
         confirmation_status_line("文件系统", "✓ 不新建/格式化".into(), success())
     } else {

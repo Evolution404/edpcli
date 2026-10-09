@@ -22,7 +22,7 @@ fn region_header() -> String {
     )
 }
 
-fn region_row(segment: &DiskLayoutSegment, total_sectors: u64) -> String {
+pub(super) fn region_row(segment: &DiskLayoutSegment, model: &DiskLayoutModel) -> String {
     format!(
         "{}  {}  {}  {}  {}  {}",
         crate::ui::pad_to(&segment.label, 16),
@@ -30,14 +30,10 @@ fn region_row(segment: &DiskLayoutSegment, total_sectors: u64) -> String {
         crate::ui::pad_to(&segment.closed_range(), 23),
         crate::ui::pad_to(&segment.sector_count.to_string(), 13),
         crate::ui::pad_to(
-            &crate::common::fmt_capacity(
-                segment
-                    .sector_count
-                    .saturating_mul(crate::common::SECTOR as u64),
-            ),
+            &crate::tui::disk_layout::format_layout_capacity(model, segment.sector_count),
             13,
         ),
-        percentage(segment.sector_count, total_sectors)
+        percentage(segment.sector_count, model.total_sectors)
     )
 }
 
@@ -49,13 +45,13 @@ pub(crate) fn region_row_height(width: u16) -> usize {
     }
 }
 
-fn compact_region_rows(
+pub(super) fn compact_region_rows(
     segment: &DiskLayoutSegment,
-    total: u64,
+    model: &DiskLayoutModel,
     width: u16,
     style: ratatui::style::Style,
 ) -> Vec<Line<'static>> {
-    let capacity = crate::common::fmt_capacity_sectors(segment.sector_count);
+    let capacity = crate::tui::disk_layout::format_layout_capacity(model, segment.sector_count);
     let name_width =
         usize::from(width).saturating_sub(crate::tui::table_layout::display_width(&capacity) + 2);
     let name = crate::tui::table_layout::truncate_cell(
@@ -69,7 +65,7 @@ fn compact_region_rows(
         format!(
             "扇区数 {} · {}",
             segment.sector_count,
-            percentage(segment.sector_count, total)
+            percentage(segment.sector_count, model.total_sectors)
         ),
     ]
     .into_iter()
@@ -89,7 +85,7 @@ pub(crate) fn disk_region_list_lines(model: &DiskLayoutModel) -> Vec<Line<'stati
     ];
     lines.extend(visible.segments.iter().map(|segment| {
         Line::from(Span::styled(
-            region_row(segment, model.total_sectors),
+            region_row(segment, model),
             theme.disk_region(segment.kind),
         ))
     }));
@@ -150,12 +146,9 @@ pub(crate) fn render_disk_region_list_body(
             selected.is_some_and(|selection| segment_matches_selection(segment, selection));
         let style = theme.apply_selection(theme.disk_region(segment.kind), active, focused);
         if row_height == 1 {
-            vec![Line::from(Span::styled(
-                region_row(segment, model.total_sectors),
-                style,
-            ))]
+            vec![Line::from(Span::styled(region_row(segment, model), style))]
         } else {
-            compact_region_rows(segment, model.total_sectors, area.width, style)
+            compact_region_rows(segment, model, area.width, style)
         }
     }));
     frame.render_widget(Paragraph::new(lines), area);

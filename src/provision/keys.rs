@@ -79,6 +79,77 @@ fn legacy_password_fold32(password: &[u8]) -> u32 {
     sum
 }
 
+/// Official label-tool algorithm combo. The crypt request byte differs
+/// from LBA12 EncryptMode: the producer maps UI choice to key wrapping mode.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum OfficialLabelAlgorithm {
+    #[default]
+    Sms4,
+    Aes,
+    AesCross,
+}
+
+impl OfficialLabelAlgorithm {
+    pub const ALL: [Self; 3] = [Self::Sms4, Self::Aes, Self::AesCross];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Sms4 => "SMS4",
+            Self::Aes => "AES",
+            Self::AesCross => "AES_CROSS",
+        }
+    }
+
+    pub const fn request_crypt(self) -> u8 {
+        match self {
+            Self::Sms4 => 0,
+            Self::Aes => 1,
+            Self::AesCross => 2,
+        }
+    }
+
+    pub const fn file_key_wrap_mode(self) -> FileKeyWrapMode {
+        match self {
+            Self::Sms4 => FileKeyWrapMode::Sm4,
+            Self::Aes => FileKeyWrapMode::A7f0,
+            Self::AesCross => FileKeyWrapMode::Aes128Ecb,
+        }
+    }
+
+    pub const fn from_file_key_wrap_mode(mode: FileKeyWrapMode) -> Self {
+        match mode {
+            FileKeyWrapMode::Sm4 => Self::Sms4,
+            FileKeyWrapMode::A7f0 => Self::Aes,
+            FileKeyWrapMode::Aes128Ecb => Self::AesCross,
+        }
+    }
+
+    pub fn shift(self, reverse: bool) -> Self {
+        let index = Self::ALL.iter().position(|choice| *choice == self).unwrap();
+        let next = if reverse {
+            (index + Self::ALL.len() - 1) % Self::ALL.len()
+        } else {
+            (index + 1) % Self::ALL.len()
+        };
+        Self::ALL[next]
+    }
+
+    /// Producer crypto selector is known but the physical sector writer is
+    /// certified for SMS4 only. Wrapped AES keys are not write certification.
+    pub fn validate_first_party_write(self) -> Result<(), String> {
+        if self == Self::Sms4 {
+            Ok(())
+        } else {
+            Err(format!(
+                "已选择官方加密算法 {}（crypt={} / EncryptMode={}），当前edpcli仅认证SMS4写入；该算法尚未完成实体扇区加密与回读验收，禁止静默回退SMS4",
+                self.name(),
+                self.request_crypt(),
+                self.file_key_wrap_mode().raw(),
+            ))
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum FileKeyWrapMode {
@@ -305,6 +376,41 @@ mod tests {
     }
 
     #[test]
+    fn official_label_tool_ui_crypto_maps_crypt_to_edpf_with_fail_closed_writer() {
+        let combos = [
+            (OfficialLabelAlgorithm::Sms4, "SMS4", 0, 2, true),
+            (OfficialLabelAlgorithm::Aes, "AES", 1, 1, false),
+            (OfficialLabelAlgorithm::AesCross, "AES_CROSS", 2, 3, false),
+        ];
+        assert_eq!(
+            OfficialLabelAlgorithm::default(),
+            OfficialLabelAlgorithm::Sms4
+        );
+        for (choice, label, crypt, wrap, available) in combos {
+            assert_eq!(choice.name(), label);
+            assert_eq!(choice.request_crypt(), crypt);
+            assert_eq!(choice.file_key_wrap_mode().raw(), wrap);
+            assert_eq!(choice.validate_first_party_write().is_ok(), available);
+        }
+        assert_eq!(
+            OfficialLabelAlgorithm::Sms4.shift(false),
+            OfficialLabelAlgorithm::Aes
+        );
+        assert_eq!(
+            OfficialLabelAlgorithm::Aes.shift(false),
+            OfficialLabelAlgorithm::AesCross
+        );
+        assert_eq!(
+            OfficialLabelAlgorithm::AesCross.shift(false),
+            OfficialLabelAlgorithm::Sms4
+        );
+        assert_eq!(
+            OfficialLabelAlgorithm::Sms4.shift(true),
+            OfficialLabelAlgorithm::AesCross
+        );
+    }
+
+    #[test]
     fn existing_file_key_verification_covers_all_wrap_modes_and_typed_failures() {
         let file_key = [0x42; 16];
         for mode in [
@@ -355,7 +461,7 @@ mod tests {
     }
 }
 
-/// Recover a mode2 file key from an LBA12 v0x0206 default-password entry.
+/// Recover a mode2/mode3 FileKey from an LBA12 v0x0206 default-password entry.
 /// The first-party default-password substitution and the entry's FileKeyCRC
 /// must both agree before the key can be used for partition-sector reads.
 pub fn default_file_key(image: &[u8], device_id: &str, index: usize) -> Result<[u8; 16], String> {
@@ -368,7 +474,7 @@ pub enum DefaultFileKeyError {
     DeviceIdMismatch,
     UnsupportedPassInfo,
     InvalidEntry(crate::protocol::types::ProtocolError),
-    NotEncryptedMode2,
+    UnsupportedDefaultEncryptedMode,
     NotDefaultPassword,
     FileKeyCrcMismatch,
 }
@@ -386,8 +492,8 @@ impl std::fmt::Display for DefaultFileKeyError {
                 formatter.write_str("default key unwrap supports PassInfo v0x0206 only")
             }
             Self::InvalidEntry(error) => error.fmt(formatter),
-            Self::NotEncryptedMode2 => {
-                formatter.write_str("default key unwrap requires an encrypted mode2 entry")
+            Self::UnsupportedDefaultEncryptedMode => {
+                formatter.write_str("default key unwrap requires an encrypted mode2/mode3 entry")
             }
             Self::NotDefaultPassword => {
                 formatter.write_str("partition does not advertise the default password")
@@ -428,9 +534,11 @@ pub fn default_file_key_checked(
         .and_then(|bytes| bytes.try_into().ok())
         .ok_or(DefaultFileKeyError::InvalidImageOrIndex)?;
     let entry = EdpfEntry96::parse(entry_bytes).map_err(DefaultFileKeyError::InvalidEntry)?;
-    if index >= entry.partition_count as usize || entry.need_encrypt == 0 || entry.encrypt_mode != 2
+    if index >= entry.partition_count as usize
+        || entry.need_encrypt == 0
+        || !matches!(entry.encrypt_mode, 2 | 3)
     {
-        return Err(DefaultFileKeyError::NotEncryptedMode2);
+        return Err(DefaultFileKeyError::UnsupportedDefaultEncryptedMode);
     }
     if entry.user_key_crc != crc32_bare(DEFAULT_KEY_DOMAIN_PASSWORD) {
         return Err(DefaultFileKeyError::NotDefaultPassword);
@@ -441,7 +549,14 @@ pub fn default_file_key_checked(
         0x54, 0x8b, 0x07, 0x2c, 0xba, 0x7f, 0x10, 0x4d, 0x88, 0xa4, 0x46, 0x55, 0x6c, 0xc3, 0xc4,
         0x32,
     ];
-    let key = sm4_decrypt_block(&entry.encrypted_file_key, &EFFECTIVE_MD5);
+    let key = match entry.encrypt_mode {
+        2 => sm4_decrypt_block(&entry.encrypted_file_key, &EFFECTIVE_MD5),
+        3 => crate::protocol::crypto::aes128_ecb_decrypt_block(
+            &entry.encrypted_file_key,
+            &EFFECTIVE_MD5,
+        ),
+        _ => unreachable!("validated mode2/mode3 above"),
+    };
     if crc32_bare(&key) != entry.file_key_crc {
         return Err(DefaultFileKeyError::FileKeyCrcMismatch);
     }

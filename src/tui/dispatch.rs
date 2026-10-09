@@ -279,6 +279,21 @@ pub(super) fn start_provision_source_password_verify(state: &mut AppState, tasks
         state.set_error_notice("目标 USB 已不存在，请返回设备页重新选择。");
         return;
     };
+    if !crate::tui::native_source_password_policy::supports_source_key_verification(
+        state
+            .selected_device()
+            .and_then(|row| row.layout_geometry().ok())
+            .map(|geometry| geometry.logical_sector_bytes),
+    ) {
+        if let Ok(Some((domain, _, revision))) = state.provision_source_password_verify_request() {
+            state.provision_finish_source_password_verify(
+                domain,
+                revision,
+                Err("来源逻辑扇区大小未经只读密码验证认证".into()),
+            );
+        }
+        return;
+    }
     match state.provision_source_password_verify_request() {
         Ok(Some((domain, password, revision))) => {
             if let Err(message) = tasks.request_source_password_verify_session(
@@ -305,6 +320,16 @@ pub(super) fn start_provision_plan(state: &mut AppState, tasks: &mut TaskHub) {
         state.set_error_notice("目标 USB 已不存在，请返回设备页重新选择。");
         return;
     };
+    // The physical writer and formatter have not passed native 4Kn write gates.
+    // Block every scheme including Plain before constructing any write request.
+    if state
+        .selected_device()
+        .and_then(|row| row.layout_geometry().ok())
+        .is_none_or(|geometry| geometry.logical_sector_bytes != 512)
+    {
+        state.set_warning_notice("当前逻辑扇区大小尚未认证写盘；只读查看布局，禁止创建制盘计划");
+        return;
+    }
     let request = if state.provision().kind == state::ProvisionKind::Plain {
         match state.provision_plain_plan() {
             Ok(plan) => crate::application::provision::ProvisionRequest::Plain(

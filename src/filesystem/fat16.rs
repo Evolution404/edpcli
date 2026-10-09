@@ -6,10 +6,12 @@ use super::{
     DetectionConfidence, DetectionResult, FilesystemCapabilities, FilesystemDriver,
     FilesystemError, FilesystemErrorKind, FilesystemGeometry, FilesystemKind, FilesystemMetadata,
     FilesystemReader, FilesystemWrite, FormatPlan, FormatRequest, FormatVerification,
+    NativeFilesystemWrite, NativeFormatPlan,
 };
 
 const SECTOR_SIZE: usize = 512;
 const ROOT_ENTRIES: u16 = 512;
+// Legacy 512B resource accounting; native writer derives this from BPB bytes/sector.
 const ROOT_SECTORS: u64 = 32;
 const RESERVED: u64 = 1;
 const COPIES: u64 = 2;
@@ -73,7 +75,7 @@ fn fat16_geometry(boot: &[u8; SECTOR_SIZE], partition_sectors: u64) -> Option<(u
     Some((total, root_start))
 }
 
-fn encode_label(label: Option<&str>) -> Result<[u8; 11], FilesystemError> {
+pub(super) fn encode_label(label: Option<&str>) -> Result<[u8; 11], FilesystemError> {
     let Some(label) = label else {
         return Ok(*b"NO NAME    ");
     };
@@ -108,7 +110,7 @@ fn encode_label(label: Option<&str>) -> Result<[u8; 11], FilesystemError> {
     Ok(out)
 }
 
-fn decode_label(raw: &[u8]) -> Result<Option<String>, FilesystemError> {
+pub(super) fn decode_label(raw: &[u8]) -> Result<Option<String>, FilesystemError> {
     if raw.len() != 11 {
         return Err(FilesystemError::for_filesystem(
             FilesystemKind::Fat16,
@@ -140,6 +142,134 @@ fn put_u16(dst: &mut [u8], offset: usize, value: u16) {
 
 fn put_u32(dst: &mut [u8], offset: usize, value: u32) {
     dst[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+}
+
+impl Fat16Driver {
+    /// Generate a full-native-block FAT16 metadata image for a virtual disk.
+    /// Does not enable 4Kn physical formatting or change the legacy 512B writer.
+    pub fn build_native_format_plan(
+        &self,
+        geometry: FilesystemGeometry,
+        request: &FormatRequest,
+    ) -> Result<NativeFormatPlan, FilesystemError> {
+        self.validate_format_request(request)?;
+        if !matches!(geometry.sector_size, 512 | 4096) || geometry.sector_count == 0 {
+            return Err(FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidGeometry,
+                "仅允许已认证的 512B/4096B FAT16 虚拟格式化几何",
+            ));
+        }
+        let sector_bytes = u64::from(geometry.sector_size);
+        let sector_len = geometry.sector_size as usize;
+        let total = u32::try_from(geometry.sector_count).map_err(|_| {
+            FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidGeometry,
+                "FAT16 分区扇区数超过 u32",
+            )
+        })?;
+        let hidden = u32::try_from(geometry.partition_offset).map_err(|_| {
+            FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidGeometry,
+                "FAT16 hidden sectors 超过 u32",
+            )
+        })?;
+        let volume_serial = request.volume_serial.ok_or_else(|| {
+            FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidMetadata,
+                "FAT16 格式化需要卷序列号",
+            )
+        })?;
+        let label = encode_label(request.volume_label.as_deref())?;
+        let (spc, fat_sectors) =
+            choose_format_geometry_for_sector_size(geometry.sector_count, geometry.sector_size)?;
+        let root_sectors = (u64::from(ROOT_ENTRIES) * 32).div_ceil(sector_bytes);
+        let root_start = RESERVED + COPIES * u64::from(fat_sectors);
+        let metadata_sectors = root_start.checked_add(root_sectors).ok_or_else(|| {
+            FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidGeometry,
+                "FAT16 元数据边界溢出",
+            )
+        })?;
+        if metadata_sectors > geometry.sector_count {
+            return Err(FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidGeometry,
+                "FAT16 元数据超过分区末尾",
+            ));
+        }
+        super::FormatResourceBudget::default().check(
+            super::FormatResourceEstimate::from_native_sectors(
+                metadata_sectors,
+                geometry.sector_size,
+            )?,
+        )?;
+
+        let mut boot = vec![0u8; sector_len];
+        boot[0..3].copy_from_slice(&[0xeb, 0x3c, 0x90]);
+        // Preserve first-party FAT16 OEM field in either geometry.
+        boot[3..11].copy_from_slice(b"MSDOS5.0");
+        put_u16(&mut boot, 11, geometry.sector_size as u16);
+        boot[13] = spc;
+        put_u16(&mut boot, 14, RESERVED as u16);
+        boot[16] = COPIES as u8;
+        put_u16(&mut boot, 17, ROOT_ENTRIES);
+        if total <= u16::MAX as u32 {
+            put_u16(&mut boot, 19, total as u16);
+        }
+        boot[21] = 0xf8;
+        put_u16(&mut boot, 22, fat_sectors);
+        put_u16(&mut boot, 24, 63);
+        put_u16(&mut boot, 26, 255);
+        put_u32(&mut boot, 28, hidden);
+        if total > u16::MAX as u32 {
+            put_u32(&mut boot, 32, total);
+        }
+        boot[36] = 0x80;
+        boot[38] = 0x29;
+        put_u32(&mut boot, 39, volume_serial);
+        boot[43..54].copy_from_slice(&label);
+        boot[54..62].copy_from_slice(b"FAT16   ");
+        boot[510..512].copy_from_slice(&[0x55, 0xaa]);
+
+        let mut sectors = BTreeMap::new();
+        sectors.insert(0, boot);
+        for copy in 0..COPIES {
+            for offset in 0..u64::from(fat_sectors) {
+                let mut fat = vec![0u8; sector_len];
+                if offset == 0 {
+                    fat[..4].copy_from_slice(&[0xf8, 0xff, 0xff, 0xff]);
+                }
+                sectors.insert(RESERVED + copy * u64::from(fat_sectors) + offset, fat);
+            }
+        }
+        let mut root = vec![0u8; sector_len];
+        if request.volume_label.is_some() {
+            root[..11].copy_from_slice(&label);
+            root[11] = 0x08;
+        }
+        sectors.insert(root_start, root);
+        for offset in 1..root_sectors {
+            sectors.insert(root_start + offset, vec![0u8; sector_len]);
+        }
+        Ok(NativeFormatPlan {
+            filesystem: self.kind(),
+            geometry,
+            writes: sectors
+                .into_iter()
+                .map(|(relative_lba, data)| NativeFilesystemWrite { relative_lba, data })
+                .collect(),
+            expected_metadata: FilesystemMetadata {
+                kind: self.kind(),
+                volume_label: decode_label(&label)?,
+                volume_serial: Some(volume_serial),
+            },
+        })
+    }
 }
 
 impl FilesystemDriver for Fat16Driver {
@@ -249,108 +379,38 @@ impl FilesystemDriver for Fat16Driver {
         geometry: FilesystemGeometry,
         request: &FormatRequest,
     ) -> Result<FormatPlan, FilesystemError> {
-        self.validate_format_request(request)?;
+        // Preserve the legacy 512-byte write contract and all existing callers.
+        // Native 4Kn plans are intentionally NOT routed to the physical writer.
         if geometry.sector_size != SECTOR_SIZE as u32 {
             return Err(FilesystemError::for_filesystem(
                 self.kind(),
                 FilesystemErrorKind::InvalidGeometry,
-                "FAT16 仅支持 512B 逻辑扇区",
+                "旧 FAT16 写入器仅支持 512B 逻辑扇区",
             ));
         }
-        let total = u32::try_from(geometry.sector_count).map_err(|_| {
-            FilesystemError::for_filesystem(
-                self.kind(),
-                FilesystemErrorKind::InvalidGeometry,
-                "FAT16 分区扇区数超过 u32",
-            )
-        })?;
-        let hidden = u32::try_from(geometry.partition_offset).map_err(|_| {
-            FilesystemError::for_filesystem(
-                self.kind(),
-                FilesystemErrorKind::InvalidGeometry,
-                "FAT16 hidden sectors 超过 u32",
-            )
-        })?;
-        let volume_serial = request.volume_serial.ok_or_else(|| {
-            FilesystemError::for_filesystem(
-                self.kind(),
-                FilesystemErrorKind::InvalidMetadata,
-                "FAT16 格式化需要卷序列号",
-            )
-        })?;
-        let label = encode_label(request.volume_label.as_deref())?;
-
-        let (spc, fat_sectors) = choose_format_geometry(geometry.sector_count)?;
-        super::FormatResourceBudget::default().check(super::estimate_format_resources(
-            self.kind(),
-            geometry.sector_count,
-        )?)?;
-        let root_start = RESERVED + COPIES * fat_sectors as u64;
-
-        let mut boot = [0u8; SECTOR_SIZE];
-        boot[0..3].copy_from_slice(&[0xeb, 0x3c, 0x90]);
-        // Match the observed first-party FAT compatibility media OEM field.
-        // Evidence: audit/protocol/lba7_compatibility/evidence/
-        // lba7_compat_fat16_zero8_closure_20260923.json.
-        boot[3..11].copy_from_slice(b"MSDOS5.0");
-        put_u16(&mut boot, 11, 512);
-        boot[13] = spc;
-        put_u16(&mut boot, 14, RESERVED as u16);
-        boot[16] = COPIES as u8;
-        put_u16(&mut boot, 17, ROOT_ENTRIES);
-        if total <= u16::MAX as u32 {
-            put_u16(&mut boot, 19, total as u16);
-        }
-        boot[21] = 0xf8;
-        put_u16(&mut boot, 22, fat_sectors);
-        put_u16(&mut boot, 24, 63);
-        put_u16(&mut boot, 26, 255);
-        put_u32(&mut boot, 28, hidden);
-        if total > u16::MAX as u32 {
-            put_u32(&mut boot, 32, total);
-        }
-        boot[36] = 0x80;
-        boot[38] = 0x29;
-        put_u32(&mut boot, 39, volume_serial);
-        boot[43..54].copy_from_slice(&label);
-        boot[54..62].copy_from_slice(b"FAT16   ");
-        boot[510..512].copy_from_slice(&[0x55, 0xaa]);
-
-        let mut sectors = BTreeMap::new();
-        sectors.insert(0, boot);
-        for copy in 0..COPIES {
-            for offset in 0..fat_sectors as u64 {
-                let mut fat = [0u8; SECTOR_SIZE];
-                if offset == 0 {
-                    fat[..4].copy_from_slice(&[0xf8, 0xff, 0xff, 0xff]);
-                }
-                sectors.insert(RESERVED + copy * fat_sectors as u64 + offset, fat);
-            }
-        }
-        let mut root = [0u8; SECTOR_SIZE];
-        if request.volume_label.is_some() {
-            root[..11].copy_from_slice(&label);
-            root[11] = 0x08;
-        }
-        sectors.insert(root_start, root);
-        for offset in 1..ROOT_SECTORS {
-            sectors.insert(root_start + offset, [0u8; SECTOR_SIZE]);
-        }
-
-        let expected_label = decode_label(&label)?;
-        let expected_metadata = FilesystemMetadata {
-            kind: self.kind(),
-            volume_label: expected_label,
-            volume_serial: Some(volume_serial),
-        };
+        let native = self.build_native_format_plan(geometry, request)?;
+        let writes = native
+            .writes
+            .into_iter()
+            .map(|write| {
+                let data = write.data.try_into().map_err(|_| {
+                    FilesystemError::for_filesystem(
+                        FilesystemKind::Fat16,
+                        FilesystemErrorKind::InvalidGeometry,
+                        "FAT16 512B 格式化块长度不一致",
+                    )
+                })?;
+                Ok(FilesystemWrite {
+                    relative_lba: write.relative_lba,
+                    data,
+                })
+            })
+            .collect::<Result<Vec<_>, FilesystemError>>()?;
         Ok(FormatPlan {
-            filesystem: self.kind(),
+            filesystem: native.filesystem,
             geometry,
-            writes: sectors
-                .into_iter()
-                .map(|(relative_lba, data)| FilesystemWrite { relative_lba, data })
-                .collect(),
-            expected_metadata,
+            writes,
+            expected_metadata: native.expected_metadata,
         })
     }
 
@@ -436,17 +496,26 @@ impl FilesystemDriver for Fat16Driver {
     }
 }
 
-fn choose_format_geometry(volume_sectors: u64) -> Result<(u8, u16), FilesystemError> {
+/// Shared FAT16 layout solver for 512B and 4Kn. Both paths use native LBAs.
+fn choose_format_geometry_for_sector_size(
+    volume_sectors: u64,
+    sector_bytes: u32,
+) -> Result<(u8, u16), FilesystemError> {
     let mut chosen = None;
+    let root_sectors = (u64::from(ROOT_ENTRIES) * 32).div_ceil(u64::from(sector_bytes));
     for spc in [1u64, 2, 4, 8, 16, 32, 64, 128] {
+        // FAT16 cluster size must remain representable by common OS readers.
+        if spc * u64::from(sector_bytes) > 65_536 {
+            break;
+        }
         let mut fat_sectors = 1u64;
         for _ in 0..16 {
-            let overhead = RESERVED + COPIES * fat_sectors + ROOT_SECTORS;
+            let overhead = RESERVED + COPIES * fat_sectors + root_sectors;
             if volume_sectors <= overhead {
                 break;
             }
             let clusters = (volume_sectors - overhead) / spc;
-            let next = ((clusters + 2) * 2).div_ceil(SECTOR_SIZE as u64);
+            let next = ((clusters + 2) * 2).div_ceil(u64::from(sector_bytes));
             if next == fat_sectors {
                 if (4_085..65_525).contains(&clusters) && fat_sectors <= u16::MAX as u64 {
                     chosen = Some((spc as u8, fat_sectors as u16));
@@ -467,6 +536,11 @@ fn choose_format_geometry(volume_sectors: u64) -> Result<(u8, u16), FilesystemEr
         )
     })
 }
+
+fn choose_format_geometry(volume_sectors: u64) -> Result<(u8, u16), FilesystemError> {
+    choose_format_geometry_for_sector_size(volume_sectors, SECTOR_SIZE as u32)
+}
+
 pub(super) fn format_sector_count(volume_sectors: u64) -> Result<u64, FilesystemError> {
     if volume_sectors > u32::MAX as u64 {
         return Err(FilesystemError::for_filesystem(

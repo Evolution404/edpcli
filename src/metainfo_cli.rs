@@ -184,7 +184,15 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
     }
 
     let path = raw_path(n);
-    let mut dev = match FileDev::open_rdonly(&path) {
+    let native_geometry = system::device_geometry(runner, n)
+        .and_then(|geometry| geometry.native_read_geometry().ok());
+    let opened = match native_geometry {
+        Some(geometry) if geometry.logical_sector_bytes > 512 => {
+            FileDev::open_rdonly_native(&path, geometry)
+        }
+        _ => FileDev::open_rdonly(&path),
+    };
+    let mut dev = match opened {
         Ok(dev) => dev,
         Err(e) => {
             eprintln!(
@@ -201,8 +209,12 @@ fn disk_flow(runner: &dyn CmdRunner, mut opts: InfoOpts) -> i32 {
         .and_then(|raw| identify(runner, n, raw).device_id);
     let device_id = opts.device_id.clone().or(auto_device_id);
     let (vid, pid) = system::usb_vid_pid(runner, n);
-    let total_sectors = system::disk_total_sectors(runner, n);
-    let size_bytes = total_sectors.and_then(|s| s.checked_mul(SECTOR as u64));
+    let total_sectors = native_geometry
+        .map(|geometry| geometry.native_sector_count)
+        .or_else(|| system::disk_total_sectors(runner, n));
+    let size_bytes = native_geometry
+        .map(|geometry| geometry.capacity_bytes)
+        .or_else(|| total_sectors.and_then(|s| s.checked_mul(SECTOR as u64)));
     let raw4 = reader.read_sector(4).ok();
     let onlyid = raw4
         .as_deref()

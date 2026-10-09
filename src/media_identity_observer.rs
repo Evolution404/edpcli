@@ -180,7 +180,10 @@ pub fn media_identity_from_protocol_image(
     let retained_raw_serial = (serial.quality != super::media_identity::SerialQuality::Missing)
         .then_some(raw_serial)
         .flatten();
-    let total_sectors = system::disk_total_sectors(runner, disk);
+    let total_sectors = system::device_geometry(runner, disk)
+        .and_then(|geometry| geometry.native_read_geometry().ok())
+        .map(|geometry| geometry.native_sector_count)
+        .or_else(|| system::disk_total_sectors(runner, disk));
     let hardware = HardwareIdentityEvidence {
         vid: probe.as_ref().and_then(|value| value.vid),
         pid: probe.as_ref().and_then(|value| value.pid),
@@ -223,7 +226,15 @@ pub fn media_identity_from_protocol_image(
     };
 
     let snapshot = if let Some(device_id) = identified.device_id {
-        let provision_kind = DiskProvisionKind::from_metadata(protocol_image, &device_id);
+        let native_size = system::device_geometry(runner, disk)
+            .and_then(|geometry| geometry.native_read_geometry().ok())
+            .map_or(SECTOR as u32, |geometry| geometry.logical_sector_bytes);
+        let provision_kind = DiskProvisionKind::from_sectors_with_logical_size(
+            &protocol_image[7 * SECTOR..8 * SECTOR],
+            &protocol_image[12 * SECTOR..13 * SECTOR],
+            &device_id,
+            native_size,
+        );
         MediaIdentitySnapshot {
             hardware,
             protocol: ProtocolIdentityEvidence {

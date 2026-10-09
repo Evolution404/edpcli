@@ -44,13 +44,19 @@ impl EdpfPartition {
             _ => "?",
         }
     }
-    pub fn end_lba(&self) -> u64 {
-        if self.size_bytes >= SECTOR as u64 {
-            self.start_lba
-                .saturating_add(self.size_bytes / SECTOR as u64 - 1)
+    /// An explicitly geometry-aware endpoint for read-only disk presentation.
+    pub fn end_lba_with_sector_bytes(&self, sector_bytes: u32) -> u64 {
+        let size = u64::from(sector_bytes);
+        if size > 0 && self.size_bytes >= size {
+            self.start_lba.saturating_add(self.size_bytes / size - 1)
         } else {
             self.start_lba
         }
+    }
+
+    /// Historical 512B compatibility path (kept for existing callers).
+    pub fn end_lba(&self) -> u64 {
+        self.end_lba_with_sector_bytes(SECTOR as u32)
     }
 }
 

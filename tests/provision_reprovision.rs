@@ -1,25 +1,49 @@
 use edpcli::{
     application::filesystem::FilesystemKind,
     platform::{HardwareProbe, InquiryInfo, NativeTransport},
-    protocol::crypto::{a6b0_full, crc32_bare, xor_rolling},
+    protocol::crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling},
     protocol::edpf::EdpPartitionType,
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
     provision::{
         apply_target_geometry_overrides, generate_official_image, parse_existing_provision,
-        prefill_for_target_mode, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
-        CapacityInputMode, CapacitySource, DiskProvisionKind, ExistingFileKeyError,
-        ExistingPartition, ExistingProvisionProfile, FileKeyWrapMode, KeyDomainRole,
-        KeyDomainSecretPair, KeyDomainSecrets, OfficialPartitionMode, OfficialPartitionSizes,
-        OfficialProvisionPlan, OnlyId, PartitionRole, PassInfoPolicy, PassthroughBasis,
-        PasswordDisposition, PlainSourceExtent, ProvisionEntropy, ProvisionMetadata,
-        ProvisionProfile, ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
-        SourcePasswordKnowledge, TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
-        OFFICIAL_PARTITION_START_SECTOR,
+        parse_existing_provision_native, prefill_for_target_mode, wrap_file_key,
+        wrap_legacy_lba7_file_key, CapacityInput, CapacityInputMode, CapacitySource,
+        DiskProvisionKind, ExistingFileKeyError, ExistingPartition, ExistingProvisionProfile,
+        FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
+        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId,
+        PartitionRole, PassInfoPolicy, PassthroughBasis, PasswordDisposition, PlainSourceExtent,
+        ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget,
+        QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge, TargetGeometryOverrides,
+        TargetIdentity, TargetProvisionPlan, OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
 const SECTOR_SIZE: u64 = 512;
 const MIB_SECTORS: u64 = 2048;
+
+/// Synthetic-only source reader. It never opens a physical disk or file.
+struct OfflineNativeFixtureReader {
+    sector_bytes: u32,
+    blocks: std::collections::BTreeMap<u64, Vec<u8>>,
+    calls: Vec<u64>,
+}
+impl edpcli::application::evidence::SectorReader for OfflineNativeFixtureReader {
+    fn read_sector(&mut self, lba: u64) -> std::io::Result<Vec<u8>> {
+        let bytes = self.blocks.get(&lba).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "missing synthetic sector")
+        })?;
+        Ok(bytes[..512].to_vec())
+    }
+    fn logical_sector_bytes(&self) -> u32 {
+        self.sector_bytes
+    }
+    fn read_native_sector(&mut self, lba: u64) -> std::io::Result<Vec<u8>> {
+        self.calls.push(lba);
+        self.blocks.get(&lba).cloned().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "missing synthetic sector")
+        })
+    }
+}
 
 // Geometry-only scenarios have no source key record. Use the same canonical
 // compatibility engine as production with both key profiles explicitly absent.
@@ -1882,4 +1906,622 @@ fn mode3_to_mode0_shrinks_share_only_when_new_encrypt_does_not_fit_in_gap() {
         source.partition(PartitionRole::Share),
         &targets[1]
     ));
+}
+
+/// Synthesized transform of the verified *512B* official generator, not a
+/// claim that any official Windows 4Kn producer generated these bytes.
+#[test]
+fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
+    use edpcli::protocol::image::NativeProtocolImage;
+
+    for mode in [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionMode::WholeDiskEncrypted,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ] {
+        let (_, image, did) = generated_source(mode);
+        let crc = crc32_bare(did.as_bytes());
+        let mut projection = image.as_bytes().to_vec();
+        let original_projection = projection.clone();
+        let start7 = 7 * 512;
+        let start12 = 12 * 512;
+        let mut plain7 = xor_rolling(
+            &projection[start7..start7 + 512],
+            (crc & 0xffff) ^ (crc >> 16),
+        );
+        let mut plain12 = a6b0_full(&projection[start12..start12 + 512], &crc.to_le_bytes(), 0);
+        let count = u32::from_le_bytes(plain12[8..12].try_into().unwrap()) as usize;
+        assert!(matches!(count, 2 | 3));
+        for index in 0..count {
+            let a = index * 0x40;
+            let b = index * 0x60;
+            // The protocol's physical-sector-width field changes from 512
+            // to 4096. The record layout itself stays exactly 512B.
+            plain7[a + 0x20..a + 0x28].copy_from_slice(&4096u64.to_le_bytes());
+            plain12[b + 0x20..b + 0x28].copy_from_slice(&4096u64.to_le_bytes());
+            let old = u64::from_le_bytes(plain12[b + 0x28..b + 0x30].try_into().unwrap());
+            let native_count = (old / 4096).max(1);
+            let new_bytes = native_count * 4096;
+            plain12[b + 0x28..b + 0x30].copy_from_slice(&new_bytes.to_le_bytes());
+            if index == 0 {
+                plain7[a + 0x28..a + 0x30].copy_from_slice(&new_bytes.to_le_bytes());
+            }
+        }
+        // The official producer retains LBA7 entry0's visible geometry,
+        // while every later LBA7 entry points to the same native LCE block.
+        // This is a synthetic 4Kn fixture, not a claimed manufacturer golden.
+        let source_lce_start = (0..count)
+            .map(|index| {
+                let base = index * 0x60;
+                let start =
+                    u64::from_le_bytes(plain12[base + 0x18..base + 0x20].try_into().unwrap());
+                let byte_len =
+                    u64::from_le_bytes(plain12[base + 0x28..base + 0x30].try_into().unwrap());
+                start + byte_len / 4096
+            })
+            .max()
+            .unwrap()
+            + 1;
+        assert!(source_lce_start + 1 < 16_777_216);
+        for index in 1..count {
+            let base = index * 0x40;
+            plain7[base + 0x18..base + 0x20].copy_from_slice(&source_lce_start.to_le_bytes());
+            plain7[base + 0x28..base + 0x30].copy_from_slice(&4096u64.to_le_bytes());
+        }
+        let first_native_bytes = u64::from_le_bytes(plain12[0x28..0x30].try_into().unwrap());
+        projection[458..462].copy_from_slice(&((first_native_bytes / 4096) as u32).to_le_bytes());
+        projection[start7..start7 + 512]
+            .copy_from_slice(&xor_rolling(&plain7, (crc & 0xffff) ^ (crc >> 16)));
+        projection[start12..start12 + 512].copy_from_slice(&a7f0_full(
+            &plain12,
+            &crc.to_le_bytes(),
+            0,
+        ));
+
+        // Create native-source complete blocks with nonzero opaque tails.
+        let mut native = NativeProtocolImage::from_protocol_zero_tailed(&projection, 4096).unwrap();
+        let mut raw = native.native_bytes().to_vec();
+        for lba in 0..13 {
+            raw[lba * 4096 + 512..(lba + 1) * 4096].fill(0xa0 + lba as u8);
+        }
+        native = NativeProtocolImage::from_native_bytes(4096, raw.clone()).unwrap();
+        let source = parse_existing_provision_native(&native, &did, 16_777_216)
+            .unwrap()
+            .unwrap();
+        assert_eq!(source.profile.source_mode, mode);
+        assert_eq!(source.total_sectors, 16_777_216);
+        // P25: bind all native EDPF partitions to independently confirmed
+        // geometry BEFORE staging a purely offline protocol/LCE replay.
+        // Synthetic 4Kn adapted from legacy official generator; not a new
+        // manufacturer's native writer golden.
+        let target_parts = source
+            .profile
+            .partitions
+            .iter()
+            .map(|part| {
+                let mut geometry = part.as_target();
+                geometry.filesystem = if part.role == PartitionRole::CompatibilityReserve {
+                    None
+                } else {
+                    Some(match part.role {
+                        PartitionRole::Boot => FilesystemKind::Fat16,
+                        PartitionRole::BootShareCombined => FilesystemKind::ExFat,
+                        PartitionRole::Share | PartitionRole::Encrypt => FilesystemKind::ExFat,
+                        PartitionRole::CompatibilityReserve => unreachable!(),
+                    })
+                };
+                geometry
+            })
+            .collect::<Vec<_>>();
+        let lce_start = target_parts
+            .iter()
+            .map(|part| part.start_lba + part.sector_count)
+            .max()
+            .unwrap()
+            + 1;
+        assert_eq!(lce_start, source_lce_start);
+        assert!(
+            lce_start + 1 < 16_777_216,
+            "synthetic source must have a free LCE block"
+        );
+        let native_layout = edpcli::provision::NativeEdpLayoutPlan::from_confirmed_geometry(
+            mode,
+            16_777_216,
+            4096,
+            &target_parts,
+            lce_start,
+            1,
+        )
+        .unwrap();
+        let source_lce = [vec![0x69; 4096]];
+        let staged = native_layout
+            .verified_source_replay_native_blocks(&native, &did, &source_lce)
+            .unwrap();
+
+        // Both the protocol and LCE must come from one native-sector reader:
+        // this prevents accidentally staging an unrelated same-size LCE
+        // supplied by a different source. No real device IO is involved.
+        let mut observed_lbas = Vec::new();
+        let from_one_source = native_layout
+            .verified_source_replay_from_reader(&did, |lba| {
+                observed_lbas.push(lba);
+                if lba < 13 {
+                    Ok(native.block(lba as usize).unwrap().to_vec())
+                } else if lba == lce_start {
+                    Ok(source_lce[0].clone())
+                } else {
+                    Err(format!("unrecognized synthetic source LBA{lba}"))
+                }
+            })
+            .unwrap();
+        assert_eq!(from_one_source, staged);
+
+        // Application evidence reader must use the same source for the
+        // original protocol and LCE and confirm the *entire native snapshot*.
+        let fixture_blocks = (0..13u64)
+            .map(|lba| (lba, native.block(lba as usize).unwrap().to_vec()))
+            .chain(std::iter::once((lce_start, source_lce[0].clone())))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut reader = OfflineNativeFixtureReader {
+            sector_bytes: 4096,
+            blocks: fixture_blocks,
+            calls: Vec::new(),
+        };
+        let verified = edpcli::application::evidence::verified_native_source_replay(
+            &mut reader,
+            &native_layout,
+            &native,
+            &did,
+            16_777_216,
+        )
+        .unwrap();
+        assert_eq!(verified, staged);
+        assert_eq!(reader.calls, observed_lbas);
+
+        // A stale capacity, incompatible reader geometry or untrusted DID
+        // must stop before the first source read.
+        for bad_capacity in [16_777_215, 16_777_217] {
+            reader.calls.clear();
+            assert!(
+                edpcli::application::evidence::verified_native_source_replay(
+                    &mut reader,
+                    &native_layout,
+                    &native,
+                    &did,
+                    bad_capacity,
+                )
+                .is_err()
+            );
+            assert!(reader.calls.is_empty());
+        }
+        reader.sector_bytes = 512;
+        assert!(
+            edpcli::application::evidence::verified_native_source_replay(
+                &mut reader,
+                &native_layout,
+                &native,
+                &did,
+                16_777_216,
+            )
+            .is_err()
+        );
+        assert!(reader.calls.is_empty());
+        reader.sector_bytes = 4096;
+        assert!(
+            edpcli::application::evidence::verified_native_source_replay(
+                &mut reader,
+                &native_layout,
+                &native,
+                "",
+                16_777_216,
+            )
+            .is_err()
+        );
+        assert!(reader.calls.is_empty());
+
+        // A changed native opaque tail fails even though the 512B protocol
+        // projection and all decoded partitions are still identical.
+        reader.blocks.get_mut(&7).unwrap()[4095] ^= 1;
+        assert!(
+            edpcli::application::evidence::verified_native_source_replay(
+                &mut reader,
+                &native_layout,
+                &native,
+                &did,
+                16_777_216,
+            )
+            .unwrap_err()
+            .contains("快照不一致")
+        );
+        assert!(!reader.calls.contains(&lce_start));
+        reader.blocks.get_mut(&7).unwrap()[4095] ^= 1;
+        reader.calls.clear();
+        assert!(
+            edpcli::application::evidence::verified_native_source_replay(
+                &mut reader,
+                &native_layout,
+                &native,
+                &did,
+                16_777_216,
+            )
+            .is_ok()
+        );
+
+        assert_eq!(
+            observed_lbas,
+            (0..13u64)
+                .chain(std::iter::once(lce_start))
+                .collect::<Vec<_>>()
+        );
+
+        // A non-matching source identity cannot trigger *any* reads.
+        let mut identity_reads = 0usize;
+        assert!(native_layout
+            .verified_source_replay_from_reader("", |_| {
+                identity_reads += 1;
+                Err("must never be called".into())
+            })
+            .is_err());
+        assert_eq!(identity_reads, 0);
+
+        // Truncated protocol evidence stops before LCE sampling.
+        let mut saw_lce = false;
+        assert!(native_layout
+            .verified_source_replay_from_reader(&did, |lba| {
+                if lba >= 13 {
+                    saw_lce = true;
+                    return Ok(source_lce[0].clone());
+                }
+                let mut sector = native.block(lba as usize).unwrap().to_vec();
+                if lba == 12 {
+                    sector.pop();
+                }
+                Ok(sector)
+            })
+            .is_err());
+        assert!(!saw_lce);
+
+        // Even a complete but invalid MBR must fail before asking for LCE.
+        let mut requested_lce = false;
+        assert!(native_layout
+            .verified_source_replay_from_reader(&did, |lba| {
+                if lba >= 13 {
+                    requested_lce = true;
+                    return Ok(source_lce[0].clone());
+                }
+                let mut sector = native.block(lba as usize).unwrap().to_vec();
+                if lba == 0 {
+                    sector[510] ^= 1;
+                }
+                Ok(sector)
+            })
+            .is_err());
+        assert!(!requested_lce);
+
+        // If the LCE is missing or truncated, refuse to produce a replay.
+        for unavailable in [true, false] {
+            assert!(native_layout
+                .verified_source_replay_from_reader(&did, |lba| {
+                    if lba < 13 {
+                        return Ok(native.block(lba as usize).unwrap().to_vec());
+                    }
+                    if unavailable {
+                        Err("synthetic LCE missing".into())
+                    } else {
+                        Ok(vec![0x69; 512])
+                    }
+                })
+                .is_err());
+        }
+        assert_eq!(staged.len(), 14);
+        assert_eq!(staged.last().unwrap().relative_lba, 0);
+        assert_eq!(staged.last().unwrap().data, raw[..4096]);
+        assert_eq!(staged[12].relative_lba, lce_start);
+        assert_eq!(staged[12].data, source_lce[0]);
+
+        // Readback is an unordered collection of complete native blocks, not
+        // just a successfully reparsed 512B EDPF projection. Compare opaque
+        // tails and the LCE's extra 1024B too, in all four partition modes.
+        let mut unordered = staged.clone();
+        unordered.reverse();
+        native_layout
+            .verify_source_replay_readback(&native, &did, &source_lce, &unordered)
+            .unwrap();
+        for (lba, byte_index) in [
+            (0, 0),
+            (7, 511),
+            (7, 512),
+            (7, 4095),
+            (lce_start, 3071),
+            (lce_start, 3072),
+            (lce_start, 4095),
+        ] {
+            let mut altered = unordered.clone();
+            let sector = altered
+                .iter_mut()
+                .find(|sector| sector.relative_lba == lba)
+                .unwrap();
+            sector.data[byte_index] ^= 1;
+            assert!(
+                native_layout
+                    .verify_source_replay_readback(&native, &did, &source_lce, &altered)
+                    .is_err(),
+                "altered native LBA{lba} byte{byte_index} must be rejected"
+            );
+        }
+        let mut missing = unordered.clone();
+        missing.pop();
+        assert!(native_layout
+            .verify_source_replay_readback(&native, &did, &source_lce, &missing)
+            .is_err());
+        let mut duplicate = unordered.clone();
+        duplicate[0] = duplicate[1].clone();
+        assert!(native_layout
+            .verify_source_replay_readback(&native, &did, &source_lce, &duplicate)
+            .is_err());
+        let mut wrong_lba = unordered.clone();
+        wrong_lba[0].relative_lba = 13;
+        assert!(native_layout
+            .verify_source_replay_readback(&native, &did, &source_lce, &wrong_lba)
+            .is_err());
+        let mut truncated = unordered.clone();
+        truncated[0].data.pop();
+        assert!(native_layout
+            .verify_source_replay_readback(&native, &did, &source_lce, &truncated)
+            .is_err());
+        assert!(native_layout
+            .verify_source_replay_readback(&native, "wrong_device_id", &source_lce, &staged)
+            .is_err());
+
+        for native_lba in 1..13usize {
+            assert_eq!(staged[native_lba - 1].relative_lba, native_lba as u64);
+            assert_eq!(
+                staged[native_lba - 1].data,
+                raw[native_lba * 4096..(native_lba + 1) * 4096]
+            );
+        }
+        assert!(!native_layout.may_write());
+        // Independently reconstruct all 13 native blocks from the staged
+        // virtual plan. This is consumer validation, never a device write.
+        let mut reconstructed = vec![0u8; 13 * 4096];
+        for block in &staged {
+            if block.relative_lba < 13 {
+                let offset = block.relative_lba as usize * 4096;
+                reconstructed[offset..offset + 4096].copy_from_slice(&block.data);
+            }
+        }
+        assert_eq!(reconstructed, raw, "including all opaque native tails");
+        let replayed_native =
+            edpcli::protocol::image::NativeProtocolImage::from_native_bytes(4096, reconstructed)
+                .unwrap();
+        let replayed = parse_existing_provision_native(&replayed_native, &did, 16_777_216)
+            .unwrap()
+            .unwrap();
+        assert_eq!(replayed.profile, source.profile);
+        assert_eq!(replayed.records, source.records);
+        assert_eq!(
+            replayed_native.protocol_projection(),
+            native.protocol_projection()
+        );
+        assert!(native_layout
+            .verified_source_replay_native_blocks(&native, "wrong_device_id", &source_lce,)
+            .is_err());
+        assert!(native_layout
+            .verified_source_replay_native_blocks(&native, "", &source_lce,)
+            .is_err());
+        assert!(native_layout
+            .verified_source_replay_native_blocks(&native, &did, &[vec![0; 512]],)
+            .is_err());
+
+        // A stale second partition is invisible to an MBR-only preflight.
+        // The strict EDPF+all-partitions entry must reject it.
+        let mut corrupted_plain12 = plain12.clone();
+        let second_size = 0x60 + 0x28;
+        let current_bytes = u64::from_le_bytes(
+            corrupted_plain12[second_size..second_size + 8]
+                .try_into()
+                .unwrap(),
+        );
+        assert!(current_bytes >= 2 * 4096);
+        corrupted_plain12[second_size..second_size + 8]
+            .copy_from_slice(&(current_bytes - 4096).to_le_bytes());
+        let mut stale_native = native.native_bytes().to_vec();
+        stale_native[12 * 4096..12 * 4096 + 512].copy_from_slice(&a7f0_full(
+            &corrupted_plain12,
+            &crc.to_le_bytes(),
+            0,
+        ));
+        let stale_native =
+            edpcli::protocol::image::NativeProtocolImage::from_native_bytes(4096, stale_native)
+                .unwrap();
+        assert!(
+            native_layout
+                .source_replay_native_blocks(&stale_native, &source_lce)
+                .is_ok(),
+            "legacy MBR-only preflight cannot see stale LBA12 secondary extent"
+        );
+        assert!(
+            native_layout
+                .verified_source_replay_native_blocks(&stale_native, &did, &source_lce,)
+                .is_err(),
+            "strict source replay must reject an unchanged MBR with a stale secondary extent"
+        );
+
+        // LBA7 pointers are authoritative for LCE. Altering one pointer
+        // or its byte length must fail strict source replay despite an
+        // unchanged MBR and unchanged LBA12 partition geometry.
+        for index in 1..count {
+            for corrupt_size in [false, true] {
+                let mut invalid_plain7 = plain7.clone();
+                let base = index * 0x40;
+                if corrupt_size {
+                    invalid_plain7[base + 0x28..base + 0x30]
+                        .copy_from_slice(&8192u64.to_le_bytes());
+                } else {
+                    invalid_plain7[base + 0x18..base + 0x20]
+                        .copy_from_slice(&(lce_start + 1).to_le_bytes());
+                }
+                let mut invalid_native = raw.clone();
+                invalid_native[7 * 4096..7 * 4096 + 512]
+                    .copy_from_slice(&xor_rolling(&invalid_plain7, (crc & 0xffff) ^ (crc >> 16)));
+                let invalid_native =
+                    NativeProtocolImage::from_native_bytes(4096, invalid_native).unwrap();
+                assert!(
+                    parse_existing_provision_native(&invalid_native, &did, 16_777_216)
+                        .unwrap()
+                        .is_some()
+                );
+                assert!(
+                    native_layout
+                        .source_replay_native_blocks(&invalid_native, &source_lce)
+                        .is_ok(),
+                    "old MBR-only replay cannot check LBA7 LCE pointers"
+                );
+                assert!(
+                    native_layout
+                        .verified_source_replay_native_blocks(&invalid_native, &did, &source_lce)
+                        .is_err(),
+                    "strict replay must reject incorrect LBA7 LCE pointer/length"
+                );
+            }
+        }
+        for record in &source.records {
+            assert_eq!(record.lba7.sector_size, 4096);
+            assert_eq!(record.lba12.sector_size, 4096);
+        }
+        for domain in [KeyDomainRole::Share, KeyDomainRole::Encrypt] {
+            let Some(record) = source.record_for_domain(domain) else {
+                continue;
+            };
+            assert_eq!(
+                record.verified_sm4_file_key(b"ProofPass1!").unwrap(),
+                [0x14; 16],
+                "{mode:?} {domain:?} genuine fixture key"
+            );
+            assert!(record.verified_sm4_file_key(b"IncorrectPass!").is_err());
+            assert!(record.verified_sm4_file_key(b"").is_err());
+        }
+        assert_eq!(native.native_bytes(), raw); // read-only never mutates
+        assert_ne!(
+            native.protocol_projection().as_slice(),
+            original_projection.as_slice()
+        );
+
+        let mut corrupt_mbr = raw.clone();
+        corrupt_mbr[458..462].copy_from_slice(&1u32.to_le_bytes());
+        let corrupt_mbr = NativeProtocolImage::from_native_bytes(4096, corrupt_mbr).unwrap();
+        assert!(parse_existing_provision_native(&corrupt_mbr, &did, 16_777_216).is_err());
+
+        let wrong_id = parse_existing_provision_native(&native, "bad_device_id", 16_777_216);
+        assert!(
+            !matches!(wrong_id, Ok(Some(_))),
+            "wrong source identity may not verify"
+        );
+        assert!(parse_existing_provision_native(&native, &did, 70).is_err());
+        let wrong_length =
+            NativeProtocolImage::from_native_bytes(4096, raw[..raw.len() - 1].to_vec());
+        assert!(wrong_length.is_err());
+        let mut corrupted = projection.clone();
+        corrupted[start12 + 4] ^= 1;
+        let corrupted = NativeProtocolImage::from_protocol_zero_tailed(&corrupted, 4096).unwrap();
+        assert!(!matches!(
+            parse_existing_provision_native(&corrupted, &did, 16_777_216),
+            Ok(Some(_))
+        ));
+        // A legacy 512B image must continue to be parsed under its own
+        // original 512B geometry (the new branch must not mutate the writer).
+        let original_source = parse_existing_provision(&image, &did, 16_777_216)
+            .unwrap()
+            .unwrap();
+        assert_eq!(original_source.profile.source_mode, mode);
+        let legacy_native =
+            NativeProtocolImage::from_native_bytes(512, original_projection).unwrap();
+        assert_eq!(
+            parse_existing_provision_native(&legacy_native, &did, 16_777_216)
+                .unwrap()
+                .unwrap()
+                .profile,
+            original_source.profile
+        );
+    }
+}
+
+/// The source profile was observed read-only on physical U391:
+/// 4096B logical sectors, mode0, encrypt_mode=3 on both encrypted entries.
+/// The material here is SYNTHETIC and deliberately contains no real keys.
+#[test]
+fn native_4kn_aes3_edpf_source_record_matches_real_u391_wrap_profile() {
+    use edpcli::protocol::image::NativeProtocolImage;
+    let (_, image, did) = generated_source(OfficialPartitionMode::DefaultThreePartition);
+    let crc = crc32_bare(did.as_bytes());
+    let mut projection = image.as_bytes().to_vec();
+    let mut decrypted7 = xor_rolling(&projection[7 * 512..8 * 512], (crc & 0xffff) ^ (crc >> 16));
+    let mut decrypted12 = a6b0_full(&projection[12 * 512..13 * 512], &crc.to_le_bytes(), 0);
+    assert_eq!(
+        u32::from_le_bytes(decrypted12[8..12].try_into().unwrap()),
+        3
+    );
+    for index in 0..3 {
+        let off7 = 0x40 * index;
+        let off12 = 0x60 * index;
+        decrypted7[off7 + 0x20..off7 + 0x28].copy_from_slice(&4096u64.to_le_bytes());
+        decrypted12[off12 + 0x20..off12 + 0x28].copy_from_slice(&4096u64.to_le_bytes());
+        let old_size =
+            u64::from_le_bytes(decrypted12[off12 + 0x28..off12 + 0x30].try_into().unwrap());
+        let native_bytes = (old_size / 4096).max(1) * 4096;
+        decrypted12[off12 + 0x28..off12 + 0x30].copy_from_slice(&native_bytes.to_le_bytes());
+        if index == 0 {
+            decrypted7[off7 + 0x28..off7 + 0x30].copy_from_slice(&native_bytes.to_le_bytes());
+            projection[458..462].copy_from_slice(&((native_bytes / 4096) as u32).to_le_bytes());
+        } else {
+            let key = wrap_file_key(
+                b"NativeAesFixturePass",
+                [0x27; 16],
+                FileKeyWrapMode::Aes128Ecb,
+            );
+            decrypted12[off12 + 0x30..off12 + 0x34]
+                .copy_from_slice(&key.user_key_crc.to_le_bytes());
+            decrypted12[off12 + 0x34..off12 + 0x38]
+                .copy_from_slice(&key.file_key_crc.to_le_bytes());
+            decrypted12[off12 + 0x38..off12 + 0x48].copy_from_slice(&key.wrapped_file_key);
+            decrypted12[off12 + 0x58] = 3;
+        }
+    }
+    projection[7 * 512..8 * 512]
+        .copy_from_slice(&xor_rolling(&decrypted7, (crc & 0xffff) ^ (crc >> 16)));
+    projection[12 * 512..13 * 512].copy_from_slice(&edpcli::protocol::crypto::a7f0_full(
+        &decrypted12,
+        &crc.to_le_bytes(),
+        0,
+    ));
+    let native = NativeProtocolImage::from_protocol_zero_tailed(&projection, 4096).unwrap();
+    let parsed = parse_existing_provision_native(&native, &did, 16_777_216)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        parsed.profile.source_mode,
+        OfficialPartitionMode::DefaultThreePartition
+    );
+    for domain in [KeyDomainRole::Share, KeyDomainRole::Encrypt] {
+        let record = parsed.record_for_domain(domain).unwrap();
+        assert_eq!(record.lba12.encrypt_mode, FileKeyWrapMode::Aes128Ecb.raw());
+        assert_eq!(record.lba12.sector_size, 4096);
+        assert_eq!(
+            record.verified_file_key(Some(b"NativeAesFixturePass")),
+            Ok([0x27; 16])
+        );
+        assert!(record.verified_file_key(Some(b"wrong password")).is_err());
+        assert!(record
+            .verified_sm4_file_key(b"NativeAesFixturePass")
+            .is_err());
+    }
+    assert_eq!(
+        native.protocol_projection().as_slice(),
+        projection.as_slice()
+    );
+    let mut corrupted = projection.clone();
+    corrupted[458..462].copy_from_slice(&1u32.to_le_bytes());
+    let corrupted = NativeProtocolImage::from_protocol_zero_tailed(&corrupted, 4096).unwrap();
+    assert!(parse_existing_provision_native(&corrupted, &did, 16_777_216).is_err());
 }

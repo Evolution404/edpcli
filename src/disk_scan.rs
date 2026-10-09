@@ -120,6 +120,37 @@ pub struct Row {
 }
 
 impl Row {
+    /// Single observed geometry used by capacity planning and TUI layout.
+    /// This is per-device, not a mutable process-global setting. Legacy
+    /// synthetic views without an observation retain their 512B fixtures.
+    pub fn layout_geometry(&self) -> Result<crate::domain::hardware::NativeReadGeometry, String> {
+        let logical = match self.identity_pin.as_ref() {
+            Some(pin) => pin
+                .snapshot
+                .hardware
+                .logical_sector_size
+                .ok_or("设备逻辑扇区大小尚未确认")?,
+            None => SECTOR as u32,
+        };
+        let native = crate::domain::hardware::ObservedDeviceGeometry {
+            capacity_bytes: self.size,
+            logical_sector_bytes: Some(logical),
+            physical_sector_bytes: None,
+        }
+        .native_read_geometry()
+        .map_err(str::to_string)?;
+        if let Some(expected) = self
+            .identity_pin
+            .as_ref()
+            .and_then(|pin| pin.snapshot.hardware.total_sectors)
+        {
+            if expected != native.native_sector_count {
+                return Err("身份快照中的原生扇区数量与介质容量不一致".into());
+            }
+        }
+        Ok(native)
+    }
+
     /// UI-only prefill from the scan cache. The physical preparation path reads
     /// and validates the source metadata again before allowing PreserveExact.
     pub fn confirmed_provision_kind(&self) -> Option<DiskProvisionKind> {
@@ -134,12 +165,14 @@ impl Row {
         if parts.len() != mode.partition_types().len() {
             return None;
         }
+        let geometry = self.layout_geometry().ok()?;
+        let sector_bytes = u64::from(geometry.logical_sector_bytes);
         let mut partitions = Vec::with_capacity(parts.len());
         for (index, part) in parts.iter().enumerate() {
             let partition_type = crate::protocol::edpf::EdpPartitionType::from_raw(part.ptype)?;
             if partition_type != mode.partition_types()[index]
                 || part.size_bytes == 0
-                || part.size_bytes % SECTOR as u64 != 0
+                || !part.size_bytes.is_multiple_of(sector_bytes)
             {
                 return None;
             }
@@ -149,7 +182,7 @@ impl Row {
                 role: semantics.role,
                 partition_type,
                 start_lba: part.start_lba,
-                sector_count: part.size_bytes / SECTOR as u64,
+                sector_count: part.size_bytes / sector_bytes,
                 physically_encrypted: semantics.physically_encrypted(),
                 filesystem: None,
             });
@@ -163,7 +196,8 @@ impl Row {
     pub fn canonical_layout(&self) -> Result<crate::disk_layout::DiskLayoutModel, String> {
         use crate::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
 
-        let total_sectors = self.size / SECTOR as u64;
+        let geometry = self.layout_geometry()?;
+        let total_sectors = geometry.native_sector_count;
         match self.confirmed_provision_kind() {
             Some(DiskProvisionKind::Plain) => {
                 let table = self.partition_table.as_ref().ok_or_else(|| {
@@ -171,7 +205,8 @@ impl Row {
                         .clone()
                         .unwrap_or_else(|| "普通盘分区表尚未完整读取".into())
                 })?;
-                DiskLayoutModel::canonical_plain(total_sectors, table)
+                DiskLayoutModel::canonical_plain(total_sectors, table)?
+                    .with_logical_sector_bytes(geometry.logical_sector_bytes)
             }
             Some(_) => {
                 let profile = self
@@ -191,11 +226,12 @@ impl Row {
                         kind: DiskRegionKind::from_partition_role(partition.role),
                     })
                     .collect();
-                DiskLayoutModel::canonical_edp(
+                DiskLayoutModel::canonical_edp_with_sector_bytes(
                     total_sectors,
                     partitions,
                     lce.start_lba,
                     lce.sector_count,
+                    geometry.logical_sector_bytes,
                 )
             }
             None => Err("介质类型尚未确认，无法建立可靠容量布局".into()),
@@ -310,7 +346,15 @@ pub fn scan_disks_with_catalog(
                         }
                     }
                     let lba12 = read_exact(12)?;
-                    if let Some(kind) = DiskProvisionKind::from_sectors(&lba7, &lba12, did) {
+                    let native_bytes = system::device_geometry(runner, d.n)
+                        .and_then(|geometry| geometry.native_read_geometry().ok())
+                        .map_or(SECTOR as u32, |geometry| geometry.logical_sector_bytes);
+                    if let Some(kind) = DiskProvisionKind::from_sectors_with_logical_size(
+                        &lba7,
+                        &lba12,
+                        did,
+                        native_bytes,
+                    ) {
                         row.provision_kind = kind;
                         row.partitions = parse_lba12(&lba12, did);
                         let lba6 = read_exact(6)?;
@@ -338,7 +382,11 @@ pub fn scan_disks_with_catalog(
                         &protocol_image,
                     )
                     .map_err(|error| io::Error::other(error.msg))?;
-                let total_sectors = d.size / SECTOR as u64;
+                let total_sectors = system::device_geometry(runner, d.n)
+                    .and_then(|geometry| geometry.native_read_geometry().ok())
+                    .map_or(d.size / SECTOR as u64, |geometry| {
+                        geometry.native_sector_count
+                    });
                 identity = crate::media_identity_observer::apply_runtime_plain_override(
                     identity,
                     &protocol_image,
@@ -367,12 +415,23 @@ pub fn scan_disks_with_catalog(
                 }
                 if identity.protocol.provision_kind != Some(DiskProvisionKind::Plain) {
                     if let Some(device_id) = identity.protocol.device_id.as_deref() {
-                        row.lce = crate::backup_metadata::parse_lba7_compatibility_geometry(
-                            &protocol_image,
-                            device_id,
-                            total_sectors,
-                        )
-                        .ok();
+                        // The identity snapshot is pinned only after the scan's
+                        // backup matching phase; use the SAME observed source
+                        // geometry here rather than a premature Row fallback.
+                        let observed = crate::domain::hardware::ObservedDeviceGeometry {
+                            capacity_bytes: row.size,
+                            logical_sector_bytes: identity.hardware.logical_sector_size,
+                            physical_sector_bytes: None,
+                        };
+                        row.lce = observed.native_read_geometry().ok().and_then(|geometry| {
+                            crate::domain::geometry::parse_lba7_compatibility_geometry_with_sector_bytes(
+                                &protocol_image,
+                                device_id,
+                                geometry.native_sector_count,
+                                geometry.logical_sector_bytes,
+                            )
+                            .ok()
+                        });
                     }
                 }
 

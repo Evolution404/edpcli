@@ -158,6 +158,12 @@ pub(super) fn commit_new_provision_with_progress(
         Option<diskio::TransactionActivity>,
     ),
 ) -> EdpCliResult<ProvisionCommitReport> {
+    // Defense in depth: even a mutated/restored prepared object cannot
+    // bypass the manufacturer crypto capability gate.
+    prepared
+        .algorithm
+        .validate_first_party_write()
+        .map_err(|message| err(EXIT_TARGET, format!("错误: {message}")))?;
     use crate::application::progress::{Phase, Step};
     let target_plan = prepared
         .target_plan

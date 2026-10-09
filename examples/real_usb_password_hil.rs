@@ -385,6 +385,7 @@ mod macos {
     ) -> ProvisionRequest {
         ProvisionRequest::Official(Box::new(OfficialProvisionRequest {
             target: ProvisionTarget::Official(OfficialPartitionMode::DefaultThreePartition),
+            algorithm: edpcli::provision::OfficialLabelAlgorithm::Sms4,
             boot_start_lba: Some(BOOT_START),
             share_start_lba: Some(SHARE_START),
             encrypt_start_lba: Some(ENCRYPT_START),

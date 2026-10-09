@@ -33,6 +33,104 @@ fn sector_reader_range_is_checked_and_lossless() {
 }
 
 #[test]
+fn native_sector_range_preserves_full_blocks_for_parameterized_geometry() {
+    struct NativeRangeReader {
+        width: u32,
+        sectors: Vec<Vec<u8>>,
+        reads: Vec<u64>,
+    }
+    impl SectorReader for NativeRangeReader {
+        fn logical_sector_bytes(&self) -> u32 {
+            self.width
+        }
+        fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+            Ok(self
+                .sectors
+                .get(lba as usize)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no sector"))?[..512]
+                .to_vec())
+        }
+        fn read_native_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+            self.reads.push(lba);
+            self.sectors
+                .get(lba as usize)
+                .cloned()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no sector"))
+        }
+    }
+
+    for width in [512u32, 1024, 2048, 4096, 8192] {
+        let mut reader = NativeRangeReader {
+            width,
+            sectors: (0..3)
+                .map(|index| vec![index + 13; width as usize])
+                .collect(),
+            reads: Vec::new(),
+        };
+        let native = reader.read_native_range(1, 2).unwrap();
+        assert_eq!(native.len(), 2 * width as usize);
+        assert_eq!(native[..width as usize], reader.sectors[1]);
+        assert_eq!(native[width as usize..], reader.sectors[2]);
+        assert_eq!(reader.reads, vec![1, 2]);
+        reader.reads.clear();
+        let legacy = reader.read_range(1, 2).unwrap();
+        assert_eq!(
+            legacy.len(),
+            1024,
+            "512B wire projection must stay independent"
+        );
+        assert_eq!(reader.reads, Vec::<u64>::new());
+
+        reader.sectors[2].pop();
+        let failure = reader.read_native_range(1, 2).unwrap_err();
+        assert_eq!(failure.kind(), io::ErrorKind::UnexpectedEof);
+        assert!(failure.to_string().contains("完整原生扇区"));
+    }
+
+    // The application reads the full 13-block native protocol envelope in
+    // one bounded operation, retaining every unknown byte past the 512B
+    // protocol projection. It must never accept a truncated final 4Kn block.
+    let mut reader = NativeRangeReader {
+        width: 4096,
+        sectors: (0..13).map(|lba| vec![lba + 1; 4096]).collect(),
+        reads: Vec::new(),
+    };
+    let protocol = reader
+        .read_native_range(0, crate::common::METADATA_SECTOR_COUNT)
+        .unwrap();
+    assert_eq!(protocol.len(), 13 * 4096);
+    assert_eq!(reader.reads, (0u64..13).collect::<Vec<_>>());
+    assert_eq!(&protocol[12 * 4096..], vec![13; 4096].as_slice());
+    reader.reads.clear();
+    reader.sectors[12].truncate(4095);
+    let error = reader
+        .read_native_range(0, crate::common::METADATA_SECTOR_COUNT)
+        .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+    assert_eq!(reader.reads, (0u64..13).collect::<Vec<_>>());
+    let mut reader = NativeRangeReader {
+        width: 4096,
+        sectors: vec![vec![0; 4096]],
+        reads: Vec::new(),
+    };
+    for (first, count) in [(u64::MAX, 2), (0, usize::MAX), (0, 2049)] {
+        assert_eq!(
+            reader.read_native_range(first, count).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert!(reader.reads.is_empty(), "invalid request must not read");
+    }
+    for invalid_width in [0u32, 256, 1000, 65_537] {
+        reader.width = invalid_width;
+        assert_eq!(
+            reader.read_native_range(0, 1).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert!(reader.reads.is_empty());
+    }
+}
+
+#[test]
 fn decoder_registry_fails_closed_outside_registered_regions() {
     let context = crate::inspect_target::InspectDiskContext::new_with_partition_table(
         vec![0; METADATA_IMAGE_LEN],
@@ -235,4 +333,220 @@ fn advanced_mode_cycles_without_hidden_state() {
         AdvancedInspectMode::Meta.previous(),
         AdvancedInspectMode::Decode
     );
+}
+
+#[test]
+fn native_four_kn_aes_cross_inspect_end_to_end_never_reads_or_decodes_partial_sector() {
+    use crate::protocol::crypto::{a6b0_full, a7f0_full, aes128_ecb_encrypt_block, crc32_bare};
+    use crate::provision::{default_file_key, wrap_file_key, FileKeyWrapMode};
+
+    const DEVICE_ID: &str = "disk&ven_lexar&prod_usb_flash_drive";
+    const IMAGE: &[u8; METADATA_IMAGE_LEN] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/protocol/disk4_243625984_vid21c4_pid0cd1_disk&ven_lexar&prod_usb_flash_drive_onlyid3164177653_20260827_221910.bin"
+    ));
+
+    struct NativeReader {
+        start: u64,
+        encrypted_boot: Vec<u8>,
+        encrypted_data: Vec<u8>,
+        reads: Vec<u64>,
+    }
+    impl SectorReader for NativeReader {
+        fn logical_sector_bytes(&self) -> u32 {
+            4096
+        }
+        fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+            self.read_native_sector(lba)
+                .map(|sector| sector[..SECTOR].to_vec())
+        }
+        fn read_native_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+            self.reads.push(lba);
+            match lba.checked_sub(self.start) {
+                Some(0) => Ok(self.encrypted_boot.clone()),
+                Some(1) => Ok(self.encrypted_data.clone()),
+                _ => Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "only two synthetic native sectors",
+                )),
+            }
+        }
+    }
+
+    let mut image = IMAGE.to_vec();
+    let mut context = crate::inspect_target::InspectDiskContext::new(
+        image.clone(),
+        Some(DEVICE_ID.into()),
+        243_625_984,
+    );
+    let index = context
+        .partitions
+        .iter()
+        .position(|p| p.partition_type == 4)
+        .unwrap();
+    let part = context.partitions[index].clone();
+    let key = default_file_key(&image, DEVICE_ID, part.index).unwrap();
+    let wrap = wrap_file_key(b"0000aaaa", key, FileKeyWrapMode::Aes128Ecb);
+    let crc = crc32_bare(DEVICE_ID.as_bytes());
+    let mut decoded_metadata = a6b0_full(&image[12 * SECTOR..13 * SECTOR], &crc.to_le_bytes(), 0);
+    decoded_metadata[part.index * 0x60 + 0x30..part.index * 0x60 + 0x48]
+        .copy_from_slice(&wrap.packed24());
+    decoded_metadata[part.index * 0x60 + 0x58] = 3;
+    image[12 * SECTOR..13 * SECTOR].copy_from_slice(&a7f0_full(
+        &decoded_metadata,
+        &crc.to_le_bytes(),
+        0,
+    ));
+    context.protocol_image = image;
+    context.partitions[index].encrypt_mode = 3;
+    context.logical_sector_bytes = 4096;
+
+    let mut boot = vec![0u8; 4096];
+    boot[0..3].copy_from_slice(&[0xeb, 0x76, 0x90]);
+    boot[3..11].copy_from_slice(b"EXFAT   ");
+    boot[64..72].copy_from_slice(&part.start_sector.to_le_bytes());
+    boot[72..80].copy_from_slice(&part.sector_count.to_le_bytes());
+    boot[80..84].copy_from_slice(&24u32.to_le_bytes());
+    boot[84..88].copy_from_slice(&1024u32.to_le_bytes());
+    boot[88..92].copy_from_slice(&1048u32.to_le_bytes());
+    let clusters = ((part.sector_count - 1048) / 8) as u32;
+    boot[92..96].copy_from_slice(&clusters.to_le_bytes());
+    boot[96..100].copy_from_slice(&2u32.to_le_bytes());
+    boot[108..111].copy_from_slice(&[12, 3, 1]);
+    boot[112] = 0xff;
+    boot[510..512].copy_from_slice(&[0x55, 0xaa]);
+    let second = (0..4096).map(|v| (v * 37 + 13) as u8).collect::<Vec<_>>();
+    let encrypt = |plain: &[u8]| {
+        plain
+            .as_chunks::<16>()
+            .0
+            .iter()
+            .flat_map(|block| aes128_ecb_encrypt_block(block, &key))
+            .collect::<Vec<_>>()
+    };
+    let encrypted_boot = encrypt(&boot);
+    let encrypted_data = encrypt(&second);
+
+    let mut reader = NativeReader {
+        start: part.start_sector,
+        encrypted_boot,
+        encrypted_data,
+        reads: Vec::new(),
+    };
+    let request = AdvancedInspectRequest {
+        mode: AdvancedInspectMode::Decode,
+        lbas: vec![part.start_sector, part.start_sector + 1],
+        export_dir: None,
+        device_id_override: None,
+        fail_soft_decode: false,
+    };
+    let result = run_advanced_source(
+        "isolated-4kn-mode3".into(),
+        InspectMeta::default(),
+        context.clone(),
+        &request,
+        &mut reader,
+    )
+    .unwrap();
+    assert_eq!(
+        reader.reads,
+        vec![part.start_sector, part.start_sector + 1, part.start_sector]
+    );
+    assert_eq!(result.items.len(), 2);
+    assert_eq!(result.items[0].decoded.as_deref(), Some(boot.as_slice()));
+    assert_eq!(result.items[1].decoded.as_deref(), Some(second.as_slice()));
+    assert_eq!(
+        result.items[1].decoded_sha256.as_deref(),
+        Some(crate::sha256::sha256_hex(&second).as_str())
+    );
+    assert!(result.items.iter().all(|item| {
+        item.decode_ranges
+            .iter()
+            .any(|range| range.start == 0 && range.end == 4096)
+    }));
+
+    let mut no_key_context = context;
+    no_key_context.device_id = None;
+    let mut fail_soft_reader = reader;
+    let fail_soft_request = AdvancedInspectRequest {
+        fail_soft_decode: true,
+        lbas: vec![part.start_sector],
+        ..request
+    };
+    let result = run_advanced_source(
+        "isolated-4kn-no-key".into(),
+        InspectMeta::default(),
+        no_key_context,
+        &fail_soft_request,
+        &mut fail_soft_reader,
+    )
+    .unwrap();
+    assert!(result.items[0].decoded.is_none());
+    assert!(result.items[0]
+        .decode_error
+        .as_deref()
+        .is_some_and(|error| error.contains("device_id")));
+}
+
+#[test]
+fn native_4kn_raw_inspect_preserves_unowned_tail_and_rejects_unknown_decode() {
+    struct NativeReader(Vec<u8>);
+    impl SectorReader for NativeReader {
+        fn logical_sector_bytes(&self) -> u32 {
+            4096
+        }
+        fn read_sector(&mut self, _lba: u64) -> io::Result<Vec<u8>> {
+            Ok(self.0[..SECTOR].to_vec())
+        }
+        fn read_native_sector(&mut self, _lba: u64) -> io::Result<Vec<u8>> {
+            Ok(self.0.clone())
+        }
+    }
+    let mut full = vec![0u8; 4096];
+    full[..4].copy_from_slice(b"DRKB");
+    full[SECTOR..].fill(0xa7);
+    let context =
+        crate::inspect_target::InspectDiskContext::new_with_partition_table_and_sector_bytes(
+            vec![0; METADATA_IMAGE_LEN],
+            None,
+            100,
+            None,
+            None,
+            None,
+            4096,
+        );
+    let request = AdvancedInspectRequest {
+        mode: AdvancedInspectMode::Raw,
+        lbas: vec![11],
+        export_dir: None,
+        device_id_override: None,
+        fail_soft_decode: false,
+    };
+    let workspace = run_advanced_source(
+        "virtual-4kn".into(),
+        InspectMeta::default(),
+        context.clone(),
+        &request,
+        &mut NativeReader(full.clone()),
+    )
+    .expect("native block read");
+    let item = &workspace.items[0];
+    assert_eq!(item.raw, full);
+    assert_eq!(item.raw_nonzero, 4 + 3584);
+    assert_eq!(item.raw_sha256, crate::sha256::sha256_hex(&full));
+    assert!(item.notes.iter().any(|note| note.contains("3584B")));
+    let decode = AdvancedInspectRequest {
+        mode: AdvancedInspectMode::Decode,
+        ..request
+    };
+    let error = run_advanced_source(
+        "virtual-4kn".into(),
+        InspectMeta::default(),
+        context,
+        &decode,
+        &mut NativeReader(full),
+    )
+    .expect_err("unknown 4kn region must fail closed");
+    assert_eq!(error.kind(), InspectErrorKind::Decode);
+    assert!(error.message().contains("4Kn"));
 }

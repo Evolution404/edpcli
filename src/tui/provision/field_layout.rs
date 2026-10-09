@@ -94,6 +94,9 @@ impl AppState {
             ProvisionFieldId::SourcePassword(_) => {
                 Some("修改原密码后，Enter / Esc 结束输入会自动只读验证".into())
             }
+            ProvisionFieldId::EncryptionAlgorithm => Some(
+                "Space / 左右切换：SMS4 / AES / AES_CROSS；官方请求值0/1/2映射密钥封装模式2/1/3。当前仅SMS4通过实体写入认证，选择另外两项会拦截提交".into(),
+            ),
             ProvisionFieldId::TargetPassword(_) if !descriptor.capabilities.toggle => {
                 Some("输入新密码，用于初始化该密码域".into())
             }
@@ -140,6 +143,71 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encryption_algorithm_is_one_global_official_form_option_for_all_modes() {
+        use crate::provision::OfficialLabelAlgorithm;
+        for kind in ProvisionKind::ALL {
+            let mut state = AppState::new();
+            state.provision_mut().kind = kind;
+            let fields = state.provision_visible_fields();
+            let descriptor_positions: Vec<_> = (0..fields.len())
+                .filter(|index| {
+                    state.provision_field_id(*index) == Some(ProvisionFieldId::EncryptionAlgorithm)
+                })
+                .collect();
+            if kind == ProvisionKind::Plain {
+                assert!(descriptor_positions.is_empty());
+                continue;
+            }
+            assert_eq!(descriptor_positions.len(), 1, "{kind:?}");
+            let index = descriptor_positions[0];
+            assert_eq!(fields[index].0, "加密算法");
+            assert_eq!(fields[index].1, "SMS4");
+            let descriptor = state.provision_field_descriptor(index).unwrap();
+            assert_eq!(descriptor.section, ProvisionFieldSection::PasswordDomain);
+            assert!(descriptor.capabilities.toggle);
+            assert!(!descriptor.capabilities.editable);
+            assert!(!descriptor.capabilities.secret);
+
+            state.provision_mut().field_selected = index;
+            assert!(state.provision_toggle_selected_option());
+            assert_eq!(
+                state.provision().form.encryption_algorithm,
+                OfficialLabelAlgorithm::Aes
+            );
+            assert_eq!(state.provision_visible_fields()[index].1, "AES");
+            let error = state.provision_request().unwrap_err();
+            assert!(error.contains("禁止静默回退SMS4"), "{error}");
+            assert!(error.contains("EncryptMode=1"), "{error}");
+
+            assert!(state.provision_shift_selected_option(false));
+            assert_eq!(
+                state.provision().form.encryption_algorithm,
+                OfficialLabelAlgorithm::AesCross
+            );
+            assert_eq!(state.provision_visible_fields()[index].1, "AES_CROSS");
+            let error = state.provision_request().unwrap_err();
+            assert!(error.contains("EncryptMode=3"), "{error}");
+
+            assert!(state.provision_shift_selected_option(false));
+            assert_eq!(
+                state.provision().form.encryption_algorithm,
+                OfficialLabelAlgorithm::Sms4
+            );
+            assert!(state.provision_shift_selected_option(true));
+            assert_eq!(
+                state.provision().form.encryption_algorithm,
+                OfficialLabelAlgorithm::AesCross
+            );
+
+            state.provision_initialize_password_candidates(kind);
+            assert_eq!(
+                state.provision().form.encryption_algorithm,
+                OfficialLabelAlgorithm::Sms4
+            );
+        }
+    }
 
     #[test]
     fn provision_form_sections_are_compact_and_user_facing() {

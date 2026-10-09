@@ -8,6 +8,9 @@ pub const PROFILE: &str = env!("EDPCLI_BUILD_PROFILE");
 pub const BUILD_TIMESTAMP: &str = env!("EDPCLI_BUILD_TIMESTAMP");
 pub const GIT_COMMIT: &str = env!("EDPCLI_BUILD_GIT");
 pub const RUSTC: &str = env!("EDPCLI_BUILD_RUSTC");
+pub const CHANNEL: &str = env!("EDPCLI_BUILD_CHANNEL");
+pub const BRANCH: &str = env!("EDPCLI_BUILD_BRANCH");
+pub const DIRTY: &str = env!("EDPCLI_BUILD_DIRTY");
 
 pub fn display_arch() -> &'static str {
     match TARGET_ARCH {
@@ -47,17 +50,20 @@ pub fn local_build_timestamp() -> String {
 
 pub fn detailed() -> String {
     format!(
-        "edpcli {VERSION}\n\
+        "edpcli {VERSION} [{CHANNEL}]\n\
 平台: {}\n\
 架构: {} ({TARGET_ARCH})\n\
 目标: {TARGET}\n\
 构建时间: {}\n\
+分支: {BRANCH}\n\
 Git: {GIT_COMMIT}\n\
+工作树: {}\n\
 Rust: {RUSTC}\n\
 构建类型: {PROFILE}",
         display_os(),
         display_arch(),
-        local_build_timestamp()
+        local_build_timestamp(),
+        if DIRTY == "true" { "modified" } else { "clean" }
     )
 }
 
@@ -68,12 +74,14 @@ mod tests {
     #[test]
     fn detailed_version_contains_release_diagnostics() {
         let text = detailed();
-        assert!(text.starts_with(&format!("edpcli {VERSION}\n")));
+        assert!(text.starts_with(&format!("edpcli {VERSION} [{CHANNEL}]\n")));
         for field in [
             "平台:",
             "架构:",
             "目标:",
             "构建时间:",
+            "分支:",
+            "工作树:",
             "Git:",
             "Rust:",
             "构建类型:",
@@ -83,5 +91,8 @@ mod tests {
         assert!(text.contains(&format!("构建时间: {}", local_build_timestamp())));
         assert!(BUILD_TIMESTAMP.ends_with('Z'));
         assert!(!GIT_COMMIT.is_empty());
+        assert!(matches!(CHANNEL, "STABLE" | "DEV"));
+        assert!(matches!(DIRTY, "true" | "false"));
+        assert!(!BRANCH.is_empty());
     }
 }

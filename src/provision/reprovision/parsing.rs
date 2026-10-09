@@ -126,6 +126,69 @@ pub fn parse_existing_provision(
     device_id: &str,
     total_sectors: u64,
 ) -> Result<Option<ParsedExistingProvision>, String> {
+    parse_existing_provision_with_native_sector_bytes(
+        image,
+        device_id,
+        total_sectors,
+        SECTOR as u32,
+    )
+}
+
+/// Parse full native LBA0–12 captures without interpreting each EDP
+/// structure as an entire native block. Source bytes after the first 512B
+/// of each native block are never modified or discarded from the capture.
+/// This read-only 4Kn parser does not authorize physical provisioning.
+pub fn parse_existing_provision_native(
+    native: &crate::protocol::image::NativeProtocolImage,
+    device_id: &str,
+    total_native_sectors: u64,
+) -> Result<Option<ParsedExistingProvision>, String> {
+    let sector_bytes = native.logical_sector_bytes();
+    if !matches!(sector_bytes, 512 | 4096) {
+        return Err("unsupported native source sector size for EDPF password verification".into());
+    }
+    let image = super::super::ProvisionImage::from_bytes(native.protocol_projection().to_vec())?;
+    let parsed = parse_existing_provision_with_native_sector_bytes(
+        &image,
+        device_id,
+        total_native_sectors,
+        sector_bytes,
+    )?;
+    // A valid decryptable key record is not enough to certify the source
+    // identity: for native 4Kn also require the physical MBR first partition
+    // to match the independent EDPF geometry exactly. Reject stale or mixed
+    // protocol/MBR captures instead of reporting a password as verified.
+    if sector_bytes == 4096 {
+        if let Some(source) = &parsed {
+            let first = source
+                .profile
+                .partitions
+                .first()
+                .ok_or("native EDPF source has no first partition")?;
+            let mbr = native.block(0).ok_or("native EDPF source is missing MBR")?;
+            let start = u32::from_le_bytes(mbr[454..458].try_into().unwrap()) as u64;
+            let count = u32::from_le_bytes(mbr[458..462].try_into().unwrap()) as u64;
+            if mbr[510..512] != [0x55, 0xaa]
+                || start != first.start_lba
+                || count != first.sector_count
+            {
+                return Err(
+                    "native EDPF source MBR and LBA12 first partition geometry disagree".into(),
+                );
+            }
+        }
+    }
+    Ok(parsed)
+}
+
+/// Shared EDPF decoder; all geometry-sensitive validation is in source-native
+/// LBAs. The 512B entry format itself remains exactly the original wire format.
+fn parse_existing_provision_with_native_sector_bytes(
+    image: &super::super::ProvisionImage,
+    device_id: &str,
+    total_sectors: u64,
+    native_sector_bytes: u32,
+) -> Result<Option<ParsedExistingProvision>, String> {
     if device_id.is_empty() {
         return Err("device_id is required to decode existing EDPF".into());
     }
@@ -162,19 +225,23 @@ pub fn parse_existing_provision(
             || lba12.partition_count as usize != count
             || lba7.partition_type != lba12.partition_type
             || lba7.need_encrypt != lba12.need_encrypt
-            || lba7.sector_size != SECTOR as u64
-            || lba12.sector_size != SECTOR as u64
+            || lba7.sector_size != u64::from(native_sector_bytes)
+            || lba12.sector_size != u64::from(native_sector_bytes)
         {
             return Err(format!(
                 "LBA7/LBA12 entry{index} has inconsistent type, count, flags, or sector size"
             ));
         }
-        if lba12.partition_size == 0 || !lba12.partition_size.is_multiple_of(SECTOR as u64) {
+        if lba12.partition_size == 0
+            || !lba12
+                .partition_size
+                .is_multiple_of(u64::from(native_sector_bytes))
+        {
             return Err(format!(
                 "LBA12 entry{index} size is empty or not sector aligned"
             ));
         }
-        let sectors = lba12.partition_size / SECTOR as u64;
+        let sectors = lba12.partition_size / u64::from(native_sector_bytes);
         if lba12.start_sector < OFFICIAL_PARTITION_START_SECTOR
             || lba12
                 .start_sector
@@ -211,7 +278,7 @@ pub fn parse_existing_provision(
             role: semantics.role,
             partition_type,
             start_lba: record.lba12.start_sector,
-            sector_count: record.lba12.partition_size / SECTOR as u64,
+            sector_count: record.lba12.partition_size / u64::from(native_sector_bytes),
             physically_encrypted: semantics.physically_encrypted(),
             filesystem: None,
         });

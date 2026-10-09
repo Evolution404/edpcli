@@ -167,6 +167,7 @@ pub(crate) struct ProvisionConfirmationViewModel {
     pub target: ProvisionConfirmationTarget,
     pub layout: crate::tui::disk_layout::DiskLayoutModel,
     pub overall: ProvisionConfirmationOverall,
+    pub algorithm: Option<crate::provision::OfficialLabelAlgorithm>,
     pub geometry_note: Option<String>,
     pub regions: Vec<ProvisionConfirmationRegion>,
 }
@@ -502,6 +503,12 @@ impl ProvisionConfirmationViewModel {
             target,
             layout,
             overall,
+            algorithm: match prepared {
+                crate::application::provision::PreparedProvision::Official(official) => {
+                    Some(official.algorithm)
+                }
+                crate::application::provision::PreparedProvision::Plain(_) => None,
+            },
             geometry_note,
             regions,
         })

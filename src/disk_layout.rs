@@ -99,6 +99,9 @@ impl DiskLayoutSegment {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiskLayoutModel {
     pub total_sectors: u64,
+    /// Source device's native logical sector size, never the fixed 512B
+    /// EDP protocol payload length.
+    pub logical_sector_bytes: u32,
     pub segments: Vec<DiskLayoutSegment>,
 }
 
@@ -107,8 +110,33 @@ impl DiskLayoutModel {
         segments.sort_by_key(|segment| segment.start_lba);
         Self {
             total_sectors,
+            logical_sector_bytes: crate::common::SECTOR as u32,
             segments,
         }
+    }
+
+    /// Binds a layout to the validated per-device native logical block size.
+    /// Historic 512B constructors retain their exact prior default.
+    pub fn with_logical_sector_bytes(mut self, logical_sector_bytes: u32) -> Result<Self, String> {
+        if !(512..=65_536).contains(&logical_sector_bytes)
+            || !logical_sector_bytes.is_power_of_two()
+        {
+            return Err(format!("无效的原生逻辑扇区大小：{logical_sector_bytes}B"));
+        }
+        if self
+            .total_sectors
+            .checked_mul(u64::from(logical_sector_bytes))
+            .is_none()
+        {
+            return Err("磁盘原生 LBA 总数乘以逻辑块长度发生容量溢出".into());
+        }
+        self.logical_sector_bytes = logical_sector_bytes;
+        Ok(self)
+    }
+
+    /// Converts a native LBA count to physical bytes without overflowing.
+    pub fn sector_byte_len(&self, sectors: u64) -> Option<u64> {
+        sectors.checked_mul(u64::from(self.logical_sector_bytes))
     }
 
     pub fn validate_complete(&self) -> Result<(), String> {
@@ -267,6 +295,55 @@ impl DiskLayoutModel {
         Self::canonical_from_known(total_sectors, known)
     }
 
+    /// The legacy 512B-only backup mirror positions are not established for
+    /// 4Kn media. Do not draw phantom mirrored sectors merely by using the
+    /// same *number* of native LBAs; only verified native extents are owned.
+    pub fn canonical_edp_with_sector_bytes(
+        total_sectors: u64,
+        partitions: Vec<DiskLayoutSegment>,
+        lce_start_lba: u64,
+        lce_sector_count: u64,
+        logical_sector_bytes: u32,
+    ) -> Result<Self, String> {
+        if logical_sector_bytes == 512 {
+            return Self::canonical_edp(total_sectors, partitions, lce_start_lba, lce_sector_count);
+        }
+        if !(512..=65_536).contains(&logical_sector_bytes)
+            || !logical_sector_bytes.is_power_of_two()
+        {
+            return Err(format!(
+                "不支持逻辑扇区大小 {logical_sector_bytes}B 的容量布局"
+            ));
+        }
+        if total_sectors < OFFICIAL_PARTITION_START_SECTOR {
+            return Err("EDP 原生扇区数量不足".into());
+        }
+        let mut known = vec![
+            DiskLayoutSegment {
+                label: "EDP 主协议区".into(),
+                start_lba: 0,
+                sector_count: 13,
+                kind: DiskRegionKind::Protocol,
+            },
+            DiskLayoutSegment {
+                label: "保留区域".into(),
+                start_lba: 13,
+                sector_count: OFFICIAL_PARTITION_START_SECTOR - 13,
+                kind: DiskRegionKind::Reserved,
+            },
+        ];
+        known.extend(partitions);
+        known.push(DiskLayoutSegment {
+            label: "LCE".into(),
+            start_lba: lce_start_lba,
+            sector_count: lce_sector_count,
+            kind: DiskRegionKind::Lce,
+        });
+        // No verified 4Kn tail mirror/restore node; never fabricate them.
+        Self::canonical_from_known(total_sectors, known)?
+            .with_logical_sector_bytes(logical_sector_bytes)
+    }
+
     pub fn draft_edp(
         total_sectors: u64,
         mut partitions: Vec<DiskLayoutSegment>,
@@ -373,7 +450,8 @@ impl DiskLayoutModel {
                 .partition_table
                 .as_ref()
                 .ok_or_else(|| "普通盘分区表尚未完整读取".to_string())?;
-            return Self::canonical_plain(context.total_sectors, table);
+            return Self::canonical_plain(context.total_sectors, table)?
+                .with_logical_sector_bytes(context.logical_sector_bytes);
         }
 
         let mode = context
@@ -402,11 +480,12 @@ impl DiskLayoutModel {
             .lce
             .as_ref()
             .ok_or_else(|| "LBA7 LCE 几何尚未确认".to_string())?;
-        Self::canonical_edp(
+        Self::canonical_edp_with_sector_bytes(
             context.total_sectors,
             partitions,
             lce.start_lba,
             lce.sector_count,
+            context.logical_sector_bytes,
         )
     }
 
@@ -474,7 +553,12 @@ impl DiskLayoutModel {
             sector_count: tail.end_exclusive - tail.start_lba,
             kind: DiskRegionKind::Tail,
         });
-        Self::new(self.total_sectors, segments)
+        // Never drop native geometry while the presentation folds the tail.
+        Self {
+            total_sectors: self.total_sectors,
+            logical_sector_bytes: self.logical_sector_bytes,
+            segments,
+        }
     }
 
     pub fn bar(&self, width: usize) -> Vec<DiskRegionKind> {

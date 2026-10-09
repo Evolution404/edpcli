@@ -290,8 +290,25 @@ pub(super) fn scan_backup_file_impl(
         if identity.protocol.provision_kind.is_none() {
             if let Some(raw) = raw.as_ref() {
                 if let Some(device_id) = identity.protocol.device_id.as_deref() {
-                    identity.protocol.provision_kind =
-                        crate::provision::DiskProvisionKind::from_metadata(raw, device_id);
+                    identity.protocol.provision_kind = if manifest.schema == "edpb.manifest.v4" {
+                        let native =
+                            crate::protocol::image::NativeProtocolImage::from_native_bytes(
+                                manifest.geometry.logical_sector_size,
+                                raw.to_vec(),
+                            )
+                            .ok();
+                        native.as_ref().and_then(|image| {
+                            let projected = image.protocol_projection();
+                            crate::provision::DiskProvisionKind::from_sectors_with_logical_size(
+                                &projected[7 * SECTOR..8 * SECTOR],
+                                &projected[12 * SECTOR..13 * SECTOR],
+                                device_id,
+                                manifest.geometry.logical_sector_size,
+                            )
+                        })
+                    } else {
+                        crate::provision::DiskProvisionKind::from_metadata(raw, device_id)
+                    };
                 } else if identity.protocol.onlyid.is_none() {
                     let total_sectors = manifest.geometry.total_sectors.unwrap_or(0);
                     if crate::partition_table::confirmed_plain_protocol_prefix(raw, total_sectors) {
@@ -312,7 +329,10 @@ pub(super) fn scan_backup_file_impl(
         })
     });
     let lba8 = raw.as_ref().and_then(|data| {
-        data.get(8 * SECTOR..9 * SECTOR)
+        let block_bytes = verified
+            .as_ref()
+            .map_or(SECTOR, |v| v.manifest.geometry.logical_sector_size as usize);
+        data.get(8 * block_bytes..8 * block_bytes + SECTOR)
             .and_then(|bytes| bytes.try_into().ok())
     });
     // Historical/Core/EDP metadata containers require the fixed LBA0-12
@@ -326,9 +346,9 @@ pub(super) fn scan_backup_file_impl(
             && manifest.snapshot.device_state.eq_ignore_ascii_case("plain")
             && manifest.snapshot.capture_level == crate::edpb::CaptureLevel::Metadata;
         plain_metadata_v3
-            || raw
-                .as_ref()
-                .is_some_and(|data| data.len() == crate::common::METADATA_IMAGE_LEN)
+            || raw.as_ref().is_some_and(|data| {
+                data.len() == 13 * manifest.geometry.logical_sector_size as usize
+            })
     });
     let integrity_status = if verified.is_some() && size_ok {
         BackupIntegrityStatus::Verified

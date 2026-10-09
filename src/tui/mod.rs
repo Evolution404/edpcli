@@ -20,6 +20,7 @@ mod help_overlay;
 #[path = "inspect/layout.rs"]
 mod inspect_layout;
 pub mod keymap;
+mod native_source_password_policy;
 mod notice_overlay;
 mod operation_progress_status;
 mod overview;

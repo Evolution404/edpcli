@@ -133,6 +133,13 @@ impl std::fmt::Debug for ProvisionNewOpts {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProvisionAction {
+    /// Offline-only complete native-block Plain image. Does not identify or open a USB disk.
+    NativeImage {
+        out: String,
+        total_sectors: u64,
+        sector_bytes: u32,
+        partitions: Vec<crate::application::provision::PlainPartitionRequest>,
+    },
     Plan(Box<ProvisionNewOpts>),
     Image {
         opts: Box<ProvisionNewOpts>,

@@ -886,3 +886,65 @@ fn controlled_password_input_is_catalogued_and_exclusive() {
         assert!(spec.sensitive && spec.takes_value && !spec.completion_visible);
     }
 }
+
+#[test]
+fn provision_offline_native_image_parses_complete_4kn_geometry_and_fails_closed() {
+    let good = [
+        "provision",
+        "image",
+        "--target",
+        "plain",
+        "--sector-bytes",
+        "4096",
+        "--total-sectors",
+        "40000",
+        "--out",
+        "virtual.img",
+        "--partition",
+        "2048:16MiB:fat16:TEST",
+    ];
+    let Parsed::Provision(ProvisionAction::NativeImage {
+        out,
+        total_sectors,
+        sector_bytes,
+        partitions,
+    }) = parse_args(&args(&good)).unwrap()
+    else {
+        panic!("native image should remain a distinct offline-only CLI action")
+    };
+    assert_eq!(out, "virtual.img");
+    assert_eq!(total_sectors, 40000);
+    assert_eq!(sector_bytes, 4096);
+    assert_eq!(partitions.len(), 1);
+    assert_eq!(partitions[0].start_lba, 2048);
+    assert_eq!(
+        partitions[0].filesystem,
+        edpcli::application::filesystem::FilesystemKind::Fat16
+    );
+    for bad in [
+        vec!["--disk", "4"],
+        vec!["--yes"],
+        vec!["--target", "mode0"],
+        vec!["--format-boot"],
+        vec!["--encrypt-target-password", "test"],
+    ] {
+        let mut argv = good.to_vec();
+        argv.extend(bad);
+        assert!(
+            parse_args(&args(&argv)).is_err(),
+            "unsafe extra flags must fail: {argv:?}"
+        );
+    }
+    let mut invalid_size = good.to_vec();
+    invalid_size[5] = "2048";
+    assert!(parse_args(&args(&invalid_size)).is_err());
+    let mut missing_geometry = good.to_vec();
+    missing_geometry.drain(4..6);
+    assert!(parse_args(&args(&missing_geometry)).is_err());
+    let mut missing_volume = good.to_vec();
+    missing_volume.drain(6..8);
+    assert!(parse_args(&args(&missing_volume)).is_err());
+    let mut repeated = good.to_vec();
+    repeated.extend(["--sector-bytes", "4096"]);
+    assert!(parse_args(&args(&repeated)).is_err());
+}

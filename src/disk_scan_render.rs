@@ -83,6 +83,10 @@ pub fn print_disk_table(rows: &[Row]) -> String {
         {
             let mut details = Vec::new();
             if let Some(parts) = &row.partitions {
+                let logical_bytes = row
+                    .layout_geometry()
+                    .map(|geometry| geometry.logical_sector_bytes)
+                    .unwrap_or(crate::common::SECTOR as u32);
                 let items: Vec<String> = parts
                     .iter()
                     .map(|part| {
@@ -91,7 +95,7 @@ pub fn print_disk_table(rows: &[Row]) -> String {
                             part.type_name(),
                             fmt_capacity(part.size_bytes),
                             group_digits(part.start_lba),
-                            group_digits(part.end_lba())
+                            group_digits(part.end_lba_with_sector_bytes(logical_bytes))
                         )
                     })
                     .collect();

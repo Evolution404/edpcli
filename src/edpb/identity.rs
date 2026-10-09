@@ -203,7 +203,7 @@ fn validate_typed_identity_projection(
 }
 
 pub(super) fn validate_manifest_identity(manifest: &Manifest) -> Result<(), String> {
-    if manifest.schema != "edpb.manifest.v3" {
+    if manifest.schema != "edpb.manifest.v3" && manifest.schema != "edpb.manifest.v4" {
         return Err(format!(
             "unsupported EDPB manifest schema: {}",
             manifest.schema

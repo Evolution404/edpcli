@@ -4,9 +4,8 @@
 //! 无法确认的区域返回明确错误，绝不把 RAW 静默冒充为 decoded。
 
 use crate::backup_metadata::{
-    parse_lba7_compatibility_geometry, parse_partition_geometry, Lba7CompatibilityGeometry,
-    PartitionGeometry, TAIL_END4_MIRROR_OFFSET_SECTORS, TAIL_METADATA_MIRROR_OFFSET_SECTORS,
-    TAIL_METADATA_MIRROR_SECTORS,
+    Lba7CompatibilityGeometry, PartitionGeometry, TAIL_END4_MIRROR_OFFSET_SECTORS,
+    TAIL_METADATA_MIRROR_OFFSET_SECTORS, TAIL_METADATA_MIRROR_SECTORS,
 };
 use crate::common::{METADATA_LAST_LBA, SECTOR};
 use crate::filesystem::FilesystemKind;
@@ -148,6 +147,8 @@ pub struct InspectDiskContext {
     pub partitions: Vec<PartitionGeometry>,
     pub lce: Option<Lba7CompatibilityGeometry>,
     pub context_issues: Vec<String>,
+    /// Per-device native logical block size (independent from fixed protocol fields).
+    pub logical_sector_bytes: u32,
 }
 
 impl InspectDiskContext {
@@ -200,9 +201,34 @@ impl InspectDiskContext {
         partition_table: Option<crate::partition_table::PartitionTableSnapshot>,
         partition_table_issue: Option<String>,
     ) -> Self {
+        Self::new_with_partition_table_and_sector_bytes(
+            protocol_image,
+            device_id,
+            total_sectors,
+            provision_kind,
+            partition_table,
+            partition_table_issue,
+            SECTOR as u32,
+        )
+    }
+
+    pub fn new_with_partition_table_and_sector_bytes(
+        protocol_image: Vec<u8>,
+        device_id: Option<String>,
+        total_sectors: u64,
+        provision_kind: Option<crate::provision::DiskProvisionKind>,
+        partition_table: Option<crate::partition_table::PartitionTableSnapshot>,
+        partition_table_issue: Option<String>,
+        logical_sector_bytes: u32,
+    ) -> Self {
         let provision_kind = provision_kind.or_else(|| {
             device_id.as_deref().and_then(|did| {
-                crate::provision::DiskProvisionKind::from_metadata(&protocol_image, did)
+                crate::provision::DiskProvisionKind::from_sectors_with_logical_size(
+                    protocol_image.get(7 * SECTOR..8 * SECTOR)?,
+                    protocol_image.get(12 * SECTOR..13 * SECTOR)?,
+                    did,
+                    logical_sector_bytes,
+                )
             })
         });
         let mut partitions = Vec::new();
@@ -215,11 +241,21 @@ impl InspectDiskContext {
             }
         } else if provision_kind.is_some() || device_id.is_some() {
             if let Some(did) = device_id.as_deref() {
-                match parse_partition_geometry(&protocol_image, did, total_sectors) {
+                match crate::domain::geometry::parse_partition_geometry_with_sector_bytes(
+                    &protocol_image,
+                    did,
+                    total_sectors,
+                    logical_sector_bytes,
+                ) {
                     Ok(value) => partitions = value,
                     Err(error) => context_issues.push(format!("LBA12 分区几何不可用: {error}")),
                 }
-                match parse_lba7_compatibility_geometry(&protocol_image, did, total_sectors) {
+                match crate::domain::geometry::parse_lba7_compatibility_geometry_with_sector_bytes(
+                    &protocol_image,
+                    did,
+                    total_sectors,
+                    logical_sector_bytes,
+                ) {
                     Ok(value) => lce = Some(value),
                     Err(error) => context_issues.push(format!("LCE 几何不可用: {error}")),
                 }
@@ -239,6 +275,7 @@ impl InspectDiskContext {
             partitions,
             lce,
             context_issues,
+            logical_sector_bytes,
         }
     }
 
@@ -343,14 +380,18 @@ impl InspectDiskContext {
             }
         }
 
-        if self.has_edp_protocol() && self.total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS {
+        if self.logical_sector_bytes == SECTOR as u32
+            && self.has_edp_protocol()
+            && self.total_sectors >= TAIL_METADATA_MIRROR_OFFSET_SECTORS
+        {
             let start = self.total_sectors - TAIL_METADATA_MIRROR_OFFSET_SECTORS;
             if lba >= start && lba < start + TAIL_METADATA_MIRROR_SECTORS {
                 out.push(SectorRegion::TailMetadataMirror { index: lba - start });
             }
         }
 
-        if self.has_edp_protocol()
+        if self.logical_sector_bytes == SECTOR as u32
+            && self.has_edp_protocol()
             && self.total_sectors > TAIL_END4_MIRROR_OFFSET_SECTORS
             && lba == self.total_sectors - TAIL_END4_MIRROR_OFFSET_SECTORS
         {
@@ -513,6 +554,74 @@ impl InspectDiskContext {
                         .into(),
             }
         }
+    }
+
+    /// Decode one full native 4Kn partition sector only after a CRC-verified
+    /// default FileKey and strict decrypted boot sector identification.
+    /// Never open or write any backing device. Other modes are fail-closed.
+    pub fn decode_native_mode3_with_boot(
+        &self,
+        lba: u64,
+        raw: &[u8],
+        boot_raw: Option<&[u8]>,
+    ) -> Result<(Vec<u8>, String), String> {
+        if self.logical_sector_bytes != 4096 || raw.len() != 4096 {
+            return Err("AES_CROSS原生只读解码仅接受完整4096B逻辑块".into());
+        }
+        let partition = self
+            .partition_for_lba(lba)
+            .ok_or_else(|| format!("4Kn LBA{lba}不属于已验证分区"))?;
+        if partition.encrypt_mode != 3 {
+            return Err(format!(
+                "原生分区encrypt_mode={}无已认证只读解码器",
+                partition.encrypt_mode
+            ));
+        }
+        let boot = if lba == partition.start_sector {
+            raw
+        } else {
+            boot_raw.ok_or_else(|| "缺少完整原生分区起始扇区证据".to_string())?
+        };
+        if boot.len() != 4096 {
+            return Err("起始扇区证据不是完整4096B".into());
+        }
+        let semantics = self.partition_semantics(partition)?;
+        if !semantics.physical_encryption.is_encrypted() {
+            return Err("该分区协议要求物理明文，不允许执行AES_CROSS".into());
+        }
+        let detect = |source: &[u8]| {
+            crate::filesystem::detect_native_boot_sector(
+                source,
+                partition.sector_count,
+                self.logical_sector_bytes,
+            )
+            .ok()
+            .flatten()
+        };
+        if detect(boot).is_some() {
+            return Err("物理密文分区raw已有合法文件系统签名，拒绝二次解密".into());
+        }
+        let did = self
+            .device_id
+            .as_deref()
+            .ok_or_else(|| "缺少device_id，拒绝无身份密钥解封".to_string())?;
+        let key = default_file_key_checked(&self.protocol_image, did, partition.index)
+            .map_err(|error| format!("AES_CROSS默认密码/FileKeyCRC尚未认证：{error}"))?;
+        let boot_plain = crate::partition_transform::decrypt_mode3_native(boot, &key)?;
+        let filesystem = detect(&boot_plain)
+            .ok_or_else(|| "AES_CROSS解码后起始扇区未通过严格文件系统校验".to_string())?;
+        let decoded = if lba == partition.start_sector {
+            boot_plain
+        } else {
+            crate::partition_transform::decrypt_mode3_native(raw, &key)?
+        };
+        Ok((
+            decoded,
+            format!(
+                "AES_CROSS标准AES-128-ECB，默认密码与FileKeyCRC=PASS，4096B原生扇区；起始扇区严格识别为{}；仅软件变换推断，不代表已验证硬件模块",
+                filesystem.label()
+            ),
+        ))
     }
 
     pub fn decode_non_protocol_with_boot(

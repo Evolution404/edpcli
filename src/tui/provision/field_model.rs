@@ -20,6 +20,7 @@ pub(crate) enum ProvisionFieldId {
     Safe6Label,
     AdvancedSection,
     Lba8Identity(Lba8IdentityField),
+    EncryptionAlgorithm,
     SourcePassword(crate::provision::KeyDomainRole),
     TargetPassword(crate::provision::KeyDomainRole),
     Capacity(crate::provision::PartitionRole),

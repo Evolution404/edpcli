@@ -70,6 +70,16 @@ impl std::error::Error for EvidenceError {}
 pub trait SectorReader {
     fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>>;
 
+    /// Keep the legacy 512B protocol projection as the existing contract.
+    fn logical_sector_bytes(&self) -> u32 {
+        SECTOR as u32
+    }
+
+    /// Full device-native block; defaults to 512B for existing/backup readers.
+    fn read_native_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        self.read_sector(lba)
+    }
+
     fn read_range(&mut self, start_lba: u64, sector_count: usize) -> io::Result<Vec<u8>> {
         let capacity = sector_count
             .checked_mul(SECTOR)
@@ -90,11 +100,71 @@ pub trait SectorReader {
         }
         Ok(out)
     }
+    /// Read a bounded sequence of complete *native* logical sectors.
+    ///
+    /// Unlike read_range(), whose legacy contract is always 512B protocol
+    /// projections, this uses the reader's independently observed block
+    /// width and never silently slices a 4Kn block. The width check is a
+    /// pure reader contract: it does not authorize physical 1024/2048/8192B
+    /// EDP provisioning, or any write operation.
+    fn read_native_range(&mut self, start_lba: u64, sector_count: usize) -> io::Result<Vec<u8>> {
+        let sector_bytes = self.logical_sector_bytes();
+        if !(512..=65_536).contains(&sector_bytes) || !sector_bytes.is_power_of_two() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("不支持的来源原生扇区长度 {sector_bytes}B"),
+            ));
+        }
+        let sector_bytes = sector_bytes as usize;
+        let bytes = sector_count
+            .checked_mul(sector_bytes)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "原生读取总字节溢出"))?;
+        // A diagnostic/metadata read may never reserve unbounded memory.
+        if bytes > 8 * 1024 * 1024 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "单次原生读取不得超过8MiB",
+            ));
+        }
+        let count = u64::try_from(sector_count)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "原生扇区数量溢出"))?;
+        start_lba
+            .checked_add(count)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "原生LBA范围溢出"))?;
+        let mut result = Vec::with_capacity(bytes);
+        for index in 0..count {
+            let lba = start_lba + index; // covered by the checked end above
+            let native = self.read_native_sector(lba)?;
+            if native.len() != sector_bytes {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    format!(
+                        "LBA{lba} 返回 {}B，预期完整原生扇区 {sector_bytes}B",
+                        native.len()
+                    ),
+                ));
+            }
+            result.extend_from_slice(&native);
+        }
+        Ok(result)
+    }
 }
 
 impl SectorReader for FileDev {
     fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
         self.read_sector_u64(lba)
+    }
+
+    fn logical_sector_bytes(&self) -> u32 {
+        FileDev::logical_sector_bytes(self)
+    }
+
+    fn read_native_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        if self.logical_sector_bytes() == SECTOR as u32 {
+            self.read_sector_u64(lba)
+        } else {
+            self.read_native_sector_u64(lba)
+        }
     }
 }
 
@@ -112,6 +182,7 @@ struct BackupSectorReader {
     snapshot: crate::edpb::VerifiedBackupReader,
     protocol: Vec<u8>,
     has_full_protocol: bool,
+    native_protocol: Option<crate::protocol::image::NativeProtocolImage>,
 }
 
 impl BackupSectorReader {
@@ -153,7 +224,58 @@ impl BackupSectorReader {
 }
 
 impl SectorReader for BackupSectorReader {
+    fn logical_sector_bytes(&self) -> u32 {
+        self.manifest().geometry.logical_sector_size
+    }
+
+    fn read_native_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        if let Some(image) = &self.native_protocol {
+            if let Some(block) = usize::try_from(lba)
+                .ok()
+                .and_then(|index| image.block(index))
+            {
+                return Ok(block.to_vec());
+            }
+        }
+        let size = usize::try_from(self.logical_sector_bytes())
+            .map_err(|_| io::Error::other("EDPB native block size overflow"))?;
+        let located = self
+            .manifest()
+            .extents
+            .iter()
+            .find_map(|extent| {
+                let end = extent.start_lba.checked_add(extent.sector_count)?;
+                if lba < extent.start_lba || lba >= end {
+                    return None;
+                }
+                let artifact = self.manifest().artifacts.iter().find(|artifact| {
+                    artifact.kind == "raw_sectors"
+                        && artifact.source_extent_ids.iter().any(|id| id == &extent.id)
+                })?;
+                Some((extent.start_lba, artifact.id.clone()))
+            })
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "EDPB 未采集该原生 LBA"))?;
+        let bytes = self
+            .read_artifact(&located.1)?
+            .ok_or_else(|| io::Error::other("EDPB artifact 缺失"))?;
+        let start = usize::try_from(lba - located.0)
+            .ok()
+            .and_then(|offset| offset.checked_mul(size))
+            .ok_or_else(|| io::Error::other("EDPB 原生 LBA 偏移溢出"))?;
+        let end = start
+            .checked_add(size)
+            .ok_or_else(|| io::Error::other("EDPB 原生块结束偏移溢出"))?;
+        bytes
+            .get(start..end)
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "EDPB 原生块截断"))
+    }
+
     fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        if self.native_protocol.is_some() {
+            let block = self.read_native_sector(lba)?;
+            return Ok(block[..SECTOR].to_vec());
+        }
         if self.has_full_protocol && lba < METADATA_SECTOR_COUNT as u64 {
             let start = usize::try_from(lba)
                 .ok()
@@ -204,6 +326,8 @@ pub struct EvidenceSource {
     source_label: String,
     total_sectors: u64,
     protocol: Vec<u8>,
+    /// Full native LBA0..12 retained for 4Kn physical sources; never log raw tails.
+    native_protocol: Option<crate::protocol::image::NativeProtocolImage>,
     identity: EvidenceIdentity,
     reader: EvidenceReader,
 }
@@ -319,7 +443,30 @@ impl EvidenceSource {
                 message: "Plain v3 metadata-only 不应包含固定 LBA0-12 protocol core".into(),
             });
         }
-        let protocol = if has_full_protocol {
+        let native_evidence = verified.manifest.schema == "edpb.manifest.v4";
+        let native_protocol = if native_evidence {
+            Some(
+                crate::protocol::image::NativeProtocolImage::from_native_bytes(
+                    verified.manifest.geometry.logical_sector_size,
+                    snapshot
+                        .read_raw_protocol()
+                        .map_err(|error| EvidenceError::BackupProtocolRead {
+                            path: path.to_path_buf(),
+                            message: error.to_string(),
+                        })?
+                        .to_vec(),
+                )
+                .map_err(|error| EvidenceError::BackupProtocolRead {
+                    path: path.to_path_buf(),
+                    message: error.to_string(),
+                })?,
+            )
+        } else {
+            None
+        };
+        let protocol = if let Some(native) = &native_protocol {
+            native.protocol_projection().to_vec()
+        } else if has_full_protocol {
             snapshot
                 .read_raw_protocol()
                 .map(<[u8]>::to_vec)
@@ -357,7 +504,16 @@ impl EvidenceSource {
             .provision_kind
             .or_else(|| {
                 effective_device_id.as_deref().and_then(|device_id| {
-                    crate::provision::DiskProvisionKind::from_metadata(&protocol, device_id)
+                    if native_evidence {
+                        crate::provision::DiskProvisionKind::from_sectors_with_logical_size(
+                            protocol.get(7 * SECTOR..8 * SECTOR)?,
+                            protocol.get(12 * SECTOR..13 * SECTOR)?,
+                            device_id,
+                            4096,
+                        )
+                    } else {
+                        crate::provision::DiskProvisionKind::from_metadata(&protocol, device_id)
+                    }
                 })
             })
             .or_else(|| {
@@ -384,11 +540,13 @@ impl EvidenceSource {
             source_label: path.display().to_string(),
             total_sectors,
             protocol: protocol.clone(),
+            native_protocol: native_protocol.clone(),
             identity,
             reader: EvidenceReader::Backup(Box::new(BackupSectorReader {
                 snapshot,
                 protocol,
                 has_full_protocol,
+                native_protocol,
             })),
         })
     }
@@ -396,20 +554,54 @@ impl EvidenceSource {
     pub fn open_disk(runner: &dyn CmdRunner, disk: u32) -> Result<Self, EvidenceError> {
         let target = TargetSession::<ReadOnly>::open_usb(runner, disk)
             .map_err(|error| EvidenceError::Target(error.msg))?;
-        let total_sectors = target
-            .total_sectors()
+        let native_geometry = crate::platform::system::device_geometry(runner, disk)
+            .and_then(|observed| observed.native_read_geometry().ok());
+        let total_sectors = native_geometry
+            .map(|geometry| geometry.native_sector_count)
+            .or_else(|| target.total_sectors())
             .ok_or(EvidenceError::DiskMissingGeometry { disk })?;
         let path = diskio::raw_path(disk);
-        let mut dev = FileDev::open_rdonly(&path).map_err(|error| EvidenceError::DiskOpen {
+        let mut dev = match native_geometry {
+            Some(geometry) if geometry.logical_sector_bytes > 512 => {
+                FileDev::open_rdonly_native(&path, geometry)
+            }
+            _ => FileDev::open_rdonly(&path),
+        }
+        .map_err(|error| EvidenceError::DiskOpen {
             disk,
             message: error.to_string(),
         })?;
-        let protocol = dev.read_range(0, METADATA_SECTOR_COUNT).map_err(|error| {
-            EvidenceError::DiskProtocolRead {
+        let (protocol, native_protocol) = if let Some(geometry) =
+            native_geometry.filter(|geometry| geometry.logical_sector_bytes > 512)
+        {
+            // Read the complete native envelope before producing the stable
+            // 6656B official protocol projection. Never discard unknown tails
+            // in a physical read; future EDPB captures consume the same type.
+            let native_bytes = SectorReader::read_native_range(&mut dev, 0, METADATA_SECTOR_COUNT)
+                .map_err(|error| EvidenceError::DiskProtocolRead {
+                    disk,
+                    message: error.to_string(),
+                })?;
+            let image = crate::protocol::image::NativeProtocolImage::from_native_bytes(
+                geometry.logical_sector_bytes,
+                native_bytes,
+            )
+            .map_err(|error| EvidenceError::DiskProtocolRead {
                 disk,
                 message: error.to_string(),
-            }
-        })?;
+            })?;
+            (image.protocol_projection().to_vec(), Some(image))
+        } else {
+            (
+                dev.read_range(0, METADATA_SECTOR_COUNT).map_err(|error| {
+                    EvidenceError::DiskProtocolRead {
+                        disk,
+                        message: error.to_string(),
+                    }
+                })?,
+                None,
+            )
+        };
         debug_assert_eq!(protocol.len(), METADATA_IMAGE_LEN);
 
         let canonical =
@@ -427,7 +619,9 @@ impl EvidenceSource {
             device_id: canonical.protocol.device_id.clone(),
             vid: canonical.hardware.vid.map(|value| format!("{value:04x}")),
             pid: canonical.hardware.pid.map(|value| format!("{value:04x}")),
-            size_bytes: total_sectors.checked_mul(SECTOR as u64),
+            size_bytes: native_geometry
+                .map(|geometry| geometry.capacity_bytes)
+                .or_else(|| total_sectors.checked_mul(SECTOR as u64)),
             onlyid: canonical.protocol.onlyid.clone(),
             provision_kind: canonical.protocol.provision_kind,
         };
@@ -435,6 +629,7 @@ impl EvidenceSource {
             source_label: format!("物理盘 disk{disk} ({path})"),
             total_sectors,
             protocol,
+            native_protocol,
             identity,
             reader: EvidenceReader::Disk(dev),
         })
@@ -452,8 +647,45 @@ impl EvidenceSource {
         &self.protocol
     }
 
+    /// Full native blocks, when the physical source provides >512B logical sectors.
+    pub fn native_protocol_image(&self) -> Option<&crate::protocol::image::NativeProtocolImage> {
+        self.native_protocol.as_ref()
+    }
+
     pub fn identity(&self) -> &EvidenceIdentity {
         &self.identity
+    }
+
+    /// UI-neutral entry point for verified native source replay from a disk
+    /// or EDPB backup. Uses this source's observed identity and the original
+    /// snapshot; callers cannot override the identity or provide LCE bytes
+    /// from a different reader.
+    ///
+    /// This API never obtains a writable handle. It does not enable native
+    /// provisioning or certify the 4Kn LCE's cryptographic content.
+    pub fn verified_native_replay(
+        &mut self,
+        plan: &crate::provision::NativeEdpLayoutPlan,
+    ) -> Result<Vec<crate::filesystem::NativeFilesystemWrite>, String> {
+        let device_id = self
+            .identity
+            .device_id
+            .as_deref()
+            .ok_or("只读来源未确认device_id")?
+            .to_owned();
+        let snapshot = match &self.native_protocol {
+            Some(image) => image.clone(),
+            None if self.logical_sector_bytes() == SECTOR as u32 => {
+                crate::protocol::image::NativeProtocolImage::from_native_bytes(
+                    SECTOR as u32,
+                    self.protocol.clone(),
+                )
+                .map_err(|error| format!("来源协议快照构造失败: {error}"))?
+            }
+            None => return Err("原生来源缺少完整协议扇区快照".into()),
+        };
+        let source_total_sectors = self.total_sectors;
+        verified_native_source_replay(self, plan, &snapshot, &device_id, source_total_sectors)
     }
 
     pub fn read_artifact(&mut self, artifact_id: &str) -> io::Result<Option<Vec<u8>>> {
@@ -466,7 +698,56 @@ impl EvidenceSource {
     }
 }
 
+/// Read a source's entire native EDP protocol and LCE through the same
+/// read-only sector abstraction, with an independently captured protocol
+/// snapshot as a second source-consistency check. This authenticates the
+/// *consistency* of reads against the provided evidence, not the hardware
+/// identity or cryptographic content of LCE.
+pub fn verified_native_source_replay<R: SectorReader + ?Sized>(
+    reader: &mut R,
+    plan: &crate::provision::NativeEdpLayoutPlan,
+    source_protocol: &crate::protocol::image::NativeProtocolImage,
+    device_id: &str,
+    source_total_sectors: u64,
+) -> Result<Vec<crate::filesystem::NativeFilesystemWrite>, String> {
+    if !matches!(reader.logical_sector_bytes(), 512 | 4096)
+        || reader.logical_sector_bytes() != plan.logical_sector_bytes
+        || source_protocol.logical_sector_bytes() != plan.logical_sector_bytes
+        || source_total_sectors != plan.total_sectors
+    {
+        return Err("来源与重放计划的原生扇区大小或容量不一致".into());
+    }
+    if device_id.is_empty() {
+        return Err("来源缺少设备身份，拒绝生成重放计划".into());
+    }
+    plan.verified_source_replay_from_reader(device_id, |lba| {
+        let block = reader
+            .read_native_sector(lba)
+            .map_err(|error| format!("来源原生LBA{lba}只读失败: {error}"))?;
+        if lba < METADATA_SECTOR_COUNT as u64
+            && source_protocol.block(lba as usize) != Some(block.as_slice())
+        {
+            return Err(format!("来源协议LBA{lba}与已采集原生快照不一致"));
+        }
+        Ok(block)
+    })
+}
+
 impl SectorReader for EvidenceSource {
+    fn logical_sector_bytes(&self) -> u32 {
+        match &self.reader {
+            EvidenceReader::Disk(reader) => reader.logical_sector_bytes(),
+            EvidenceReader::Backup(reader) => reader.logical_sector_bytes(),
+        }
+    }
+
+    fn read_native_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        match &mut self.reader {
+            EvidenceReader::Disk(reader) => SectorReader::read_native_sector(reader, lba),
+            EvidenceReader::Backup(reader) => reader.read_native_sector(lba),
+        }
+    }
+
     fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
         match &mut self.reader {
             EvidenceReader::Disk(reader) => SectorReader::read_sector(reader, lba),

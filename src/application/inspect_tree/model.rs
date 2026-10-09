@@ -47,11 +47,18 @@ impl InspectNodeRange {
     }
 
     pub fn from_bytes(range: AbsoluteByteRange) -> Self {
-        let start_lba = range.start_lba();
+        Self::from_bytes_with_sector_bytes(range, crate::common::SECTOR as u32)
+    }
+
+    pub fn from_bytes_with_sector_bytes(range: AbsoluteByteRange, logical_bytes: u32) -> Self {
+        let size = u64::from(logical_bytes.max(1));
+        let start_lba = range.start / size;
         let sector_count = if range.end_exclusive == range.start {
             0
         } else {
-            range.end_lba().saturating_sub(start_lba).saturating_add(1)
+            ((range.end_exclusive - 1) / size)
+                .saturating_sub(start_lba)
+                .saturating_add(1)
         };
         Self {
             start_lba,

@@ -183,6 +183,14 @@ impl AppState {
                 false,
             ));
         }
+        fields.push(descriptor(
+            ProvisionFieldId::EncryptionAlgorithm,
+            ProvisionFieldSection::PasswordDomain,
+            false,
+            false,
+            true,
+            false,
+        ));
         if matches!(mode, 0 | 3) {
             for id in [
                 ProvisionFieldId::StartLba(crate::provision::PartitionRole::Boot),

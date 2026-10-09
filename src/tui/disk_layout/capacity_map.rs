@@ -1,6 +1,6 @@
 //! Shared capacity map with visible small-region blocks and linked selection.
 use super::{
-    format_sector_size, percentage, DiskLayoutModel, DiskLayoutSegment, DiskRegionKind,
+    format_layout_capacity, percentage, DiskLayoutModel, DiskLayoutSegment, DiskRegionKind,
     TailExpansion,
 };
 use ratatui::text::{Line, Span};
@@ -317,10 +317,8 @@ fn capacity_map_content_line(
             .map(|(segment, width)| {
                 let text = match content {
                     CapacityContent::Label => capacity_segment_label(segment, width),
-                    CapacityContent::Value => {
-                        capacity_segment_value(segment, width, model.total_sectors)
-                    }
-                    CapacityContent::Compact => capacity_segment_compact(segment, width),
+                    CapacityContent::Value => capacity_segment_value(segment, width, model),
+                    CapacityContent::Compact => capacity_segment_compact(segment, width, model),
                 };
                 let active = capacity_segment_active(segment, selection);
                 Span::styled(
@@ -342,12 +340,19 @@ fn capacity_segment_label(segment: &DiskLayoutSegment, width: usize) -> String {
     }
 }
 
-fn capacity_segment_value(segment: &DiskLayoutSegment, width: usize, total: u64) -> String {
+fn capacity_segment_value(
+    segment: &DiskLayoutSegment,
+    width: usize,
+    model: &DiskLayoutModel,
+) -> String {
     if width < 8 {
         return String::new();
     }
-    let capacity = format_sector_size(segment.sector_count);
-    let full = format!("{capacity} · {}", percentage(segment.sector_count, total));
+    let capacity = format_layout_capacity(model, segment.sector_count);
+    let full = format!(
+        "{capacity} · {}",
+        percentage(segment.sector_count, model.total_sectors)
+    );
     if crate::tui::table_layout::display_width(&full) <= width {
         full
     } else if crate::tui::table_layout::display_width(&capacity) <= width {
@@ -357,8 +362,12 @@ fn capacity_segment_value(segment: &DiskLayoutSegment, width: usize, total: u64)
     }
 }
 
-fn capacity_segment_compact(segment: &DiskLayoutSegment, width: usize) -> String {
-    let capacity = format_sector_size(segment.sector_count);
+fn capacity_segment_compact(
+    segment: &DiskLayoutSegment,
+    width: usize,
+    model: &DiskLayoutModel,
+) -> String {
+    let capacity = format_layout_capacity(model, segment.sector_count);
     let full = format!("{} {capacity}", segment.label);
     if crate::tui::table_layout::display_width(&full) <= width {
         full

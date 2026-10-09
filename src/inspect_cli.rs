@@ -12,7 +12,7 @@ use crate::application::inspect::{
 };
 use crate::cli::StdPrompter;
 use crate::cli_args::{InspectMode, InspectOpts};
-use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, EXIT_TARGET, EXIT_USAGE, SECTOR};
+use crate::common::{EXIT_BACKUP, EXIT_IO, EXIT_OK, EXIT_TARGET, EXIT_USAGE};
 use crate::elevate;
 use crate::inspect::InspectMeta;
 use crate::ports::CmdRunner;
@@ -194,7 +194,7 @@ fn render_workspace(workspace: &AdvancedInspectWorkspace) -> i32 {
         let regions = item.regions.join("；");
         match workspace.mode {
             AdvancedInspectMode::Raw => {
-                let offset = match item.lba.checked_mul(SECTOR as u64) {
+                let offset = match item.lba.checked_mul(item.raw.len() as u64) {
                     Some(offset) => offset,
                     None => {
                         eprintln!("{}", crate::ui::red("错误: LBA 字节偏移溢出"));
@@ -204,8 +204,12 @@ fn render_workspace(workspace: &AdvancedInspectWorkspace) -> i32 {
                 println!(
                     "{}",
                     crate::ui::bold(&format!(
-                        "LBA{}  offset=0x{offset:X}  区域={}  SHA-256={}  非零={}/512",
-                        item.lba, regions, item.raw_sha256, item.raw_nonzero
+                        "LBA{}  offset=0x{offset:X}  区域={}  SHA-256={}  非零={}/{}",
+                        item.lba,
+                        regions,
+                        item.raw_sha256,
+                        item.raw_nonzero,
+                        item.raw.len()
                     ))
                 );
                 print!("{}", plain_hex(&item.raw));

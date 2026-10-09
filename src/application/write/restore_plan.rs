@@ -9,6 +9,14 @@ pub(super) fn build_metadata_restore_plan(
     target_total_sectors: u64,
 ) -> EdpCliResult<diskio::WriteTransactionPlan> {
     let verified = reader.verified();
+    if verified.manifest.schema != "edpb.manifest.v3"
+        || verified.manifest.geometry.logical_sector_size != SECTOR as u32
+    {
+        return Err(err(
+            EXIT_BACKUP,
+            "错误: 此备份为4Kn只读取证容器，不支持恢复写盘",
+        ));
+    }
     let mut transaction = diskio::WriteTransactionPlan::new(target_total_sectors);
     for artifact in verified
         .manifest

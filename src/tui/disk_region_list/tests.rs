@@ -106,3 +106,18 @@ fn moving_selection_updates_map_bridge_and_viewport() {
         Some(DiskRegionKind::Boot)
     );
 }
+
+#[test]
+fn region_table_uses_model_native_bytes_in_wide_and_compact_rows() {
+    let model_512 = fixture();
+    let model_4kn = model_512.clone().with_logical_sector_bytes(4096).unwrap();
+    let boot = &model_4kn.segments[1];
+    let row_512 = super::render::region_row(&model_512.segments[1], &model_512);
+    let row_4kn = super::render::region_row(boot, &model_4kn);
+    assert!(row_512.contains("20.48KB"), "{row_512}");
+    assert!(row_4kn.contains("163.84KB"), "{row_4kn}");
+    let compact =
+        super::render::compact_region_rows(boot, &model_4kn, 40, ratatui::style::Style::default());
+    assert!(compact[0].to_string().contains("163.84KB"), "{compact:?}");
+    assert_eq!(model_4kn.collapsed_tail_model().logical_sector_bytes, 4096);
+}

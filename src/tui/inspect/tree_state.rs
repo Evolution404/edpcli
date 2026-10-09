@@ -190,10 +190,16 @@ impl AppState {
                                 .iter()
                                 .find(|item| item.lba == child.range.start_lba)
                             {
-                                crate::application::inspect_tree::enrich_sector_node(
-                                    child,
-                                    &item.fields,
-                                )
+                                if item.raw.len() == crate::common::SECTOR {
+                                    crate::application::inspect_tree::enrich_sector_node(
+                                        child,
+                                        &item.fields,
+                                    )
+                                } else {
+                                    crate::application::inspect_tree::enrich_sector_node_with_sector_bytes(
+                                        child, &item.fields, item.raw.len() as u32,
+                                    )
+                                }
                             } else {
                                 child
                             }

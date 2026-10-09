@@ -1,6 +1,19 @@
 use super::*;
 
 impl AppState {
+    /// All Inspect byte offsets and cursor bounds refer to native blocks.
+    /// Legacy cached 512B backup/browser fixtures retain their exact behavior.
+    pub fn advanced_inspect_native_sector_bytes(&self) -> usize {
+        self.inspect
+            .advanced
+            .as_ref()
+            .and_then(|state| state.result.as_ref())
+            .and_then(|workspace| workspace.items.first())
+            .map_or(crate::common::SECTOR, |item| {
+                item.raw.len().max(crate::common::SECTOR)
+            })
+    }
+
     pub fn advanced_inspect_sector(&self) -> Option<&SectorInspectorState> {
         self.inspect.advanced.as_ref()?.sector.as_ref()
     }
@@ -121,6 +134,9 @@ impl AppState {
     }
 
     pub fn advanced_inspect_sector_set_cursor(&mut self, cursor: usize) {
+        let max_cursor = self
+            .advanced_inspect_native_sector_bytes()
+            .saturating_sub(1);
         let Some(sector) = self
             .inspect
             .advanced
@@ -129,7 +145,7 @@ impl AppState {
         else {
             return;
         };
-        sector.cursor = cursor.min(crate::common::SECTOR - 1);
+        sector.cursor = cursor.min(max_cursor);
         sector.pinned_field = None;
         sector.field_expanded = false;
     }
@@ -143,7 +159,7 @@ impl AppState {
     pub fn advanced_inspect_sector_row_end(&mut self) {
         if let Some(cursor) = self.advanced_inspect_sector().map(|sector| sector.cursor) {
             self.advanced_inspect_sector_set_cursor(
-                ((cursor / 16) * 16 + 15).min(crate::common::SECTOR - 1),
+                ((cursor / 16) * 16 + 15).min(self.advanced_inspect_native_sector_bytes() - 1),
             );
         }
     }
@@ -153,7 +169,7 @@ impl AppState {
     }
 
     pub fn advanced_inspect_sector_bottom(&mut self) {
-        self.advanced_inspect_sector_set_cursor(crate::common::SECTOR - 1);
+        self.advanced_inspect_sector_set_cursor(self.advanced_inspect_native_sector_bytes() - 1);
     }
 
     pub fn advanced_inspect_sector_half_page(&mut self, up: bool) {
@@ -165,6 +181,9 @@ impl AppState {
     }
 
     pub fn advanced_inspect_sector_move_cursor(&mut self, delta: isize) {
+        let max_cursor = self
+            .advanced_inspect_native_sector_bytes()
+            .saturating_sub(1);
         let Some(sector) = self
             .inspect
             .advanced
@@ -176,10 +195,7 @@ impl AppState {
         sector.cursor = if delta < 0 {
             sector.cursor.saturating_sub(delta.unsigned_abs())
         } else {
-            sector
-                .cursor
-                .saturating_add(delta as usize)
-                .min(crate::common::SECTOR - 1)
+            sector.cursor.saturating_add(delta as usize).min(max_cursor)
         };
         sector.pinned_field = None;
         sector.field_expanded = false;
@@ -192,7 +208,7 @@ impl AppState {
         let sector = state.sector.as_ref()?;
         let absolute = sector
             .lba
-            .checked_mul(crate::common::SECTOR as u64)?
+            .checked_mul(self.advanced_inspect_native_sector_bytes() as u64)?
             .checked_add(sector.cursor as u64)?;
         if let Some(field) = sector
             .pinned_field
@@ -298,9 +314,14 @@ impl AppState {
         sector.lba = next;
         sector.error = None;
         sector.field_expanded = false;
+        let block_bytes = state
+            .result
+            .as_ref()
+            .and_then(|workspace| workspace.items.first())
+            .map_or(crate::common::SECTOR as u64, |item| item.raw.len() as u64);
         if let Some(field) = sector.pinned_field.as_ref() {
-            let sector_start = next.saturating_mul(crate::common::SECTOR as u64);
-            let sector_end = sector_start.saturating_add(crate::common::SECTOR as u64);
+            let sector_start = next.saturating_mul(block_bytes);
+            let sector_end = sector_start.saturating_add(block_bytes);
             if field.range.start < sector_end && field.range.end_exclusive > sector_start {
                 sector.cursor = field
                     .range

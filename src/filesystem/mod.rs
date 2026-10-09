@@ -10,6 +10,8 @@ mod image;
 mod io;
 mod kind;
 mod metadata;
+mod native_boot;
+mod native_virtual;
 mod ntfs;
 mod policy;
 pub mod registry;
@@ -24,6 +26,7 @@ pub use fat16::{Fat16Driver, FAT16_DRIVER};
 pub use fat32::{Fat32Driver, FAT32_DRIVER};
 pub use format::{
     FilesystemGeometry, FilesystemWrite, FormatPlan, FormatRequest, FormatVerification,
+    NativeFilesystemWrite, NativeFormatPlan,
 };
 pub use image::{
     build_empty_exfat, build_empty_fat16, build_empty_fat32, build_empty_filesystem,
@@ -33,6 +36,8 @@ pub use image::{
 pub use io::{BootSectorReader, FilesystemReader};
 pub use kind::FilesystemKind;
 pub use metadata::FilesystemMetadata;
+pub use native_boot::detect_native_boot_sector;
+pub use native_virtual::NativeVirtualDiskPlan;
 pub use ntfs::{NtfsDriver, NTFS_DRIVER};
 pub use policy::{
     is_writable_filesystem, shift_writable_filesystem, validate_writable_filesystem,

@@ -95,9 +95,9 @@ fn evidence_rows(
             "物理字节偏移",
             format!(
                 "0x{:X}",
-                row.range
-                    .start_lba
-                    .saturating_mul(crate::common::SECTOR as u64)
+                row.range.start_lba.saturating_mul(
+                    item.map_or(crate::common::SECTOR as u64, |item| item.raw.len() as u64)
+                )
             ),
         );
     } else {
@@ -157,7 +157,7 @@ fn evidence_rows(
                         &mut rows,
                         "字段",
                         "来源 LBA",
-                        field.range.start_lba().to_string(),
+                        (field.range.start / item.raw.len() as u64).to_string(),
                     );
                     push(
                         &mut rows,
