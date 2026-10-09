@@ -67,11 +67,11 @@ pub use region_mapping::{
 };
 pub use reprovision::{
     apply_target_geometry_overrides, apply_target_geometry_overrides_draft,
-    parse_existing_provision, pass_info_policy_from_sectors, plain_extent_preserve_candidate,
-    prefill_for_target_mode, rekey_existing_partition_image, validate_target_geometry,
-    CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind, ExistingPartition,
-    ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision, PlainSourceExtent,
-    ProvisionPrefill, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
+    parse_existing_provision, parse_existing_provision_native, pass_info_policy_from_sectors,
+    plain_extent_preserve_candidate, prefill_for_target_mode, rekey_existing_partition_image,
+    validate_target_geometry, CapacityInput, CapacityInputMode, CapacitySource, DiskProvisionKind,
+    ExistingPartition, ExistingPartitionRecord, ExistingProvisionProfile, ParsedExistingProvision,
+    PlainSourceExtent, ProvisionPrefill, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
     TargetGeometryOverrides, TargetPartitionGeometry, TargetPartitionPlan, TargetProvisionPlan,
 };
 pub use spec::{Lba8Identity, OnlyId, ProvisionMetadata, ProvisionSpec, TargetIdentity};

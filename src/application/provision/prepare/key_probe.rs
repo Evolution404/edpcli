@@ -2,10 +2,147 @@
 
 use super::*;
 
+/// The 4Kn source path is a completely READ-ONLY evidence capture. It uses
+/// full native LBA0..12 blocks, a 512B-per-LBA fixed wire projection, and
+/// native-LBA geometry. It does not call the legacy 512B SectorDev reader or
+/// open any write handle.
+fn native_registration_on_disk(
+    runner: &dyn CmdRunner,
+    disk: u32,
+) -> EdpCliResult<(
+    crate::provision::DiskProvisionKind,
+    Option<ParsedExistingProvision>,
+)> {
+    let source = crate::application::evidence::EvidenceSource::open_disk(runner, disk)
+        .map_err(|error| err(EXIT_TARGET, format!("错误: 4Kn来源只读取证失败: {error}")))?;
+    let native = source
+        .native_protocol_image()
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 来源不具备完整原生协议只读镜像"))?;
+    if native.logical_sector_bytes() != 4096 {
+        return Err(err(EXIT_TARGET, "错误: 来源逻辑扇区并非已认证4096B"));
+    }
+    let identity = source.identity();
+    let kind = identity
+        .provision_kind
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 4Kn来源盘型尚未确认，不能自动验证密码"))?;
+    if kind == crate::provision::DiskProvisionKind::Plain {
+        return Ok((kind, None));
+    }
+    let did = identity
+        .device_id
+        .as_deref()
+        .filter(|did| {
+            did.starts_with("disk&ven_")
+                && did.len() <= 128
+                && did
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'&' | b'.' | b'-'))
+        })
+        .ok_or_else(|| {
+            err(
+                EXIT_TARGET,
+                "错误: 4Kn来源device_id不完整或不可信，不能验证密码",
+            )
+        })?;
+    let parsed =
+        crate::provision::parse_existing_provision_native(native, did, source.total_sectors())
+            .map_err(|message| {
+                err(
+                    EXIT_TARGET,
+                    format!("错误: 4Kn来源EDPF协议几何或密钥结构不可信: {message}"),
+                )
+            })?
+            .ok_or_else(|| err(EXIT_TARGET, "错误: 4Kn来源没有完整且可验证的EDPF密码域"))?;
+    if kind.official_mode() != Some(parsed.profile.source_mode) {
+        return Err(err(EXIT_TARGET, "错误: 4Kn来源盘型与完整EDPF模式不一致"));
+    }
+    Ok((kind, Some(parsed)))
+}
+
+fn native_key_probe_on_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<ProvisionKeyProbe> {
+    let (source_kind, parsed) = native_registration_on_disk(runner, disk)?;
+    let classify = |domain: KeyDomainRole| {
+        let record = parsed
+            .as_ref()
+            .and_then(|source| source.record_for_domain(domain));
+        let Some(record) = record else {
+            return (None, false);
+        };
+        let supported = record.lba12.need_encrypt != 0
+            && FileKeyWrapMode::from_raw(record.lba12.encrypt_mode) == Some(FileKeyWrapMode::Sm4);
+        let knowledge = if supported
+            && record
+                .verified_sm4_file_key(DEFAULT_KEY_DOMAIN_PASSWORD)
+                .is_ok()
+        {
+            SourcePasswordKnowledge::DefaultVerified
+        } else {
+            SourcePasswordKnowledge::Unknown
+        };
+        (Some(knowledge), !supported)
+    };
+    let (share, share_opaque_profile) = classify(KeyDomainRole::Share);
+    let (encrypt, encrypt_opaque_profile) = classify(KeyDomainRole::Encrypt);
+    Ok(ProvisionKeyProbe {
+        source_kind,
+        share,
+        share_opaque_profile,
+        encrypt,
+        encrypt_opaque_profile,
+    })
+}
+
+fn native_source_password_on_disk(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    domain: KeyDomainRole,
+    password: &[u8],
+) -> EdpCliResult<SourcePasswordKnowledge> {
+    let (_, parsed) = native_registration_on_disk(runner, disk)?;
+    let source =
+        parsed.ok_or_else(|| err(EXIT_TARGET, "错误: 4Kn来源未注册EDP密码域，拒绝密码验证"))?;
+    let record = source
+        .record_for_domain(domain)
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 4Kn来源模式不包含指定密码域"))?;
+    record.verified_sm4_file_key(password).map_err(|message| {
+        err(
+            EXIT_TARGET,
+            format!("错误: 4Kn来源原密码/SM4 FileKey校验失败: {message}"),
+        )
+    })?;
+    Ok(if password == DEFAULT_KEY_DOMAIN_PASSWORD {
+        SourcePasswordKnowledge::DefaultVerified
+    } else {
+        SourcePasswordKnowledge::UserVerified
+    })
+}
+
+/// Choose by observed physical sector geometry rather than infer from EDP
+/// protocol contents. Unknown geometry preserves the historical 512B reader
+/// behavior; an observed unsupported non-512B size fails closed.
+fn source_native_sector_bytes(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<Option<u32>> {
+    let observed = crate::platform::system::device_geometry(runner, disk)
+        .and_then(|geometry| geometry.logical_sector_bytes);
+    validate_source_password_sector_bytes(observed)
+}
+
+fn validate_source_password_sector_bytes(observed: Option<u32>) -> EdpCliResult<Option<u32>> {
+    if observed.is_some_and(|bytes| !matches!(bytes, 512 | 4096)) {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 原密码自动验证仅认证512B与4096B逻辑扇区",
+        ));
+    }
+    Ok(observed)
+}
+
 pub fn probe_provision_key_domains_on_disk(
     runner: &dyn CmdRunner,
     disk: u32,
 ) -> EdpCliResult<ProvisionKeyProbe> {
+    if source_native_sector_bytes(runner, disk)? == Some(4096) {
+        return native_key_probe_on_disk(runner, disk);
+    }
     let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
     let total_sectors = target_session
         .total_sectors()
@@ -80,6 +217,9 @@ pub fn verify_provision_source_password_on_disk(
     if password.is_empty() {
         return Err(err(EXIT_TARGET, "错误: 来源密码不能为空"));
     }
+    if source_native_sector_bytes(runner, disk)? == Some(4096) {
+        return native_source_password_on_disk(runner, disk, domain, password);
+    }
     let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
     let total_sectors = target_session
         .total_sectors()
@@ -121,4 +261,25 @@ pub fn verify_provision_source_password_on_disk(
     } else {
         SourcePasswordKnowledge::UserVerified
     })
+}
+
+#[cfg(test)]
+mod native_sector_probe_policy_tests {
+    use super::*;
+
+    #[test]
+    fn observed_sector_size_routes_4kn_only_and_fails_closed_for_other_sizes() {
+        assert_eq!(
+            validate_source_password_sector_bytes(Some(512)).unwrap(),
+            Some(512)
+        );
+        assert_eq!(
+            validate_source_password_sector_bytes(Some(4096)).unwrap(),
+            Some(4096)
+        );
+        assert_eq!(validate_source_password_sector_bytes(None).unwrap(), None);
+        for unsupported in [0, 256, 1024, 2048, 8192, 65536] {
+            assert!(validate_source_password_sector_bytes(Some(unsupported)).is_err());
+        }
+    }
 }

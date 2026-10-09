@@ -1,20 +1,20 @@
 use edpcli::{
     application::filesystem::FilesystemKind,
     platform::{HardwareProbe, InquiryInfo, NativeTransport},
-    protocol::crypto::{a6b0_full, crc32_bare, xor_rolling},
+    protocol::crypto::{a6b0_full, a7f0_full, crc32_bare, xor_rolling},
     protocol::edpf::EdpPartitionType,
     protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry,
     provision::{
         apply_target_geometry_overrides, generate_official_image, parse_existing_provision,
-        prefill_for_target_mode, wrap_file_key, wrap_legacy_lba7_file_key, CapacityInput,
-        CapacityInputMode, CapacitySource, DiskProvisionKind, ExistingFileKeyError,
-        ExistingPartition, ExistingProvisionProfile, FileKeyWrapMode, KeyDomainRole,
-        KeyDomainSecretPair, KeyDomainSecrets, OfficialPartitionMode, OfficialPartitionSizes,
-        OfficialProvisionPlan, OnlyId, PartitionRole, PassInfoPolicy, PassthroughBasis,
-        PasswordDisposition, PlainSourceExtent, ProvisionEntropy, ProvisionMetadata,
-        ProvisionProfile, ProvisionSpec, ProvisionTarget, QuickCapacityUnit, RegionDisposition,
-        SourcePasswordKnowledge, TargetGeometryOverrides, TargetIdentity, TargetProvisionPlan,
-        OFFICIAL_PARTITION_START_SECTOR,
+        parse_existing_provision_native, prefill_for_target_mode, wrap_file_key,
+        wrap_legacy_lba7_file_key, CapacityInput, CapacityInputMode, CapacitySource,
+        DiskProvisionKind, ExistingFileKeyError, ExistingPartition, ExistingProvisionProfile,
+        FileKeyWrapMode, KeyDomainRole, KeyDomainSecretPair, KeyDomainSecrets,
+        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId,
+        PartitionRole, PassInfoPolicy, PassthroughBasis, PasswordDisposition, PlainSourceExtent,
+        ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec, ProvisionTarget,
+        QuickCapacityUnit, RegionDisposition, SourcePasswordKnowledge, TargetGeometryOverrides,
+        TargetIdentity, TargetProvisionPlan, OFFICIAL_PARTITION_START_SECTOR,
     },
 };
 
@@ -1882,4 +1882,127 @@ fn mode3_to_mode0_shrinks_share_only_when_new_encrypt_does_not_fit_in_gap() {
         source.partition(PartitionRole::Share),
         &targets[1]
     ));
+}
+
+/// Synthesized transform of the verified *512B* official generator, not a
+/// claim that any official Windows 4Kn producer generated these bytes.
+#[test]
+fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
+    use edpcli::protocol::image::NativeProtocolImage;
+
+    for mode in [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionMode::WholeDiskEncrypted,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ] {
+        let (_, image, did) = generated_source(mode);
+        let crc = crc32_bare(did.as_bytes());
+        let mut projection = image.as_bytes().to_vec();
+        let original_projection = projection.clone();
+        let start7 = 7 * 512;
+        let start12 = 12 * 512;
+        let mut plain7 = xor_rolling(
+            &projection[start7..start7 + 512],
+            (crc & 0xffff) ^ (crc >> 16),
+        );
+        let mut plain12 = a6b0_full(&projection[start12..start12 + 512], &crc.to_le_bytes(), 0);
+        let count = u32::from_le_bytes(plain12[8..12].try_into().unwrap()) as usize;
+        assert!(matches!(count, 2 | 3));
+        for index in 0..count {
+            let a = index * 0x40;
+            let b = index * 0x60;
+            // The protocol's physical-sector-width field changes from 512
+            // to 4096. The record layout itself stays exactly 512B.
+            plain7[a + 0x20..a + 0x28].copy_from_slice(&4096u64.to_le_bytes());
+            plain12[b + 0x20..b + 0x28].copy_from_slice(&4096u64.to_le_bytes());
+            let old = u64::from_le_bytes(plain12[b + 0x28..b + 0x30].try_into().unwrap());
+            let native_count = (old / 4096).max(1);
+            let new_bytes = native_count * 4096;
+            plain12[b + 0x28..b + 0x30].copy_from_slice(&new_bytes.to_le_bytes());
+            if index == 0 {
+                plain7[a + 0x28..a + 0x30].copy_from_slice(&new_bytes.to_le_bytes());
+            }
+        }
+        let first_native_bytes = u64::from_le_bytes(plain12[0x28..0x30].try_into().unwrap());
+        projection[458..462].copy_from_slice(&((first_native_bytes / 4096) as u32).to_le_bytes());
+        projection[start7..start7 + 512]
+            .copy_from_slice(&xor_rolling(&plain7, (crc & 0xffff) ^ (crc >> 16)));
+        projection[start12..start12 + 512].copy_from_slice(&a7f0_full(
+            &plain12,
+            &crc.to_le_bytes(),
+            0,
+        ));
+
+        // Create native-source complete blocks with nonzero opaque tails.
+        let mut native = NativeProtocolImage::from_protocol_zero_tailed(&projection, 4096).unwrap();
+        let mut raw = native.native_bytes().to_vec();
+        for lba in 0..13 {
+            raw[lba * 4096 + 512..(lba + 1) * 4096].fill(0xa0 + lba as u8);
+        }
+        native = NativeProtocolImage::from_native_bytes(4096, raw.clone()).unwrap();
+        let source = parse_existing_provision_native(&native, &did, 16_777_216)
+            .unwrap()
+            .unwrap();
+        assert_eq!(source.profile.source_mode, mode);
+        assert_eq!(source.total_sectors, 16_777_216);
+        for record in &source.records {
+            assert_eq!(record.lba7.sector_size, 4096);
+            assert_eq!(record.lba12.sector_size, 4096);
+        }
+        for domain in [KeyDomainRole::Share, KeyDomainRole::Encrypt] {
+            let Some(record) = source.record_for_domain(domain) else {
+                continue;
+            };
+            assert_eq!(
+                record.verified_sm4_file_key(b"ProofPass1!").unwrap(),
+                [0x14; 16],
+                "{mode:?} {domain:?} genuine fixture key"
+            );
+            assert!(record.verified_sm4_file_key(b"IncorrectPass!").is_err());
+            assert!(record.verified_sm4_file_key(b"").is_err());
+        }
+        assert_eq!(native.native_bytes(), raw); // read-only never mutates
+        assert_ne!(
+            native.protocol_projection().as_slice(),
+            original_projection.as_slice()
+        );
+
+        let mut corrupt_mbr = raw.clone();
+        corrupt_mbr[458..462].copy_from_slice(&1u32.to_le_bytes());
+        let corrupt_mbr = NativeProtocolImage::from_native_bytes(4096, corrupt_mbr).unwrap();
+        assert!(parse_existing_provision_native(&corrupt_mbr, &did, 16_777_216).is_err());
+
+        let wrong_id = parse_existing_provision_native(&native, "bad_device_id", 16_777_216);
+        assert!(
+            !matches!(wrong_id, Ok(Some(_))),
+            "wrong source identity may not verify"
+        );
+        assert!(parse_existing_provision_native(&native, &did, 70).is_err());
+        let wrong_length =
+            NativeProtocolImage::from_native_bytes(4096, raw[..raw.len() - 1].to_vec());
+        assert!(wrong_length.is_err());
+        let mut corrupted = projection.clone();
+        corrupted[start12 + 4] ^= 1;
+        let corrupted = NativeProtocolImage::from_protocol_zero_tailed(&corrupted, 4096).unwrap();
+        assert!(!matches!(
+            parse_existing_provision_native(&corrupted, &did, 16_777_216),
+            Ok(Some(_))
+        ));
+        // A legacy 512B image must continue to be parsed under its own
+        // original 512B geometry (the new branch must not mutate the writer).
+        let original_source = parse_existing_provision(&image, &did, 16_777_216)
+            .unwrap()
+            .unwrap();
+        assert_eq!(original_source.profile.source_mode, mode);
+        let legacy_native =
+            NativeProtocolImage::from_native_bytes(512, original_projection).unwrap();
+        assert_eq!(
+            parse_existing_provision_native(&legacy_native, &did, 16_777_216)
+                .unwrap()
+                .unwrap()
+                .profile,
+            original_source.profile
+        );
+    }
 }
