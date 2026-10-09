@@ -64,3 +64,11 @@
 - `backup verify` 和备份目录扫描按清单的实际原生块长度校验 v4；备份 `Inspect` 可按本机原生4096B 访问任意已采集扇区、提取官方前512B协议投影，LCE和原始尾部保真；TUI 备份预览标识不可恢复，避免误用旧盘尾镜像位置。
 - 虚拟测试覆盖原生块往返、LBA11未知尾部、LCE指针/原生尺寸、缺失LCE、伪造可恢复策略、损坏负载摘要及不匹配几何；U391 只读验证已执行 `backup create --disk 4`、`backup verify`、`inspect decode backup.edpb --lba 11`，成功之后删除专用临时目录的取证文件。U391 从始至终没有设备写盘。
 - 下一阶段需扩展分区文件系统关键区域的原生块采集，做 4K 虚拟事务回滚与官方消费端独立挂载验收，最后才讨论 v4 的可恢复契约；**4K实体制盘仍继续禁止**。
+
+## 2026-10-09 第六批：4Kn 文件系统首扇区只读探测（P6 前置）
+
+- 新增 `src/filesystem/native_boot.rs` 只读探测接口 `detect_native_boot_sector()`，设备几何参数来自观察到的原生逻辑扇区，不能由文件系统引导扇区自行决定。512B 原样调用已有 driver registry，不改变其解析行为；当前仅额外认证4096B，其他尺寸明确拒绝。
+- FAT12/FAT16/FAT32 根据 BPB 中的 `BytesPerSector=4096`、总扇区、簇数、FAT大小、根目录所需原生块数以及 `0x55AA` 引导区签名交叉判定；exFAT 根据 `BytesPerSectorShift=12`、FAT/数据堆范围以及根簇等交叉判定。仅确认格式身份，不新增格式化、用户文件读写与分区解密能力；现有512B FAT系列写入器继续保持原几何门禁。
+- 原生 EDPB v4 取证时对每个分区首个4096B仅做只读验证，可补充已认证文件系统提示；若加密分区首块无法辨识，保持未知而不伪造文件系统类型，原始4096B仍完整保存。
+- 在真实 aigo U391 上对启动区原生 LBA63 完全只读验证：4096B/BPB，SPC=1、Reserved=1、FATs=2、RootEntries=512、TotalSectors=2497、FATSize16=1，识别结果 `Fat12`；合成4Kn FAT12/FAT16/FAT32/exFAT样本与不一致几何负例测试通过。
+- **尚未证明** 4Kn FAT 格式化输出可以被官方 Windows/LINUX 读取端消费、操作系统挂载或完成文件读写；后续需将驱动中固定512B的 `FilesystemWrite`/`SparseFilesystemImage` 改成设备几何派生的全块格式，并通过虚拟4K文件系统独立读取验收后才可进入4K制盘事务。
