@@ -116,6 +116,36 @@ pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String>
         }
     }
 
+    if native_evidence {
+        // The v4 read-only source reader locates raw data by native LBA.
+        // Multiple artifacts covering one physical LBA would make that
+        // lookup depend on manifest ordering, even with individually valid
+        // artifact hashes. Keep every native evidence LBA unambiguous.
+        let mut raw_ranges = Vec::new();
+        for artifact in manifest.artifacts.iter().filter(|item| item.kind == "raw_sectors") {
+            let [source_id] = artifact.source_extent_ids.as_slice() else {
+                return Err("4Kn raw evidence must reference exactly one source extent".into());
+            };
+            let extent = manifest
+                .extents
+                .iter()
+                .find(|item| &item.id == source_id)
+                .ok_or("4Kn raw source extent missing")?;
+            let end = extent
+                .start_lba
+                .checked_add(extent.sector_count)
+                .ok_or("4Kn source extent range overflow")?;
+            if extent.sector_count == 0 {
+                return Err("4Kn raw evidence extent cannot be empty".into());
+            }
+            raw_ranges.push((extent.start_lba, end));
+        }
+        raw_ranges.sort_unstable();
+        if raw_ranges.windows(2).any(|pair| pair[0].1 > pair[1].0) {
+            return Err("4Kn raw evidence source extents overlap".into());
+        }
+    }
+
     if !plain_metadata {
         let protocol_region = manifest
             .regions
