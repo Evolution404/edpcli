@@ -248,9 +248,7 @@ impl NativeEdpLayoutPlan {
     /// MBR is an independent source of the first partition geometry and
     /// must be checked *before* reading any LCE payload.
     fn verify_source_visible_mbr(&self, mbr: &[u8]) -> Result<(), String> {
-        if mbr.len() < 512
-            || mbr[510..512] != [0x55, 0xaa]
-            || mbr[446 + 4] != self.visible_mbr_type
+        if mbr.len() < 512 || mbr[510..512] != [0x55, 0xaa] || mbr[446 + 4] != self.visible_mbr_type
         {
             return Err("来源 LBA0 MBR 签名或分区类型不匹配".into());
         }
@@ -295,10 +293,8 @@ impl NativeEdpLayoutPlan {
             }
             protocol_bytes.extend_from_slice(&block);
         }
-        let image = NativeProtocolImage::from_native_bytes(
-            self.logical_sector_bytes,
-            protocol_bytes,
-        )?;
+        let image =
+            NativeProtocolImage::from_native_bytes(self.logical_sector_bytes, protocol_bytes)?;
         self.verify_source_protocol_geometry(&image, device_id)?;
         let source_mbr = image.block(0).ok_or("来源缺少 LBA0 原生块")?;
         self.verify_source_visible_mbr(source_mbr)?;
