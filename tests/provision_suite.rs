@@ -6,6 +6,8 @@ mod filesystem_contract;
 mod filesystem_domain;
 #[path = "support/gold_name.rs"]
 pub mod gold_name;
+#[path = "native_edp_geometry.rs"]
+mod native_edp_geometry;
 #[path = "native_virtual_disk.rs"]
 mod native_virtual_disk;
 

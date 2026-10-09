@@ -9,6 +9,7 @@ mod key_domain;
 mod keys;
 mod layout;
 mod lce;
+mod native_geometry;
 mod partition_format;
 pub(crate) use partition_format::build_official_partition_filesystem_from_plain;
 mod partition_semantics;
@@ -44,6 +45,9 @@ pub use layout::{
     WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use lce::{build_lce_ciphertext, lce_plaintext};
+pub use native_geometry::{
+    NativeEdpExtent, NativeEdpLayoutPlan, NativeEdpPartition, NativeEdpWriteCapability,
+};
 pub use partition_format::{build_official_partition_filesystem, PartitionFilesystemImage};
 pub use partition_semantics::{
     official_partition_semantics, physical_partition_encryption_semantics,
