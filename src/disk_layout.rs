@@ -267,6 +267,54 @@ impl DiskLayoutModel {
         Self::canonical_from_known(total_sectors, known)
     }
 
+    /// The legacy 512B-only backup mirror positions are not established for
+    /// 4Kn media. Do not draw phantom mirrored sectors merely by using the
+    /// same *number* of native LBAs; only verified native extents are owned.
+    pub fn canonical_edp_with_sector_bytes(
+        total_sectors: u64,
+        partitions: Vec<DiskLayoutSegment>,
+        lce_start_lba: u64,
+        lce_sector_count: u64,
+        logical_sector_bytes: u32,
+    ) -> Result<Self, String> {
+        if logical_sector_bytes == 512 {
+            return Self::canonical_edp(total_sectors, partitions, lce_start_lba, lce_sector_count);
+        }
+        if !(512..=65_536).contains(&logical_sector_bytes)
+            || !logical_sector_bytes.is_power_of_two()
+        {
+            return Err(format!(
+                "不支持逻辑扇区大小 {logical_sector_bytes}B 的容量布局"
+            ));
+        }
+        if total_sectors < OFFICIAL_PARTITION_START_SECTOR {
+            return Err("EDP 原生扇区数量不足".into());
+        }
+        let mut known = vec![
+            DiskLayoutSegment {
+                label: "EDP 主协议区".into(),
+                start_lba: 0,
+                sector_count: 13,
+                kind: DiskRegionKind::Protocol,
+            },
+            DiskLayoutSegment {
+                label: "保留区域".into(),
+                start_lba: 13,
+                sector_count: OFFICIAL_PARTITION_START_SECTOR - 13,
+                kind: DiskRegionKind::Reserved,
+            },
+        ];
+        known.extend(partitions);
+        known.push(DiskLayoutSegment {
+            label: "LCE".into(),
+            start_lba: lce_start_lba,
+            sector_count: lce_sector_count,
+            kind: DiskRegionKind::Lce,
+        });
+        // No verified 4Kn tail mirror/restore node; never fabricate them.
+        Self::canonical_from_known(total_sectors, known)
+    }
+
     pub fn draft_edp(
         total_sectors: u64,
         mut partitions: Vec<DiskLayoutSegment>,

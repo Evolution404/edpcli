@@ -169,6 +169,64 @@ fn edp_device_with_layout() -> edpcli::cli::Row {
     row
 }
 
+#[test]
+fn four_kn_capacity_uses_native_lbas_and_does_not_fabricate_512b_tail_mirrors() {
+    use edpcli::protocol::sectors::EdpfPartition;
+    use edpcli::tui::disk_layout::DiskRegionKind;
+
+    let mut row = edp_device_with_layout();
+    row.size = 255_944_818_688;
+    let geometry = &mut row
+        .identity_pin
+        .as_mut()
+        .expect("snapshot")
+        .snapshot
+        .hardware;
+    geometry.logical_sector_size = Some(4096);
+    geometry.total_sectors = Some(62_486_528);
+    row.partitions = Some(vec![
+        EdpfPartition {
+            ptype: 1,
+            active: 1,
+            enc: 0,
+            start_lba: 63,
+            size_bytes: 2497 * 4096,
+        },
+        EdpfPartition {
+            ptype: 2,
+            active: 1,
+            enc: 1,
+            start_lba: 2560,
+            size_bytes: 49_976_864 * 4096,
+        },
+        EdpfPartition {
+            ptype: 4,
+            active: 1,
+            enc: 1,
+            start_lba: 49_979_648,
+            size_bytes: 12_494_112 * 4096,
+        },
+    ]);
+    row.lce.as_mut().expect("lce").start_lba = 62_476_561;
+    row.lce.as_mut().expect("lce").sector_count = 1;
+    let g = row.layout_geometry().expect("native geometry");
+    assert_eq!(g.logical_sector_bytes, 4096);
+    assert_eq!(g.native_sector_count, 62_486_528);
+    let profile = row.existing_profile_for_prefill().expect("source profile");
+    assert_eq!(profile.partitions[0].sector_count, 2497);
+    assert_eq!(profile.partitions[1].sector_count, 49_976_864);
+    let layout = row.canonical_layout().expect("real 4Kn partition geometry");
+    layout.validate_complete().expect("complete geometry");
+    assert_eq!(layout.total_sectors, 62_486_528);
+    assert!(layout.segments.iter().any(|s| s.kind == DiskRegionKind::Lce
+        && s.start_lba == 62_476_561
+        && s.sector_count == 1));
+    assert!(!layout.segments.iter().any(|s| matches!(
+        s.kind,
+        DiskRegionKind::BackupMirror | DiskRegionKind::RestoreNode
+    )));
+}
+
 fn inspect_state() -> AppState {
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
