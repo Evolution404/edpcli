@@ -116,6 +116,10 @@ pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String>
         }
     }
 
+    if native_evidence {
+        super::validate_raw_extents::validate_unique_native_raw_extents(manifest)?;
+    }
+
     if !plain_metadata {
         let protocol_region = manifest
             .regions

@@ -689,6 +689,42 @@ fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
     assert!(!plan.may_write());
     let verified_writes = source.verified_native_replay(&plan).unwrap();
     assert_eq!(verified_writes.len(), 14);
+
+    // The UI may display a diagnostic device_id override. It must NEVER
+    // become the authentication identity for EDPF decode/FileKey checks.
+    // Compare a real EDPB v4 consumer read against an overridden display:
+    // the decoded fields and bytes must be invariant under the override.
+    use edpcli::application::inspect::{
+        load_backup_advanced_inspect, AdvancedInspectMode, AdvancedInspectRequest,
+    };
+    let inspect = AdvancedInspectRequest {
+        mode: AdvancedInspectMode::Decode,
+        lbas: vec![12],
+        export_dir: None,
+        device_id_override: None,
+        fail_soft_decode: true,
+    };
+    let observed = load_backup_advanced_inspect(&path, &inspect).unwrap();
+    let mut display_override = inspect.clone();
+    display_override.device_id_override = Some("disk&ven_fake&prod_untrusted".into());
+    let diagnostic = load_backup_advanced_inspect(&path, &display_override).unwrap();
+    assert_eq!(observed.items.len(), 1);
+    assert_eq!(diagnostic.items.len(), 1);
+    assert_eq!(
+        diagnostic.meta.device_id.as_deref(),
+        Some("disk&ven_fake&prod_untrusted")
+    );
+    assert_eq!(observed.items[0].decoded, diagnostic.items[0].decoded);
+    assert_eq!(
+        observed.items[0].decoded_sha256,
+        diagnostic.items[0].decoded_sha256
+    );
+    assert_eq!(observed.items[0].fields, diagnostic.items[0].fields);
+    assert!(diagnostic.items[0]
+        .notes
+        .iter()
+        .any(|note| note.contains("仅用于诊断显示")));
+
     assert_eq!(verified_writes.last().unwrap().relative_lba, 0);
     for native_lba in 0..13u64 {
         let block = verified_writes
@@ -770,6 +806,86 @@ fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
     assert!(VerifiedBackupReader::open(&bad)
         .unwrap_err()
         .contains("SHA-256"));
+    // A manifest can hold individually valid, SHA-verified artifacts and
+    // still be ambiguous if two raw extents claim the same native LBA.
+    // The EDPB v4 source reader must never pick one by artifact ordering.
+    let mut overlap = build(&extra);
+    let conflicting_extent = "extent.synthetic.lce_alias";
+    overlap.extents.push(Extent {
+        id: conflicting_extent.into(),
+        region_id: region.id.clone(),
+        start_lba: 10_000,
+        sector_count: 1,
+        purpose: "ambiguous_lce_alias".into(),
+    });
+    let mut alias = extra[0].clone();
+    alias.id = "raw.synthetic.lce_alias".into();
+    alias.source_extent_ids = vec![conflicting_extent.into()];
+    alias.data = vec![0x55; 4096]; // independent, valid-sized and conflicting data
+    overlap.artifacts.push(alias);
+    let overlap_error = write_metadata_backup(&tmp.0.join("overlap.edpb"), &overlap).unwrap_err();
+    assert!(
+        overlap_error.contains("source extents overlap"),
+        "{overlap_error}"
+    );
+
+    // Extent adjacency is not overlap: this extra source block may be saved,
+    // but the LCE pointer still determines which exact LBA is the real LCE.
+    let mut adjacent = overlap;
+    adjacent.regions.push(Region {
+        id: "region.synthetic.additional".into(),
+        role: "additional_read_only_evidence".into(),
+        start_lba: Some(10_001),
+        sector_count: Some(1),
+        semantic_status: SemanticStatus::Identified,
+    });
+    adjacent.extents.last_mut().unwrap().start_lba = 10_001;
+    adjacent.extents.last_mut().unwrap().region_id = "region.synthetic.additional".into();
+    let adjacent_path = tmp.0.join("adjacent.edpb");
+    write_metadata_backup(&adjacent_path, &adjacent).unwrap();
+    let adjacent_source =
+        edpcli::application::evidence::EvidenceSource::open_backup(&adjacent_path).unwrap();
+    assert_eq!(adjacent_source.total_sectors(), 12_000);
+
+    // Invalid v4 metadata never acquires a deterministic native source mapping.
+    let mut missing = adjacent.clone();
+    missing.extents.pop();
+    assert!(write_metadata_backup(&tmp.0.join("missing-source.edpb"), &missing).is_err());
+
+    let mut zero = adjacent.clone();
+    zero.extents.last_mut().unwrap().sector_count = 0;
+    assert!(
+        write_metadata_backup(&tmp.0.join("empty-source.edpb"), &zero)
+            .unwrap_err()
+            .contains("cannot be empty")
+    );
+
+    let mut overflowing = adjacent.clone();
+    overflowing.extents.last_mut().unwrap().start_lba = u64::MAX;
+    overflowing.extents.last_mut().unwrap().sector_count = 2;
+    assert!(write_metadata_backup(&tmp.0.join("overflow-source.edpb"), &overflowing).is_err());
+
+    let mut outside = adjacent.clone();
+    outside.extents.last_mut().unwrap().start_lba = 12_000;
+    assert!(
+        write_metadata_backup(&tmp.0.join("outside-source.edpb"), &outside)
+            .unwrap_err()
+            .contains("source device geometry")
+    );
+
+    let mut ambiguous = adjacent.clone();
+    ambiguous
+        .artifacts
+        .last_mut()
+        .unwrap()
+        .source_extent_ids
+        .push("extent.synthetic.lce_alias".into());
+    assert!(
+        write_metadata_backup(&tmp.0.join("ambiguous-source.edpb"), &ambiguous)
+            .unwrap_err()
+            .contains("exactly one source extent")
+    );
+
     extra[0].restore_policy = RestorePolicy::Restorable;
     assert!(write_metadata_backup(&tmp.0.join("forbidden.edpb"), &build(&extra)).is_err());
     assert!(write_metadata_backup(&tmp.0.join("missing.edpb"), &build(&[])).is_err());

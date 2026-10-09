@@ -19,6 +19,7 @@ mod model;
 mod read;
 mod validate;
 mod validate_native;
+mod validate_raw_extents;
 mod write;
 
 pub use crate::sha256::{sha256_hex, sha256_reader_hex};
