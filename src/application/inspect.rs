@@ -16,7 +16,10 @@ mod source;
 
 pub use super::inspect_text::render_fields_plain;
 /// Isolated native 4Kn AES_CROSS read-only decoder; no device or write handle.
-pub use crate::partition_transform::decrypt_mode3_native;
+pub use crate::partition_transform::{
+    decrypt_mode3_native, transform_native_sector_offline, NativeCipherDirection,
+    NativePartitionDataCipher,
+};
 pub use decode::{decode_sector, sector_meta_text};
 use decode::{materialize_protocol_fields, materialize_protocol_fields_with_sector_bytes};
 use export::{export_advanced_bytes, export_advanced_meta};
