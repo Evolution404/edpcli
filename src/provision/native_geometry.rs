@@ -257,7 +257,10 @@ impl NativeEdpLayoutPlan {
         let mut by_lba = std::collections::BTreeMap::new();
         for block in observed {
             if block.data.len() != self.logical_sector_bytes as usize {
-                return Err(format!("虚拟重放回读LBA{}不是完整原生块", block.relative_lba));
+                return Err(format!(
+                    "虚拟重放回读LBA{}不是完整原生块",
+                    block.relative_lba
+                ));
             }
             if by_lba.insert(block.relative_lba, &block.data).is_some() {
                 return Err(format!("虚拟重放回读LBA{}重复", block.relative_lba));
