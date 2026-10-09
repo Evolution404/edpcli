@@ -237,3 +237,31 @@ trait NativeBlockDevice {
 - P9/P10 即使全功能完成，旧 512B 门禁或三平台 CI 失败时也不能发布。
 
 **最终发布验收定义：** 对原来已支持的所有 512B 功能，新版本继续成功，字节/语义/错误码/交互均没有未审批的差异；对逐项认证的 4096B 功能，能在官方证据、虚拟运行时、独立读回与受控实体 HIL 之间形成闭环；任何无法证明的配置类型按安全规则明确拒绝，而不是声称已完整支持。
+
+## 13. 设备几何唯一真相源与可参数化扇区设计（2026-10-09 追加）
+
+**原则：** 用户要求“修改一次逻辑扇区大小，其余模块自动适配”，必须实现为**每个目标设备唯一、经过硬件验证的只读 `DeviceGeometry`**，绝对不是进程范围内一个可自由改写的全局 `LOGICAL_SECTOR_SIZE`。多块盘可以同时以 512B/4096B/其他经验证几何存在，不能共享单个全局值。测试/虚拟盘可自由配置合法 `logical_sector_bytes`，实体盘只能接受设备实际报告的逻辑块长度，不能在业务表单中修改硬件扇区长度。
+
+```
+OS native geometry query ── verify device handle / byte capacity
+                     ↓
+DeviceGeometry {capacity_bytes, logical_sector_bytes, physical_sector_bytes, total_native_lbas}
+                     ↓ immutable per-device operation context
+    ┌───────────────┼────────────────────┬────────────────────────┐
+NativeBlock I/O   512B EDP projector   Partition/Filesystem    EDPB/Inspect/TUI
+    │                │                    │                        │
+  4096B read     first 512B protocol   native LBA geometry    native full block
+  4096B write*   OpaqueTail unchanged   byte capacities         non-protocol tail
+```
+
+*只有经过独立认证的读、写、恢复、格式化、加密/模式组合才能授予对应实体介质写入能力。所有地址与容量换算集中在单一领域 API，不允许其他业务模块自行计算 `LBA * 512`、`bytes / 512`、`MiB * 2048`。一次扫描只获取/验证一个物理设备几何上下文，传入其所有服务和 UI 模型；重新打开设备前重新核验。同一设备的 identity snapshot、TUI 容量布局和事务不得拥有互相冲突的副本。
+
+- 固定 EDP 协议字段 `ProtocolSector512` 不是硬件逻辑块：它只定义协议**前 512B 的有效结构**，不能用作全盘 I/O 步长。包括 LBA11 的剩余 3584B 须保留。
+- 盘上记录的 `sector_size` 必须与 `DeviceGeometry.logical_sector_bytes` 严格吻合；如不符，拒绝解读和写入。LCE 的原生扇区数由官方字段和设备几何共同确定：真实 U391 4Kn 已验证为 1 个 4096B 原生 LBA；历史 512B 官方金标是 6 个 512B。不可机械转换为 8 个、6 个或固定 3072B。
+- 盘尾历史镜像的固定 `1024/9/4` **512B 扇区位置**没有 4Kn 官方证据。当前 U391 的对应 4Kn 末尾读取为全零，故 4Kn 展示不得凭空创建 `BackupMirror/RestoreNode`，只有在对应设备得到真实签名和官方证据后才能建模和恢复。
+- 阶段实施中每条入口（`scan/list/info/Inspect/Backup/Restore/Provision/Plain/FS/TUI`）都必须从已认证设备上下文获取几何。短期维护原有 `512B` 接口适配层以保证 2.6.0 旧功能字节级不变，最终应删除每个子系统对默认 `512B` 原生逻辑扇区的暗中假设。
+- 验证内容不仅覆盖 512B、4096B 正例，还包括 1024B/2048B/8192B 虚拟模拟、几何突变（拔插和句柄复用）、未知尺寸、非 2 的幂、跨几何备份/恢复拒绝、溢出、全原生块回滚、官方模式及文件系统格式和用户交互。某一格式未认证不得因为统一参数模型存在就自动解禁。
+
+**与官方对照：** 官方 Windows 底层 `GetUsbSizeInfoEx/IOCTL_DISK_GET_DRIVE_GEOMETRY` 获取 `BytesPerSector`，`ReadDisk/WriteNtDisk` 部分位置使用它计算偏移和大小，这验证了参数化的总体方向。官方内部仍混用 512B 协议结构、硬编码 LCE/盘尾的跨代假设，`WriteToUsb11` 存在 512B 栈缓冲区被按 4096B 读出的缺陷。因此“所有路径使用单一几何上下文”属于我们对官方设计的安全工程化，而不是声称官方已经完整抽象成功。
+
+**实施验收新增硬门禁：** 在源码审计表逐条标记 `native-LBA/byte-length/fixed-protocol-payload/legacy-512-sector` 的单位类型，每项业务至少提供一组 512B + 4096B 参数化回归，确保修改设备上下文会自动改变所有相应长度、起始和边界，**不会改变任何协议固定 512B 的字段编码**。没有完成这项验证不能宣布“全局统一扇区配置已实现”。
