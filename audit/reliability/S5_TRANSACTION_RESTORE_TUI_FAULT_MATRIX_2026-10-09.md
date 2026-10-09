@@ -33,7 +33,7 @@
 
 ## S5.4 CI 隔离虚拟磁盘故障注入
 
-`tests/virtual_disk_hil.rs` 新增 `#[ignore]` 的 `virtual_disk_partial_write_faults_restore_entire_metadata_exactly`，仅在编译 `ci-virtual-disk` feature 并由 CI 创建**已证明为 loop/VHD/disk image 的原始虚拟设备**后执行：既有 `ci_prepare_virtual_write` 和 `is_raw_device_path` 守卫必须成功。每次先拍摄原 LBA0–12，再对第 1、第 7、最后一个写入位置实施“已改动该扇区前 256B、返回写错误”，生产 `atomic_write_sectors` 应完整回滚并读回全部 LBA0–12，与写前字节逐一比较。串行 `HIL_LOCK` 防止虚拟磁盘 HIL 用例并发写同一临时卷。CI 结束后已有脚本重新挂载原文件系统并验证保留的文件内容。
+`tests/virtual_disk_hil.rs` 将 `assert_virtual_disk_partial_write_faults` 接入**现有** `#[ignore]` 的 `raw_virtual_disk_atomic_roundtrip_and_restore`，仅在编译 `ci-virtual-disk` feature 并由 CI 创建**已证明为 loop/VHD/disk image 的原始虚拟设备**后执行：既有 `ci_prepare_virtual_write` 和 `is_raw_device_path` 守卫必须成功，并且**所有成功读回与故障测试必须复用这同一次已验证写盘租约**。Linux ARM64 初版单列第二个 HIL 测试重复准备写入租约时，首个用例已卸载虚拟分区，导致 `/sys/class/block/loop0p1/dev` 不存在而被设备准入门禁正确拒绝；本轮修复的是 HIL 组织方式，不放松平台安全规则。每次先拍摄原 LBA0–12，再对第 1、第 7、最后一个写入位置实施“已改动该扇区前 256B、返回写错误”，生产 `atomic_write_sectors` 应完整回滚并读回全部 LBA0–12，与写前字节逐一比较。串行 `HIL_LOCK` 防止虚拟磁盘 HIL 用例并发写同一临时卷。CI 结束后已有脚本重新挂载原文件系统并验证保留的文件内容。
 
 只接受 GitHub Linux loop、Windows VHD、macOS disk image 的隔离设备；**此 HIL 不可绕过到用户的真实 USB、不可宣称证明掉电和控制器固件异常下的真正原子性**。本轮不调整 `FileDev` 的原始盘批处理上限。
 

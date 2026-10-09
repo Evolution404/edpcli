@@ -186,6 +186,11 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
         "virtual disk was not restored bit-for-bit"
     );
 
+    // Exercise partial-write failure injection inside this SAME guarded virtual
+    // disk write lease. Running a second guarded test would incorrectly require
+    // the loop/VHD partition node to still exist after the first unmount.
+    assert_virtual_disk_partial_write_faults(&mut dev);
+
     // Chapter 12 semantic HIL: install a real mode0 metadata image on the disposable
     // loop/VHD/raw disk image, read it back through FileDev, then exercise the per-domain planner
     // against bytes that actually crossed the raw-device boundary.
@@ -447,8 +452,8 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
     );
 }
 
-// This HIL fixture must never run without the CI-only feature AND the platform's
-// existing disposable-virtual-disk guard. It is intentionally `#[ignore]`.
+// Only invoked by the guarded, ignored top-level virtual HIL test above.
+// Reuse the same open virtual raw device and its one verified write lease.
 struct FailOnceVirtualWrite<'a> {
     inner: &'a mut FileDev,
     fail_at: usize,
@@ -479,20 +484,8 @@ impl SectorDev for FailOnceVirtualWrite<'_> {
     }
 }
 
-#[test]
-#[ignore = "requires an explicitly created and guarded disposable OS loop/VHD/disk image"]
-fn virtual_disk_partial_write_faults_restore_entire_metadata_exactly() {
-    let _serial = HIL_LOCK.lock().expect("serialize destructive virtual HIL");
-    let path = std::env::var("EDPCLI_VIRTUAL_DISK_PATH")
-        .expect("CI must provide disposable virtual disk path");
-    assert!(
-        edpcli::platform::is_raw_device_path(&path),
-        "refuse any non-raw HIL target: {path}"
-    );
-    let _guard = edpcli::platform::ci_prepare_virtual_write(&path)
-        .expect("must prove disposable virtual disk before any write");
-    let mut dev = FileDev::open_rdwr(&path, Duration::from_secs(5)).unwrap();
-    let original = read_metadata(&mut dev);
+fn assert_virtual_disk_partial_write_faults(dev: &mut FileDev) {
+    let original = read_metadata(&mut *dev);
     let mut patch = deterministic_patch();
     // The normal HIL test might have used this exact patch already, but it
     // always restores. Ensure every touched sector actually changes here.
@@ -502,7 +495,7 @@ fn virtual_disk_partial_write_faults_restore_entire_metadata_exactly() {
     assert_ne!(original, patch);
     for fail_at in [1, 7, METADATA_SECTOR_COUNT] {
         let mut faulty = FailOnceVirtualWrite {
-            inner: &mut dev,
+            inner: &mut *dev,
             fail_at,
             writes: 0,
         };
@@ -521,5 +514,5 @@ fn virtual_disk_partial_write_faults_restore_entire_metadata_exactly() {
             "LBA0-12 after failed write {fail_at}"
         );
     }
-    assert_eq!(read_metadata(&mut dev), original);
+    assert_eq!(read_metadata(&mut *dev), original);
 }
