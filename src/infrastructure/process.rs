@@ -268,14 +268,19 @@ mod tests {
         vec!["/bin/sh", "-c", script]
     }
     #[cfg(windows)]
-    fn shell(script: &str) -> Vec<&str> {
-        vec![
-            "powershell.exe",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            script,
-        ]
+    fn windows_test_command(fixture: &str) -> (String, String) {
+        let executable = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+        let name = format!("infrastructure::process::tests::{fixture}");
+        (executable, name)
+    }
+    #[cfg(windows)]
+    fn run_windows_test_command(fixture: &str, timeout: Duration) -> CommandOutcome {
+        let (executable, name) = windows_test_command(fixture);
+        run_command(
+            &[&executable, "--exact", &name, "--ignored", "--nocapture"],
+            timeout,
+        )
+        .unwrap()
     }
     #[test]
     fn empty_command_is_invalid() {
@@ -288,9 +293,13 @@ mod tests {
     fn preserves_bounded_stderr_and_exit_status() {
         #[cfg(unix)]
         let script = "printf abc; printf denied >&2; exit 7";
-        #[cfg(windows)]
-        let script = "[Console]::Out.Write('abc'); [Console]::Error.Write('denied'); exit 7";
+        #[cfg(unix)]
         let outcome = run_command(&shell(script), Duration::from_secs(15)).unwrap();
+        #[cfg(windows)]
+        let outcome = run_windows_test_command(
+            "windows_fixture_stderr_exit7",
+            Duration::from_secs(15),
+        );
         assert_eq!(
             outcome.completion,
             CommandCompletion::Exited {
@@ -298,26 +307,92 @@ mod tests {
                 code: Some(7)
             }
         );
+        #[cfg(unix)]
         assert_eq!(outcome.stdout, "abc");
+        #[cfg(windows)]
+        assert!(outcome.stdout.contains("abc"));
         assert_eq!(outcome.stderr, "denied");
-        assert!(check_output(&shell(script), Duration::from_secs(15))
+        #[cfg(unix)]
+        let error = check_output(&shell(script), Duration::from_secs(15)).unwrap_err();
+        #[cfg(windows)]
+        let error = {
+            let (executable, name) = windows_test_command("windows_fixture_stderr_exit7");
+            check_output(
+                &[&executable, "--exact", &name, "--ignored", "--nocapture"],
+                Duration::from_secs(15),
+            )
             .unwrap_err()
-            .to_string()
-            .contains("denied"));
+        };
+        assert!(error.to_string().contains("denied"));
     }
     #[test]
     fn stderr_only_output_cannot_block_or_exceed_retained_diagnostic_budget() {
         #[cfg(unix)]
-        let script = "head -c 100000 /dev/zero >&2";
+        let outcome = run_command(
+            &shell("head -c 100000 /dev/zero >&2"),
+            Duration::from_secs(15),
+        )
+        .unwrap();
         #[cfg(windows)]
-        let script = "[Console]::Error.Write(('x' * 100000))";
-        let outcome = run_command(&shell(script), Duration::from_secs(15)).unwrap();
+        let outcome = run_windows_test_command(
+            "windows_fixture_stderr_limit",
+            Duration::from_secs(15),
+        );
         assert!(matches!(
             outcome.completion,
             CommandCompletion::Exited { success: true, .. }
         ));
         assert_eq!(outcome.stderr.len(), STDERR_LIMIT);
         assert!(outcome.stderr_truncated);
+    }
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "native child fixture for the Windows subprocess runner"]
+    fn windows_fixture_stderr_exit7() {
+        use std::io::Write;
+        print!("abc");
+        eprint!("denied");
+        std::io::stdout().flush().unwrap();
+        std::io::stderr().flush().unwrap();
+        std::process::exit(7);
+    }
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "native child fixture for the Windows subprocess runner"]
+    fn windows_fixture_stderr_limit() {
+        use std::io::Write;
+        std::io::stderr().write_all(&vec![b'x'; 100_000]).unwrap();
+        std::io::stderr().flush().unwrap();
+    }
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "native child fixture for the Windows subprocess runner"]
+    fn windows_fixture_closed_pipes() {
+        use std::io::Write;
+        use windows_sys::Win32::{
+            Foundation::CloseHandle,
+            System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE},
+        };
+        print!("ready");
+        std::io::stdout().flush().unwrap();
+        // SAFETY: this fixture owns its subprocess and intentionally closes
+        // inherited standard handles to test the parent's timeout behavior.
+        unsafe {
+            CloseHandle(GetStdHandle(STD_OUTPUT_HANDLE));
+            CloseHandle(GetStdHandle(STD_ERROR_HANDLE));
+        }
+        std::thread::sleep(Duration::from_secs(60));
+    }
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "native child fixture for the Windows subprocess runner"]
+    fn windows_fixture_stdout_limit() {
+        use std::io::Write;
+        let chunk = vec![b'x'; 64 * 1024];
+        for _ in 0..140 {
+            std::io::stdout().write_all(&chunk).unwrap();
+        }
+        std::io::stdout().flush().unwrap();
     }
     #[cfg(unix)]
     #[test]
@@ -336,15 +411,19 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_deadline_survives_closed_pipes_and_output_limit_is_typed() {
-        let script = r#"Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class Pipes { [DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int n); [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h); }'; [Console]::Out.Write('ready'); [Console]::Out.Flush(); [Pipes]::CloseHandle([Pipes]::GetStdHandle(-11)) | Out-Null; [Pipes]::CloseHandle([Pipes]::GetStdHandle(-12)) | Out-Null; Start-Sleep 60"#;
-        let outcome = run_command(&shell(script), Duration::from_secs(10)).unwrap();
+        // Native test-binary fixtures avoid nondeterministic PowerShell
+        // startup on overloaded CI runners while retaining the actual
+        // pipe-closure, deadline and output-budget behavior.
+        let outcome = run_windows_test_command(
+            "windows_fixture_closed_pipes",
+            Duration::from_secs(10),
+        );
         assert_eq!(outcome.completion, CommandCompletion::TimedOut);
-        assert_eq!(outcome.stdout, "ready");
-        let outcome = run_command(
-            &shell("[Console]::Out.Write(('x' * 9000000))"),
+        assert!(outcome.stdout.contains("ready"));
+        let outcome = run_windows_test_command(
+            "windows_fixture_stdout_limit",
             Duration::from_secs(20),
-        )
-        .unwrap();
+        );
         assert_eq!(outcome.completion, CommandCompletion::OutputLimit);
         assert!(outcome.stdout_truncated);
     }
