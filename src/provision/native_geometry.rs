@@ -294,7 +294,8 @@ impl NativeEdpLayoutPlan {
             protocol_bytes.extend_from_slice(&block);
         }
         let image =
-            NativeProtocolImage::from_native_bytes(self.logical_sector_bytes, protocol_bytes)?;
+            NativeProtocolImage::from_native_bytes(self.logical_sector_bytes, protocol_bytes)
+                .map_err(|error| format!("来源原生协议构造失败: {error}"))?;
         self.verify_source_protocol_geometry(&image, device_id)?;
         let source_mbr = image.block(0).ok_or("来源缺少 LBA0 原生块")?;
         self.verify_source_visible_mbr(source_mbr)?;
