@@ -11,6 +11,7 @@ mod io;
 mod kind;
 mod metadata;
 mod native_boot;
+mod native_virtual;
 mod ntfs;
 mod policy;
 pub mod registry;
@@ -36,6 +37,7 @@ pub use io::{BootSectorReader, FilesystemReader};
 pub use kind::FilesystemKind;
 pub use metadata::FilesystemMetadata;
 pub use native_boot::detect_native_boot_sector;
+pub use native_virtual::NativeVirtualDiskPlan;
 pub use ntfs::{NtfsDriver, NTFS_DRIVER};
 pub use policy::{
     is_writable_filesystem, shift_writable_filesystem, validate_writable_filesystem,

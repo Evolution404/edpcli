@@ -50,9 +50,9 @@ pub mod filesystem {
         Fat12Driver, Fat16Driver, Fat32Driver, FilesystemCapabilities, FilesystemDriver,
         FilesystemError, FilesystemErrorKind, FilesystemGeometry, FilesystemKind,
         FilesystemMetadata, FilesystemReader, FilesystemWrite, FormatPlan, FormatRequest,
-        FormatResourceBudget, FormatResourceEstimate, FormatVerification, NtfsDriver,
-        SparseFilesystemImage, EXFAT_DRIVER, FAT12_DRIVER, FAT16_DRIVER, FAT32_DRIVER, NTFS_DRIVER,
-        WRITABLE_FILESYSTEMS,
+        FormatResourceBudget, FormatResourceEstimate, FormatVerification, NativeFilesystemWrite,
+        NativeFormatPlan, NativeVirtualDiskPlan, NtfsDriver, SparseFilesystemImage, EXFAT_DRIVER,
+        FAT12_DRIVER, FAT16_DRIVER, FAT32_DRIVER, NTFS_DRIVER, WRITABLE_FILESYSTEMS,
     };
 }
 
