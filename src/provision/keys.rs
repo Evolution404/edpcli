@@ -79,6 +79,69 @@ fn legacy_password_fold32(password: &[u8]) -> u32 {
     sum
 }
 
+/// Official label-tool algorithm combo. The crypt request byte differs
+/// from LBA12 EncryptMode: the producer maps UI choice to key wrapping mode.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum OfficialLabelAlgorithm {
+    #[default]
+    Sms4,
+    Aes,
+    AesCross,
+}
+
+impl OfficialLabelAlgorithm {
+    pub const ALL: [Self; 3] = [Self::Sms4, Self::Aes, Self::AesCross];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Sms4 => "SMS4",
+            Self::Aes => "AES",
+            Self::AesCross => "AES_CROSS",
+        }
+    }
+
+    pub const fn request_crypt(self) -> u8 {
+        match self {
+            Self::Sms4 => 0,
+            Self::Aes => 1,
+            Self::AesCross => 2,
+        }
+    }
+
+    pub const fn file_key_wrap_mode(self) -> FileKeyWrapMode {
+        match self {
+            Self::Sms4 => FileKeyWrapMode::Sm4,
+            Self::Aes => FileKeyWrapMode::A7f0,
+            Self::AesCross => FileKeyWrapMode::Aes128Ecb,
+        }
+    }
+
+    pub fn shift(self, reverse: bool) -> Self {
+        let index = Self::ALL.iter().position(|choice| *choice == self).unwrap();
+        let next = if reverse {
+            (index + Self::ALL.len() - 1) % Self::ALL.len()
+        } else {
+            (index + 1) % Self::ALL.len()
+        };
+        Self::ALL[next]
+    }
+
+    /// Producer crypto selector is known but the physical sector writer is
+    /// certified for SMS4 only. Wrapped AES keys are not write certification.
+    pub fn validate_first_party_write(self) -> Result<(), String> {
+        if self == Self::Sms4 {
+            Ok(())
+        } else {
+            Err(format!(
+                "已选择官方加密算法 {}（crypt={} / EncryptMode={}），当前edpcli仅认证SMS4写入；该算法尚未完成实体扇区加密与回读验收，禁止静默回退SMS4",
+                self.name(),
+                self.request_crypt(),
+                self.file_key_wrap_mode().raw(),
+            ))
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum FileKeyWrapMode {
@@ -301,6 +364,41 @@ mod tests {
         assert_eq!(
             md5_digest(DEFAULT_EFFECTIVE_PASSWORD),
             hex16("548b072cba7f104d88a446556cc3c432")
+        );
+    }
+
+    #[test]
+    fn official_label_tool_ui_crypto_maps_crypt_to_edpf_with_fail_closed_writer() {
+        let combos = [
+            (OfficialLabelAlgorithm::Sms4, "SMS4", 0, 2, true),
+            (OfficialLabelAlgorithm::Aes, "AES", 1, 1, false),
+            (OfficialLabelAlgorithm::AesCross, "AES_CROSS", 2, 3, false),
+        ];
+        assert_eq!(
+            OfficialLabelAlgorithm::default(),
+            OfficialLabelAlgorithm::Sms4
+        );
+        for (choice, label, crypt, wrap, available) in combos {
+            assert_eq!(choice.name(), label);
+            assert_eq!(choice.request_crypt(), crypt);
+            assert_eq!(choice.file_key_wrap_mode().raw(), wrap);
+            assert_eq!(choice.validate_first_party_write().is_ok(), available);
+        }
+        assert_eq!(
+            OfficialLabelAlgorithm::Sms4.shift(false),
+            OfficialLabelAlgorithm::Aes
+        );
+        assert_eq!(
+            OfficialLabelAlgorithm::Aes.shift(false),
+            OfficialLabelAlgorithm::AesCross
+        );
+        assert_eq!(
+            OfficialLabelAlgorithm::AesCross.shift(false),
+            OfficialLabelAlgorithm::Sms4
+        );
+        assert_eq!(
+            OfficialLabelAlgorithm::Sms4.shift(true),
+            OfficialLabelAlgorithm::AesCross
         );
     }
 

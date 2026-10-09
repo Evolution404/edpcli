@@ -188,3 +188,12 @@
 - AES来源在UI密码检测上可进行只读验证，但它与第一方SM4写盘目标仍为不兼容封装，须保留`opaque_profile=true`的保守告警，不得由“知道原密码”直接推导为“允许实体改密或重建加密分区”。4Kn物理制盘门禁继续保持关闭。
 - 在修改后使用三重硬件身份限制再次对真实U391作默认密码探测：Mode0、交换区状态`Unknown`、保密区状态`Unknown`，两者不兼容写盘封装标记均为true。说明内置默认密码**没有得到完整FileKey认证**，并不证明用户原密码错误，也不证明厂家采用了SM4；没有从用户收集密码，未做任何密码字典枚举或实际写入。
 - 后续若由用户主动提供来源原密码，仍需通过只读页面执行单次真实AES FileKey核验；新盘4Kn协议生成与分区加密仍受厂家金标及P7事务门禁限制。512B原有官方格式保持逐字节回归。
+
+## 2026-10-09 第十九批：官方加密算法路径核查与制盘表单算法策略
+
+- 官方 Windows 制盘软件的 `tabAlgorithmComboBox` 按固定次序显示 `SMS4 / AES / AES_CROSS`，默认索引0。其 `currentIndex()` 写入 `normalDetail.algorithm +0x44`，`sub_42E8E0` 继续将此值填入 `LabelInfo.crypt +0x7E8`，逆向加载 `sub_42EC90` 也保持该对应。`WriteNormalULabel` 依据请求值0/1/2写入内部算法模式2/1/3，`CreatePartitions` 将内部模式写入紧凑 ED PF 条目 `EncryptMode +0x58`。此结论来自已有一方二进制及隔离执行证据，并非本轮在真实USB上运行官方Windows写盘程序。
+- 官方映射严格保持：`SMS4(index=0,crypt=0) -> EncryptMode=2 -> SM4-ECB`；`AES(index=1,crypt=1) -> EncryptMode=1 -> A7F0/A6B0`；`AES_CROSS(index=2,crypt=2) -> EncryptMode=3 -> AES-128-ECB`。上述EncryptMode决定16B FileKey封装算法，不允许把它推断为全部分区数据物理扇区加密算法。`GLOBAL/oldSM4`仅影响SM4实现分支，不构成第四项盘面算法。Windows消费端Mode3的AES CRC失败后可按Mode1再解一次；Linux现有组件只验证Mode1/2，不能宣称全平台等价。
+- 本轮新增统一 `OfficialLabelAlgorithm`：与官方UI一致的显示名、crypt请求值、EDPF封装模式映射和正反方向循环，默认SMS4。四种官方制盘模式的TUI“密码域”区域新增**单个全盘加密算法选择项**，Space/左右延续已有选项切换规则；Plain普通盘无此字段。每次新表单会话重置官方默认SMS4，避免上一个设备的算法设置意外传入下一个设备。
+- 计划确认界面同步展示经写入门禁认证的“加密算法：SMS4 / EncryptMode=2 / crypt=0”，避免参数与实际计划错位。由于现阶段edpcli实体分区写入器只认证SMS4，选择AES或AES_CROSS虽然在表单中可见且可切换，但 `provision_request()` 在生成正式计划前**直接拒绝**，并在用户可见错误中写出真实crypt/EncryptMode；禁止无声重设或按SMS4写入。4Kn的原有硬拦截仍保留，与算法选择无关。
+- 永久回归覆盖三档官方映射、默认值、正反切换、四个官方模式下仅一个全盘字段、Plain不显示、未认证选项不可提交、新表单重置，以及原有512B协议字节金标。此批是表单选择与保守前置门禁，并不代表非SMS4的新盘物理扇区加密、分区改密或写后回读已经完成认证。
+- 后续若启用非SMS4实体写入，应先将算法策略贯通 `OfficialProvisionRequest`、正式协议生产者、分区加密、事务写入及验证，获取官方生产者/消费端金标和可牺牲测试盘真实结果后才解除门禁。真实U391本轮不触及任何物理写入。

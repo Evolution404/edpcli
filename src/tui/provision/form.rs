@@ -27,6 +27,7 @@ pub struct ProvisionForm {
     pub dept: String,
     pub label: String,
     pub lba8_identity: crate::provision::Lba8Identity,
+    pub encryption_algorithm: crate::provision::OfficialLabelAlgorithm,
     pub share_source_password: SecretText,
     pub share_source_knowledge: crate::provision::SourcePasswordKnowledge,
     pub share_opaque_profile: bool,
@@ -58,6 +59,7 @@ impl std::fmt::Debug for ProvisionForm {
             .field("user", &self.user)
             .field("dept", &self.dept)
             .field("label", &self.label)
+            .field("encryption_algorithm", &self.encryption_algorithm)
             .field("share_source_knowledge", &self.share_source_knowledge)
             .field("share_source_password", &"[REDACTED]")
             .field("share_target_password", &"[REDACTED]")
@@ -278,6 +280,7 @@ impl Default for ProvisionForm {
             dept: String::new(),
             label: crate::provision::DEFAULT_SAFE6_LABEL.into(),
             lba8_identity: crate::provision::Lba8Identity::default(),
+            encryption_algorithm: crate::provision::OfficialLabelAlgorithm::Sms4,
             share_source_password: SecretText::default(),
             share_source_knowledge: crate::provision::SourcePasswordKnowledge::Unknown,
             share_opaque_profile: false,

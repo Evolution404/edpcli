@@ -34,7 +34,7 @@ pub use key_domain::{
 pub use keys::{
     default_file_key, default_file_key_checked, unwrap_file_key, unwrap_legacy_lba7_file_key,
     wrap_file_key, wrap_legacy_lba7_file_key, DefaultFileKeyError, ExistingFileKeyError,
-    FileKeyWrapMode, LegacyLba7KeyMaterial, ProvisionKeyMaterial,
+    FileKeyWrapMode, LegacyLba7KeyMaterial, OfficialLabelAlgorithm, ProvisionKeyMaterial,
 };
 pub use layout::{
     build_official_partition_layout, official_format_targets_with_filesystems,

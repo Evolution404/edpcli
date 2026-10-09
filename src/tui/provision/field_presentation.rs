@@ -129,6 +129,11 @@ impl AppState {
                     == password_verification::TargetPasswordMode::Explicit,
             ));
         }
+        out.push((
+            "加密算法".into(),
+            self.provision.form.encryption_algorithm.name(),
+            false,
+        ));
         if matches!(mode, 0 | 3) {
             let exact =
                 self.provision.form.boot_input_mode == crate::provision::CapacityInputMode::Exact;

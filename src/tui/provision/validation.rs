@@ -315,6 +315,10 @@ impl AppState {
     pub fn provision_request(
         &mut self,
     ) -> Result<crate::application::provision::OfficialProvisionRequest, String> {
+        self.provision
+            .form
+            .encryption_algorithm
+            .validate_first_party_write()?;
         if self
             .selected_device()
             .ok_or("目标 USB 已不存在")?
