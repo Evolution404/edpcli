@@ -117,27 +117,25 @@ fn summarize_nodes(nodes: &[NodeSnapshot]) -> HardwareProbe {
             "IOUSBMassStorageUASDriver" => has_uas = true,
             "IOUSBMassStorageInterfaceNub" | "IOUSBMassStorageDriver" => has_bot = true,
             "IOSCSITargetDevice" | "IOSCSILogicalUnitNub" | "IOSCSIPeripheralDeviceNub" => {
-                if let Some(vendor) = node
-                    .strings
-                    .get("Vendor Identification")
-                    .filter(|value| !value.is_empty())
-                {
-                    inquiry_by_class.insert(
-                        node.class_name.as_str(),
-                        InquiryInfo {
-                            vendor: vendor.clone(),
-                            product: node
-                                .strings
-                                .get("Product Identification")
-                                .cloned()
-                                .unwrap_or_default(),
-                            revision: node
-                                .strings
-                                .get("Product Revision Level")
-                                .cloned()
-                                .unwrap_or_default(),
-                        },
-                    );
+                let inquiry = InquiryInfo {
+                    vendor: node
+                        .strings
+                        .get("Vendor Identification")
+                        .cloned()
+                        .unwrap_or_default(),
+                    product: node
+                        .strings
+                        .get("Product Identification")
+                        .cloned()
+                        .unwrap_or_default(),
+                    revision: node
+                        .strings
+                        .get("Product Revision Level")
+                        .cloned()
+                        .unwrap_or_default(),
+                };
+                if inquiry.has_model_identity() {
+                    inquiry_by_class.insert(node.class_name.as_str(), inquiry);
                 }
             }
             _ => {}
@@ -249,6 +247,42 @@ mod tests {
         assert_eq!(summary.pid, Some(0x6300));
         assert_eq!(summary.transport, NativeTransport::Uas);
         assert_eq!(summary.inquiry.unwrap().vendor, "AIGO    ");
+    }
+
+    #[test]
+    fn empty_scsi_vendor_does_not_hide_valid_product_from_native_probe() {
+        // Actual disk4: SCSI/UAS vendor is blank, product and revision are present.
+        let mut target = node("IOSCSITargetDevice");
+        target
+            .strings
+            .insert("Vendor Identification".into(), String::new());
+        target
+            .strings
+            .insert("Product Identification".into(), "HIKSEMI S500".into());
+        target
+            .strings
+            .insert("Product Revision Level".into(), "0206".into());
+        let probe = summarize_nodes(&[node("IOUSBMassStorageUASDriver"), target]);
+        assert_eq!(probe.transport, NativeTransport::Uas);
+        let inquiry = probe.inquiry.expect("product-only inquiry must survive");
+        assert_eq!(inquiry.vendor, "");
+        assert_eq!(inquiry.product, "HIKSEMI S500");
+        assert_eq!(inquiry.revision, "0206");
+    }
+
+    #[test]
+    fn absent_vendor_and_product_rejects_revision_only_probe() {
+        let mut target = node("IOSCSITargetDevice");
+        target
+            .strings
+            .insert("Vendor Identification".into(), "   ".into());
+        target
+            .strings
+            .insert("Product Identification".into(), "".into());
+        target
+            .strings
+            .insert("Product Revision Level".into(), "0206".into());
+        assert!(summarize_nodes(&[target]).inquiry.is_none());
     }
 
     #[test]

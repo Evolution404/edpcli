@@ -35,6 +35,9 @@ fn windows_disk_identity_segment(
     inquiry: &InquiryInfo,
     transport: NativeTransport,
 ) -> Result<String, String> {
+    if !inquiry.has_model_identity() {
+        return Err("SCSI inquiry has neither Vendor nor Product".into());
+    }
     let vendor = pnp_component(&inquiry.vendor);
     let product = pnp_component(&inquiry.product);
     let revision = pnp_component(&inquiry.revision);
@@ -195,7 +198,7 @@ pub fn generate_candidates(runner: &dyn CmdRunner, disk: u32) -> Vec<String> {
                 || probe
                     .inquiry
                     .as_ref()
-                    .is_none_or(|inquiry| inquiry.vendor.is_empty())
+                    .is_none_or(|inquiry| !inquiry.has_model_identity())
         })
         .then(|| crate::platform::fallback_hardware_probe(runner, disk))
         .flatten();
@@ -222,18 +225,21 @@ pub fn generate_candidates(runner: &dyn CmdRunner, disk: u32) -> Vec<String> {
     let inquiry = native
         .as_ref()
         .and_then(|probe| probe.inquiry.as_ref())
-        .filter(|inquiry| !inquiry.vendor.is_empty())
-        .or_else(|| fallback.as_ref().and_then(|probe| probe.inquiry.as_ref()));
+        .filter(|inquiry| inquiry.has_model_identity())
+        .or_else(|| {
+            fallback
+                .as_ref()
+                .and_then(|probe| probe.inquiry.as_ref())
+                .filter(|inquiry| inquiry.has_model_identity())
+        });
     if let Some(inquiry) = inquiry {
-        if !inquiry.vendor.is_empty() {
-            push_candidate_pair(
-                &mut cs,
-                &inquiry.vendor,
-                &inquiry.product,
-                &inquiry.revision,
-                transport,
-            );
-        }
+        push_candidate_pair(
+            &mut cs,
+            &inquiry.vendor,
+            &inquiry.product,
+            &inquiry.revision,
+            transport,
+        );
     }
     cs
 }
@@ -348,6 +354,43 @@ mod tests {
         assert_eq!(
             reconstruct_windows_pnp_instance_id(&inquiry, NativeTransport::Bot).unwrap(),
             r"USBSTOR\Disk&Ven_HIKSEMI&Prod_&Rev_1.00"
+        );
+    }
+
+    #[test]
+    fn empty_vendor_with_product_builds_real_disk4_candidate_without_fallback() {
+        let runner = NativeOnlyRunner {
+            probe: HardwareProbe {
+                vid: Some(0x2bdf),
+                pid: Some(0x0309),
+                transport: NativeTransport::Uas,
+                windows_pnp_instance_id: None,
+                inquiry: Some(InquiryInfo {
+                    vendor: String::new(),
+                    product: "HIKSEMI S500".into(),
+                    revision: "0206".into(),
+                }),
+            },
+            subprocess_calls: Cell::new(0),
+        };
+        assert_eq!(
+            generate_candidates(&runner, 4),
+            vec![
+                "disk&ven_&prod_hiksemi_s500".to_string(),
+                "disk&ven_&prod_hiksemi_s500&rev_0206".to_string(),
+            ]
+        );
+        assert_eq!(runner.subprocess_calls.get(), 0);
+    }
+
+    #[test]
+    fn missing_both_vendor_and_product_does_not_invent_identity() {
+        for transport in [Transport::Uas, Transport::Bot] {
+            assert!(build_device_id(" ", "", "0206", transport).is_empty());
+        }
+        assert_eq!(
+            build_device_id("HIKSEMI", "", "0206", Transport::Uas),
+            "disk&ven_hiksemi&prod_"
         );
     }
 

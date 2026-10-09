@@ -279,11 +279,12 @@ pub(super) fn hardware_probe(disk: u32) -> Option<HardwareProbe> {
     } else {
         NativeTransport::Unknown
     };
-    let inquiry = (!vendor.is_empty()).then_some(InquiryInfo {
+    let inquiry = InquiryInfo {
         vendor,
         product,
         revision,
-    });
+    };
+    let inquiry = inquiry.has_model_identity().then_some(inquiry);
     Some(HardwareProbe {
         vid,
         pid,

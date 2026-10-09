@@ -73,6 +73,37 @@ pub struct InquiryInfo {
     pub revision: String,
 }
 
+impl InquiryInfo {
+    /// SCSI INQUIRY permits blank Vendor or Product independently; reject only
+    /// a completely missing model identity (Revision alone is insufficient).
+    pub fn has_model_identity(&self) -> bool {
+        !self.vendor.trim().is_empty() || !self.product.trim().is_empty()
+    }
+}
+
+#[cfg(test)]
+mod inquiry_identity_tests {
+    use super::InquiryInfo;
+
+    #[test]
+    fn blank_vendor_and_nonempty_product_is_valid_but_revision_alone_is_not() {
+        for (vendor, product, expected) in [
+            ("", "HIKSEMI S500", true),
+            ("AIGO", "", true),
+            ("AIGO", "U335", true),
+            ("", "", false),
+            ("   ", "  ", false),
+        ] {
+            let inquiry = InquiryInfo {
+                vendor: vendor.into(),
+                product: product.into(),
+                revision: "0206".into(),
+            };
+            assert_eq!(inquiry.has_model_identity(), expected);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HardwareProbe {
     pub vid: Option<u16>,

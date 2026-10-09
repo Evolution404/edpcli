@@ -54,7 +54,7 @@ fn merged_hardware_probe(runner: &dyn CmdRunner, disk: u32) -> Option<HardwarePr
             || probe
                 .inquiry
                 .as_ref()
-                .is_none_or(|inquiry| inquiry.vendor.trim().is_empty())
+                .is_none_or(|inquiry| !inquiry.has_model_identity())
     });
     let fallback = fallback_needed
         .then(|| crate::platform::fallback_hardware_probe(runner, disk))
@@ -74,7 +74,7 @@ fn merged_hardware_probe(runner: &dyn CmdRunner, disk: u32) -> Option<HardwarePr
             if primary
                 .inquiry
                 .as_ref()
-                .is_none_or(|inquiry| inquiry.vendor.trim().is_empty())
+                .is_none_or(|inquiry| !inquiry.has_model_identity())
             {
                 primary.inquiry = secondary.inquiry;
             }

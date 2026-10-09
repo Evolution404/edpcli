@@ -217,15 +217,12 @@ pub(super) fn fallback_hardware_probe(runner: &dyn CmdRunner, disk: u32) -> Opti
     .into_iter()
     .find_map(|class| {
         let block = ioreg_block(runner, class, disk)?;
-        let vendor = block_str_field(&block, "Vendor Identification")?;
-        if vendor.is_empty() {
-            return None;
-        }
-        Some(InquiryInfo {
-            vendor,
+        let inquiry = InquiryInfo {
+            vendor: block_str_field(&block, "Vendor Identification").unwrap_or_default(),
             product: block_str_field(&block, "Product Identification").unwrap_or_default(),
             revision: block_str_field(&block, "Product Revision Level").unwrap_or_default(),
-        })
+        };
+        inquiry.has_model_identity().then_some(inquiry)
     });
 
     (vid.is_some() || pid.is_some() || transport != NativeTransport::Unknown || inquiry.is_some())
@@ -492,6 +489,35 @@ mod selector_tests {
                 Err(io::Error::other("unexpected command"))
             }
         }
+    }
+
+    struct EmptyVendorIoRegRunner;
+
+    impl CmdRunner for EmptyVendorIoRegRunner {
+        fn check_output(&self, cmd: &[&str], _timeout: std::time::Duration) -> io::Result<String> {
+            if cmd == ["ioreg", "-r", "-c", "IOSCSITargetDevice", "-l"] {
+                return Ok(concat!(
+                    "+-o IOSCSITargetDevice@0 <class IOSCSITargetDevice, id 0x100, active>\n",
+                    "  | \"Vendor Identification\" = \"\"\n",
+                    "  | \"Product Identification\" = \"HIKSEMI S500\"\n",
+                    "  | \"Product Revision Level\" = \"0206\"\n",
+                    "  +-o HIKSEMI S500 Media <class IOMedia, id 0x101>\n",
+                    "      \"BSD Name\" = \"disk4\"\n",
+                )
+                .to_string());
+            }
+            Err(io::Error::other("no other inquiry sources"))
+        }
+    }
+
+    #[test]
+    fn fallback_accepts_scsi_product_with_empty_vendor() {
+        let probe = fallback_hardware_probe(&EmptyVendorIoRegRunner, 4)
+            .expect("SCSI Product is a valid identity without Vendor");
+        let inquiry = probe.inquiry.expect("product-only probe must survive");
+        assert_eq!(inquiry.vendor, "");
+        assert_eq!(inquiry.product, "HIKSEMI S500");
+        assert_eq!(inquiry.revision, "0206");
     }
 
     #[test]
