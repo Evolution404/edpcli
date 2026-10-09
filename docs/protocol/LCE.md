@@ -313,3 +313,45 @@ EDP_OEM_DLL_PATH=/path/to/cemsusbregsiter.dll uv run --locked python -m unittest
 ```
 
 如没有原厂DLL，测试只跳过原厂向量测试，其它无关原厂文件的安全输入负例仍运行；DLL SHA-256与真实函数边界均作为强制执行门禁。不能把单独机器指令测试当作完整`CreatePartitions`/`FormatDisk`运行。
+
+## 16. 旧版FAT16明文模板的精确引用审计：**嵌入并不等于被调用**（2026-10-09）
+
+### 历史上下文
+
+第7节及 `audit/protocol/lba7_compatibility/evidence/lba7_compat_fat16_zero8_closure_20260923.json` 已在真实Lexar、SanDisk盘上证明：固定3072B FAT16明文被旧版zero8+物理字节偏移A6B0/A7F0变换加解密，而且 `vrvaud_c.dll` 的两个原厂发布版本里能找到字节完全一致的明文模板。**既有闭环只说明负载内容与密码学规则，不代表已追踪到那个模板第一次被某个进程写入虚拟卷的代码调用点。**
+
+### 对两个原厂PE建立SHA绑定的完整静态交叉引用扫描
+
+新增 `scripts/protocol/audit_vrvaud_lce_template_xrefs.py`。它先确认原厂PE和FAT16金标的完整SHA-256，不允许错误版本混入；检查PE节映射、模板出现次数、整个 `.text` x86-32反汇编的立即数/内存位移地址引用、`.reloc` 重定位指针、导出符号是否指向3072B范围，并独立统计真实指令里 **恰好值为0xC00** 的立即数/内存操作数。采用 Capstone PE全代码段扫描，不依赖反编译字符串搜索。
+
+| 原厂证据 | 2022年 `vrvaud_c.dll` | 2026年 `vrvaud_c.dll` |
+| --- | --- | --- |
+| SHA-256 | `57a290d9…3c455a2797b1f` | `7b1fc2aa…43eaee913069` |
+| 原始文件中模板起点 | `0x1697D8` | `0x203EE8` |
+| 映射后模板VA | `0x1016B9D8` | `0x10205AE8` |
+| 完整3072B明文出现 | `.data` 节，1次 | `.data` 节，1次 |
+| `.text`静态直接引用目标VA范围 | **0** | **0** |
+| `.reloc`中指向模板的指针 | **0** | **0** |
+| 指向模板的PE数据导出 | **0** | **0** |
+| 整个`.text`精确0xC00立即数 | 2处：`0x1001D09F`,`0x1001D150` | 2处：`0x1002426F`,`0x10024320` |
+| 上述立即数实际语义 | x87浮点控制字 `or eax,0xc00`，**不是块写长度** | 同样是x87控制字掩码 |
+
+两个版本只导出 `AddProcessWL`、`GetDiskCtrlMode`、`GetPolicyObject`；没有导出一个直接指向模板数据的符号。已检查的原厂 `cemssafeudisklabeltool_orig.exe`、`usbtoolbusmanage.dll`、`cemsusbregsiter.dll`、三版 `EdpEDiskCtrl.dll` 中都没有字节完全一致的3072B模板及其完整512B引导扇区。第三份Win10路径下的`vrvaud_c.dll`与已审2022年版本原始内容完全相同。
+
+这一组**负向直接调用证据**有确定边界：只排除所审样本中“代码/重定位表/导出表直接引用3072B模板的普通静态寻址”和“以常量`0xC00`直接提交写入长度”。它不能排除：从模板前的其它静态基址加运行时偏移、模块加载基址加运行时RVA、间接方法调用、使用无常量长度参数以及其它原厂模块初始化虚拟卷。不能声称模板确定是废弃数据，更不能推导“官方4Kn不会写LCE”。
+
+### 接下来的生产者追踪入口
+
+1. 将 `vrvaud_c.dll` 现有`GetPolicyObject`及其虚函数实现中的间接`WriteFile`/虚拟卷打开路径反向追踪到缓冲区指针，核对是否有计算得到模板起始地址的运行时路径。
+2. 继续从 `EdpEDiskCtrl` 的历史LBA7挂载/虚拟卷 `ZwWriteFile` 条件写入链**逆向追上层触发**，判断谁向虚拟卷偏移0提交过3072B镜像。
+3. 在隔离Windows虚拟机+4Kn虚拟块设备记录全部主机/内核写入的4096B事务与调用栈，逐字节比较写前/写后，分别裁决：根本未写、只写前3072B而保留尾部、整块4096B覆盖。
+4. 在生产者调用证据闭合前，U391物理指针虽吻合原厂公式，也不代表其真实块中的1024B尾部可以清零或改写；实体盘保持只读。
+
+清洁工作树下的复现示例（本地安装的两份原厂PE需由调用者自己指定）：
+
+```sh
+uv run --locked python scripts/protocol/audit_vrvaud_lce_template_xrefs.py \
+  --old /path/to/old/vrvaud_c.dll --current /path/to/current/vrvaud_c.dll
+```
+
+隔离Python测试位于 `scripts/protocol/tests/test_audit_vrvaud_lce_template_xrefs.py`，合成指令测试无外部二进制依赖；原厂实测测试仅在设置 `EDP_OEM_VRVAUD_LEGACY` 和 `EDP_OEM_VRVAUD_CURRENT` 时运行。程序不打开磁盘或读取私密配置。
