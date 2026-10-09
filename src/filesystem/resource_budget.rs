@@ -12,7 +12,17 @@ pub struct FormatResourceEstimate {
 }
 impl FormatResourceEstimate {
     pub fn from_sectors(metadata_sectors: u64) -> Result<Self, FilesystemError> {
-        let image_payload_bytes = metadata_sectors.checked_mul(512).ok_or_else(overflow)?;
+        Self::from_native_sectors(metadata_sectors, 512)
+    }
+
+    /// Metadata count in complete native logical blocks, not 512B equivalents.
+    pub fn from_native_sectors(
+        metadata_sectors: u64,
+        sector_bytes: u32,
+    ) -> Result<Self, FilesystemError> {
+        let image_payload_bytes = metadata_sectors
+            .checked_mul(u64::from(sector_bytes))
+            .ok_or_else(overflow)?;
         let working_payload_bytes = image_payload_bytes.checked_mul(8).ok_or_else(overflow)?;
         Ok(Self {
             metadata_sectors,

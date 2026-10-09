@@ -72,3 +72,13 @@
 - 原生 EDPB v4 取证时对每个分区首个4096B仅做只读验证，可补充已认证文件系统提示；若加密分区首块无法辨识，保持未知而不伪造文件系统类型，原始4096B仍完整保存。
 - 在真实 aigo U391 上对启动区原生 LBA63 完全只读验证：4096B/BPB，SPC=1、Reserved=1、FATs=2、RootEntries=512、TotalSectors=2497、FATSize16=1，识别结果 `Fat12`；合成4Kn FAT12/FAT16/FAT32/exFAT样本与不一致几何负例测试通过。
 - **尚未证明** 4Kn FAT 格式化输出可以被官方 Windows/LINUX 读取端消费、操作系统挂载或完成文件读写；后续需将驱动中固定512B的 `FilesystemWrite`/`SparseFilesystemImage` 改成设备几何派生的全块格式，并通过虚拟4K文件系统独立读取验收后才可进入4K制盘事务。
+
+
+## 2026-10-09 第七批：P6 FAT16 原生格式化虚拟闭环（非实体写盘）
+
+- 审计确认旧版 \`FilesystemWrite\`、\`SparseFilesystemImage\`、FAT16/FAT32/exFAT 元数据生成和资源估算的 512B 固定约束。当前仅迁移 **FAT16** 生成器：新增 \`NativeFormatPlan\` / \`NativeFilesystemWrite\`（全原生块 \`Vec<u8>\`），复用同一 FAT16 原生几何规划和生成核心；历史 \`FormatPlan\` 通过严格512B转换适配，**保持4Kn无法进入原有实体写盘器**。
+- FAT16 4Kn 虚拟生成：BPB \`BytesPerSector=4096\`，原生 LBA 扇区数，按 \`root_entries*32/4096\` 计算根目录扇区数，按 \`(clusters+2)*2/4096\` 求两份 FAT 的单份长度；元数据预算按完整原生块计。只允许已认证的512/4096B；其他尺寸、越界/溢出、不能表示的簇数量均拒绝。
+- **512B 字节兼容：** 三套独立固定的历史 FAT16 元数据 SHA256 金标覆盖 20417/32768/65535 扇区配置，并由旧接口与新接口分别比较；旧512B功能的最终判定仍须运行完整测试和协议门禁。
+- **虚拟4Kn独立验证：** 测试在临时普通文件中创建64MiB、4096B LBA FAT16 卷，对 BPB、FAT副本、根目录、数据边界进行独立字段解码和文件读取；macOS \`/sbin/fsck_msdos -n\` 完成全部检查（0 files, 16363 free clusters）。临时文件验证后删除；未操作真实 U391。
+- **未取得的验收：** macOS \`hdiutil\` 将原始64MiB镜像以512B虚拟设备块大小呈现，无法等同4Kn系统挂载认证；没有完成系统挂载后的写文件/读回。FAT32、exFAT 原生写入、4K加密/变换、完整制盘与恢复/回滚仍未迁移。该阶段只开放**虚拟格式化计划生成**，不解除4Kn设备任何写入门禁。
+- **下一子阶段：** 将 FAT32 的 FSInfo、备用引导、根簇和FAT长度迁移到同一 NativeFormatPlan 契约并独立fsck；再迁移exFAT的boot checksum/bitmap/upcase。之后升级虚拟事务/原生块写入与恢复验证、操作系统4Kn挂载测试和官方消费端对照。

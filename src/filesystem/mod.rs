@@ -25,6 +25,7 @@ pub use fat16::{Fat16Driver, FAT16_DRIVER};
 pub use fat32::{Fat32Driver, FAT32_DRIVER};
 pub use format::{
     FilesystemGeometry, FilesystemWrite, FormatPlan, FormatRequest, FormatVerification,
+    NativeFilesystemWrite, NativeFormatPlan,
 };
 pub use image::{
     build_empty_exfat, build_empty_fat16, build_empty_fat32, build_empty_filesystem,

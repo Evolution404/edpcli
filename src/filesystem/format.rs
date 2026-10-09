@@ -48,6 +48,22 @@ pub struct FormatPlan {
     pub expected_metadata: FilesystemMetadata,
 }
 
+/// A complete native block emitted only to a virtual formatting plan.
+/// This type does not grant permission to write physical disks.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeFilesystemWrite {
+    pub relative_lba: u64,
+    pub data: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeFormatPlan {
+    pub filesystem: FilesystemKind,
+    pub geometry: FilesystemGeometry,
+    pub writes: Vec<NativeFilesystemWrite>,
+    pub expected_metadata: FilesystemMetadata,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FormatVerification {
     pub metadata: FilesystemMetadata,
