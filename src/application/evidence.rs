@@ -577,17 +577,11 @@ impl EvidenceSource {
             // Read the complete native envelope before producing the stable
             // 6656B official protocol projection. Never discard unknown tails
             // in a physical read; future EDPB captures consume the same type.
-            let mut native_bytes =
-                Vec::with_capacity(METADATA_SECTOR_COUNT * geometry.logical_sector_bytes as usize);
-            for lba in 0..METADATA_SECTOR_COUNT as u64 {
-                let block = SectorReader::read_native_sector(&mut dev, lba).map_err(|error| {
-                    EvidenceError::DiskProtocolRead {
-                        disk,
-                        message: error.to_string(),
-                    }
+            let native_bytes = SectorReader::read_native_range(&mut dev, 0, METADATA_SECTOR_COUNT)
+                .map_err(|error| EvidenceError::DiskProtocolRead {
+                    disk,
+                    message: error.to_string(),
                 })?;
-                native_bytes.extend_from_slice(&block);
-            }
             let image = crate::protocol::image::NativeProtocolImage::from_native_bytes(
                 geometry.logical_sector_bytes,
                 native_bytes,
