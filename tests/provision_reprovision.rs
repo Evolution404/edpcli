@@ -2034,75 +2034,69 @@ fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
         assert_eq!(from_one_source, staged);
         assert_eq!(
             observed_lbas,
-            (0..13u64).chain(std::iter::once(lce_start)).collect::<Vec<_>>()
+            (0..13u64)
+                .chain(std::iter::once(lce_start))
+                .collect::<Vec<_>>()
         );
 
         // A non-matching source identity cannot trigger *any* reads.
         let mut identity_reads = 0usize;
-        assert!(
-            native_layout
-                .verified_source_replay_from_reader("", |_| {
-                    identity_reads += 1;
-                    Err("must never be called".into())
-                })
-                .is_err()
-        );
+        assert!(native_layout
+            .verified_source_replay_from_reader("", |_| {
+                identity_reads += 1;
+                Err("must never be called".into())
+            })
+            .is_err());
         assert_eq!(identity_reads, 0);
 
         // Truncated protocol evidence stops before LCE sampling.
         let mut saw_lce = false;
-        assert!(
-            native_layout
-                .verified_source_replay_from_reader(&did, |lba| {
-                    if lba >= 13 {
-                        saw_lce = true;
-                        return Ok(source_lce[0].clone());
-                    }
-                    let mut sector = native.block(lba as usize).unwrap().to_vec();
-                    if lba == 12 {
-                        sector.pop();
-                    }
-                    Ok(sector)
-                })
-                .is_err()
-        );
+        assert!(native_layout
+            .verified_source_replay_from_reader(&did, |lba| {
+                if lba >= 13 {
+                    saw_lce = true;
+                    return Ok(source_lce[0].clone());
+                }
+                let mut sector = native.block(lba as usize).unwrap().to_vec();
+                if lba == 12 {
+                    sector.pop();
+                }
+                Ok(sector)
+            })
+            .is_err());
         assert!(!saw_lce);
 
         // Even a complete but invalid MBR must fail before asking for LCE.
         let mut requested_lce = false;
-        assert!(
-            native_layout
-                .verified_source_replay_from_reader(&did, |lba| {
-                    if lba >= 13 {
-                        requested_lce = true;
-                        return Ok(source_lce[0].clone());
-                    }
-                    let mut sector = native.block(lba as usize).unwrap().to_vec();
-                    if lba == 0 {
-                        sector[510] ^= 1;
-                    }
-                    Ok(sector)
-                })
-                .is_err()
-        );
+        assert!(native_layout
+            .verified_source_replay_from_reader(&did, |lba| {
+                if lba >= 13 {
+                    requested_lce = true;
+                    return Ok(source_lce[0].clone());
+                }
+                let mut sector = native.block(lba as usize).unwrap().to_vec();
+                if lba == 0 {
+                    sector[510] ^= 1;
+                }
+                Ok(sector)
+            })
+            .is_err());
         assert!(!requested_lce);
 
         // If the LCE is missing or truncated, refuse to produce a replay.
         for unavailable in [true, false] {
-            assert!(
-                native_layout
-                    .verified_source_replay_from_reader(&did, |lba| {
-                        if lba < 13 {
-                            return Ok(native.block(lba as usize).unwrap().to_vec());
-                        }
-                        if unavailable {
-                            Err("synthetic LCE missing".into())
-                        } else {
-                            Ok(vec![0x69; 512])
-                        }
-                    })
-                    .is_err()
-            );
+            assert!(native_layout
+                .verified_source_replay_from_reader(&did, |lba| {
+                    if lba < 13 {
+                        return Ok(native.block(lba as usize).unwrap().to_vec());
+                    }
+                    if unavailable {
+                        Err("synthetic LCE missing".into())
+                    } else {
+                        Ok(vec![0x69; 512])
+                    }
+                })
+                .is_err());
         }
         assert_eq!(staged.len(), 14);
         assert_eq!(staged.last().unwrap().relative_lba, 0);
