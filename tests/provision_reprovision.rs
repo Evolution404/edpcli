@@ -1930,23 +1930,20 @@ fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
         let source_lce_start = (0..count)
             .map(|index| {
                 let base = index * 0x60;
-                let start = u64::from_le_bytes(
-                    plain12[base + 0x18..base + 0x20].try_into().unwrap(),
-                );
-                let byte_len = u64::from_le_bytes(
-                    plain12[base + 0x28..base + 0x30].try_into().unwrap(),
-                );
+                let start =
+                    u64::from_le_bytes(plain12[base + 0x18..base + 0x20].try_into().unwrap());
+                let byte_len =
+                    u64::from_le_bytes(plain12[base + 0x28..base + 0x30].try_into().unwrap());
                 start + byte_len / 4096
             })
             .max()
-            .unwrap() + 1;
+            .unwrap()
+            + 1;
         assert!(source_lce_start + 1 < 16_777_216);
         for index in 1..count {
             let base = index * 0x40;
-            plain7[base + 0x18..base + 0x20]
-                .copy_from_slice(&source_lce_start.to_le_bytes());
-            plain7[base + 0x28..base + 0x30]
-                .copy_from_slice(&4096u64.to_le_bytes());
+            plain7[base + 0x18..base + 0x20].copy_from_slice(&source_lce_start.to_le_bytes());
+            plain7[base + 0x28..base + 0x30].copy_from_slice(&4096u64.to_le_bytes());
         }
         let first_native_bytes = u64::from_le_bytes(plain12[0x28..0x30].try_into().unwrap());
         projection[458..462].copy_from_slice(&((first_native_bytes / 4096) as u32).to_le_bytes());
@@ -2111,20 +2108,27 @@ fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
                         .copy_from_slice(&(lce_start + 1).to_le_bytes());
                 }
                 let mut invalid_native = raw.clone();
-                invalid_native[7 * 4096..7 * 4096 + 512].copy_from_slice(
-                    &xor_rolling(&invalid_plain7, (crc & 0xffff) ^ (crc >> 16)),
-                );
+                invalid_native[7 * 4096..7 * 4096 + 512]
+                    .copy_from_slice(&xor_rolling(&invalid_plain7, (crc & 0xffff) ^ (crc >> 16)));
                 let invalid_native =
                     NativeProtocolImage::from_native_bytes(4096, invalid_native).unwrap();
-                assert!(parse_existing_provision_native(
-                    &invalid_native, &did, 16_777_216
-                ).unwrap().is_some());
-                assert!(native_layout
-                    .source_replay_native_blocks(&invalid_native, &source_lce)
-                    .is_ok(), "old MBR-only replay cannot check LBA7 LCE pointers");
-                assert!(native_layout
-                    .verified_source_replay_native_blocks(&invalid_native, &did, &source_lce)
-                    .is_err(), "strict replay must reject incorrect LBA7 LCE pointer/length");
+                assert!(
+                    parse_existing_provision_native(&invalid_native, &did, 16_777_216)
+                        .unwrap()
+                        .is_some()
+                );
+                assert!(
+                    native_layout
+                        .source_replay_native_blocks(&invalid_native, &source_lce)
+                        .is_ok(),
+                    "old MBR-only replay cannot check LBA7 LCE pointers"
+                );
+                assert!(
+                    native_layout
+                        .verified_source_replay_native_blocks(&invalid_native, &did, &source_lce)
+                        .is_err(),
+                    "strict replay must reject incorrect LBA7 LCE pointer/length"
+                );
             }
         }
         for record in &source.records {
