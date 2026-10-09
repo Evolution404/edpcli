@@ -336,7 +336,9 @@ EDP_OEM_DLL_PATH=/path/to/cemsusbregsiter.dll uv run --locked python -m unittest
 | 整个`.text`精确0xC00立即数 | 2处：`0x1001D09F`,`0x1001D150` | 2处：`0x1002426F`,`0x10024320` |
 | 上述立即数实际语义 | x87浮点控制字 `or eax,0xc00`，**不是块写长度** | 同样是x87控制字掩码 |
 
-两个版本只导出 `AddProcessWL`、`GetDiskCtrlMode`、`GetPolicyObject`；没有导出一个直接指向模板数据的符号。已检查的原厂 `cemssafeudisklabeltool_orig.exe`、`usbtoolbusmanage.dll`、`cemsusbregsiter.dll`、三版 `EdpEDiskCtrl.dll` 中都没有字节完全一致的3072B模板及其完整512B引导扇区。第三份Win10路径下的`vrvaud_c.dll`与已审2022年版本原始内容完全相同。
+两个版本只导出 `AddProcessWL`、`GetDiskCtrlMode`、`GetPolicyObject`；没有导出一个直接指向模板数据的符号。
+
+另做一遍真实PE `KERNEL32!WriteFile` IAT边界反向筛查：旧版12处静态直接调用、2026版13处。直接调用现场用到的长度来自对象字段、栈参数、其它全局变量或0x6B4常量，并未发现 `push 0xC00` / 以 `0xC00` 为当前写入长度的直接指令；所有已发现的模板VA静态直接引用依然为0。**这只排除单跳直接写入证据**：不能排除某个长度/缓冲区参数由上游初始化后经本地变量传递，亦不能排除间接调用`WriteFile`或内核虚拟卷写入。该负结论已加入SHA绑定的跨版本测试。已检查的原厂 `cemssafeudisklabeltool_orig.exe`、`usbtoolbusmanage.dll`、`cemsusbregsiter.dll`、三版 `EdpEDiskCtrl.dll` 中都没有字节完全一致的3072B模板及其完整512B引导扇区。第三份Win10路径下的`vrvaud_c.dll`与已审2022年版本原始内容完全相同。
 
 这一组**负向直接调用证据**有确定边界：只排除所审样本中“代码/重定位表/导出表直接引用3072B模板的普通静态寻址”和“以常量`0xC00`直接提交写入长度”。它不能排除：从模板前的其它静态基址加运行时偏移、模块加载基址加运行时RVA、间接方法调用、使用无常量长度参数以及其它原厂模块初始化虚拟卷。不能声称模板确定是废弃数据，更不能推导“官方4Kn不会写LCE”。
 

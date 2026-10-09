@@ -47,6 +47,7 @@ class StaticXrefAuditTests(unittest.TestCase):
                 self.assertEqual(result['template_relocated_pointer_count'], 0)
                 self.assertEqual(result['template_data_export_count'], 0)
                 self.assertEqual(len(result['code_3072_immediates']), 2)
+                self.assertEqual(len(result['direct_kernel32_writefile_calls']), {'legacy_2022': 12, 'current_2026': 13}[version])
                 self.assertTrue(all(mnemonic == 'or' for _, mnemonic, _ in result['code_3072_immediates']))
 
 

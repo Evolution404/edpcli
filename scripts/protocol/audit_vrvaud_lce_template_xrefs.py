@@ -66,6 +66,12 @@ def audit_original_dll(path: Path, template: bytes, version: str):
     owning = [s for s in pe.sections if s.PointerToRawData <= expected_offset < s.PointerToRawData + s.SizeOfRawData]
     if len(owning) != 1 or owning[0].Name.rstrip(b'\0') != b'.data':
         raise ValueError('LCE template moved outside expected initialized data section')
+    # Capture the complete set of *direct* kernel32!WriteFile callsites in
+    # addition to the template xrefs; this does not include indirect wrappers.
+    writefile_iat = [item.address for module in getattr(pe, 'DIRECTORY_ENTRY_IMPORT', [])
+                     for item in module.imports
+                     if module.dll.lower() == b'kernel32.dll' and item.name == b'WriteFile']
+    all_writefile_calls = []
     all_refs = []
     all_c00 = []
     for section in pe.sections:
@@ -77,6 +83,14 @@ def audit_original_dll(path: Path, template: bytes, version: str):
         )
         all_refs.extend(refs)
         all_c00.extend(c00)
+        decoder = Cs(CS_ARCH_X86, CS_MODE_32)
+        decoder.detail = True
+        for instruction in decoder.disasm(section.get_data(), pe.OPTIONAL_HEADER.ImageBase + section.VirtualAddress):
+            if instruction.mnemonic == 'call' and any(
+                op.type == X86_OP_MEM and op.mem.disp in writefile_iat
+                for op in instruction.operands
+            ):
+                all_writefile_calls.append(instruction.address)
     relocated = []
     for block in getattr(pe, 'DIRECTORY_ENTRY_BASERELOC', []):
         for entry in block.entries:
@@ -100,6 +114,7 @@ def audit_original_dll(path: Path, template: bytes, version: str):
         'template_static_text_ref_count': len(all_refs),
         'template_relocated_pointer_count': len(relocated),
         'template_data_export_count': len(export_template_pointers),
+        'direct_kernel32_writefile_calls': all_writefile_calls,
         'code_3072_immediates': all_c00,
         'export_names': [name for name, _ in names],
         'bounded_interpretation': 'no direct xrefs is not proof of no indirect/runtime use',
@@ -119,6 +134,8 @@ def main():
                     'template_static_text_ref_count', 'template_relocated_pointer_count',
                     'template_data_export_count', 'export_names'):
             print(f' {key}={result[key]}')
+        print(f' direct_kernel32_WriteFile_call_count={len(result["direct_kernel32_writefile_calls"])}')
+        print(f' direct_kernel32_WriteFile_calls={[hex(addr) for addr in result["direct_kernel32_writefile_calls"]]}')
         print(f' exact_0xC00_integer_operands={[(hex(ip), mnemonic, op) for ip, mnemonic, op in result["code_3072_immediates"]]}')
         print(' INTERPRETATION=Cannot infer actual template writer from embedding alone; indirect calls not excluded')
     print('PHYSICAL_DISK_OR_CREDENTIAL_ACCESS=NONE')
