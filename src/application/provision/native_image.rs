@@ -213,6 +213,267 @@ pub fn export_native_edp_512_image(
     export_native_plain_image(path, &native)
 }
 
+// Bridge a caller-owned read-only native-sector callback into the application's
+// EvidenceSource contract. An independent native protocol snapshot is required
+// at every public replay call, so the source cannot silently change between
+// preview and LCE acquisition.
+struct OfflineNativeSourceReader<F> {
+    native_sector_bytes: u32,
+    read_native: F,
+}
+
+impl<F> crate::application::evidence::SectorReader for OfflineNativeSourceReader<F>
+where
+    F: FnMut(u64) -> Result<Vec<u8>, String>,
+{
+    fn logical_sector_bytes(&self) -> u32 {
+        self.native_sector_bytes
+    }
+
+    fn read_native_sector(&mut self, lba: u64) -> std::io::Result<Vec<u8>> {
+        (self.read_native)(lba).map_err(std::io::Error::other)
+    }
+
+    fn read_sector(&mut self, lba: u64) -> std::io::Result<Vec<u8>> {
+        let block = self.read_native_sector(lba)?;
+        if block.len() < 512 {
+            return Err(std::io::Error::other("离线来源原生扇区不足512B"));
+        }
+        Ok(block[..512].to_vec())
+    }
+}
+
+/// Replay source-authenticated native EDP protocol and LCE blocks into a
+/// sparse *virtual* write plan. Both 512B and 4Kn inputs retain all complete
+/// native block bytes, including unknown protocol tails and LCE suffixes.
+///
+/// This is deliberately source replay, NOT new 4Kn OEM protocol generation.
+/// A separately captured native protocol snapshot must match every read.
+/// One read-only callback supplies both metadata and LCE, but no physical
+/// write permission is ever provided.
+pub fn plan_native_edp_source_replay_image<F>(
+    layout: &crate::provision::NativeEdpLayoutPlan,
+    source_protocol: &crate::protocol::image::NativeProtocolImage,
+    device_id: &str,
+    source_total_sectors: u64,
+    read_native: F,
+) -> Result<NativeVirtualDiskPlan, String>
+where
+    F: FnMut(u64) -> Result<Vec<u8>, String>,
+{
+    let mut source_reader = OfflineNativeSourceReader {
+        native_sector_bytes: layout.logical_sector_bytes,
+        read_native,
+    };
+    let writes = crate::application::evidence::verified_native_source_replay(
+        &mut source_reader,
+        layout,
+        source_protocol,
+        device_id,
+        source_total_sectors,
+    )?;
+    if !matches!(layout.logical_sector_bytes, 512 | 4096)
+        || writes.last().is_none_or(|block| block.relative_lba != 0)
+        || writes.len() != 13 + layout.lce.sector_count as usize
+    {
+        return Err("来源EDP重放不是完整原生块、完整LCE或MBR最后提交".into());
+    }
+    Ok(NativeVirtualDiskPlan {
+        total_sectors: layout.total_sectors,
+        sector_bytes: layout.logical_sector_bytes,
+        writes,
+    })
+}
+
+/// Export a verified source replay into a *new regular file* with the shared
+/// native rollback/readback transaction. The result contains only original
+/// protocol/LCE blocks; no source partition user data or mountability is
+/// claimed. Physical media writers and device paths remain unavailable.
+pub fn export_native_edp_source_replay_image<F>(
+    path: &Path,
+    layout: &crate::provision::NativeEdpLayoutPlan,
+    source_protocol: &crate::protocol::image::NativeProtocolImage,
+    device_id: &str,
+    source_total_sectors: u64,
+    read_native: F,
+) -> Result<(), String>
+where
+    F: FnMut(u64) -> Result<Vec<u8>, String>,
+{
+    let plan = plan_native_edp_source_replay_image(
+        layout,
+        source_protocol,
+        device_id,
+        source_total_sectors,
+        read_native,
+    )?;
+    export_native_plain_image(path, &plan)
+}
+
+/// One optional *offline-only* filesystem initialization over a confirmed
+/// source partition. The password is used only to authenticate the original
+/// wrapped FileKey (including CRC); it is never stored in the write plan.
+pub struct NativeEdpReplayFormat<'a> {
+    pub partition_index: usize,
+    pub filesystem: &'a NativeFormatPlan,
+    pub source_password: Option<&'a [u8]>,
+}
+
+/// Combine exact source-owned EDP 512B/4Kn protocol + LCE with independently
+/// produced native FAT/exFAT metadata for selected existing partitions.
+///
+/// This is a disposable sparse-image format experiment. All original user
+/// data is ABSENT, even for unselected partitions. It is NOT a lossless disk
+/// clone, not a new OEM label producer, and never authorizes hardware writes.
+/// Encrypted partition metadata requires CRC-verified original password/key.
+pub fn plan_native_edp_source_replay_with_formats<F>(
+    layout: &crate::provision::NativeEdpLayoutPlan,
+    source_protocol: &crate::protocol::image::NativeProtocolImage,
+    device_id: &str,
+    source_total_sectors: u64,
+    read_native: F,
+    formats: &[NativeEdpReplayFormat<'_>],
+) -> Result<NativeVirtualDiskPlan, String>
+where
+    F: FnMut(u64) -> Result<Vec<u8>, String>,
+{
+    use crate::partition_transform::{
+        transform_native_sector_offline, NativeCipherDirection, NativePartitionDataCipher,
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut base = plan_native_edp_source_replay_image(
+        layout,
+        source_protocol,
+        device_id,
+        source_total_sectors,
+        read_native,
+    )?;
+    let native_bytes = layout.logical_sector_bytes as usize;
+    let mut native_protocol = vec![0u8; 13 * native_bytes];
+    for block in base.writes.iter().filter(|write| write.relative_lba < 13) {
+        let offset = block.relative_lba as usize * native_bytes;
+        native_protocol[offset..offset + native_bytes].copy_from_slice(&block.data);
+    }
+    let source = crate::protocol::image::NativeProtocolImage::from_native_bytes(
+        layout.logical_sector_bytes,
+        native_protocol,
+    )
+    .map_err(|error| error.to_string())?;
+    let parsed = crate::provision::parse_existing_provision_native(
+        &source,
+        device_id,
+        layout.total_sectors,
+    )?
+    .ok_or("无法复核来源EDPF分区密钥记录")?;
+
+    let mut occupied = base
+        .writes
+        .iter()
+        .map(|write| (write.relative_lba, write.data.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut seen_partitions = BTreeSet::new();
+    for request in formats {
+        if !seen_partitions.insert(request.partition_index) {
+            return Err("重复初始化同一来源分区".into());
+        }
+        let partition = layout
+            .partitions
+            .get(request.partition_index)
+            .ok_or("来源格式化分区索引越界")?;
+        let format = request.filesystem;
+        let geometry = partition.geometry;
+        if partition.semantics.role == crate::provision::PartitionRole::CompatibilityReserve
+            || geometry.filesystem != Some(format.filesystem)
+            || format.expected_metadata.kind != format.filesystem
+            || format.geometry.partition_offset != geometry.start_lba
+            || format.geometry.sector_count != geometry.sector_count
+            || format.geometry.sector_size != layout.logical_sector_bytes
+        {
+            return Err("来源分区、文件系统类型或原生格式化几何不匹配".into());
+        }
+        crate::filesystem::validate_writable_filesystem(format.filesystem)
+            .map_err(|error| error.to_string())?;
+        let boot = format
+            .writes
+            .iter()
+            .find(|write| write.relative_lba == 0)
+            .ok_or("原生格式化缺少启动扇区")?;
+        if crate::filesystem::detect_native_boot_sector(
+            &boot.data,
+            geometry.sector_count,
+            layout.logical_sector_bytes,
+        )
+        .map_err(|error| error.to_string())?
+            != Some(format.filesystem)
+        {
+            return Err("原生格式化启动扇区与声明的文件系统不一致".into());
+        }
+        let cipher = if geometry.physically_encrypted {
+            let record = parsed
+                .records
+                .get(request.partition_index)
+                .copied()
+                .ok_or("来源密码域记录不存在")?;
+            if record.lba12.need_encrypt == 0 {
+                return Err("来源物理加密分区没有加密密码域".into());
+            }
+            let password = request
+                .source_password
+                .filter(|password| !password.is_empty())
+                .ok_or("离线加密格式化需要来源密码与CRC认证FileKey")?;
+            let key = record
+                .verified_file_key(Some(password))
+                .map_err(|error| format!("来源FileKey验证失败: {error}"))?;
+            let algorithm =
+                NativePartitionDataCipher::from_encrypt_mode(record.lba12.encrypt_mode)?;
+            Some((algorithm, key))
+        } else {
+            None
+        };
+        let mut relative = BTreeSet::new();
+        for write in &format.writes {
+            if write.relative_lba >= geometry.sector_count
+                || write.data.len() != native_bytes
+                || !relative.insert(write.relative_lba)
+            {
+                return Err("原生格式化包含重复、截断或越界分区扇区".into());
+            }
+            let absolute = geometry
+                .start_lba
+                .checked_add(write.relative_lba)
+                .ok_or("格式化绝对LBA溢出")?;
+            let data = if let Some((algorithm, key)) = &cipher {
+                transform_native_sector_offline(
+                    *algorithm,
+                    NativeCipherDirection::Encrypt,
+                    &write.data,
+                    key,
+                    absolute,
+                    layout.logical_sector_bytes,
+                )?
+            } else {
+                write.data.clone()
+            };
+            if occupied.insert(absolute, data).is_some() {
+                return Err(format!(
+                    "文件系统与来源协议、LCE或其他分区重叠LBA{absolute}"
+                ));
+            }
+        }
+    }
+    let mbr = occupied.remove(&0).ok_or("原生重放缺少MBR")?;
+    base.writes = occupied
+        .into_iter()
+        .map(|(relative_lba, data)| crate::filesystem::NativeFilesystemWrite { relative_lba, data })
+        .collect();
+    base.writes.push(crate::filesystem::NativeFilesystemWrite {
+        relative_lba: 0,
+        data: mbr,
+    });
+    Ok(base)
+}
+
 pub fn export_native_plain_image(path: &Path, plan: &NativeVirtualDiskPlan) -> Result<(), String> {
     let byte_len = plan
         .total_sectors

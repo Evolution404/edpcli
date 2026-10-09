@@ -2056,6 +2056,306 @@ fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
             })
             .unwrap();
         assert_eq!(from_one_source, staged);
+        // End-to-end: replay the same synthetic 4Kn source through the
+        // application virtual-image author, then independently reopen and
+        // compare every full 4096B native block (including all opaque tails).
+        // This does not synthesize an OEM 4Kn protocol or touch a USB device.
+        let offline_plan =
+            edpcli::application::provision::native_image::plan_native_edp_source_replay_image(
+                &native_layout,
+                &native,
+                &did,
+                16_777_216,
+                |lba| {
+                    if lba < 13 {
+                        Ok(native.block(lba as usize).unwrap().to_vec())
+                    } else if lba == lce_start {
+                        Ok(source_lce[0].clone())
+                    } else {
+                        Err("unexpected synthetic read".into())
+                    }
+                },
+            )
+            .unwrap();
+        assert_eq!(offline_plan.total_sectors, 16_777_216);
+        assert_eq!(offline_plan.sector_bytes, 4096);
+        assert_eq!(offline_plan.writes, staged);
+        // This application entrypoint MUST check the independent protocol
+        // snapshot before reading any LCE, even if its decoded 512B projection
+        // remains identical and only the native 3584B opaque tail changes.
+        let mut stale_snapshot = native.native_bytes().to_vec();
+        stale_snapshot[7 * 4096 + 4095] ^= 1;
+        let stale_snapshot =
+            edpcli::protocol::image::NativeProtocolImage::from_native_bytes(4096, stale_snapshot)
+                .unwrap();
+        let mut attempted_lce = false;
+        let err =
+            edpcli::application::provision::native_image::plan_native_edp_source_replay_image(
+                &native_layout,
+                &stale_snapshot,
+                &did,
+                16_777_216,
+                |lba| {
+                    if lba >= 13 {
+                        attempted_lce = true;
+                        Ok(source_lce[0].clone())
+                    } else {
+                        Ok(native.block(lba as usize).unwrap().to_vec())
+                    }
+                },
+            )
+            .unwrap_err();
+        assert!(err.contains("快照不一致"), "{err}");
+        assert!(!attempted_lce, "snapshot mismatch must precede LCE read");
+        let mut attempted_any_read = false;
+        assert!(
+            edpcli::application::provision::native_image::plan_native_edp_source_replay_image(
+                &native_layout,
+                &native,
+                &did,
+                16_777_215,
+                |_| {
+                    attempted_any_read = true;
+                    Err("must not read stale-capacity source".into())
+                },
+            )
+            .is_err()
+        );
+        assert!(
+            !attempted_any_read,
+            "capacity mismatch must precede any source read"
+        );
+        let image_path = std::env::temp_dir().join(format!(
+            "edpcli-native-source-replay-{}-{}.img",
+            std::process::id(),
+            mode as u8
+        ));
+        assert!(!image_path.exists(), "synthetic target path must be fresh");
+        assert!(
+            edpcli::application::provision::native_image::export_native_edp_source_replay_image(
+                std::path::Path::new("/dev/disk99"),
+                &native_layout,
+                &native,
+                &did,
+                16_777_216,
+                |lba| {
+                    if lba < 13 {
+                        Ok(native.block(lba as usize).unwrap().to_vec())
+                    } else {
+                        Ok(source_lce[0].clone())
+                    }
+                },
+            )
+            .is_err()
+        );
+        edpcli::application::provision::native_image::export_native_edp_source_replay_image(
+            &image_path,
+            &native_layout,
+            &native,
+            &did,
+            16_777_216,
+            |lba| {
+                if lba < 13 {
+                    Ok(native.block(lba as usize).unwrap().to_vec())
+                } else if lba == lce_start {
+                    Ok(source_lce[0].clone())
+                } else {
+                    Err("unexpected synthetic read".into())
+                }
+            },
+        )
+        .unwrap();
+        use std::io::{Read, Seek, SeekFrom};
+        let mut image_file = std::fs::File::open(&image_path).unwrap();
+        assert_eq!(image_file.metadata().unwrap().len(), 16_777_216u64 * 4096);
+        let mut observed = Vec::new();
+        for block in &staged {
+            image_file
+                .seek(SeekFrom::Start(block.relative_lba * 4096))
+                .unwrap();
+            let mut bytes = vec![0u8; 4096];
+            image_file.read_exact(&mut bytes).unwrap();
+            assert_eq!(bytes, block.data, "native LBA{}", block.relative_lba);
+            observed.push(edpcli::application::filesystem::NativeFilesystemWrite {
+                relative_lba: block.relative_lba,
+                data: bytes,
+            });
+        }
+        native_layout
+            .verify_source_replay_readback(&native, &did, &source_lce, &observed)
+            .unwrap();
+        // Guard the otherwise unowned 1024B LCE native tail.
+        let lce_observation = observed
+            .iter_mut()
+            .find(|block| block.relative_lba == lce_start)
+            .unwrap();
+        lce_observation.data[3072] ^= 0x01;
+        assert!(native_layout
+            .verify_source_replay_readback(&native, &did, &source_lce, &observed)
+            .is_err());
+        assert!(
+            edpcli::application::provision::native_image::export_native_edp_source_replay_image(
+                &image_path,
+                &native_layout,
+                &native,
+                &did,
+                16_777_216,
+                |_| Err("existing target must be rejected".into()),
+            )
+            .is_err()
+        );
+        std::fs::remove_file(&image_path).unwrap();
+        // Format exactly one existing native encrypted partition using the
+        // original CRC-authenticated source password/FileKey. This initializes
+        // only sparse filesystem metadata; every original user-data block is
+        // intentionally absent from this disposable image.
+        use edpcli::application::filesystem::{
+            detect_native_boot_sector, FilesystemGeometry, FormatRequest, EXFAT_DRIVER,
+        };
+        use edpcli::application::inspect::{
+            transform_native_sector_offline, NativeCipherDirection, NativePartitionDataCipher,
+        };
+        use edpcli::application::provision::native_image::{
+            plan_native_edp_source_replay_with_formats, NativeEdpReplayFormat,
+        };
+        let encrypted_index = native_layout
+            .partitions
+            .iter()
+            .position(|part| {
+                part.geometry.physically_encrypted
+                    && part.geometry.filesystem == Some(FilesystemKind::ExFat)
+            })
+            .unwrap();
+        let encrypted_part = native_layout.partitions[encrypted_index].geometry;
+        let native_format = EXFAT_DRIVER
+            .build_native_format_plan(
+                FilesystemGeometry::new(
+                    encrypted_part.start_lba,
+                    encrypted_part.sector_count,
+                    4096,
+                ),
+                &FormatRequest {
+                    filesystem: FilesystemKind::ExFat,
+                    volume_label: Some("OFFLINE".into()),
+                    volume_serial: Some(0x1234_5678),
+                },
+            )
+            .unwrap();
+        let source_reader = |lba| {
+            if lba < 13 {
+                Ok(native.block(lba as usize).unwrap().to_vec())
+            } else if lba == lce_start {
+                Ok(source_lce[0].clone())
+            } else {
+                Err("unknown synthetic LBA".into())
+            }
+        };
+        let format_choice = NativeEdpReplayFormat {
+            partition_index: encrypted_index,
+            filesystem: &native_format,
+            source_password: Some(b"ProofPass1!"),
+        };
+        let formatted = plan_native_edp_source_replay_with_formats(
+            &native_layout,
+            &native,
+            &did,
+            16_777_216,
+            source_reader,
+            &[format_choice],
+        )
+        .unwrap();
+        assert_eq!(formatted.writes.last().unwrap().relative_lba, 0);
+        assert!(formatted.writes.len() > staged.len());
+        let wrong_choice = NativeEdpReplayFormat {
+            partition_index: encrypted_index,
+            filesystem: &native_format,
+            source_password: Some(b"WRONG PASSWORD"),
+        };
+        assert!(plan_native_edp_source_replay_with_formats(
+            &native_layout,
+            &native,
+            &did,
+            16_777_216,
+            source_reader,
+            &[wrong_choice],
+        )
+        .is_err());
+        let missing_choice = NativeEdpReplayFormat {
+            partition_index: encrypted_index,
+            filesystem: &native_format,
+            source_password: None,
+        };
+        assert!(plan_native_edp_source_replay_with_formats(
+            &native_layout,
+            &native,
+            &did,
+            16_777_216,
+            source_reader,
+            &[missing_choice],
+        )
+        .is_err());
+        let mismatched = edpcli::application::filesystem::NativeFormatPlan {
+            geometry: FilesystemGeometry::new(
+                encrypted_part.start_lba + 1,
+                encrypted_part.sector_count,
+                4096,
+            ),
+            ..native_format.clone()
+        };
+        assert!(plan_native_edp_source_replay_with_formats(
+            &native_layout,
+            &native,
+            &did,
+            16_777_216,
+            source_reader,
+            &[NativeEdpReplayFormat {
+                partition_index: encrypted_index,
+                filesystem: &mismatched,
+                source_password: Some(b"ProofPass1!"),
+            }],
+        )
+        .is_err());
+        let formatted_path = image_path.with_extension("formatted.img");
+        assert!(!formatted_path.exists());
+        edpcli::application::provision::native_image::export_native_plain_image(
+            &formatted_path,
+            &formatted,
+        )
+        .unwrap();
+        let mut formatted_file = std::fs::File::open(&formatted_path).unwrap();
+        for write in &staged {
+            formatted_file
+                .seek(SeekFrom::Start(write.relative_lba * 4096))
+                .unwrap();
+            let mut actual = vec![0; 4096];
+            formatted_file.read_exact(&mut actual).unwrap();
+            assert_eq!(
+                actual, write.data,
+                "format altered source-owned LBA{}",
+                write.relative_lba
+            );
+        }
+        formatted_file
+            .seek(SeekFrom::Start(encrypted_part.start_lba * 4096))
+            .unwrap();
+        let mut encrypted_boot = vec![0u8; 4096];
+        formatted_file.read_exact(&mut encrypted_boot).unwrap();
+        assert_ne!(&encrypted_boot[3..11], b"EXFAT   ");
+        let decrypted_boot = transform_native_sector_offline(
+            NativePartitionDataCipher::Sm4Ecb,
+            NativeCipherDirection::Decrypt,
+            &encrypted_boot,
+            &[0x14; 16],
+            encrypted_part.start_lba,
+            4096,
+        )
+        .unwrap();
+        assert_eq!(decrypted_boot, native_format.writes[0].data);
+        assert_eq!(
+            detect_native_boot_sector(&decrypted_boot, encrypted_part.sector_count, 4096).unwrap(),
+            Some(FilesystemKind::ExFat),
+        );
+        std::fs::remove_file(&formatted_path).unwrap();
 
         // Application evidence reader must use the same source for the
         // original protocol and LCE and confirm the *entire native snapshot*.
