@@ -21,16 +21,14 @@ fn activate_scheme(state: &mut AppState) -> ActionOutcome {
     if kind == ProvisionKind::Plain || state.provision_source_is_plain() {
         return ActionOutcome::handled();
     }
-    // Current password verifier reads a legacy 512B protocol image. On 4Kn
-    // it could use incorrect source LBAs: explicitly mark it unverified.
+    // 512B and 4096B are both handled by the application-layer read-only
+    // verifier. Physical provisioning authorization is independent.
     let native_bytes = state
         .selected_device()
         .and_then(|row| row.layout_geometry().ok())
         .map(|geometry| geometry.logical_sector_bytes);
-    if native_bytes != Some(512) {
-        state.set_warning_notice(
-            "4Kn 目前只支持原生布局的只读预览；原密码自动验证尚未支持，未执行验证或制盘写入",
-        );
+    if !crate::tui::native_source_password_policy::supports_source_key_verification(native_bytes) {
+        state.set_warning_notice("当前来源逻辑扇区大小未经只读验证认证；不执行密码探测或制盘写入");
         return ActionOutcome::handled();
     }
     ActionOutcome::request(ActionRequest::ProvisionKeyProbe { disk })

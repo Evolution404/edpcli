@@ -26,12 +26,13 @@ impl AppState {
         let password = crate::domain::secret::SecretText::from(
             crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT,
         );
-        // A 4Kn source cannot use the legacy 512B-only key-probing path.
-        // Do not display an endless spinner when no native verifier is running.
-        let can_probe = self
-            .selected_device()
-            .and_then(|row| row.layout_geometry().ok())
-            .is_some_and(|geometry| geometry.logical_sector_bytes == 512);
+        // Both the legacy 512B path and the native 4Kn read-only source-key
+        // verifier can run. The spinner must be backed by an actual request.
+        let can_probe = crate::tui::native_source_password_policy::supports_source_key_verification(
+            self.selected_device()
+                .and_then(|row| row.layout_geometry().ok())
+                .map(|geometry| geometry.logical_sector_bytes),
+        );
         let share_active = matches!(mode, Some(0 | 1 | 3));
         let encrypt_active = matches!(mode, Some(0..=2));
         let share_from_source =

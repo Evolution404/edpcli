@@ -279,16 +279,17 @@ pub(super) fn start_provision_source_password_verify(state: &mut AppState, tasks
         state.set_error_notice("目标 USB 已不存在，请返回设备页重新选择。");
         return;
     };
-    if state
-        .selected_device()
-        .and_then(|row| row.layout_geometry().ok())
-        .is_none_or(|geometry| geometry.logical_sector_bytes != 512)
-    {
+    if !crate::tui::native_source_password_policy::supports_source_key_verification(
+        state
+            .selected_device()
+            .and_then(|row| row.layout_geometry().ok())
+            .map(|geometry| geometry.logical_sector_bytes),
+    ) {
         if let Ok(Some((domain, _, revision))) = state.provision_source_password_verify_request() {
             state.provision_finish_source_password_verify(
                 domain,
                 revision,
-                Err("当前4Kn来源密码验证读取链尚未认证；保持未验证，禁止无损改密".into()),
+                Err("来源逻辑扇区大小未经只读密码验证认证".into()),
             );
         }
         return;

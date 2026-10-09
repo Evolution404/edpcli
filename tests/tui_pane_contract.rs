@@ -370,9 +370,16 @@ fn four_kn_provision_form_uses_native_source_geometry_and_blocks_unverified_writ
     rejected.provision_begin_selected();
     rejected.provision_enter_form_workspace();
     assert_eq!(rejected.provision_layout_model().total_sectors, 0);
-    // A 4Kn form must not advertise a verification worker that never ran.
+    // The 4Kn default key candidate can now be verified via the native
+    // read-only worker when controller activation dispatches KeyProbe.
+    // Direct state-construction tests leave that asynchronous work pending.
     assert!(
-        !values.iter().any(|v| v[3].contains("验证中")),
+        values
+            .iter()
+            .any(|v| v[0].contains("交换区") && v[3].contains("验证中"))
+            && values
+                .iter()
+                .any(|v| v[0].contains("保密区") && v[3].contains("验证中")),
         "{values:?}"
     );
 }

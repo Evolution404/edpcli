@@ -192,7 +192,7 @@ impl AppState {
         rows.push(Detail::muted(usable_summary));
         if model.logical_sector_bytes == 4096 {
             rows.push(Detail::warning(
-                "4Kn 原生容量只读预览 · 来源密码未经验证 · 禁止写盘",
+                "4Kn 原生布局 · 来源密码可独立只读验证 · 实体写盘仍禁用",
             ));
         }
         if let Some(note) = super::mode2_geometry_note::editor_note(self) {
