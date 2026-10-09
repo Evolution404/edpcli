@@ -1924,6 +1924,27 @@ fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
                 plain7[a + 0x28..a + 0x30].copy_from_slice(&new_bytes.to_le_bytes());
             }
         }
+        // The official producer retains LBA7 entry0's visible geometry,
+        // while every later LBA7 entry points to the same native LCE block.
+        // This is a synthetic 4Kn fixture, not a claimed manufacturer golden.
+        let source_lce_start = (0..count)
+            .map(|index| {
+                let base = index * 0x60;
+                let start =
+                    u64::from_le_bytes(plain12[base + 0x18..base + 0x20].try_into().unwrap());
+                let byte_len =
+                    u64::from_le_bytes(plain12[base + 0x28..base + 0x30].try_into().unwrap());
+                start + byte_len / 4096
+            })
+            .max()
+            .unwrap()
+            + 1;
+        assert!(source_lce_start + 1 < 16_777_216);
+        for index in 1..count {
+            let base = index * 0x40;
+            plain7[base + 0x18..base + 0x20].copy_from_slice(&source_lce_start.to_le_bytes());
+            plain7[base + 0x28..base + 0x30].copy_from_slice(&4096u64.to_le_bytes());
+        }
         let first_native_bytes = u64::from_le_bytes(plain12[0x28..0x30].try_into().unwrap());
         projection[458..462].copy_from_slice(&((first_native_bytes / 4096) as u32).to_le_bytes());
         projection[start7..start7 + 512]
@@ -1975,6 +1996,7 @@ fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
             .max()
             .unwrap()
             + 1;
+        assert_eq!(lce_start, source_lce_start);
         assert!(
             lce_start + 1 < 16_777_216,
             "synthetic source must have a free LCE block"
@@ -2071,6 +2093,44 @@ fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
             "strict source replay must reject an unchanged MBR with a stale secondary extent"
         );
 
+        // LBA7 pointers are authoritative for LCE. Altering one pointer
+        // or its byte length must fail strict source replay despite an
+        // unchanged MBR and unchanged LBA12 partition geometry.
+        for index in 1..count {
+            for corrupt_size in [false, true] {
+                let mut invalid_plain7 = plain7.clone();
+                let base = index * 0x40;
+                if corrupt_size {
+                    invalid_plain7[base + 0x28..base + 0x30]
+                        .copy_from_slice(&8192u64.to_le_bytes());
+                } else {
+                    invalid_plain7[base + 0x18..base + 0x20]
+                        .copy_from_slice(&(lce_start + 1).to_le_bytes());
+                }
+                let mut invalid_native = raw.clone();
+                invalid_native[7 * 4096..7 * 4096 + 512]
+                    .copy_from_slice(&xor_rolling(&invalid_plain7, (crc & 0xffff) ^ (crc >> 16)));
+                let invalid_native =
+                    NativeProtocolImage::from_native_bytes(4096, invalid_native).unwrap();
+                assert!(
+                    parse_existing_provision_native(&invalid_native, &did, 16_777_216)
+                        .unwrap()
+                        .is_some()
+                );
+                assert!(
+                    native_layout
+                        .source_replay_native_blocks(&invalid_native, &source_lce)
+                        .is_ok(),
+                    "old MBR-only replay cannot check LBA7 LCE pointers"
+                );
+                assert!(
+                    native_layout
+                        .verified_source_replay_native_blocks(&invalid_native, &did, &source_lce)
+                        .is_err(),
+                    "strict replay must reject incorrect LBA7 LCE pointer/length"
+                );
+            }
+        }
         for record in &source.records {
             assert_eq!(record.lba7.sector_size, 4096);
             assert_eq!(record.lba12.sector_size, 4096);
