@@ -19,10 +19,21 @@ fn activate_scheme(state: &mut AppState) -> ActionOutcome {
     let kind = state.provision_begin_selected();
     state.provision_enter_form_workspace();
     if kind == ProvisionKind::Plain || state.provision_source_is_plain() {
-        ActionOutcome::handled()
-    } else {
-        ActionOutcome::request(ActionRequest::ProvisionKeyProbe { disk })
+        return ActionOutcome::handled();
     }
+    // Current password verifier reads a legacy 512B protocol image. On 4Kn
+    // it could use incorrect source LBAs: explicitly mark it unverified.
+    let native_bytes = state
+        .selected_device()
+        .and_then(|row| row.layout_geometry().ok())
+        .map(|geometry| geometry.logical_sector_bytes);
+    if native_bytes != Some(512) {
+        state.set_warning_notice(
+            "4Kn 目前只支持原生布局的只读预览；原密码自动验证尚未支持，未执行验证或制盘写入",
+        );
+        return ActionOutcome::handled();
+    }
+    ActionOutcome::request(ActionRequest::ProvisionKeyProbe { disk })
 }
 
 pub(super) fn dispatch_provision(

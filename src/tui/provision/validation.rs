@@ -13,6 +13,34 @@ impl AppState {
         self.provision.kind.target().official_mode()
     }
 
+    /// Read-only layout projection uses the observed device-native geometry.
+    /// A 4Kn source may be previewed only with its confirmed LCE and mode.
+    /// This never authorizes a 4Kn write plan.
+    pub(super) fn provision_preview_geometry(&self) -> Result<(u64, u32, u64), String> {
+        let row = self.selected_device().ok_or("目标 USB 已不存在")?;
+        let geometry = row.layout_geometry()?;
+        let total = geometry.native_sector_count;
+        let lce_start = if geometry.logical_sector_bytes == 512 {
+            crate::application::provision_geometry::verified_usb_compatibility_extent(total)
+                .ok_or("目标不符合已验证的512B制盘几何")?
+                .start_lba
+        } else if geometry.logical_sector_bytes == 4096 {
+            let lce = row.lce.as_ref().ok_or("4Kn 来源 LCE 几何尚未验证")?;
+            if lce.sector_count != 1
+                || lce
+                    .start_lba
+                    .checked_add(lce.sector_count)
+                    .is_none_or(|end| end > total)
+            {
+                return Err("4Kn 来源 LCE 指针或完整块范围无效".into());
+            }
+            lce.start_lba
+        } else {
+            return Err("当前逻辑扇区大小未经验证；拒绝规划".into());
+        };
+        Ok((total, geometry.logical_sector_bytes, lce_start))
+    }
+
     pub(super) fn provision_initial_prefill(
         &self,
         kind: ProvisionKind,
@@ -20,14 +48,16 @@ impl AppState {
         let target_mode = kind.target().official_mode()?;
         let row = self.selected_device()?;
         let source = row.existing_profile_for_prefill();
-        let total_sectors = row.size / crate::common::SECTOR as u64;
-        let lce = crate::application::provision_geometry::verified_usb_compatibility_extent(
-            total_sectors,
-        )?;
+        let (_, logical_bytes, lce_start) = self.provision_preview_geometry().ok()?;
+        if logical_bytes != 512
+            && source.as_ref().map(|existing| existing.source_mode) != Some(target_mode)
+        {
+            return None;
+        }
         crate::provision::prefill_for_target_mode(
             source.as_ref(),
             target_mode,
-            lce.start_lba,
+            lce_start,
             crate::common::SECTOR as u64,
         )
         .ok()
@@ -53,16 +83,19 @@ impl AppState {
         let target_mode = self
             .provision_target_mode()
             .ok_or_else(|| "离线快照工具不使用物理制盘表单".to_string())?;
-        let total_sectors = row.size / crate::common::SECTOR as u64;
-        let lce = crate::application::provision_geometry::verified_usb_compatibility_extent(
-            total_sectors,
-        )
-        .ok_or_else(|| "当前目标不符合已验证的 USB 制盘兼容几何".to_string())?;
+        let (_, logical_bytes, lce_start) = self.provision_preview_geometry()?;
         let source = row.existing_profile_for_prefill();
+        // There is no certified native 4Kn writer. Only an exact-source-mode
+        // preview is permissible until cross-mode native geometry is proven.
+        if logical_bytes != 512
+            && source.as_ref().map(|existing| existing.source_mode) != Some(target_mode)
+        {
+            return Err("4Kn 目前仅支持已确认盘型的只读布局预览；跨模式制盘尚未认证".into());
+        }
         let base = crate::provision::prefill_for_target_mode(
             source.as_ref(),
             target_mode,
-            lce.start_lba,
+            lce_start,
             crate::common::SECTOR as u64,
         )?;
         let form = &self.provision.form;
@@ -282,6 +315,15 @@ impl AppState {
     pub fn provision_request(
         &mut self,
     ) -> Result<crate::application::provision::OfficialProvisionRequest, String> {
+        if self
+            .selected_device()
+            .ok_or("目标 USB 已不存在")?
+            .layout_geometry()?
+            .logical_sector_bytes
+            != 512
+        {
+            return Err("4Kn 制盘尚未通过写入/挂载认证；当前只读预览禁止生成实体写盘计划".into());
+        }
         let mode = self
             .provision
             .kind

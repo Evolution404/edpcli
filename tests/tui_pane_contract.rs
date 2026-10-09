@@ -269,6 +269,114 @@ fn four_kn_capacity_uses_native_lbas_and_does_not_fabricate_512b_tail_mirrors() 
     }
 }
 
+#[test]
+fn four_kn_provision_form_uses_native_source_geometry_and_blocks_unverified_write() {
+    use edpcli::protocol::sectors::EdpfPartition;
+    use edpcli::tui::disk_layout::{DiskCapacityMap, DiskCapacityMapProfile};
+    let mut row = edp_device_with_layout();
+    row.size = 255_944_818_688;
+    let snapshot = &mut row.identity_pin.as_mut().unwrap().snapshot.hardware;
+    snapshot.logical_sector_size = Some(4096);
+    snapshot.total_sectors = Some(62_486_528);
+    row.partitions = Some(vec![
+        EdpfPartition {
+            ptype: 1,
+            active: 1,
+            enc: 0,
+            start_lba: 63,
+            size_bytes: 2_497 * 4096,
+        },
+        EdpfPartition {
+            ptype: 2,
+            active: 1,
+            enc: 1,
+            start_lba: 2_560,
+            size_bytes: 49_976_864 * 4096,
+        },
+        EdpfPartition {
+            ptype: 4,
+            active: 1,
+            enc: 1,
+            start_lba: 49_979_648,
+            size_bytes: 12_494_112 * 4096,
+        },
+    ]);
+    row.lce.as_mut().unwrap().start_lba = 62_476_561;
+    row.lce.as_mut().unwrap().sector_count = 1;
+    let canonical = row.canonical_layout().unwrap();
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    state.begin_provision_for_selected_device().unwrap();
+    assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
+    state.provision_enter_form_workspace();
+    let form = &state.provision().form;
+    assert_eq!(form.boot_start_lba, "63");
+    assert_eq!(form.boot_sectors, "2497");
+    assert_eq!(form.share_start_lba, "2560");
+    assert_eq!(form.share_sectors, "49976864");
+    assert_eq!(form.encrypt_start_lba, "49979648");
+    assert_eq!(form.encrypt_sectors, "12494112");
+
+    let layout = state.provision_layout_model();
+    assert_complete_layout(&layout);
+    assert_eq!(layout.logical_sector_bytes, 4096);
+    assert_eq!(layout.total_sectors, 62_486_528);
+    assert_eq!(layout.segments, canonical.segments);
+    assert_eq!(
+        layout.sector_byte_len(layout.total_sectors),
+        Some(255_944_818_688)
+    );
+    let lines = DiskCapacityMap::new(&layout, DiskCapacityMapProfile::Full).lines(160);
+    let text = lines
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("204.71GB"), "4Kn map: {text}");
+    assert!(text.contains("51.18GB"), "4Kn map: {text}");
+    assert!(!text.contains("223.95GB"), "phantom free space: {text}");
+    let details = state.provision_layout_editor_details();
+    let values = details
+        .iter()
+        .filter_map(|detail| detail.columns.as_ref())
+        .collect::<Vec<_>>();
+    assert!(
+        values
+            .iter()
+            .any(|v| v[0].contains("交换区") && v[1] == "204.71GB"),
+        "{values:?}"
+    );
+    assert!(
+        values
+            .iter()
+            .any(|v| v[0].contains("保密区") && v[1] == "51.18GB"),
+        "{values:?}"
+    );
+    assert!(state
+        .provision_request()
+        .unwrap_err()
+        .contains("4Kn 制盘尚未通过"));
+    // Refuse an out-of-range or unverified 4Kn LCE rather than placing a phantom tail.
+    let mut invalid = edp_device_with_layout();
+    invalid.size = 255_944_818_688;
+    let hw = &mut invalid.identity_pin.as_mut().unwrap().snapshot.hardware;
+    hw.logical_sector_size = Some(4096);
+    hw.total_sectors = Some(62_486_528);
+    invalid.lce.as_mut().unwrap().sector_count = 6;
+    let mut rejected = AppState::new();
+    rejected.replace_devices(vec![invalid]);
+    rejected.begin_provision_for_selected_device().unwrap();
+    rejected.provision_begin_selected();
+    rejected.provision_enter_form_workspace();
+    assert_eq!(rejected.provision_layout_model().total_sectors, 0);
+    // A 4Kn form must not advertise a verification worker that never ran.
+    assert!(
+        !values.iter().any(|v| v[3].contains("验证中")),
+        "{values:?}"
+    );
+}
+
 fn inspect_state() -> AppState {
     let mut state = AppState::new();
     assert!(state.begin_advanced_inspect(AdvancedInspectSource::Disk(6)));
