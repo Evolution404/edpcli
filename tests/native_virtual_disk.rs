@@ -870,16 +870,16 @@ fn native_four_kn_exfat_real_file_roundtrip_all_official_data_ciphers() {
     for cluster in [sample.first_cluster, sample.first_cluster + 1] {
         for offset in 0..sample.sectors_per_cluster {
             covered.insert(
-                sample.heap_lba
-                    + u64::from(cluster - 2) * sample.sectors_per_cluster
-                    + offset,
+                sample.heap_lba + u64::from(cluster - 2) * sample.sectors_per_cluster + offset,
             );
         }
     }
     assert!(covered.len() > 10);
-    assert!(covered.iter().all(|lba| (*lba >= start) && (*lba < start + count)));
-    let first_file_lba = sample.heap_lba
-        + u64::from(sample.first_cluster - 2) * sample.sectors_per_cluster;
+    assert!(covered
+        .iter()
+        .all(|lba| (*lba >= start) && (*lba < start + count)));
+    let first_file_lba =
+        sample.heap_lba + u64::from(sample.first_cluster - 2) * sample.sectors_per_cluster;
     assert!(covered.contains(&first_file_lba));
 
     let key = [0x42u8; 16];
@@ -983,7 +983,10 @@ fn native_four_kn_exfat_real_file_roundtrip_all_official_data_ciphers() {
         let cipher_file_sector = read_block(&mut cipher, first_file_lba);
         let plaintext_file_sector = read_block(&mut decoded, first_file_lba);
         assert_ne!(cipher_file_sector, plaintext_file_sector);
-        assert_eq!(plaintext_file_sector, read_block(&mut plain, first_file_lba));
+        assert_eq!(
+            plaintext_file_sector,
+            read_block(&mut plain, first_file_lba)
+        );
         let mut tampered = cipher_file_sector;
         tampered[17] ^= 1;
         let tampered_plain = transform_native_sector_offline(
