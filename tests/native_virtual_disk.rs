@@ -565,3 +565,100 @@ fn native_full_disk_512b_compatibility_and_4kn_independent_block_sizes() {
     assert!(legacy.writes.len() > 10);
     assert!(native.writes.len() > 10);
 }
+
+/// AES_CROSS data crypto in a sparse *ordinary file*: this is deliberately
+/// independent of physical USB 4Kn provisioning or FileKey/password records.
+/// The AES block algorithm is already pinned to the official Windows driver.
+#[test]
+fn aes_cross_native_four_kn_virtual_exfat_file_roundtrip() {
+    use edpcli::application::filesystem::detect_native_boot_sector;
+    use edpcli::application::inspect::decrypt_mode3_native;
+    use edpcli::protocol::crypto::aes128_ecb_encrypt_block;
+
+    let key = std::array::from_fn(|index| index as u8);
+    let (start, count, fs) = PARTITIONS[3];
+    assert_eq!(fs, FilesystemKind::ExFat);
+    let composite = NativeVirtualDiskPlan::assemble(TOTAL, 4096, &plans()).unwrap();
+    let mut written_encrypted = 0;
+    let scratch = std::env::temp_dir().join(format!(
+        "edpcli-p6-aes-cross-native-4kn-{}-{}.img",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    // create_new rejects existing files/symlinks; no raw device path is ever
+    // accepted or opened, and only this private scratch pathname is removed.
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(&scratch)
+        .unwrap();
+    assert!(file.metadata().unwrap().is_file());
+    file.set_len(TOTAL * BPS).unwrap();
+    let encrypt = |plain: &[u8]| {
+        assert_eq!(plain.len(), BPS as usize);
+        plain
+            .as_chunks::<16>()
+            .0
+            .iter()
+            .flat_map(|block| aes128_ecb_encrypt_block(block, &key))
+            .collect::<Vec<u8>>()
+    };
+    // The generator emits the MBR last, after every encrypted partition block.
+    assert_eq!(composite.writes.last().unwrap().relative_lba, 0);
+    for write in &composite.writes {
+        let inside = (start..start + count).contains(&write.relative_lba);
+        let payload = if inside {
+            written_encrypted += 1;
+            encrypt(&write.data)
+        } else {
+            write.data.clone()
+        };
+        write_block(&mut file, write.relative_lba, &payload);
+    }
+    assert!(written_encrypted >= 2);
+    file.sync_all().unwrap();
+    drop(file);
+
+    let mut verify = OpenOptions::new().read(true).open(&scratch).unwrap();
+    assert_eq!(&read_block(&mut verify, 0)[510..512], &[0x55, 0xaa]);
+    let boot_raw = read_block(&mut verify, start);
+    assert_ne!(&boot_raw[3..11], b"EXFAT   ");
+    let boot = decrypt_mode3_native(&boot_raw, &key).unwrap();
+    assert_eq!(&boot[3..11], b"EXFAT   ");
+    assert_eq!(boot[108], 12);
+    assert!(detect_native_boot_sector(&boot_raw, count, 4096)
+        .unwrap()
+        .is_none());
+    let recognized = detect_native_boot_sector(&boot, count, 4096).unwrap();
+    assert!(
+        recognized.is_some(),
+        "decrypted native exFAT must pass strict BPB"
+    );
+    let mut wrong_key = key;
+    wrong_key[0] ^= 1;
+    let wrong_boot = decrypt_mode3_native(&boot_raw, &wrong_key).unwrap();
+    assert!(detect_native_boot_sector(&wrong_boot, count, 4096)
+        .unwrap()
+        .is_none());
+
+    let formatted = &plans()[3];
+    for write in &formatted.writes {
+        let full_lba = start + write.relative_lba;
+        let cipher = read_block(&mut verify, full_lba);
+        let recovered = decrypt_mode3_native(&cipher, &key).unwrap();
+        assert_eq!(recovered, write.data, "AES_CROSS exFAT LBA{full_lba}");
+        assert_eq!(cipher.len(), 4096);
+        assert_ne!(
+            cipher, recovered,
+            "no ciphertext block may remain plaintext"
+        );
+    }
+    assert!(decrypt_mode3_native(&boot_raw[..512], &key).is_ok());
+    assert!(decrypt_mode3_native(&boot_raw[..4095], &key).is_err());
+    drop(verify);
+    std::fs::remove_file(&scratch).unwrap();
+}
