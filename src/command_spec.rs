@@ -198,6 +198,8 @@ const PROVISION_IMAGE_OPTIONS: &[OptionSpec] = &[
     value("--out"),
     value("--total-sectors"),
     value("--sector-bytes"),
+    switch("--synthetic-demo"),
+    value("--algorithm"),
 ];
 const PROVISION_WRITE_OPTIONS: &[OptionSpec] = &[switch("--yes"), value("--backup-dir")];
 

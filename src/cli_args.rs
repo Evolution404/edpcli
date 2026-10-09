@@ -140,6 +140,13 @@ pub enum ProvisionAction {
         sector_bytes: u32,
         partitions: Vec<crate::application::provision::PlainPartitionRequest>,
     },
+    /// Disposable, synthetic 4Kn EDP demonstration image, never a real USB.
+    NativeEdpDemoImage {
+        out: String,
+        total_sectors: u64,
+        mode: crate::provision::OfficialPartitionMode,
+        algorithm: crate::provision::FileKeyWrapMode,
+    },
     Plan(Box<ProvisionNewOpts>),
     Image {
         opts: Box<ProvisionNewOpts>,

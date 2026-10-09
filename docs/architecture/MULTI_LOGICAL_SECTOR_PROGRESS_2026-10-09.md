@@ -298,3 +298,15 @@
 - 原生 `diskio::native_transaction` 增加统一 512B/4096B **无硬件适配器**的 `NativeBlockDevice` 模拟事务端口：校验单设备原生几何和LBA归属，写前快照全部目标块、写入/回读、MBR最后提交、分阶段同步；故障时逆序恢复并复核恢复字节，返回明确的回滚验证状态。合成512B/4Kn注入截断写失败和错扇区大小时均保证可检测并验证**进程内**回滚。
 - 在真实本机测试中，40000原生扇区的512B与4096B稀疏文件都被独立读回确认为完整MBR（P1 起点2048、长度37952原生块）及 exFAT OEM/BPS Shift分别9/12；同名覆盖被拒绝。离线模块单元/CLI语法负例及全仓快速门禁需持续执行。
 - **未解除实体制盘门禁：** 没有为上述事务端口提供物理USB驱动；官方EDP Mode0–3新的4Kn协议/LCE字节金标、非SMS4写入认证、硬件安全模块分叉、断电持久回滚与真实原生4Kn块设备挂载仍需验证。不能将模拟事务、Plain镜像或成功解密现有U391等同于允许在U391或其它4Kn设备执行制盘。此批无实体盘写操作。
+
+## 2026-10-10：全新4Kn EDP离线制盘 + 四模式三算法虚拟盘矩阵
+
+**交付类型：可运行的4Kn全新EDP虚拟盘候选，不等于厂家4Kn原生生产者金标或实体写盘解禁。** 在此前4Kn LCE候选（3072B兼容模板+1024B全零明文，zero8+A7F0连续加密）基础上完成：
+
+1. 协议统一：纯领域接口 `generate_official_native_image` 对Mode0–3按512/4096逻辑宽度生成13个原生LBA；EDPF entry的SectorSize、PartitionSize、StartSector均采用真正原生几何，LBA11的DRKB/PDKB密钥使用原生总容量字节数，MBR起点/容量与EDPF首项一致。每个原生LBA协议前512B沿用旧字段写法，新4Kn未知尾3584B确定性置零，不重复厂家4Kn LBA11的栈泄漏问题。原512B公开API和Lexar LCE真金标不变。
+2. Mode2（仅保密区）历史预留0x7E00B会截断4Kn逻辑块，新增基于原生扇区的向上对齐（4096B下变成8块=0x8000B、512B下仍63块=0x7E00B），禁止部分原生块边界写入。
+3. 应用入口 `plan_native_edp_4kn_image` / `export_native_edp_4kn_image`：统一校验四模式分区角色、物理加密标志、容量、重叠、LCE指针/长度及格式化选择；构造完整原生13块协议+1块LCE+可选FAT12/16/32/exFAT格式化元数据，三种EncryptMode全部走共享`NativePartitionDataCipher`及绝对原生LBA变换，并对FileKeyCRC不匹配 fail-closed；MBR最后提交，使用仅允许排他新建普通文件的原生事务、回读与故障回滚，不提供物理设备句柄。
+4. CLI隔离虚拟测试入口：`edpcli provision image --target mode0 --synthetic-demo --sector-bytes 4096 --total-sectors 262144 --algorithm sms4 --out mode0.img`。可改为mode1/mode2/mode3、`aes`或`aes-cross`。全部使用**固定公开测试身份、测试口令0000aaaa、固定公开FileKey**，镜像只用于可丢弃的离线验证，严禁保存真实业务数据；没有`--synthetic-demo`、包含`--disk`/`--partition`/密码参数、指向`/dev`、覆盖已有文件均直接拒绝。原Plain离线CLI仍可用。
+5. 验收：四模式×三加密模式共12组纯领域端到端组合回归，重新读取LBA7/LBA12并验证模式/分区、单独重算LBA11容量/身份解密、验证4096B LCE解密成原3072B模板+1024B零、加密分区按原生绝对LBA解密引导块并识别文件系统；四模式的SM4组合额外创建1GiB稀疏新文件，回读MBR/LCE/分区启动块后删除；另补Mode1 FAT32+AES_CROSS加密exFAT及Plain原生exFAT。CLI另外真实执行12组，复读4096B镜像字节并清除临时镜像；负例覆盖缺少模拟显式同意、设备路径和几何错误。
+
+**依然待处理**：原厂4Kn协议尾部、加密后1024B LCE与Windows消费/挂载端的独立字节金标；新物理设备原生事务与驱动交互、完整分区未写扇区初始化与真实数据读写、断电重试；硬件认证前不取消4Kn TUI实体写保护。用户可用命令行模拟整盘结构，但不能据此宣称完整真实USB制盘已经被厂家校验。

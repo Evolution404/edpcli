@@ -175,6 +175,7 @@ fn edpf_entry_with_flags(
     size_bytes: u64,
     material: &[u8],
     encrypt_mode: u8,
+    native_sector_bytes: u32,
 ) -> Vec<u8> {
     let mut entry = vec![0u8; stride];
     entry[..4].copy_from_slice(b"EDPF");
@@ -183,7 +184,7 @@ fn edpf_entry_with_flags(
     put_u32(&mut entry, 0x10, need_disturb);
     put_u32(&mut entry, 0x14, need_encrypt);
     put_u64(&mut entry, 0x18, start);
-    put_u64(&mut entry, 0x20, SECTOR as u64);
+    put_u64(&mut entry, 0x20, u64::from(native_sector_bytes));
     put_u64(&mut entry, 0x28, size_bytes);
     entry[0x30..0x30 + material.len()].copy_from_slice(material);
     if stride == 0x60 && need_encrypt != 0 {
@@ -199,8 +200,9 @@ fn need_disturb(index: usize) -> u32 {
 fn validate_official_geometry(
     spec: &ProvisionSpec,
     plan: &OfficialProvisionPlan,
+    sector_bytes: u32,
 ) -> Result<Vec<OfficialPartitionGeometry>, String> {
-    let logical = plan.logical_partitions(SECTOR as u64)?;
+    let logical = plan.logical_partitions(u64::from(sector_bytes))?;
     let end = logical
         .last()
         .ok_or("official partition layout is empty")?
@@ -212,8 +214,12 @@ fn validate_official_geometry(
         ));
     }
     let compat = plan.lba7_compatibility_extent;
-    if compat.size_bytes != compat.size_sectors * SECTOR as u64 {
-        return Err("LBA7 compatibility extent is not 512-byte-sector aligned".into());
+    if compat.size_sectors.checked_mul(u64::from(sector_bytes)) != Some(compat.size_bytes)
+        || compat.start_lba.checked_mul(u64::from(sector_bytes)) != Some(compat.start_byte_offset)
+        || compat.size_bytes
+            != (3072u64).div_ceil(u64::from(sector_bytes)) * u64::from(sector_bytes)
+    {
+        return Err("LCE extent does not match native logical-sector geometry".into());
     }
     if compat.start_lba + compat.size_sectors > spec.target().total_sectors() {
         return Err("LBA7 compatibility extent lies beyond target".into());
@@ -230,7 +236,12 @@ fn build_official_lba0(
         .ok_or("official partition layout is empty")?;
     let mut out = [0u8; SECTOR];
     let entry = 0x1be;
-    out[entry + 4] = plan.visible_mbr_partition_type()?;
+    let front_role = super::official_partition_role(plan.mode, 0, first.partition_type);
+    let front_fs = plan
+        .filesystems
+        .for_role(front_role)
+        .unwrap_or(crate::filesystem::FilesystemKind::Fat16);
+    out[entry + 4] = super::visible_mbr_partition_type(plan.mode, front_fs);
     let start = u32::try_from(first.start_sector).map_err(|_| "MBR start LBA overflows u32")?;
     let count =
         u32::try_from(first.sector_count()).map_err(|_| "MBR sector count overflows u32")?;
@@ -244,6 +255,7 @@ fn build_official_lba7(
     spec: &ProvisionSpec,
     plan: &OfficialProvisionPlan,
     logical: &[OfficialPartitionGeometry],
+    native_sector_bytes: u32,
 ) -> Result<[u8; SECTOR], String> {
     let count = u32::try_from(logical.len()).map_err(|_| "partition count overflow")?;
     if !(2..=3).contains(&count) {
@@ -278,6 +290,7 @@ fn build_official_lba7(
             size_bytes,
             &material,
             0,
+            native_sector_bytes,
         );
         plain[base..base + 0x40].copy_from_slice(&entry);
     }
@@ -291,6 +304,7 @@ fn build_official_lba12(
     spec: &ProvisionSpec,
     plan: &OfficialProvisionPlan,
     logical: &[OfficialPartitionGeometry],
+    native_sector_bytes: u32,
 ) -> Result<[u8; SECTOR], String> {
     let count = u32::try_from(logical.len()).map_err(|_| "partition count overflow")?;
     if !(2..=3).contains(&count) {
@@ -326,6 +340,7 @@ fn build_official_lba12(
             } else {
                 0
             },
+            native_sector_bytes,
         );
         plain[base..base + 0x60].copy_from_slice(&entry);
     }
@@ -361,7 +376,11 @@ fn build_lba8(spec: &ProvisionSpec) -> Result<[u8; SECTOR], String> {
     Ok(out)
 }
 
-fn build_lba11(spec: &ProvisionSpec, entropy: &ProvisionEntropy) -> Result<[u8; SECTOR], String> {
+fn build_lba11(
+    spec: &ProvisionSpec,
+    entropy: &ProvisionEntropy,
+    sector_bytes: u32,
+) -> Result<[u8; SECTOR], String> {
     let device_id = spec.target().device_id().as_bytes();
     if device_id.len() + 5 > 256 {
         return Err("device_id does not fit PDKB plaintext".into());
@@ -375,7 +394,12 @@ fn build_lba11(spec: &ProvisionSpec, entropy: &ProvisionEntropy) -> Result<[u8; 
     key_input.extend_from_slice(&drkb);
     key_input.extend_from_slice(spec.target().vid_hex().as_bytes());
     key_input.extend_from_slice(spec.target().pid_hex().as_bytes());
-    key_input.extend_from_slice(&(spec.target().total_sectors() * SECTOR as u64).to_le_bytes());
+    let total_bytes = spec
+        .target()
+        .total_sectors()
+        .checked_mul(u64::from(sector_bytes))
+        .ok_or("native LBA11 capacity overflow")?;
+    key_input.extend_from_slice(&total_bytes.to_le_bytes());
     let key = crc32_bare(&key_input).to_le_bytes();
 
     let mut plain = [0u8; 256];
@@ -397,21 +421,75 @@ pub fn generate_official_image(
     entropy: &ProvisionEntropy,
     plan: &OfficialProvisionPlan,
 ) -> Result<ProvisionImage, String> {
-    let logical = validate_official_geometry(spec, plan)?;
+    let logical = validate_official_geometry(spec, plan, 512)?;
     let mut image = vec![0u8; PROVISION_IMAGE_LEN];
     let (lba6, lba9) = build_lba6_lba9(spec)?;
     let sectors = [
         (0usize, build_official_lba0(plan, &logical)?.to_vec()),
         (4, build_lba4(spec)?.to_vec()),
         (6, lba6.to_vec()),
-        (7, build_official_lba7(spec, plan, &logical)?.to_vec()),
+        (7, build_official_lba7(spec, plan, &logical, 512)?.to_vec()),
         (8, build_lba8(spec)?.to_vec()),
         (9, lba9.to_vec()),
-        (11, build_lba11(spec, entropy)?.to_vec()),
-        (12, build_official_lba12(spec, plan, &logical)?.to_vec()),
+        (11, build_lba11(spec, entropy, 512)?.to_vec()),
+        (
+            12,
+            build_official_lba12(spec, plan, &logical, 512)?.to_vec(),
+        ),
     ];
     for (lba, data) in sectors {
         image[lba * SECTOR..(lba + 1) * SECTOR].copy_from_slice(&data);
     }
     ProvisionImage::from_bytes(image)
+}
+
+/// Offline new-native protocol candidate. The EDP wire schema occupies the
+/// first 512 bytes of each logical LBA and the remaining native bytes are
+/// explicitly zero-initialized. This models the existing 4Kn consumer, but
+/// has no independent OEM gold for native tail contents and cannot authorize
+/// physical 4Kn writes. In particular LBA11 uses the TRUE native capacity.
+pub fn generate_official_native_image(
+    spec: &ProvisionSpec,
+    entropy: &ProvisionEntropy,
+    plan: &OfficialProvisionPlan,
+    sector_bytes: u32,
+) -> Result<crate::protocol::image::NativeProtocolImage, String> {
+    if !matches!(sector_bytes, 512 | 4096) {
+        return Err("new EDP native protocol supports only 512B and 4096B".into());
+    }
+    if sector_bytes == 512 {
+        let legacy = generate_official_image(spec, entropy, plan)?;
+        return crate::protocol::image::NativeProtocolImage::from_protocol_zero_tailed(
+            legacy.as_bytes(),
+            512,
+        )
+        .map_err(|error| error.to_string());
+    }
+    let logical = validate_official_geometry(spec, plan, sector_bytes)?;
+    let mut projection = vec![0u8; PROVISION_IMAGE_LEN];
+    let (lba6, lba9) = build_lba6_lba9(spec)?;
+    let sectors = [
+        (0usize, build_official_lba0(plan, &logical)?.to_vec()),
+        (4, build_lba4(spec)?.to_vec()),
+        (6, lba6.to_vec()),
+        (
+            7,
+            build_official_lba7(spec, plan, &logical, sector_bytes)?.to_vec(),
+        ),
+        (8, build_lba8(spec)?.to_vec()),
+        (9, lba9.to_vec()),
+        (11, build_lba11(spec, entropy, sector_bytes)?.to_vec()),
+        (
+            12,
+            build_official_lba12(spec, plan, &logical, sector_bytes)?.to_vec(),
+        ),
+    ];
+    for (lba, data) in sectors {
+        projection[lba * SECTOR..(lba + 1) * SECTOR].copy_from_slice(&data);
+    }
+    crate::protocol::image::NativeProtocolImage::from_protocol_zero_tailed(
+        &projection,
+        sector_bytes,
+    )
+    .map_err(|error| error.to_string())
 }

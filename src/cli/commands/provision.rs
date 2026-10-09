@@ -269,8 +269,95 @@ fn print_provision_summary(prepared: &crate::application::provision::PreparedPro
     }
 }
 
+/// Build a deterministic disposable OEM-layout candidate using synthetic
+/// identity, FileKeys and passwords. Exposed only by --synthetic-demo and only
+/// as a freshly created ordinary file, never through USB discovery or sudo.
+fn export_synthetic_4kn_edp_demo(
+    out: &str,
+    total_sectors: u64,
+    mode: crate::provision::OfficialPartitionMode,
+    algorithm: crate::provision::FileKeyWrapMode,
+) -> Result<(), String> {
+    use crate::platform::{HardwareProbe, InquiryInfo, NativeTransport};
+    use crate::provision::{
+        wrap_file_key, wrap_legacy_lba7_file_key, OfficialPartitionSizes, OfficialProvisionPlan,
+        OnlyId, ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
+        TargetIdentity,
+    };
+    let probe = HardwareProbe {
+        vid: Some(0x0dd8),
+        pid: Some(0x2005),
+        transport: NativeTransport::Uas,
+        windows_pnp_instance_id: None,
+        inquiry: Some(InquiryInfo {
+            vendor: "Netac".into(),
+            product: "OnlyDisk".into(),
+            revision: "1.00".into(),
+        }),
+    };
+    let target = TargetIdentity::from_probe(&probe, total_sectors)?;
+    let metadata = ProvisionMetadata::new(
+        OnlyId::parse("1402259934")?,
+        "VIRTUAL",
+        "SYNTHETIC",
+        "EDP OFFLINE DEMO",
+    )?;
+    let spec = ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1())?;
+    let cylinders = total_sectors / (255 * 63);
+    let compat = crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry(
+        cylinders, 255, 63, 4096,
+    )
+    .ok_or("虚拟盘太小，无法定位EDP 4Kn原生LCE")?;
+    let key = [0x42u8; 16]; // fixed, PUBLIC TEST-ONLY key, never production
+    let options = crate::application::provision::FormatOptions {
+        boot: matches!(
+            mode,
+            crate::provision::OfficialPartitionMode::DefaultThreePartition
+                | crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition
+        ),
+        share: mode != crate::provision::OfficialPartitionMode::WholeDiskEncrypted,
+        encrypt: mode != crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition,
+        ..Default::default()
+    };
+    let plan = OfficialProvisionPlan::new(
+        mode,
+        OfficialPartitionSizes::new(32, 64, 128),
+        compat,
+        wrap_legacy_lba7_file_key(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD, [0; 8]),
+        wrap_file_key(
+            crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD,
+            key,
+            algorithm,
+        ),
+    )?
+    .with_filesystems(options.filesystems());
+    let count = plan.format_targets_native(4096)?.len();
+    crate::application::provision::native_image::export_native_edp_4kn_image(
+        Path::new(out),
+        &spec,
+        &ProvisionEntropy::new([0x5a; 252]),
+        &plan,
+        &options,
+        &vec![0x1234_5678; count],
+        &vec![key; count],
+    )
+}
+
 pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
     match action {
+        ProvisionAction::NativeEdpDemoImage {
+            out,
+            total_sectors,
+            mode,
+            algorithm,
+        } => match export_synthetic_4kn_edp_demo(&out, total_sectors, mode, algorithm) {
+            Ok(()) => {
+                println!("4Kn EDP虚拟测试盘创建成功: {out}（{}原生4096B扇区、mode{}、EncryptMode={}；仅测试密钥/身份，不可保存真实数据；未访问USB）", total_sectors, mode as u8, algorithm.raw());
+                EXIT_OK
+            }
+            Err(message) => finish(Err(crate::common::EdpCliError::new(EXIT_TARGET, message))),
+        },
+
         ProvisionAction::NativeImage {
             out,
             total_sectors,

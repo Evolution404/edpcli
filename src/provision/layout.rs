@@ -212,6 +212,22 @@ impl OfficialProvisionPlan {
         format_targets_for_geometry(self.mode, self.logical_partitions(512)?, self.filesystems)
     }
 
+    /// Format targets in native logical LBAs; the legacy 512B adapter remains
+    /// unchanged for existing physical/protocol workflows.
+    pub fn format_targets_native(
+        self,
+        sector_bytes: u32,
+    ) -> Result<Vec<PartitionFormatTarget>, String> {
+        if !matches!(sector_bytes, 512 | 4096) {
+            return Err("unsupported native target sector size".into());
+        }
+        format_targets_for_geometry(
+            self.mode,
+            self.logical_partitions(u64::from(sector_bytes))?,
+            self.filesystems,
+        )
+    }
+
     pub fn with_filesystems(mut self, filesystems: OfficialPartitionFilesystems) -> Self {
         self.filesystems = filesystems;
         self
@@ -415,18 +431,23 @@ pub fn build_official_partition_layout(
             (EdpPartitionType::Encrypt, encrypt),
         ],
         OfficialPartitionMode::WholeDiskEncrypted => {
+            // 0x7E00 is an exact 63-sector 512B compatibility reservation.
+            // Native 4Kn geometry must reserve eight WHOLE blocks (0x8000)
+            // rather than emit an unaligned or partially owned 4Kn sector.
+            let compat = WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES
+                .checked_add(sector_size - 1)
+                .and_then(|bytes| bytes.checked_div(sector_size))
+                .and_then(|blocks| blocks.checked_mul(sector_size))
+                .ok_or("whole-disk compatibility size overflows native sector")?;
             let encrypted = if sizes.encrypt_sectors.is_some() {
                 encrypt
             } else {
                 encrypt
-                    .checked_sub(WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES)
-                    .ok_or("whole-disk encrypted size is smaller than 0x7E00 compatibility entry")?
+                    .checked_sub(compat)
+                    .ok_or("whole-disk encrypted size is smaller than compatibility entry")?
             };
             vec![
-                (
-                    EdpPartitionType::Boot,
-                    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
-                ),
+                (EdpPartitionType::Boot, compat),
                 (EdpPartitionType::Encrypt, encrypted),
             ]
         }

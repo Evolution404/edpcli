@@ -538,6 +538,9 @@ fn parse_native_image_opts(rest: &[String]) -> Result<Parsed, String> {
     let mut sector_bytes = None;
     let mut target = None;
     let mut partitions = Vec::new();
+    let mut synthetic_demo = false;
+    let mut algorithm = None;
+
     let mut i = 0;
     while i < rest.len() {
         match flag_name(&rest[i]) {
@@ -565,10 +568,24 @@ fn parse_native_image_opts(rest: &[String]) -> Result<Parsed, String> {
             }
             "--target" => {
                 let value = take_value(rest, &mut i, "--target")?;
-                if value != "plain" {
-                    return Err("错误: 离线原生镜像目前仅支持 --target plain".into());
-                }
+                parse_provision_target(&value)?;
                 set_once(&mut target, value, "--target")?;
+            }
+            "--synthetic-demo" => {
+                if synthetic_demo {
+                    return Err("错误: --synthetic-demo 重复".into());
+                }
+                synthetic_demo = true;
+            }
+            "--algorithm" => {
+                let value = take_value(rest, &mut i, "--algorithm")?;
+                let mode = match value.to_ascii_lowercase().as_str() {
+                    "sms4" | "sm4" => crate::provision::FileKeyWrapMode::Sm4,
+                    "aes" => crate::provision::FileKeyWrapMode::A7f0,
+                    "aes-cross" | "aes_cross" => crate::provision::FileKeyWrapMode::Aes128Ecb,
+                    _ => return Err("错误: 虚拟测试算法只接受 sms4/aes/aes-cross".into()),
+                };
+                set_once(&mut algorithm, mode, "--algorithm")?;
             }
             "--partition" => {
                 let value = take_value(rest, &mut i, "--partition")?;
@@ -585,14 +602,32 @@ fn parse_native_image_opts(rest: &[String]) -> Result<Parsed, String> {
         }
         i += 1;
     }
-    if target.is_none() {
-        return Err("错误: 离线原生镜像必须使用 --target plain".into());
+    let target = target.ok_or("错误: 离线原生镜像必须指定 --target")?;
+    let out = out.ok_or("错误: 缺少 --out FILE")?;
+    let total_sectors = total_sectors.ok_or("错误: 缺少 --total-sectors N")?;
+    let sector_bytes = sector_bytes.ok_or("错误: 缺少 --sector-bytes 512|4096")?;
+    if target == "plain" {
+        if synthetic_demo || algorithm.is_some() {
+            return Err("错误: Plain 原生镜像不接受 --synthetic-demo 或 --algorithm".into());
+        }
+        return Ok(Parsed::Provision(ProvisionAction::NativeImage {
+            out,
+            total_sectors,
+            sector_bytes,
+            partitions,
+        }));
     }
-    Ok(Parsed::Provision(ProvisionAction::NativeImage {
-        out: out.ok_or("错误: 缺少 --out FILE")?,
-        total_sectors: total_sectors.ok_or("错误: 缺少 --total-sectors N")?,
-        sector_bytes: sector_bytes.ok_or("错误: 缺少 --sector-bytes 512|4096")?,
-        partitions,
+    if !synthetic_demo || !partitions.is_empty() || sector_bytes != 4096 {
+        return Err("错误: EDP原生新盘目前仅在4096B离线模拟模式接受 --synthetic-demo，且禁止 --partition；不支持实体盘".into());
+    }
+    let mode = parse_provision_target(&target)?
+        .official_mode()
+        .ok_or("错误: 离线EDP模拟必须是mode0..mode3")?;
+    Ok(Parsed::Provision(ProvisionAction::NativeEdpDemoImage {
+        out,
+        total_sectors,
+        mode,
+        algorithm: algorithm.unwrap_or(crate::provision::FileKeyWrapMode::Sm4),
     }))
 }
 

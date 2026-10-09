@@ -948,3 +948,78 @@ fn provision_offline_native_image_parses_complete_4kn_geometry_and_fails_closed(
     repeated.extend(["--sector-bytes", "4096"]);
     assert!(parse_args(&args(&repeated)).is_err());
 }
+#[test]
+fn provision_4kn_edp_virtual_demo_requires_explicit_opt_in_and_rejects_live_flags() {
+    for mode in ["mode0", "mode1", "mode2", "mode3"] {
+        for (algorithm, expected) in [
+            ("sms4", edpcli::provision::FileKeyWrapMode::Sm4),
+            ("aes", edpcli::provision::FileKeyWrapMode::A7f0),
+            ("aes-cross", edpcli::provision::FileKeyWrapMode::Aes128Ecb),
+        ] {
+            let argv = [
+                "provision",
+                "image",
+                "--target",
+                mode,
+                "--sector-bytes",
+                "4096",
+                "--total-sectors",
+                "262144",
+                "--out",
+                "demo.img",
+                "--synthetic-demo",
+                "--algorithm",
+                algorithm,
+            ];
+            let Parsed::Provision(ProvisionAction::NativeEdpDemoImage {
+                out,
+                total_sectors,
+                mode: actual,
+                algorithm: parsed_mode,
+            }) = parse_args(&args(&argv)).unwrap()
+            else {
+                panic!("offline demo must have a separate no-hardware CLI action")
+            };
+            assert_eq!(out, "demo.img");
+            assert_eq!(total_sectors, 262144);
+            assert_eq!(parsed_mode, expected);
+            assert_eq!(
+                actual,
+                edpcli::provision::ProvisionTarget::from_mode_number(
+                    mode.strip_prefix("mode").unwrap().parse().unwrap()
+                )
+                .unwrap()
+                .official_mode()
+                .unwrap()
+            );
+        }
+    }
+    let base = [
+        "provision",
+        "image",
+        "--target",
+        "mode0",
+        "--sector-bytes",
+        "4096",
+        "--total-sectors",
+        "262144",
+        "--out",
+        "demo.img",
+    ];
+    assert!(parse_args(&args(&base)).is_err());
+    for forbidden in [
+        vec!["--disk", "4"],
+        vec!["--yes"],
+        vec!["--partition", "63:32MiB:fat16"],
+        vec!["--encrypt-target-password", "PRIVATE"],
+    ] {
+        let mut argv = base.to_vec();
+        argv.push("--synthetic-demo");
+        argv.extend(forbidden);
+        assert!(parse_args(&args(&argv)).is_err());
+    }
+    let mut bad_size = base.to_vec();
+    bad_size[5] = "512";
+    bad_size.push("--synthetic-demo");
+    assert!(parse_args(&args(&bad_size)).is_err());
+}

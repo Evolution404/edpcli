@@ -824,6 +824,383 @@ fn sparse_export_includes_selected_format_images() {
 }
 
 #[test]
+fn native_4kn_new_edp_all_modes_algorithms_export_and_verify_virtual_disk() {
+    use crate::partition_transform::{
+        transform_native_sector_offline, NativeCipherDirection, NativePartitionDataCipher,
+    };
+    use crate::protocol::crypto::{a6b0_full, crc32_bare};
+    use crate::protocol::image::NativeProtocolImage;
+    use std::io::{Read, Seek, SeekFrom};
+
+    let total = 262_144u64;
+    let lce_lba = 250_000u64;
+    let probe = crate::platform::HardwareProbe {
+        vid: Some(0x0dd8),
+        pid: Some(0x2005),
+        transport: crate::platform::NativeTransport::Uas,
+        windows_pnp_instance_id: None,
+        inquiry: Some(crate::platform::InquiryInfo {
+            vendor: "Netac".into(),
+            product: "OnlyDisk".into(),
+            revision: "1.00".into(),
+        }),
+    };
+    let target = TargetIdentity::from_probe(&probe, total).unwrap();
+    let did = target.device_id().to_string();
+    let metadata = ProvisionMetadata::new(
+        OnlyId::parse("1402259934").unwrap(),
+        "TEST USER",
+        "TEST DEPT",
+        "EDP 4Kn VIRTUAL",
+    )
+    .unwrap();
+    let spec = ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1()).unwrap();
+    let entropy = ProvisionEntropy::new([0x5a; 252]);
+    let key = [0x42u8; 16];
+    let lce_geometry = crate::protocol::lba7_compat::Lba7CompatibilityExtentLayout {
+        chs_bytes: lce_lba * 4096 + 0xe0000,
+        start_byte_offset: lce_lba * 4096,
+        start_lba: lce_lba,
+        size_bytes: 4096,
+        size_sectors: 1,
+    };
+
+    for mode in [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionMode::WholeDiskEncrypted,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ] {
+        for algorithm in [
+            FileKeyWrapMode::Sm4,
+            FileKeyWrapMode::A7f0,
+            FileKeyWrapMode::Aes128Ecb,
+        ] {
+            let options = FormatOptions {
+                boot: matches!(
+                    mode,
+                    OfficialPartitionMode::DefaultThreePartition
+                        | OfficialPartitionMode::IntranetExtranetDualPartition
+                ),
+                share: mode != OfficialPartitionMode::WholeDiskEncrypted,
+                encrypt: mode != OfficialPartitionMode::IntranetExtranetDualPartition,
+                ..FormatOptions::default()
+            };
+            let plan = OfficialProvisionPlan::new(
+                mode,
+                OfficialPartitionSizes::new(32, 64, 128),
+                lce_geometry,
+                wrap_legacy_lba7_file_key(b"0000aaaa", [0u8; 8]),
+                wrap_file_key(b"0000aaaa", key, algorithm),
+            )
+            .unwrap()
+            .with_filesystems(options.filesystems());
+            let targets = plan.format_targets_native(4096).unwrap();
+            let serials = vec![0x1234_5678; targets.len()];
+            let file_keys = vec![key; targets.len()];
+            let candidate = native_image::plan_native_edp_4kn_image(
+                &spec, &entropy, &plan, &options, &serials, &file_keys,
+            )
+            .unwrap();
+            assert_eq!(candidate.total_sectors, total);
+            assert_eq!(candidate.sector_bytes, 4096);
+            assert_eq!(candidate.writes.last().unwrap().relative_lba, 0);
+            assert!(candidate
+                .writes
+                .iter()
+                .all(|write| write.data.len() == 4096));
+            let native_bytes = (0..13)
+                .flat_map(|lba| {
+                    candidate
+                        .writes
+                        .iter()
+                        .find(|write| write.relative_lba == lba)
+                        .unwrap()
+                        .data
+                        .clone()
+                })
+                .collect::<Vec<_>>();
+            let native = NativeProtocolImage::from_native_bytes(4096, native_bytes).unwrap();
+            let parsed = crate::provision::parse_existing_provision_native(&native, &did, total)
+                .unwrap()
+                .unwrap();
+            assert_eq!(parsed.profile.source_mode, mode);
+            assert_eq!(parsed.records.len(), targets.len());
+
+            // Official 4Kn LBA11 binds its PDKB decryption key to native
+            // byte capacity, not the legacy total_lbas * 512 shortcut.
+            let lba11 = native.block(11).unwrap();
+            let mut key_input = lba11[..256].to_vec();
+            key_input.extend_from_slice(spec.target().vid_hex().as_bytes());
+            key_input.extend_from_slice(spec.target().pid_hex().as_bytes());
+            key_input.extend_from_slice(&(total * 4096).to_le_bytes());
+            let lba11_key = crc32_bare(&key_input).to_le_bytes();
+            let decrypted_pdkb = a6b0_full(&lba11[256..512], &lba11_key, 0);
+            assert_eq!(&decrypted_pdkb[..4], b"PDKB");
+            assert_eq!(
+                &decrypted_pdkb[4..4 + did.len()],
+                did.as_bytes(),
+                "LBA11 identity must use true 4Kn capacity"
+            );
+            assert!(
+                lba11[512..].iter().all(|b| *b == 0),
+                "new virtual native protocol must not reproduce leaked tail"
+            );
+            let compat = candidate
+                .writes
+                .iter()
+                .find(|write| write.relative_lba == lce_lba)
+                .unwrap();
+            let lce_plain = a6b0_full(&compat.data, &[0u8; 8], lce_lba * 4096);
+            assert_eq!(&lce_plain[..3072], crate::provision::lce_plaintext());
+            assert_eq!(&lce_plain[3072..], &[0u8; 1024]);
+            for (index, target) in targets.iter().enumerate() {
+                let (selected, _) = options.choice(target.role);
+                if !selected {
+                    continue;
+                }
+                let lba = target.geometry.start_sector;
+                let sector = candidate
+                    .writes
+                    .iter()
+                    .find(|write| write.relative_lba == lba)
+                    .expect("selected native filesystem must have a boot block");
+                let plaintext = if target.physically_encrypted {
+                    assert_eq!(crc32_bare(&key), plan.lba12_key_material.file_key_crc);
+                    transform_native_sector_offline(
+                        NativePartitionDataCipher::from_encrypt_mode(algorithm.raw()).unwrap(),
+                        NativeCipherDirection::Decrypt,
+                        &sector.data,
+                        &file_keys[index],
+                        lba,
+                        4096,
+                    )
+                    .unwrap()
+                } else {
+                    sector.data.clone()
+                };
+                assert_eq!(
+                    crate::filesystem::detect_native_boot_sector(
+                        &plaintext,
+                        target.geometry.sector_count(),
+                        4096
+                    )
+                    .unwrap(),
+                    target.filesystem,
+                );
+            }
+            if targets.iter().any(|target| target.physically_encrypted) {
+                let mut wrong_keys = file_keys.clone();
+                wrong_keys[targets.iter().position(|t| t.physically_encrypted).unwrap()][0] ^= 1;
+                assert!(native_image::plan_native_edp_4kn_image(
+                    &spec,
+                    &entropy,
+                    &plan,
+                    &options,
+                    &serials,
+                    &wrong_keys
+                )
+                .is_err());
+            }
+            // Full sparse disk execution and independent readback for every
+            // mode, including the 4Kn candidate LCE, MBR and first FS block.
+            if algorithm == FileKeyWrapMode::Sm4 {
+                let path = portable_test_temp_file("edpcli-full-4kn-mode", "img");
+                let _ = std::fs::remove_file(&path);
+                assert!(native_image::export_native_edp_4kn_image(
+                    std::path::Path::new("/dev/disk99"),
+                    &spec,
+                    &entropy,
+                    &plan,
+                    &options,
+                    &serials,
+                    &file_keys,
+                )
+                .is_err());
+                native_image::export_native_edp_4kn_image(
+                    &path, &spec, &entropy, &plan, &options, &serials, &file_keys,
+                )
+                .unwrap();
+                assert_eq!(std::fs::metadata(&path).unwrap().len(), total * 4096);
+                let mut disk = std::fs::File::open(&path).unwrap();
+                let mut observed = vec![0u8; 4096];
+                disk.read_exact(&mut observed).unwrap();
+                assert_eq!(observed, native.block(0).unwrap());
+                disk.seek(SeekFrom::Start(lce_lba * 4096)).unwrap();
+                disk.read_exact(&mut observed).unwrap();
+                assert_eq!(observed, compat.data);
+                let formatted = targets.iter().find(|t| options.choice(t.role).0).unwrap();
+                disk.seek(SeekFrom::Start(formatted.geometry.start_sector * 4096))
+                    .unwrap();
+                disk.read_exact(&mut observed).unwrap();
+                assert_eq!(
+                    observed,
+                    candidate
+                        .writes
+                        .iter()
+                        .find(|write| { write.relative_lba == formatted.geometry.start_sector })
+                        .unwrap()
+                        .data
+                );
+                std::fs::remove_file(&path).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn native_4kn_mode1_combined_fat32_and_encrypted_exfat_format() {
+    use crate::partition_transform::{
+        transform_native_sector_offline, NativeCipherDirection, NativePartitionDataCipher,
+    };
+    let total = 600_000u64;
+    let probe = crate::platform::HardwareProbe {
+        vid: Some(0x0dd8),
+        pid: Some(0x2005),
+        transport: crate::platform::NativeTransport::Uas,
+        windows_pnp_instance_id: None,
+        inquiry: Some(crate::platform::InquiryInfo {
+            vendor: "Netac".into(),
+            product: "OnlyDisk".into(),
+            revision: "1.00".into(),
+        }),
+    };
+    let target = TargetIdentity::from_probe(&probe, total).unwrap();
+    let metadata = ProvisionMetadata::new(
+        OnlyId::parse("991148").unwrap(),
+        "USER",
+        "DEPT",
+        "MIXED 4Kn",
+    )
+    .unwrap();
+    let spec = ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1()).unwrap();
+    let key = [0x42u8; 16];
+    let lce_lba = 550_000u64;
+    let options = FormatOptions {
+        share: true,
+        encrypt: true,
+        share_fs: FilesystemKind::Fat32,
+        encrypt_fs: FilesystemKind::ExFat,
+        ..FormatOptions::default()
+    };
+    let plan = OfficialProvisionPlan::new(
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionSizes::new(32, 1536, 128),
+        crate::protocol::lba7_compat::Lba7CompatibilityExtentLayout {
+            chs_bytes: lce_lba * 4096 + 0xe0000,
+            start_byte_offset: lce_lba * 4096,
+            start_lba: lce_lba,
+            size_bytes: 4096,
+            size_sectors: 1,
+        },
+        wrap_legacy_lba7_file_key(b"0000aaaa", [0u8; 8]),
+        wrap_file_key(b"0000aaaa", key, FileKeyWrapMode::Aes128Ecb),
+    )
+    .unwrap()
+    .with_filesystems(options.filesystems());
+    let targets = plan.format_targets_native(4096).unwrap();
+    let built = native_image::plan_native_edp_4kn_image(
+        &spec,
+        &ProvisionEntropy::new([0x5a; 252]),
+        &plan,
+        &options,
+        &[1, 2],
+        &[key, key],
+    )
+    .unwrap();
+    assert_eq!(targets.len(), 2);
+    assert_eq!(targets[0].filesystem, Some(FilesystemKind::Fat32));
+    let fat = built
+        .writes
+        .iter()
+        .find(|w| w.relative_lba == targets[0].geometry.start_sector)
+        .unwrap();
+    assert_eq!(
+        crate::filesystem::detect_native_boot_sector(
+            &fat.data,
+            targets[0].geometry.sector_count(),
+            4096
+        )
+        .unwrap(),
+        Some(FilesystemKind::Fat32)
+    );
+    let encrypted = built
+        .writes
+        .iter()
+        .find(|w| w.relative_lba == targets[1].geometry.start_sector)
+        .unwrap();
+    let decrypted = transform_native_sector_offline(
+        NativePartitionDataCipher::AesCrossEcb,
+        NativeCipherDirection::Decrypt,
+        &encrypted.data,
+        &key,
+        targets[1].geometry.start_sector,
+        4096,
+    )
+    .unwrap();
+    assert_eq!(
+        crate::filesystem::detect_native_boot_sector(
+            &decrypted,
+            targets[1].geometry.sector_count(),
+            4096
+        )
+        .unwrap(),
+        Some(FilesystemKind::ExFat)
+    );
+    let mut inconsistent_fs = options.clone();
+    inconsistent_fs.share_fs = FilesystemKind::ExFat;
+    assert!(native_image::plan_native_edp_4kn_image(
+        &spec,
+        &ProvisionEntropy::new([0x5a; 252]),
+        &plan,
+        &inconsistent_fs,
+        &[1, 2],
+        &[key, key],
+    )
+    .is_err());
+    let mut unsupported_role = options.clone();
+    unsupported_role.boot = true;
+    assert!(native_image::plan_native_edp_4kn_image(
+        &spec,
+        &ProvisionEntropy::new([0x5a; 252]),
+        &plan,
+        &unsupported_role,
+        &[1, 2],
+        &[key, key],
+    )
+    .is_err());
+}
+
+#[test]
+fn native_4kn_plain_exports_and_reopens_valid_native_exfat() {
+    use std::io::{Read, Seek, SeekFrom};
+    let partitions = vec![PlainPartitionRequest {
+        start_lba: 2048,
+        size: PlainPartitionSize::Fill,
+        filesystem: FilesystemKind::ExFat,
+        volume_label: "NATIVE-PLN".into(),
+    }];
+    let expected = native_image::plan_native_plain_image(64_000, 4096, &partitions).unwrap();
+    let path = portable_test_temp_file("edpcli-4kn-plain", "img");
+    let _ = std::fs::remove_file(&path);
+    native_image::export_native_plain_image(&path, &expected).unwrap();
+    let mut file = std::fs::File::open(&path).unwrap();
+    let mut block = vec![0u8; 4096];
+    file.read_exact(&mut block).unwrap();
+    assert_eq!(&block[510..512], &[0x55, 0xaa]);
+    assert_eq!(
+        u32::from_le_bytes(block[454..458].try_into().unwrap()),
+        2048
+    );
+    file.seek(SeekFrom::Start(2048 * 4096)).unwrap();
+    file.read_exact(&mut block).unwrap();
+    assert_eq!(
+        crate::filesystem::detect_native_boot_sector(&block, 64_000 - 2048, 4096).unwrap(),
+        Some(FilesystemKind::ExFat),
+    );
+    std::fs::remove_file(path).unwrap();
+}
+#[test]
 fn all_four_edp_modes_export_produced_512b_virtual_disks_with_independent_readback() {
     use crate::partition_transform::{
         transform_native_sector_offline, NativeCipherDirection, NativePartitionDataCipher,

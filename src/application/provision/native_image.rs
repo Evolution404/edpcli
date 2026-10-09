@@ -213,6 +213,234 @@ pub fn export_native_edp_512_image(
     export_native_plain_image(path, &native)
 }
 
+/// Compose a NEW native 4Kn EDP disk with all 13 protocol blocks, native LCE,
+/// selected FAT/exFAT filesystem metadata and FileKeyCRC-checked ciphertext.
+/// This is an OFFLINE virtual candidate; it does not certify OEM 4Kn tails or
+/// grant permission to write USB hardware. For legacy 512B use the existing
+/// exact gold-backed producer above rather than a separate implementation.
+pub fn plan_native_edp_4kn_image(
+    spec: &crate::provision::ProvisionSpec,
+    entropy: &crate::provision::ProvisionEntropy,
+    plan: &crate::provision::OfficialProvisionPlan,
+    options: &super::FormatOptions,
+    serials: &[u32],
+    file_keys: &[[u8; 16]],
+) -> Result<NativeVirtualDiskPlan, String> {
+    use crate::filesystem::NativeFilesystemWrite;
+    use crate::partition_transform::{
+        transform_native_sector_offline, NativeCipherDirection, NativePartitionDataCipher,
+    };
+    use crate::protocol::crypto::crc32_bare;
+    use crate::provision::{NativeEdpLayoutPlan, TargetPartitionGeometry};
+    use std::collections::BTreeMap;
+
+    const NATIVE: u32 = 4096;
+    let total = spec.target().total_sectors();
+    let targets = plan.format_targets_native(NATIVE)?;
+    if targets.len() != serials.len() || targets.len() != file_keys.len() {
+        return Err("原生4Kn制盘格式化目标、serial和FileKey数量不一致".into());
+    }
+    if plan.filesystems != options.filesystems() {
+        return Err("4Kn格式化选项与目标分区文件系统配置不一致".into());
+    }
+    for (requested, role) in [
+        (options.boot, crate::provision::PartitionRole::Boot),
+        (options.share, crate::provision::PartitionRole::Share),
+        (options.encrypt, crate::provision::PartitionRole::Encrypt),
+    ] {
+        if requested
+            && !targets.iter().any(|part| {
+                part.format_capable
+                    && (part.role == role
+                        || (role == crate::provision::PartitionRole::Share
+                            && part.role == crate::provision::PartitionRole::BootShareCombined))
+            })
+        {
+            return Err(format!("4Kn目标模式不包含请求格式化的{}分区", role.label()));
+        }
+    }
+    let mut resources = crate::filesystem::FormatResourceEstimate::from_sectors(0)
+        .map_err(|error| error.to_string())?;
+    for part in targets.iter().filter(|part| options.choice(part.role).0) {
+        let filesystem = part.filesystem.ok_or("4Kn格式化分区缺少文件系统")?;
+        let estimated =
+            crate::filesystem::estimate_format_resources(filesystem, part.geometry.sector_count())
+                .map_err(|error| error.to_string())?;
+        resources = resources
+            .checked_add(estimated)
+            .map_err(|error| error.to_string())?;
+    }
+    crate::filesystem::FormatResourceBudget::default()
+        .check(resources)
+        .map_err(|error| error.to_string())?;
+
+    let geometries = targets
+        .iter()
+        .map(|target| TargetPartitionGeometry {
+            role: target.role,
+            partition_type: target.geometry.partition_type,
+            start_lba: target.geometry.start_sector,
+            sector_count: target.geometry.sector_count(),
+            physically_encrypted: target.physically_encrypted,
+            filesystem: target.filesystem,
+        })
+        .collect::<Vec<_>>();
+    // The same native geometry validator gates fresh 4Kn authoring, source
+    // replay, mode semantics and LCE collision/overflow prevention.
+    let layout = NativeEdpLayoutPlan::from_confirmed_geometry(
+        plan.mode,
+        total,
+        NATIVE,
+        &geometries,
+        plan.lba7_compatibility_extent.start_lba,
+        plan.lba7_compatibility_extent.size_sectors,
+    )?;
+    if layout.visible_mbr_type
+        != crate::provision::visible_mbr_partition_type(
+            plan.mode,
+            targets[0].filesystem.unwrap_or(FilesystemKind::Fat16),
+        )
+    {
+        return Err("4Kn可见分区类型不一致".into());
+    }
+    let native = crate::provision::generate_official_native_image(spec, entropy, plan, NATIVE)?;
+    let parsed = crate::provision::parse_existing_provision_native(
+        &native,
+        spec.target().device_id(),
+        total,
+    )?
+    .ok_or("4Kn新协议无法通过统一EDPF解码器")?;
+    if parsed.profile.source_mode != plan.mode
+        || parsed.profile.partitions.len() != targets.len()
+        || parsed
+            .profile
+            .partitions
+            .iter()
+            .zip(&geometries)
+            .any(|(actual, wanted)| {
+                actual.start_lba != wanted.start_lba
+                    || actual.sector_count != wanted.sector_count
+                    || actual.partition_type != wanted.partition_type
+            })
+    {
+        return Err("4Kn新盘协议回解析模式或分区原生几何不一致".into());
+    }
+
+    let mut writes = BTreeMap::<u64, Vec<u8>>::new();
+    for lba in 0..13 {
+        writes.insert(
+            lba,
+            native
+                .block(lba as usize)
+                .ok_or("缺少完整原生协议块")?
+                .to_vec(),
+        );
+    }
+    let lce =
+        crate::provision::build_native_lce_ciphertext(plan.lba7_compatibility_extent, NATIVE)?;
+    if writes.insert(layout.lce.start_lba, lce).is_some() {
+        return Err("LCE与协议冲突".into());
+    }
+    for (index, target) in targets.iter().enumerate() {
+        let (selected, label) = options.choice(target.role);
+        if !selected {
+            continue;
+        }
+        if !target.format_capable {
+            return Err("兼容预留区域禁止格式化".into());
+        }
+        let filesystem = target.filesystem.ok_or("格式化目标未指定文件系统")?;
+        crate::filesystem::validate_writable_filesystem(filesystem)
+            .map_err(|error| error.to_string())?;
+        let geometry = FilesystemGeometry::new(
+            target.geometry.start_sector,
+            target.geometry.sector_count(),
+            NATIVE,
+        );
+        let request = FormatRequest {
+            filesystem,
+            volume_label: Some(label.to_string()),
+            volume_serial: Some(serials[index]),
+        };
+        let format = match filesystem {
+            FilesystemKind::Fat12 => FAT12_DRIVER.build_native_format_plan(geometry, &request),
+            FilesystemKind::Fat16 => FAT16_DRIVER.build_native_format_plan(geometry, &request),
+            FilesystemKind::Fat32 => FAT32_DRIVER.build_native_format_plan(geometry, &request),
+            FilesystemKind::ExFat => EXFAT_DRIVER.build_native_format_plan(geometry, &request),
+            _ => return Err("4Kn离线EDP格式化不支持该文件系统".into()),
+        }
+        .map_err(|error| format!("4Kn {}格式化失败: {error}", target.role.label()))?;
+        let cipher = if target.physically_encrypted {
+            let material = plan.partition_lba12_material[index].unwrap_or(plan.lba12_key_material);
+            if crc32_bare(&file_keys[index]) != material.file_key_crc {
+                return Err(format!("4Kn slot{index} FileKeyCRC不匹配"));
+            }
+            Some(NativePartitionDataCipher::from_encrypt_mode(
+                material.encrypt_mode.raw(),
+            )?)
+        } else {
+            None
+        };
+        for write in &format.writes {
+            let lba = target
+                .geometry
+                .start_sector
+                .checked_add(write.relative_lba)
+                .ok_or("4Kn格式化目标LBA溢出")?;
+            if write.relative_lba >= target.geometry.sector_count()
+                || write.data.len() != NATIVE as usize
+            {
+                return Err("4Kn文件系统元数据未对齐完整原生块".into());
+            }
+            let data = match cipher {
+                Some(cipher) => transform_native_sector_offline(
+                    cipher,
+                    NativeCipherDirection::Encrypt,
+                    &write.data,
+                    &file_keys[index],
+                    lba,
+                    NATIVE,
+                )?,
+                None => write.data.clone(),
+            };
+            if writes.insert(lba, data).is_some() {
+                return Err(format!(
+                    "4Kn格式化元数据与协议、LCE或其他分区重叠于LBA{lba}"
+                ));
+            }
+        }
+    }
+    let mbr = writes.remove(&0).ok_or("4Kn虚拟盘没有MBR")?;
+    let mut block_writes = writes
+        .into_iter()
+        .map(|(relative_lba, data)| NativeFilesystemWrite { relative_lba, data })
+        .collect::<Vec<_>>();
+    block_writes.push(NativeFilesystemWrite {
+        relative_lba: 0,
+        data: mbr,
+    });
+    Ok(NativeVirtualDiskPlan {
+        total_sectors: total,
+        sector_bytes: NATIVE,
+        writes: block_writes,
+    })
+}
+
+/// Like 512B export, the 4Kn candidate can only create a *new ordinary file*.
+/// It always uses full-block transaction verification and MBR-last commit.
+pub fn export_native_edp_4kn_image(
+    path: &Path,
+    spec: &crate::provision::ProvisionSpec,
+    entropy: &crate::provision::ProvisionEntropy,
+    plan: &crate::provision::OfficialProvisionPlan,
+    options: &super::FormatOptions,
+    serials: &[u32],
+    file_keys: &[[u8; 16]],
+) -> Result<(), String> {
+    let native = plan_native_edp_4kn_image(spec, entropy, plan, options, serials, file_keys)?;
+    export_native_plain_image(path, &native)
+}
+
 // Bridge a caller-owned read-only native-sector callback into the application's
 // EvidenceSource contract. An independent native protocol snapshot is required
 // at every public replay call, so the source cannot silently change between
