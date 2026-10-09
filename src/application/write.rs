@@ -9,6 +9,8 @@ mod restore_plan;
 use restore_plan::build_metadata_restore_plan;
 #[path = "write/backup.rs"]
 mod backup;
+#[path = "write/native_backup.rs"]
+mod native_backup;
 pub use backup::{backup_create_flow, backup_create_on_disk, backup_create_on_disk_with_pin};
 #[path = "write/restore.rs"]
 mod restore;

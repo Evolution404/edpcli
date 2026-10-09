@@ -133,7 +133,13 @@ fn build_layout(manifest: &Manifest, is_plain: bool) -> Result<DiskLayoutModel, 
             .find(|region| region.role == "lba7_legacy_partition_compatibility_extent")
             .and_then(|region| Some((region.start_lba?, region.sector_count?)))
             .ok_or_else(|| "备份未记录可验证的 LCE 几何".to_string())?;
-        return DiskLayoutModel::canonical_edp(total, partitions, lce.0, lce.1);
+        return DiskLayoutModel::canonical_edp_with_sector_bytes(
+            total,
+            partitions,
+            lce.0,
+            lce.1,
+            manifest.geometry.logical_sector_size,
+        );
     }
 
     let restorable_extent_ids = manifest
@@ -170,6 +176,7 @@ fn build_layout(manifest: &Manifest, is_plain: bool) -> Result<DiskLayoutModel, 
 impl BackupRestorePreview {
     pub fn from_manifest(manifest: &Manifest) -> Self {
         let is_plain = manifest.snapshot.device_state.eq_ignore_ascii_case("plain");
+        let evidence_only = manifest.schema == "edpb.manifest.v4";
         let restore_contract = Some(manifest.restore_contract.clone());
         let mut region_statuses = Vec::new();
 
@@ -193,7 +200,9 @@ impl BackupRestorePreview {
                 .find(|region| region.role == "protocol");
             region_statuses.push(BackupRestoreRegionStatus {
                 label: "EDP 协议 LBA0-12".into(),
-                kind: if restore_contract
+                kind: if evidence_only {
+                    BackupRestoreRegionKind::OutOfScope
+                } else if restore_contract
                     .as_ref()
                     .is_some_and(|contract| contract.restores_edp_protocol)
                     && protocol_region
@@ -203,7 +212,11 @@ impl BackupRestorePreview {
                 } else {
                     BackupRestoreRegionKind::PartialOrInvalid
                 },
-                detail: Some("13 sector".into()),
+                detail: Some(if evidence_only {
+                    "原生13扇区已完整取证；禁止恢复写盘".into()
+                } else {
+                    "13 sector".into()
+                }),
             });
         }
 

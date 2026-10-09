@@ -164,6 +164,20 @@ pub fn backup_create_on_disk(
     expected_onlyid: Option<&str>,
     expected_device_id: Option<&str>,
 ) -> EdpCliResult<crate::application::post_restore::MetadataBackupReport> {
+    if crate::platform::system::device_geometry(runner, disk)
+        .and_then(|geometry| geometry.logical_sector_bytes)
+        == Some(4096)
+    {
+        return super::native_backup::create_native_evidence_on_disk(
+            runner,
+            disk,
+            backup_dir,
+            prompt,
+            expected_onlyid,
+            expected_device_id,
+            None,
+        );
+    }
     verify_native_backup_capture_compatibility(crate::platform::system::device_geometry(
         runner, disk,
     ))?;
@@ -185,6 +199,20 @@ pub fn backup_create_on_disk_with_pin(
     prompt: &mut dyn Prompter,
     expected: &MediaIdentityResumePin,
 ) -> EdpCliResult<crate::application::post_restore::MetadataBackupReport> {
+    if crate::platform::system::device_geometry(runner, disk)
+        .and_then(|geometry| geometry.logical_sector_bytes)
+        == Some(4096)
+    {
+        return super::native_backup::create_native_evidence_on_disk(
+            runner,
+            disk,
+            backup_dir,
+            prompt,
+            None,
+            None,
+            Some(expected),
+        );
+    }
     verify_native_backup_capture_compatibility(crate::platform::system::device_geometry(
         runner, disk,
     ))?;

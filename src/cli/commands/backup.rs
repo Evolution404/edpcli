@@ -44,15 +44,20 @@ pub(in crate::cli) fn backup_create_real_flow(
             None,
         )
         .map(|report| {
-            println!(
-                "元数据备份完成：{} 个分区；分区结构已保存；EDP 协议{}；文件系统与用户数据不包含",
-                report.partition_count,
-                if report.edp_protocol_saved {
-                    "已保存"
-                } else {
-                    "不适用"
-                }
-            );
+            let native_evidence = crate::edpb::verify_file(&report.path)
+                .is_ok_and(|verified| verified.manifest.schema == "edpb.manifest.v4");
+            if native_evidence {
+                println!(
+                    "4Kn 只读取证完成：{} 个分区首块、完整原生 EDP 协议及 LCE；暂不支持恢复写盘或保证文件系统完整恢复",
+                    report.partition_count
+                );
+            } else {
+                println!(
+                    "元数据备份完成：{} 个分区；分区结构已保存；EDP 协议{}；文件系统与用户数据不包含",
+                    report.partition_count,
+                    if report.edp_protocol_saved { "已保存" } else { "不适用" }
+                );
+            }
             EXIT_OK
         }),
     )
