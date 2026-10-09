@@ -816,3 +816,215 @@ fn native_encrypted_virtual_transaction_injects_faults_and_restores_exact_blocks
         std::fs::remove_file(&scratch).unwrap();
     }
 }
+
+/// P2: verify actual two-cluster exFAT file bytes after complete native-block
+/// encryption, durable ordinary-file write, independent reopened read,
+/// decryption, and independent exFAT directory/FAT/bitmap/content parsing.
+///
+/// This is only a scratch-file test of confirmed SOFTWARE data ciphers.
+/// There is no EDP 4Kn manufacturer protocol synthesis, hardware crypto,
+/// physical device access, password handling, or physical write permission.
+#[test]
+fn native_four_kn_exfat_real_file_roundtrip_all_official_data_ciphers() {
+    use edpcli::application::filesystem::detect_native_boot_sector;
+    use edpcli::application::inspect::{
+        transform_native_sector_offline, NativeCipherDirection, NativePartitionDataCipher,
+    };
+    use std::collections::BTreeSet;
+
+    let (start, count, kind) = PARTITIONS[3];
+    assert_eq!(kind, FilesystemKind::ExFat);
+    let plan = NativeVirtualDiskPlan::assemble(TOTAL, 4096, &plans()).unwrap();
+    assert_eq!(plan.writes.last().unwrap().relative_lba, 0);
+    let scratch_prefix = std::env::temp_dir().join(format!(
+        "edpcli-p2-encrypted-native-exfat-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let plain_path = scratch_prefix.with_extension("plain.img");
+    let mut plain_file = OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(&plain_path)
+        .unwrap();
+    assert!(plain_file.metadata().unwrap().is_file());
+    plain_file.set_len(TOTAL * BPS).unwrap();
+    for write in &plan.writes {
+        write_block(&mut plain_file, write.relative_lba, &write.data);
+    }
+    let sample = write_exfat_file(&mut plain_file);
+    plain_file.sync_all().unwrap();
+    drop(plain_file);
+
+    let mut plain = OpenOptions::new().read(true).open(&plain_path).unwrap();
+    verify_exfat_file(&mut plain, &sample);
+    let mut covered = BTreeSet::new();
+    for block in &plans()[3].writes {
+        covered.insert(start + block.relative_lba);
+    }
+    covered.extend([sample.root_lba, sample.bitmap_lba, sample.fat_lba]);
+    for cluster in [sample.first_cluster, sample.first_cluster + 1] {
+        for offset in 0..sample.sectors_per_cluster {
+            covered.insert(
+                sample.heap_lba + u64::from(cluster - 2) * sample.sectors_per_cluster + offset,
+            );
+        }
+    }
+    assert!(covered.len() > 10);
+    assert!(covered
+        .iter()
+        .all(|lba| (*lba >= start) && (*lba < start + count)));
+    let first_file_lba =
+        sample.heap_lba + u64::from(sample.first_cluster - 2) * sample.sectors_per_cluster;
+    assert!(covered.contains(&first_file_lba));
+
+    let key = [0x42u8; 16];
+    for (index, algorithm) in [
+        NativePartitionDataCipher::AesOffset,
+        NativePartitionDataCipher::Sm4Ecb,
+        NativePartitionDataCipher::AesCrossEcb,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let cipher_path = scratch_prefix.with_extension(format!("cipher{index}.img"));
+        let decoded_path = scratch_prefix.with_extension(format!("decoded{index}.img"));
+        let mut cipher = OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&cipher_path)
+            .unwrap();
+        cipher.set_len(TOTAL * BPS).unwrap();
+        write_block(&mut cipher, 0, &read_block(&mut plain, 0));
+        for &lba in &covered {
+            let original = read_block(&mut plain, lba);
+            let encrypted = transform_native_sector_offline(
+                algorithm,
+                NativeCipherDirection::Encrypt,
+                &original,
+                &key,
+                lba,
+                BPS as u32,
+            )
+            .unwrap();
+            assert_ne!(encrypted, original, "LBA{lba} should be encrypted");
+            write_block(&mut cipher, lba, &encrypted);
+        }
+        cipher.sync_all().unwrap();
+        drop(cipher);
+
+        let mut cipher = OpenOptions::new().read(true).open(&cipher_path).unwrap();
+        assert_eq!(read_block(&mut cipher, 0), read_block(&mut plain, 0));
+        let raw_boot = read_block(&mut cipher, start);
+        assert_ne!(&raw_boot[3..11], b"EXFAT   ");
+        let recovered_boot = transform_native_sector_offline(
+            algorithm,
+            NativeCipherDirection::Decrypt,
+            &raw_boot,
+            &key,
+            start,
+            BPS as u32,
+        )
+        .unwrap();
+        assert!(detect_native_boot_sector(&recovered_boot, count, 4096)
+            .unwrap()
+            .is_some());
+        let mut wrong_key = key;
+        wrong_key[0] ^= 0xff;
+        let invalid_boot = transform_native_sector_offline(
+            algorithm,
+            NativeCipherDirection::Decrypt,
+            &raw_boot,
+            &wrong_key,
+            start,
+            BPS as u32,
+        )
+        .unwrap();
+        assert!(detect_native_boot_sector(&invalid_boot, count, 4096)
+            .ok()
+            .flatten()
+            .is_none());
+
+        let mut decoded = OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&decoded_path)
+            .unwrap();
+        decoded.set_len(TOTAL * BPS).unwrap();
+        write_block(&mut decoded, 0, &read_block(&mut plain, 0));
+        for &lba in &covered {
+            let raw = read_block(&mut cipher, lba);
+            let original = read_block(&mut plain, lba);
+            let recovered = transform_native_sector_offline(
+                algorithm,
+                NativeCipherDirection::Decrypt,
+                &raw,
+                &key,
+                lba,
+                BPS as u32,
+            )
+            .unwrap();
+            assert_eq!(recovered, original, "native LBA{lba} mismatch");
+            write_block(&mut decoded, lba, &recovered);
+        }
+        decoded.sync_all().unwrap();
+        drop(decoded);
+        let mut decoded = OpenOptions::new().read(true).open(&decoded_path).unwrap();
+        verify_exfat_file(&mut decoded, &sample);
+
+        // Both the ciphertext and the independently extracted plaintext
+        // carry the real two-cluster file, not just a formatted boot sector.
+        let cipher_file_sector = read_block(&mut cipher, first_file_lba);
+        let plaintext_file_sector = read_block(&mut decoded, first_file_lba);
+        assert_ne!(cipher_file_sector, plaintext_file_sector);
+        assert_eq!(
+            plaintext_file_sector,
+            read_block(&mut plain, first_file_lba)
+        );
+        let mut tampered = cipher_file_sector;
+        tampered[17] ^= 1;
+        let tampered_plain = transform_native_sector_offline(
+            algorithm,
+            NativeCipherDirection::Decrypt,
+            &tampered,
+            &key,
+            first_file_lba,
+            BPS as u32,
+        )
+        .unwrap();
+        assert_ne!(tampered_plain, plaintext_file_sector);
+
+        // A real independent reader must reject corrupted ciphertext after
+        // decryption, not merely observe a byte difference in the block.
+        let mut damaged = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&decoded_path)
+            .unwrap();
+        write_block(&mut damaged, first_file_lba, &tampered_plain);
+        damaged.sync_all().unwrap();
+        let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            verify_exfat_file(&mut damaged, &sample);
+        }));
+        assert!(
+            rejected.is_err(),
+            "corrupted ciphertext passed exFAT file SHA-256 validation"
+        );
+        write_block(&mut damaged, first_file_lba, &plaintext_file_sector);
+        damaged.sync_all().unwrap();
+        drop(damaged);
+
+        drop(cipher);
+        drop(decoded);
+        std::fs::remove_file(&cipher_path).unwrap();
+        std::fs::remove_file(&decoded_path).unwrap();
+    }
+    drop(plain);
+    std::fs::remove_file(&plain_path).unwrap();
+}
