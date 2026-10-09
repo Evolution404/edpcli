@@ -245,6 +245,25 @@ impl NativeEdpLayoutPlan {
         Ok(())
     }
 
+    /// MBR is an independent source of the first partition geometry and
+    /// must be checked *before* reading any LCE payload.
+    fn verify_source_visible_mbr(&self, mbr: &[u8]) -> Result<(), String> {
+        if mbr.len() < 512
+            || mbr[510..512] != [0x55, 0xaa]
+            || mbr[446 + 4] != self.visible_mbr_type
+        {
+            return Err("来源 LBA0 MBR 签名或分区类型不匹配".into());
+        }
+        let start = u32::from_le_bytes(mbr[454..458].try_into().unwrap()) as u64;
+        let count = u32::from_le_bytes(mbr[458..462].try_into().unwrap()) as u64;
+        if start != self.partitions[0].geometry.start_lba
+            || count != self.partitions[0].geometry.sector_count
+        {
+            return Err("来源 LBA0 MBR 首分区原生起点/容量与已确认布局不一致".into());
+        }
+        Ok(())
+    }
+
     /// Reconstruct an offline replay from ONE read-only source of complete
     /// native sectors. The protocol and the LCE are sampled through the same
     /// caller-supplied reader; callers cannot accidentally substitute an
@@ -281,6 +300,8 @@ impl NativeEdpLayoutPlan {
             protocol_bytes,
         )?;
         self.verify_source_protocol_geometry(&image, device_id)?;
+        let source_mbr = image.block(0).ok_or("来源缺少 LBA0 原生块")?;
+        self.verify_source_visible_mbr(source_mbr)?;
 
         let mut source_lce = Vec::with_capacity(self.lce.sector_count as usize);
         for index in 0..self.lce.sector_count {
@@ -364,16 +385,7 @@ impl NativeEdpLayoutPlan {
             return Err("来源协议/LCE 原生逻辑扇区几何不匹配".into());
         }
         let mbr = protocol.block(0).ok_or("来源缺少 LBA0 原生块")?;
-        if mbr[510..512] != [0x55, 0xaa] || mbr[446 + 4] != self.visible_mbr_type {
-            return Err("来源 LBA0 MBR 签名或分区类型不匹配".into());
-        }
-        let start = u32::from_le_bytes(mbr[454..458].try_into().unwrap()) as u64;
-        let count = u32::from_le_bytes(mbr[458..462].try_into().unwrap()) as u64;
-        if start != self.partitions[0].geometry.start_lba
-            || count != self.partitions[0].geometry.sector_count
-        {
-            return Err("来源 LBA0 MBR 首分区原生起点/容量与已确认布局不一致".into());
-        }
+        self.verify_source_visible_mbr(mbr)?;
         let mut output = Vec::with_capacity(13 + source_lce.len());
         for lba in 1..13 {
             output.push(NativeFilesystemWrite {
