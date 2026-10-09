@@ -1,0 +1,103 @@
+{
+  "binary_sha256": {
+    "EdpEDiskEx.dll": "9a665e5c46eaa4076e14e2208d467d2110d33fd5bf1d363b34cc40c517fccaca",
+    "EdpEDisk64.sys": "724544a96f899b9bb0f87a8adedd08a961d8e4b8ec40aa90bc8144e5ae7e0620"
+  },
+  "import_boundaries": [
+    {
+      "symbol": "KERNEL32.dll!DeviceIoControl",
+      "iat": "0x1003028c"
+    },
+    {
+      "symbol": "ntoskrnl.exe!ZwWriteFile",
+      "iat": "0x190b0"
+    }
+  ],
+  "verified_user_mount_instructions": [
+    {
+      "va": "0x100098e2",
+      "instruction": "call 0x10007480"
+    },
+    {
+      "va": "0x10007852",
+      "instruction": "call 0x10007c10"
+    },
+    {
+      "va": "0x10007c98",
+      "instruction": "mov dword ptr [ebp - 0x230], 0x8200e000"
+    },
+    {
+      "va": "0x1000807c",
+      "instruction": "mov dword ptr [ebp - 0x230], 0x8200e00c"
+    },
+    {
+      "va": "0x100080ba",
+      "instruction": "call dword ptr [0x1003028c]"
+    }
+  ],
+  "verified_kernel_dispatch_and_write_instructions": [
+    {
+      "va": "0x11b37",
+      "instruction": "cmp eax, 0x8200e00c"
+    },
+    {
+      "va": "0x11b54",
+      "instruction": "cmp eax, 0x8200e000"
+    },
+    {
+      "va": "0x11b3c",
+      "instruction": "je 0x11bfe"
+    },
+    {
+      "va": "0x11b59",
+      "instruction": "je 0x11bfe"
+    },
+    {
+      "va": "0x120f2",
+      "instruction": "test rax, rax"
+    },
+    {
+      "va": "0x12100",
+      "instruction": "cmp rcx, qword ptr [r15 + 0x20]"
+    },
+    {
+      "va": "0x1214d",
+      "instruction": "mov rax, qword ptr [r15 + 0x28]"
+    },
+    {
+      "va": "0x1215a",
+      "instruction": "add rax, qword ptr [rbx + 0x18]"
+    },
+    {
+      "va": "0x12163",
+      "instruction": "mov qword ptr [rsp + 0x50], rax"
+    },
+    {
+      "va": "0x1218e",
+      "instruction": "call 0x183c0"
+    },
+    {
+      "va": "0x12313",
+      "instruction": "mov dword ptr [rsp + 0x30], r13d"
+    },
+    {
+      "va": "0x12324",
+      "instruction": "mov qword ptr [rsp + 0x28], rbp"
+    },
+    {
+      "va": "0x1232e",
+      "instruction": "call qword ptr [rip + 0x6d7c]"
+    }
+  ],
+  "mount_path": "EdpMountFile RVA 0x98b0 -> 0x10007480 -> 0x10007c10 -> DeviceIoControl(0x8200e000|0x8200e00c) -> kernel shared 0x11bfe",
+  "mount_selection": "0x8200e00c if sub_10007c10 arg1 == 1, else 0x8200e000",
+  "write_mapping": "virtual length [rbx+8]; bound [r15+0x20]; physical offset [r15+0x28]+[rbx+0x18]; copied pool buffer rbp; ZwWriteFile 0x1232e",
+  "verified_scope": "conditional mount transport and virtual-write-to-backing-file transport ONLY",
+  "unproven": [
+    "LCE virtual extent was mounted during provisioning",
+    "which caller supplied FAT16 3072B template",
+    "any current U391 4096B payload producer",
+    "last 1024B owner"
+  ],
+  "read_only": true
+}

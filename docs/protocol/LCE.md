@@ -357,3 +357,71 @@ uv run --locked python scripts/protocol/audit_vrvaud_lce_template_xrefs.py \
 ```
 
 隔离Python测试位于 `scripts/protocol/tests/test_audit_vrvaud_lce_template_xrefs.py`，合成指令测试无外部二进制依赖；原厂实测测试仅在设置 `EDP_OEM_VRVAUD_LEGACY` 和 `EDP_OEM_VRVAUD_CURRENT` 时运行。程序不打开磁盘或读取私密配置。
+
+
+## 17. 历史登录挂载中间层与内核写入传递证据（2026-10-09）
+
+本节**只认证传输链路**；不推定原厂制盘曾执行同一登录挂载流程，也不把能够对兼容区写入等同于已经生成3072B FAT16数据。
+
+### 17.1 新识别的中间层：EdpEDiskEx.dll
+
+从原厂 `edpediskctrl.dll.m` 定位：
+
+- `CEdpDiskControl::sub_100270a0` 动态 `LoadLibraryA("EdpEDiskEx.dll")`，再通过 `GetProcAddress("EdpMountFile")` 保存到 `dword_10091120`；其它分支可动态计算库名，不能推定**所有**版本均使用此DLL。
+- `CEdpDiskControl::WSTUserLogin/sub_100254c0` 构造挂载参数，调用 `sub_10029eb0` 后，通过 `(*dword_10091120)(&var_224)` 请求挂载；这是历史客户端**用户登录路径**，并非被证实由官方 `CreatePartitions` 调用的路径。
+- `EdpEDiskEx.dll` 原厂SHA-256为 `9a665e5c46eaa4076e14e2208d467d2110d33fd5bf1d363b34cc40c517fccaca`；精确导出 `EdpMountFile` RVA `0x98B0`。
+- 原厂二进制 x86-32 `0x100098E2: call 0x10007480`，再在 `0x10007852: call 0x10007C10`；后者调用 `KERNEL32!DeviceIoControl`（IAT `0x1003028C`）。
+- `sub_10007C10` 在 `0x10007C98` 默认构造IOCTL `0x8200E000`，`0x1000807C` 在参数 `arg1==1` 时改为 `0x8200E00C`，`0x100080BA` 调用 `DeviceIoControl`。输入包含调用方构造的可变长度挂载描述符；**本验证尚未证明该描述符的分区大小为3072B或来自哪张LBA7标签**。
+
+### 17.2 内核接收与虚拟I/O重定向
+
+`EdpEDisk64.sys` 原厂SHA-256为 `724544a96f899b9bb0f87a8adedd08a961d8e4b8ec40aa90bc8144e5ae7e0620`。原厂x64机器码：
+
+| 地址 | 原厂行为及边界 |
+| --- | --- |
+| `0x11B37` / `0x11B54` | 比较 `0x8200E00C` / `0x8200E000`，两者均跳到 `0x11BFE` |
+| `0x11BFE..0x11C33` | 接受挂载参数并检查输入长度，随后入队请求，**不代表立即写入扇区** |
+| `0x120F2..0x12104` | 检查虚拟IRP偏移、长度不超出已挂载区域 |
+| `0x1214D..0x12163` | `[r15+0x28] + [rbx+0x18]` 得到后端物理字节偏移，存到栈参数 `[rsp+0x50]` |
+| `0x12185..0x1218E` | 复制来自IRP的写入缓冲区到池内存 `rbp`；加密开启时在后续分支执行写变换 |
+| `0x12313` / `0x12324` | `r13d` 写入长度、`rbp` 为准备好的缓冲区 |
+| `0x1232E` | 调用 `ntoskrnl!ZwWriteFile`，IAT `0x190B0` |
+
+这条路径的触发前提是**主机确实向已经挂载的虚拟卷提交写IRP**。没有虚拟写请求，`EdpMountFile`、挂载IOCTL本身不足以推断FAT16初始化。因此“虚拟盘能够写到LCE地址”为事实；“原厂制盘必然以该路径写LCE”为未解决问题。
+
+### 17.3 与官方制盘 `MountEdpPart` 的职责划分
+
+2026一方 `cemsusbregsiter.dll::CreatePartitions/sub_1003DB50` 构造 `0x206` 标签后调用 `sub_100439D0(MountEdpPart)`。后者把`0x206`版本、**新分区条目**的起点/大小复制到挂载请求，并通过运行时函数指针请求虚拟设备；这与历史 `EdpEDiskCtrl::WSTUserLogin` 经`EdpEDiskEx.dll`建立回退兼容设备是两条**必须分别证明**的路径。
+
+因此，即使 `FormatDisk` 对 `MountEdpPart` 返回的正常交换区或保密区调用FAT/NTFS格式化，也不能直接归因为对`CHS-0xE0000`兼容负载的初始化。仍需核对是否由其它后续流程主动初始化。
+
+### 17.4 复现实验与限制
+
+新增无需设备的SHA/指令/导入表金标审计：
+
+```sh
+uv run --locked python scripts/protocol/audit_edpediskex_mount_chain.py \
+  --edpediskex /path/to/EdpEDiskEx.dll \
+  --edpedisk64 /path/to/EdpEDisk64.sys
+EDP_OEM_EDPEDISKEX=/path/to/EdpEDiskEx.dll \
+EDP_OEM_EDPEDISK64=/path/to/EdpEDisk64.sys \
+uv run --locked python -m unittest scripts.protocol.tests.test_audit_edpediskex_mount_chain
+```
+
+已认证：**挂载API入口 → 两个IOCTL → 内核共同处理分支 → 有条件的虚拟写IRP → 偏移映射/加密 → ZwWriteFile**。
+
+尚未认证：**FAT16 3072B缓冲区首次来自哪个业务函数；是否由`CreatePartitions`、`FormatDisk`或登录/兼容初始化触发；4096B下是否进行物理块RMW；当前U391最后1024B的真实所有者**。因此目前不能从驱动存在写路径推导4Kn的A/B/C选项，也不能解除4Kn实盘写保护。Windows隔离实验须记录写前/写后4096B、请求字节范围、提交线程/调用栈、缓冲区SHA与传输IOCTL，才能进一步裁决。
+
+### 17.5 两代 `vrvaud_c.dll` 额外静态调查：一般性物理写入能力不等于 LCE 生成
+
+沿旧版 `vrvaud_c.m` 与新版 `vrvaud_c.m` 的 `GetPolicyObject`、通用磁盘写函数及 `FormatEx` 调用点继续反向检查：
+
+- 2022版 `GetPolicyObject → sub_100a39c0` 返回对象指针 `0x1022DF18`；2026版 `GetPolicyObject → sub_100c55d0` 返回 `0x102C8850`。两者均**不是**既知FAT16模板地址（分别为 `0x1016B9D8` / `0x10205AE8`）。这只确定入口第一跳的对象指针，不排除对象的方法通过别的偏移间接读模板。
+- 2026版存在 `CDiskFunc::WriteDisk/sub_100DB7B0` 和 `CDiskFunc::WriteDiskEx/sub_100DBD40` 两个一般性原始物理写方法：`CreateFileA("\\\\.\\PhysicalDrive%u")` → `SetFilePointer` → `WriteFile`。两者由参数提供写入缓冲区 `arg4`，并从设备读取扇区字节数。其写入长度为 `arg3 * bytes_per_sector`，写入起点源于调用参数与原生扇区大小的组合。它们有能力发起物理写入，但**未发现可归因到LCE专用地址或3072B FAT16模板的调用方**。
+- 原厂机器码中，两个原始写方法分别具有跳板 `0x10002B58 → 0x100DB7B0` 和 `0x10002EA5 → 0x100DBD40`，对目标函数的全部精确x86静态立即数引用各1处（跳板）；这不排除运行时函数表和动态分派。两个DLL的直接模板VA/重定位引用仍是0。
+- 2022版 `sub_10086700`、2026版 `sub_100A2A00` 通过 `fmifs.dll!FormatEx` 格式化由外部指定的盘符/文件系统；2026版 `sub_100DC080` 另有明确的NTFS `FormatEx` 调用。这些**只证明存在文件系统格式化入口**，不能认证目标恰为3072B LCE或4096B保留区。
+- 新版另有 `SetPolicyToEdpDisk/sub_100A13C0`，通过 `CreateFileA` 对策略文件写入 `0x6B4` 字节。其有明确的策略对象/文件路径，**不是3072B LCE模板证据**。
+
+**可复核反编译位置**（文件均为未入库的用户原厂材料）：新版 `vrvaud_c.m` 约行1-17、114004-114046、114705-114770、136130-136194、136266-136310；旧版 `vrvaud_c.m` 约行1-11、98388-98442。上面的反编译行号仅为交叉检查定位，关键确证的历史挂载/虚拟写传输链仍以本节SHA绑定原厂机器码证据为准。
+
+上述进一步排除了将通用 `WriteDiskEx`、策略写入或普通 `FormatEx` **直接当成LCE初始化的推理跳跃**。要证明生产者仍需真实调用边 `caller → 缓冲区构造 → (PhysicalDrive写入或虚拟卷写IRP) → LCE物理范围`，或隔离动态写前后取证。本轮未获得这一完整调用边。末尾1024B维持未归属且不可覆盖。
