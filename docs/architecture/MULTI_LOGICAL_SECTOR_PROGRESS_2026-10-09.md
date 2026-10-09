@@ -197,3 +197,10 @@
 - 计划确认界面同步展示经写入门禁认证的“加密算法：SMS4 / EncryptMode=2 / crypt=0”，避免参数与实际计划错位。由于现阶段edpcli实体分区写入器只认证SMS4，选择AES或AES_CROSS虽然在表单中可见且可切换，但 `provision_request()` 在生成正式计划前**直接拒绝**，并在用户可见错误中写出真实crypt/EncryptMode；禁止无声重设或按SMS4写入。4Kn的原有硬拦截仍保留，与算法选择无关。
 - 永久回归覆盖三档官方映射、默认值、正反切换、四个官方模式下仅一个全盘字段、Plain不显示、未认证选项不可提交、新表单重置，以及原有512B协议字节金标。此批是表单选择与保守前置门禁，并不代表非SMS4的新盘物理扇区加密、分区改密或写后回读已经完成认证。
 - 后续若启用非SMS4实体写入，应先将算法策略贯通 `OfficialProvisionRequest`、正式协议生产者、分区加密、事务写入及验证，获取官方生产者/消费端金标和可牺牲测试盘真实结果后才解除门禁。真实U391本轮不触及任何物理写入。
+
+## 2026-10-09 第二十批：官方双层加密算法选择与分区数据路径取证
+
+- 只读反汇编官方Linux libedpedisk.so，确认LBA12 EncryptMode@+0x58同时选择第一层FileKey包装和第二层实际数据Cipher对象：模式1为厂家FileKey A7F0/A6B0与分区EDPAES、CipherEDPAES（实际调用aes_128_Encrypt）；模式2为SM4-ECB FileKey包装与SMS4_128、CipherSMS4_128（实际调用MC_KKSMS4）。后者通过Volume::ParseVolumeInfo进入Volume::ReadSectors/WriteSectors及EncryptionModeEDP扇区变换。
+- 模式3 AES_CROSS的FileKey包装为AES-128-ECB，4Kn U391真实盘采用该模式，但当前Linux GetPartitionHeader明确不支持模式3，因此Windows数据扇区算法仍未认证，不能由模式名或封装算法推断数据区采用AES-ECB、AES-CBC或XTS。
+- 另对libsectorManage.so确定其ReadEncrypt/WriteEncrypt采用SM4-ECB、设备元数据及DataKey管理调用AES-256-CBC；该库也导出SM4-CFB函数但未发现分区数据读写调用点。不能把不同组件出现的算法简单拼成官方三种加密选项的分区算法矩阵。
+- 全部机器码函数地址、SHA-256、已验证模式对应与未闭合证据记录在 docs/protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md 新专题。写盘实现必须把FileKey封装和PartitionCrypto分层但遵照官方映射；SMS4以外正式制盘与4Kn实体写入保持禁止，U391从未写入。

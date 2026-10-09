@@ -6920,3 +6920,33 @@ USB/SCSI 修订号、控制器、固件、ID_BLK 或 NAND ID。保存的 macOS i
    设备专属证据。
 5. 任何恢复出的 Phison 私有子字段语义都必须与 EDP 字节账本分开；它们可以丰富
    制造商来源解释，但不会改变 LBA3 仅原样保留的 EDP 所有权边界。
+
+### 2026-10-09：FileKey 封装与分区扇区加密两层关系（官方 Linux 组件直接反汇编）
+
+样本：官方 libedpedisk.so SHA256 e10e12dfc26fee71b5cd1cc5465e5045fcec603a34f35e676faf9e571a7f5560；libsectorManage.so SHA256 77d08eb8dd9aced7f6e103ac4469cce7f356ad41e0743f7dcf22cdae83209cc7。结论仅由对应 Linux 版本证明，不能推出 Windows 或真实 U391 模式3的数据加密算法。
+
+两层不是用户可自由组合的两个算法开关：第一层以用户密码MD5派生值封装16B FileKey，位于LBA12每条紧凑EDPF记录+0x38..+0x47，UserKeyCRC、FileKeyCRC分别校验；第二层由认证出的FileKey供分区的 EncryptionAlgorithm 对象处理实际扇区。前一层的ECB封装算法不等于后一层的扇区密码模式。LBA12中的 EncryptMode@+0x58 是两层共用的官方策略入口，NeedEncrypt@+0x14决定是否启用透明加密；PartionType决定区域角色，不是算法选择。
+
+| EncryptMode | 官方界面选项、crypt请求值 | 16B FileKey封装 | 该Linux挂载库中实际分区数据算法 |
+|---|---|---|---|
+| 0 | 当前新盘界面无此选项 | 历史配置类型 | PartitionHeaderOldEdp旧版兼容路径，不能视为当前新盘标准模式 |
+| 1 | AES，crypt=1 | 厂家A7F0/A6B0 | PartitionHeaderEdpAes128构造EDPAES及CipherEDPAES；底层确实调用aes_128_Encrypt，但运行于厂家EncryptionModeEDP而非已经证明的ECB/CBC/XTS整扇区模式 |
+| 2 | SMS4，crypt=0，官方默认 | SM4-ECB | PartitionHeaderSms4构造SMS4_128及CipherSMS4_128；底层调用MC_KKSMS4::EncryptBuffer，运行于EncryptionModeEDP |
+| 3 | AES_CROSS，crypt=2 | AES-128-ECB | 当前Linux主挂载函数没有mode3分支、不能创建PartitionHeader；Windows的实际扇区算法尚无完整调用链、不可擅自指定 |
+
+原生机器码证据（均为libedpedisk.so虚拟地址）：
+
+- Volume::GetPartitionHeader @0x41110 在0x4114D读取LBA12每条记录+0x58；0x41157识别mode1并跳0x41548；0x41165识别mode2并创建SMS4分区头；模式0走旧路径；其他值包括3返回无可用对象。
+- PartitionHeaderEdpAes128 @0x52150 在0x52221调用EDPAES构造@0x2C5C0，包含CipherEDPAES；CipherEDPAES::EncryptBlocks @0x26DC0在0x26DDE调用aes_128_Encrypt@0xB67F0；该Cipher密钥长度与分组长度均16B（@0x27B20、@0x27B10）。
+- PartitionHeaderSms4 @0x51780 在0x5184C调用SMS4_128构造@0x2CE90，包含CipherSMS4_128；CipherSMS4_128::EncryptBlocks @0x26F70在0x26F95调用MC_KKSMS4::EncryptBuffer@0xB6E80；密钥/分组均16B（@0x27B60、@0x27B50）。
+- Volume::ParseVolumeInfo @0x40E50 在0x40E8E读取分区头算法成员+0x10，0x40EDA存储到Volume算法成员+0x08；Volume::ReadSectors @0x3FC80 与 WriteSectors @0x40120从算法对象虚表调用分区扇区解/加密，最终才调用物理File的读写。
+- EncryptionModeEDP::EncryptSectorsCurrentThread @0x2F370 及 EncryptBufferEDP @0x2FC10提供512B对齐的扇区位置参数，故不能仅由密钥包装的ECB直接推断分区数据是ECB。是否所有实际配置都将解封的16B FileKey原封不动用作扇区CipherKey，需要继续核验各类SetKey与默认密码分支。
+
+容易混淆的另一套官方组件 libsectorManage.so：
+
+- Sm4EcbEncrypt/Decrypt（@0x38510/@0x38530）调用OpenSSL EVP_sm4_ecb：SectorManageImp::ReadEncrypt @0x19020在0x1924D调用SM4-ECB解密；WriteEncrypt @0x19410在0x194A0、0x195DA调用SM4-ECB加密，且按512B对齐。这条调用链**不等同于**libedpedisk.so::Volume透明分区数据流。
+- AesCbcEncrypt/Decrypt（@0x38550/@0x38570）实际使用 EVP_aes_256_cbc，即AES-256-CBC，主要在GetDataKey、ChangeDataKey、ReadIIR、WriteIIR、GetUsbSign等设备元数据/密钥管理方法中被调用，不可作为U391模式3数据区采用AES-256-CBC的证据。
+- Sm4CfbEncrypt/Decrypt（@0x38400/@0x38420）调用OpenSSL EVP_sm4_cfb128；已确认导出实现，未发现本组件内调用它进行实际分区扇区读写的路径，不能因存在符号宣称已启用。
+- libedpedisk.so还含通用的EncryptionModeXTS和CipherEDPOPENSSLAES等类型；类型存在不等于官方EDPF mode0/1/2/3全部使用这些模式。
+
+工程结论：edpcli 应将 FileKeyWrapMode 与 PartitionCryptoMode 分层建模，但采用经版本/平台认证的官方组合映射，不能让用户任意交叉配置。当前只认证SMS4数据写入；AES模式1需要拿厂家扇区明文/密文金标验证；AES_CROSS mode3在本版Linux不支持，需要继续追Windows EdpMountFile->EdpEDisk64.sys驱动、扇区消费者及U391官方密文配对。保持4Kn硬写保护与U391只读，旧512B官方金标不能回退。
