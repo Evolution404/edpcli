@@ -712,7 +712,7 @@ fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
     plan.verify_source_replay_readback(
         snapshot,
         "disk&ven_test&prod_native",
-        &[lce.clone()],
+        std::slice::from_ref(&lce),
         &verified_writes,
     )
     .unwrap();
@@ -726,7 +726,7 @@ fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
         .verify_source_replay_readback(
             snapshot,
             "disk&ven_test&prod_native",
-            &[lce.clone()],
+            std::slice::from_ref(&lce),
             &changed
         )
         .is_err());
@@ -740,7 +740,7 @@ fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
         .verify_source_replay_readback(
             snapshot,
             "disk&ven_test&prod_native",
-            &[lce.clone()],
+            std::slice::from_ref(&lce),
             &changed_lce
         )
         .is_err());
