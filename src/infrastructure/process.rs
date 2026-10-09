@@ -345,9 +345,8 @@ mod tests {
         #[cfg(unix)]
         let failure = check_output(&shell(script), Duration::from_secs(15)).unwrap_err();
         #[cfg(windows)]
-        let failure =
-            check_native_fixture("windows_native_exit_fixture", Duration::from_secs(15))
-                .unwrap_err();
+        let failure = check_native_fixture("windows_native_exit_fixture", Duration::from_secs(15))
+            .unwrap_err();
         assert!(failure.to_string().contains("denied"));
     }
     #[test]
@@ -357,9 +356,11 @@ mod tests {
         #[cfg(unix)]
         let outcome = run_command(&shell(script), Duration::from_secs(15)).unwrap();
         #[cfg(windows)]
-        let outcome =
-            run_native_fixture("windows_native_stderr_limit_fixture", Duration::from_secs(15))
-                .unwrap();
+        let outcome = run_native_fixture(
+            "windows_native_stderr_limit_fixture",
+            Duration::from_secs(15),
+        )
+        .unwrap();
         assert!(matches!(
             outcome.completion,
             CommandCompletion::Exited { success: true, .. }
@@ -384,9 +385,11 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_deadline_survives_closed_pipes_and_output_limit_is_typed() {
-        let outcome =
-            run_native_fixture("windows_native_closed_pipes_fixture", Duration::from_secs(10))
-                .unwrap();
+        let outcome = run_native_fixture(
+            "windows_native_closed_pipes_fixture",
+            Duration::from_secs(10),
+        )
+        .unwrap();
         assert_eq!(outcome.completion, CommandCompletion::TimedOut);
         assert!(
             outcome.stdout.trim_end().ends_with("ready"),
