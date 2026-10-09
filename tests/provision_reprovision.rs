@@ -2019,6 +2019,61 @@ fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
         assert_eq!(staged.last().unwrap().data, raw[..4096]);
         assert_eq!(staged[12].relative_lba, lce_start);
         assert_eq!(staged[12].data, source_lce[0]);
+
+        // Readback is an unordered collection of complete native blocks, not
+        // just a successfully reparsed 512B EDPF projection. Compare opaque
+        // tails and the LCE's extra 1024B too, in all four partition modes.
+        let mut unordered = staged.clone();
+        unordered.reverse();
+        native_layout
+            .verify_source_replay_readback(&native, &did, &source_lce, &unordered)
+            .unwrap();
+        for (lba, byte_index) in [
+            (0, 0),
+            (7, 511),
+            (7, 512),
+            (7, 4095),
+            (lce_start, 3071),
+            (lce_start, 3072),
+            (lce_start, 4095),
+        ] {
+            let mut altered = unordered.clone();
+            let sector = altered
+                .iter_mut()
+                .find(|sector| sector.relative_lba == lba)
+                .unwrap();
+            sector.data[byte_index] ^= 1;
+            assert!(
+                native_layout
+                    .verify_source_replay_readback(&native, &did, &source_lce, &altered)
+                    .is_err(),
+                "altered native LBA{lba} byte{byte_index} must be rejected"
+            );
+        }
+        let mut missing = unordered.clone();
+        missing.pop();
+        assert!(native_layout
+            .verify_source_replay_readback(&native, &did, &source_lce, &missing)
+            .is_err());
+        let mut duplicate = unordered.clone();
+        duplicate[0] = duplicate[1].clone();
+        assert!(native_layout
+            .verify_source_replay_readback(&native, &did, &source_lce, &duplicate)
+            .is_err());
+        let mut wrong_lba = unordered.clone();
+        wrong_lba[0].relative_lba = 13;
+        assert!(native_layout
+            .verify_source_replay_readback(&native, &did, &source_lce, &wrong_lba)
+            .is_err());
+        let mut truncated = unordered.clone();
+        truncated[0].data.pop();
+        assert!(native_layout
+            .verify_source_replay_readback(&native, &did, &source_lce, &truncated)
+            .is_err());
+        assert!(native_layout
+            .verify_source_replay_readback(&native, "wrong_device_id", &source_lce, &staged)
+            .is_err());
+
         for native_lba in 1..13usize {
             assert_eq!(staged[native_lba - 1].relative_lba, native_lba as u64);
             assert_eq!(
