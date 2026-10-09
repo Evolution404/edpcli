@@ -310,7 +310,15 @@ pub fn scan_disks_with_catalog(
                         }
                     }
                     let lba12 = read_exact(12)?;
-                    if let Some(kind) = DiskProvisionKind::from_sectors(&lba7, &lba12, did) {
+                    let native_bytes = system::device_geometry(runner, d.n)
+                        .and_then(|geometry| geometry.native_read_geometry().ok())
+                        .map_or(SECTOR as u32, |geometry| geometry.logical_sector_bytes);
+                    if let Some(kind) = DiskProvisionKind::from_sectors_with_logical_size(
+                        &lba7,
+                        &lba12,
+                        did,
+                        native_bytes,
+                    ) {
                         row.provision_kind = kind;
                         row.partitions = parse_lba12(&lba12, did);
                         let lba6 = read_exact(6)?;
@@ -338,7 +346,11 @@ pub fn scan_disks_with_catalog(
                         &protocol_image,
                     )
                     .map_err(|error| io::Error::other(error.msg))?;
-                let total_sectors = d.size / SECTOR as u64;
+                let total_sectors = system::device_geometry(runner, d.n)
+                    .and_then(|geometry| geometry.native_read_geometry().ok())
+                    .map_or(d.size / SECTOR as u64, |geometry| {
+                        geometry.native_sector_count
+                    });
                 identity = crate::media_identity_observer::apply_runtime_plain_override(
                     identity,
                     &protocol_image,

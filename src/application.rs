@@ -146,7 +146,15 @@ fn scan_dashboard_catalog(
         -> Result<Vec<crate::infrastructure::backup_store::catalog::BackupEntry>, String>,
 ) -> Vec<Row> {
     let devices = RefCell::new(diskio::ReadOnlyDiskPool::new(|disk| {
-        FileDev::open_rdonly(&raw_path(disk))
+        let path = raw_path(disk);
+        match crate::platform::system::device_geometry(runner, disk)
+            .and_then(|geometry| geometry.native_read_geometry().ok())
+        {
+            Some(geometry) if geometry.logical_sector_bytes > 512 => {
+                FileDev::open_rdonly_native(&path, geometry)
+            }
+            _ => FileDev::open_rdonly(&path),
+        }
     }));
     let read_disk = |disk: u32, lba: u32| -> io::Result<Vec<u8>> {
         devices.borrow_mut().read_sector(disk, lba)

@@ -319,6 +319,21 @@ impl DiskProvisionKind {
     /// Returns None for malformed, conflicting, unsupported, or non-EDP
     /// metadata. Plain is not an EDP decode result.
     pub fn from_sectors(lba7: &[u8], lba12: &[u8], device_id: &str) -> Option<Self> {
+        Self::from_sectors_with_logical_size(lba7, lba12, device_id, SECTOR as u32)
+    }
+
+    /// Read-only classification of an official disk whose EDP metadata payload
+    /// is 512B but whose native logical sector may be 4096B. The 512B writer
+    /// still calls `from_sectors` and retains its historical geometry contract.
+    pub fn from_sectors_with_logical_size(
+        lba7: &[u8],
+        lba12: &[u8],
+        device_id: &str,
+        logical_sector_bytes: u32,
+    ) -> Option<Self> {
+        if logical_sector_bytes < 512 || !logical_sector_bytes.is_power_of_two() {
+            return None;
+        }
         if lba7.len() != SECTOR || lba12.len() != SECTOR || device_id.is_empty() {
             return None;
         }
@@ -349,10 +364,12 @@ impl DiskProvisionKind {
             if e7.partition_count as usize != count
                 || e12.partition_count as usize != count
                 || e7.partition_type != e12.partition_type
-                || e7.sector_size != 512
-                || e12.sector_size != 512
+                || e7.sector_size != u64::from(logical_sector_bytes)
+                || e12.sector_size != u64::from(logical_sector_bytes)
                 || e12.partition_size == 0
-                || !e12.partition_size.is_multiple_of(512)
+                || !e12
+                    .partition_size
+                    .is_multiple_of(u64::from(logical_sector_bytes))
             {
                 return None;
             }
@@ -364,5 +381,58 @@ impl DiskProvisionKind {
             types.push(e12.partition_type);
         }
         OfficialPartitionMode::from_partition_types(&types).map(Self::from_mode)
+    }
+}
+
+#[cfg(test)]
+mod native_logical_sector_mode_tests {
+    use super::*;
+    use crate::protocol::crypto::a7f0_full;
+
+    fn synthetic_mode0(logical: u32) -> (Vec<u8>, Vec<u8>) {
+        let mut plain7 = vec![0_u8; SECTOR];
+        let mut plain12 = vec![0_u8; SECTOR];
+        let sizes = [2497_u64, 49_976_864, 12_494_112];
+        let starts = [63_u64, 2560, 49_979_648];
+        for (index, ptype) in [1_u32, 2, 4].iter().enumerate() {
+            for (plain, entry_size) in [(&mut plain7, 0x40_usize), (&mut plain12, 0x60)] {
+                let off = index * entry_size;
+                plain[off..off + 4].copy_from_slice(b"EDPF");
+                plain[off + 8..off + 12].copy_from_slice(&3_u32.to_le_bytes());
+                plain[off + 12..off + 16].copy_from_slice(&ptype.to_le_bytes());
+                plain[off + 0x18..off + 0x20].copy_from_slice(&starts[index].to_le_bytes());
+                plain[off + 0x20..off + 0x28].copy_from_slice(&u64::from(logical).to_le_bytes());
+                plain[off + 0x28..off + 0x30]
+                    .copy_from_slice(&(sizes[index] * u64::from(logical)).to_le_bytes());
+            }
+        }
+        let crc = crc32_bare(b"disk&ven_test&prod_synthetic");
+        let encrypted7 = xor_rolling(&plain7, (crc & 0xffff) ^ (crc >> 16));
+        let encrypted12 = a7f0_full(&plain12, &crc.to_le_bytes(), 0);
+        (encrypted7, encrypted12)
+    }
+
+    #[test]
+    fn native_4kn_mode_detection_does_not_weaken_legacy_512_path() {
+        let did = "disk&ven_test&prod_synthetic";
+        for logical in [512, 4096] {
+            let (lba7, lba12) = synthetic_mode0(logical);
+            assert_eq!(
+                DiskProvisionKind::from_sectors_with_logical_size(&lba7, &lba12, did, logical),
+                Some(DiskProvisionKind::Mode0)
+            );
+            assert_eq!(
+                DiskProvisionKind::from_sectors(&lba7, &lba12, did),
+                (logical == 512).then_some(DiskProvisionKind::Mode0)
+            );
+            assert_eq!(
+                DiskProvisionKind::from_sectors_with_logical_size(&lba7, &lba12, did, 2048),
+                None
+            );
+            assert_eq!(
+                DiskProvisionKind::from_sectors_with_logical_size(&lba7, &lba12, did, 513),
+                None
+            );
+        }
     }
 }

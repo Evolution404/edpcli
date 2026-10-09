@@ -396,11 +396,20 @@ impl EvidenceSource {
     pub fn open_disk(runner: &dyn CmdRunner, disk: u32) -> Result<Self, EvidenceError> {
         let target = TargetSession::<ReadOnly>::open_usb(runner, disk)
             .map_err(|error| EvidenceError::Target(error.msg))?;
-        let total_sectors = target
-            .total_sectors()
+        let native_geometry = crate::platform::system::device_geometry(runner, disk)
+            .and_then(|observed| observed.native_read_geometry().ok());
+        let total_sectors = native_geometry
+            .map(|geometry| geometry.native_sector_count)
+            .or_else(|| target.total_sectors())
             .ok_or(EvidenceError::DiskMissingGeometry { disk })?;
         let path = diskio::raw_path(disk);
-        let mut dev = FileDev::open_rdonly(&path).map_err(|error| EvidenceError::DiskOpen {
+        let mut dev = match native_geometry {
+            Some(geometry) if geometry.logical_sector_bytes > 512 => {
+                FileDev::open_rdonly_native(&path, geometry)
+            }
+            _ => FileDev::open_rdonly(&path),
+        }
+        .map_err(|error| EvidenceError::DiskOpen {
             disk,
             message: error.to_string(),
         })?;
@@ -427,7 +436,9 @@ impl EvidenceSource {
             device_id: canonical.protocol.device_id.clone(),
             vid: canonical.hardware.vid.map(|value| format!("{value:04x}")),
             pid: canonical.hardware.pid.map(|value| format!("{value:04x}")),
-            size_bytes: total_sectors.checked_mul(SECTOR as u64),
+            size_bytes: native_geometry
+                .map(|geometry| geometry.capacity_bytes)
+                .or_else(|| total_sectors.checked_mul(SECTOR as u64)),
             onlyid: canonical.protocol.onlyid.clone(),
             provision_kind: canonical.protocol.provision_kind,
         };
