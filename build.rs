@@ -112,6 +112,14 @@ fn main() {
         ],
     )
     .is_some_and(|output| !output.is_empty());
+    let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "unknown".into());
+    let branch = command_output("git", &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .unwrap_or_else(|| "detached".into());
+    let exact_stable_tag = !version.contains('-')
+        && !git_dirty
+        && command_output("git", &["tag", "--points-at", "HEAD"])
+            .is_some_and(|tags| tags.lines().any(|tag| tag == format!("v{version}")));
+    let channel = if exact_stable_tag { "STABLE" } else { "DEV" };
     let rustc = env::var("RUSTC")
         .ok()
         .and_then(|rustc| command_output(&rustc, &["--version"]))
@@ -130,5 +138,8 @@ fn main() {
         git_commit,
         if git_dirty { "+dirty" } else { "" }
     );
+    println!("cargo:rustc-env=EDPCLI_BUILD_CHANNEL={channel}");
+    println!("cargo:rustc-env=EDPCLI_BUILD_BRANCH={branch}");
+    println!("cargo:rustc-env=EDPCLI_BUILD_DIRTY={git_dirty}");
     println!("cargo:rustc-env=EDPCLI_BUILD_RUSTC={rustc}");
 }

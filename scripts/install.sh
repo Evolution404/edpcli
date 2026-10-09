@@ -21,8 +21,13 @@ if [ -n "$(git status --porcelain 2>/dev/null || true)" ]; then
 ' >&2
 fi
 
-printf 'install: building release from %s
-' "$(git rev-parse --short=12 HEAD 2>/dev/null || printf unknown)"
+CURRENT_VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)"
+CURRENT_BRANCH="$(git symbolic-ref --short -q HEAD 2>/dev/null || printf detached)"
+printf 'install: current workspace version=%s branch=%s commit=%s
+' \
+    "$CURRENT_VERSION" "$CURRENT_BRANCH" "$(git rev-parse --short=12 HEAD 2>/dev/null || printf unknown)"
+printf 'install: building release profile from current working tree (no git pull)
+'
 "$CARGO_BIN" build --release --locked
 
 exec "$ROOT/scripts/install-local.sh" "$ROOT/target/release/edpcli"

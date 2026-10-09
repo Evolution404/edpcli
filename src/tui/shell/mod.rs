@@ -27,7 +27,11 @@ pub fn header(frame: &mut Frame, area: Rect, state: &AppState, core_mode: CoreMo
         Paragraph::new(Line::from(vec![
             Span::styled(" edpcli", theme.accent()),
             Span::styled(
-                format!(" v{}  TUI", env!("CARGO_PKG_VERSION")),
+                format!(
+                    " v{} [{}]  TUI",
+                    env!("CARGO_PKG_VERSION"),
+                    crate::build_info::CHANNEL
+                ),
                 theme.muted(),
             ),
             Span::styled(format!("  [{mode}]"), mode_style),
