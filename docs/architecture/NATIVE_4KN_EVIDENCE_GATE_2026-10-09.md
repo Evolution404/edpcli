@@ -47,3 +47,11 @@
 - **拒绝**：官方新盘4Kn生产认证结论、未经认证的AES/AES_CROSS物理制盘、全部原生4Kn实体写入、把模拟回滚结果描述为真实掉电恢复。
 
 依据：`docs/protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md`、`docs/protocol/LCE.md`、`docs/architecture/MULTI_LOGICAL_SECTOR_PROGRESS_2026-10-09.md` 与相关Rust源码/测试。
+
+
+## 6. 原生扇区读取的参数化边界（2026-10-09）
+
+- `SectorReader::read_range`继续保持每扇区512B的**固定协议投影**，避免破坏历史项目代码。
+- 新增`SectorReader::read_native_range`，读取调用方来源已观测的完整原生逻辑扇区，不做512B截断。仅支持纯读取层检验512–65536B的2次幂宽度，执行总字节乘法、原生LBA区间溢出检测，单次容量上限8MiB。任意块缺失或实际字节长度不符则拒绝。
+- 测试涵盖512、1024、2048、4096、8192B的完整读取，确认协议投影和原生块长度互不混淆；错误块宽度、极端扇区数量、超出原生地址和截断源块均在读取链明确失败。
+- **这是只读几何抽象，不是扩大官方EDP 4Kn写盘协议的认证规格。** `NativeEdpLayoutPlan` 和实体制盘仍只识别经认证的来源规格，原生4Kn及非SMS4实体写入门禁原封不动。

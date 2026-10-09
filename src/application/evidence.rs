@@ -100,6 +100,54 @@ pub trait SectorReader {
         }
         Ok(out)
     }
+    /// Read a bounded sequence of complete *native* logical sectors.
+    ///
+    /// Unlike read_range(), whose legacy contract is always 512B protocol
+    /// projections, this uses the reader's independently observed block
+    /// width and never silently slices a 4Kn block. The width check is a
+    /// pure reader contract: it does not authorize physical 1024/2048/8192B
+    /// EDP provisioning, or any write operation.
+    fn read_native_range(&mut self, start_lba: u64, sector_count: usize) -> io::Result<Vec<u8>> {
+        let sector_bytes = self.logical_sector_bytes();
+        if !(512..=65_536).contains(&sector_bytes) || !sector_bytes.is_power_of_two() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("不支持的来源原生扇区长度 {sector_bytes}B"),
+            ));
+        }
+        let sector_bytes = sector_bytes as usize;
+        let bytes = sector_count
+            .checked_mul(sector_bytes)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "原生读取总字节溢出"))?;
+        // A diagnostic/metadata read may never reserve unbounded memory.
+        if bytes > 8 * 1024 * 1024 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "单次原生读取不得超过8MiB",
+            ));
+        }
+        let count = u64::try_from(sector_count)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "原生扇区数量溢出"))?;
+        start_lba
+            .checked_add(count)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "原生LBA范围溢出"))?;
+        let mut result = Vec::with_capacity(bytes);
+        for index in 0..count {
+            let lba = start_lba + index; // covered by the checked end above
+            let native = self.read_native_sector(lba)?;
+            if native.len() != sector_bytes {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    format!(
+                        "LBA{lba} 返回 {}B，预期完整原生扇区 {sector_bytes}B",
+                        native.len()
+                    ),
+                ));
+            }
+            result.extend_from_slice(&native);
+        }
+        Ok(result)
+    }
 }
 
 impl SectorReader for FileDev {
