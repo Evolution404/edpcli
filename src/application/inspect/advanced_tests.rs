@@ -47,8 +47,7 @@ fn native_sector_range_preserves_full_blocks_for_parameterized_geometry() {
             Ok(self
                 .sectors
                 .get(lba as usize)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no sector"))?
-                [..512]
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no sector"))?[..512]
                 .to_vec())
         }
         fn read_native_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
@@ -63,7 +62,9 @@ fn native_sector_range_preserves_full_blocks_for_parameterized_geometry() {
     for width in [512u32, 1024, 2048, 4096, 8192] {
         let mut reader = NativeRangeReader {
             width,
-            sectors: (0..3).map(|index| vec![index + 13; width as usize]).collect(),
+            sectors: (0..3)
+                .map(|index| vec![index + 13; width as usize])
+                .collect(),
             reads: Vec::new(),
         };
         let native = reader.read_native_range(1, 2).unwrap();
@@ -73,7 +74,11 @@ fn native_sector_range_preserves_full_blocks_for_parameterized_geometry() {
         assert_eq!(reader.reads, vec![1, 2]);
         reader.reads.clear();
         let legacy = reader.read_range(1, 2).unwrap();
-        assert_eq!(legacy.len(), 1024, "512B wire projection must stay independent");
+        assert_eq!(
+            legacy.len(),
+            1024,
+            "512B wire projection must stay independent"
+        );
         assert_eq!(reader.reads, Vec::<u64>::new());
 
         reader.sectors[2].pop();
