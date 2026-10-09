@@ -830,7 +830,16 @@ fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
     // Extent adjacency is not overlap: this extra source block may be saved,
     // but the LCE pointer still determines which exact LBA is the real LCE.
     let mut adjacent = overlap;
+    adjacent.regions.push(Region {
+        id: "region.synthetic.additional".into(),
+        role: "additional_read_only_evidence".into(),
+        start_lba: Some(10_001),
+        sector_count: Some(1),
+        semantic_status: SemanticStatus::Identified,
+    });
     adjacent.extents.last_mut().unwrap().start_lba = 10_001;
+    adjacent.extents.last_mut().unwrap().region_id =
+        "region.synthetic.additional".into();
     let adjacent_path = tmp.0.join("adjacent.edpb");
     write_metadata_backup(&adjacent_path, &adjacent).unwrap();
     let adjacent_source = edpcli::application::evidence::EvidenceSource::open_backup(
