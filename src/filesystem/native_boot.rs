@@ -70,6 +70,28 @@ pub fn detect_native_boot_sector(
         }
         return Ok(None);
     }
+    if &native[3..11] == b"NTFS    " {
+        // NTFS does not have FAT's BPB layout. Do not run it through the FAT
+        // reserved-sector/FAT-count checks, which reject valid 4Kn NTFS boots.
+        // Match the existing 512B NTFS driver's structural checks, using the
+        // observed native 4096B sector geometry instead of assuming 512B.
+        let bps = le16(native, 11) as u32;
+        let spc = native[13] as u64;
+        let total = le64(native, 40);
+        let clusters = total.checked_div(spc);
+        return Ok((bps == logical_sector_bytes
+            && spc > 0
+            && spc.is_power_of_two()
+            && spc <= 128
+            && total > 0
+            && total <= volume_native_sectors
+            && native[14..21].iter().all(|byte| *byte == 0)
+            && native[21] >= 0xf0
+            && clusters.is_some_and(|count| {
+                count > 0 && le64(native, 48) < count && le64(native, 56) < count
+            }))
+        .then_some(FilesystemKind::Ntfs));
+    }
     let bps = le16(native, 11) as u32;
     let spc = native[13] as u64;
     let reserved = le16(native, 14) as u64;
@@ -179,6 +201,66 @@ mod tests {
             None
         );
     }
+    #[test]
+    fn four_kn_ntfs_accepts_real_u391_geometry_and_rejects_invalid_boots() {
+        let mut ntfs = boot();
+        ntfs[3..11].copy_from_slice(b"NTFS    ");
+        ntfs[13] = 1;
+        ntfs[14..21].fill(0);
+        ntfs[21] = 0xf8;
+        let volume_sectors = 12_494_112u64;
+        ntfs[40..48].copy_from_slice(&(volume_sectors - 1).to_le_bytes());
+        ntfs[48..56].copy_from_slice(&4u64.to_le_bytes());
+        ntfs[56..64].copy_from_slice(&8u64.to_le_bytes());
+        assert_eq!(
+            detect_native_boot_sector(&ntfs, volume_sectors, 4096).unwrap(),
+            Some(FilesystemKind::Ntfs)
+        );
+        // Regression: prior FAT-only path returned None for the valid NTFS boot.
+        let valid = ntfs.clone();
+        ntfs[11..13].copy_from_slice(&512u16.to_le_bytes());
+        assert_eq!(
+            detect_native_boot_sector(&ntfs, volume_sectors, 4096).unwrap(),
+            None
+        );
+        ntfs = valid.clone();
+        ntfs[13] = 3;
+        assert_eq!(
+            detect_native_boot_sector(&ntfs, volume_sectors, 4096).unwrap(),
+            None
+        );
+        ntfs = valid.clone();
+        ntfs[40..48].copy_from_slice(&(volume_sectors + 1).to_le_bytes());
+        assert_eq!(
+            detect_native_boot_sector(&ntfs, volume_sectors, 4096).unwrap(),
+            None
+        );
+        ntfs = valid.clone();
+        ntfs[48..56].copy_from_slice(&volume_sectors.to_le_bytes());
+        assert_eq!(
+            detect_native_boot_sector(&ntfs, volume_sectors, 4096).unwrap(),
+            None
+        );
+        ntfs = valid.clone();
+        ntfs[14] = 1;
+        assert_eq!(
+            detect_native_boot_sector(&ntfs, volume_sectors, 4096).unwrap(),
+            None
+        );
+        ntfs = valid.clone();
+        ntfs[3..11].copy_from_slice(b"BADFS   ");
+        assert_eq!(
+            detect_native_boot_sector(&ntfs, volume_sectors, 4096).unwrap(),
+            None
+        );
+        ntfs = valid.clone();
+        ntfs[510] = 0;
+        assert_eq!(
+            detect_native_boot_sector(&ntfs, volume_sectors, 4096).unwrap(),
+            None
+        );
+    }
+
     #[test]
     fn four_kn_exfat_requires_native_geometry_and_consistent_extents() {
         let mut boot = boot();
