@@ -212,6 +212,25 @@ impl NativeEdpLayoutPlan {
                 return Err(format!("来源EDPF slot{slot}与确认的全部原生分区几何不一致"));
             }
         }
+        // LBA7 entry0 carries the visible partition geometry. Every later
+        // legacy entry points to the same physical LCE, regardless of its
+        // logical type (share/encrypt). The LBA12 partition geometry above
+        // MUST NOT be substituted for these LBA7 compatibility pointers.
+        let expected_lce_bytes = self
+            .lce
+            .byte_count(self.logical_sector_bytes)
+            .ok_or("LCE 原生字节长度溢出")?;
+        for (slot, record) in parsed.records.iter().enumerate().skip(1) {
+            if record.lba7.start_sector != self.lce.start_lba
+                || record.lba7.partition_size != expected_lce_bytes
+            {
+                return Err(format!(
+                    "LBA7 entry{slot} 兼容区指针或原生占用长度与来源LCE不一致"
+                ));
+            }
+        }
+        // This authenticates pointer/geometry consistency, NOT the LCE
+        // ciphertext content, which remains opaque and source-preserved.
         self.source_replay_native_blocks(protocol, source_lce)
     }
 
