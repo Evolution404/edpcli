@@ -569,3 +569,181 @@ fn fat16_native_writer_refuses_unvalidated_geometry_or_overflow() {
         .build_format_plan(FilesystemGeometry::new(63, 16384, 4096), &request,)
         .is_err());
 }
+
+#[test]
+fn fat32_legacy_512_goldens_survive_shared_native_writer() {
+    use sha2::{Digest, Sha256};
+    // Fixed goldens captured from the original FAT32 formatter before the
+    // native-block implementation; never recompute these from new output.
+    let request = FormatRequest {
+        filesystem: FilesystemKind::Fat32,
+        volume_label: Some("DATA".into()),
+        volume_serial: Some(0x1020_3040),
+    };
+    for (offset, sectors, expected_sha) in [
+        (
+            63,
+            70_000,
+            "c0dbcc0ee274f109bd209fd5b0036b67291963281ea555df45e35456d1ea9db1",
+        ),
+        (
+            2048,
+            262_144,
+            "0705ddabb9b6855442d4dd172ea5972569b9ebaf0d1150ea40cb0c5bc99d4c80",
+        ),
+        (
+            63,
+            1_048_576,
+            "79f3c8de5049e59706801690ecbc41804542059c059b87af7fa2c80e64416c6d",
+        ),
+    ] {
+        let geometry = FilesystemGeometry::new(offset, sectors, 512);
+        let old = FAT32_DRIVER.build_format_plan(geometry, &request).unwrap();
+        let native = FAT32_DRIVER
+            .build_native_format_plan(geometry, &request)
+            .unwrap();
+        assert_eq!(old.expected_metadata, native.expected_metadata);
+        assert_eq!(old.writes.len(), native.writes.len());
+        let mut hash = Sha256::new();
+        for (left, right) in old.writes.iter().zip(&native.writes) {
+            assert_eq!(left.relative_lba, right.relative_lba);
+            assert_eq!(&left.data[..], right.data.as_slice());
+            hash.update(left.relative_lba.to_le_bytes());
+            hash.update(left.data);
+        }
+        let digest = hash
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            digest, expected_sha,
+            "512B FAT32 baseline drift {offset}:{sectors}"
+        );
+    }
+}
+
+#[test]
+fn fat32_native_4kn_virtual_file_has_independent_consistent_metadata() {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    const SIZE: u64 = 4096;
+    const COUNT: u64 = 70_000;
+    let geometry = FilesystemGeometry::new(63, COUNT, SIZE as u32);
+    let request = FormatRequest {
+        filesystem: FilesystemKind::Fat32,
+        volume_label: Some("FOURKN".into()),
+        volume_serial: Some(0x45a3_917f),
+    };
+    let plan = FAT32_DRIVER
+        .build_native_format_plan(geometry, &request)
+        .unwrap();
+    let external = std::env::var_os("EDPCLI_NATIVE_FAT32_IMAGE_PATH");
+    let path = external
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("edpcli-fat32-4kn-{}.img", std::process::id()))
+        });
+    let mut file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    let outcome = (|| -> std::io::Result<()> {
+        file.set_len(COUNT * SIZE)?;
+        for write in &plan.writes {
+            assert!(write.relative_lba < COUNT);
+            assert_eq!(write.data.len(), SIZE as usize);
+            file.seek(SeekFrom::Start(write.relative_lba * SIZE))?;
+            file.write_all(&write.data)?;
+        }
+        file.flush()?;
+        let block = |file: &mut std::fs::File, lba: u64| -> std::io::Result<Vec<u8>> {
+            let mut bytes = vec![0u8; SIZE as usize];
+            file.seek(SeekFrom::Start(lba * SIZE))?;
+            file.read_exact(&mut bytes)?;
+            Ok(bytes)
+        };
+        // This deliberately parses on-disk bytes without using edpcli's own FAT32 parser.
+        let boot = block(&mut file, 0)?;
+        let get16 = |raw: &[u8], offset: usize| {
+            u16::from_le_bytes(raw[offset..offset + 2].try_into().unwrap()) as u64
+        };
+        let get32 = |raw: &[u8], offset: usize| {
+            u32::from_le_bytes(raw[offset..offset + 4].try_into().unwrap()) as u64
+        };
+        let bps = get16(&boot, 11);
+        let spc = u64::from(boot[13]);
+        let reserved = get16(&boot, 14);
+        let copies = u64::from(boot[16]);
+        let fat_len = get32(&boot, 36);
+        let root_cluster = get32(&boot, 44);
+        let fsinfo_lba = get16(&boot, 48);
+        let backup_lba = get16(&boot, 50);
+        assert_eq!(bps, SIZE);
+        assert_eq!(spc, 1);
+        assert_eq!(reserved, 32);
+        assert_eq!(copies, 2);
+        assert_eq!(root_cluster, 2);
+        assert_eq!(fsinfo_lba, 1);
+        assert_eq!(backup_lba, 6);
+        assert_eq!(get32(&boot, 28), 63);
+        assert_eq!(get32(&boot, 32), COUNT);
+        assert_eq!(&boot[510..512], &[0x55, 0xaa]);
+        assert!(boot[512..].iter().all(|b| *b == 0));
+        let data_start = reserved + copies * fat_len;
+        let clusters = (COUNT - data_start) / spc;
+        assert!((65_525..=4_194_304).contains(&clusters));
+        assert!((clusters + 2) * 4 <= fat_len * bps);
+        let fsinfo = block(&mut file, fsinfo_lba)?;
+        assert_eq!(get32(&fsinfo, 0), 0x4161_5252);
+        assert_eq!(get32(&fsinfo, 484), 0x6141_7272);
+        assert_eq!(get32(&fsinfo, 488), clusters - 1);
+        assert_eq!(get32(&fsinfo, 492), 3);
+        assert_eq!(get32(&fsinfo, 508), 0xaa55_0000);
+        assert_eq!(block(&mut file, backup_lba)?, boot);
+        assert_eq!(block(&mut file, backup_lba + 1)?, fsinfo);
+        let first_fat = block(&mut file, reserved)?;
+        assert_eq!(get32(&first_fat, 0), 0x0fff_fff8);
+        assert_eq!(get32(&first_fat, 4), 0x0fff_ffff);
+        assert_eq!(get32(&first_fat, 8), 0x0fff_ffff);
+        assert_eq!(block(&mut file, reserved + fat_len)?, first_fat);
+        let root = block(&mut file, data_start)?;
+        assert_eq!(&root[..11], &boot[71..82]);
+        assert_eq!(root[11], 0x08);
+        assert_eq!(plan.writes.len() as u64, 4 + 2 * fat_len + spc);
+        assert!(block(&mut file, COUNT - 1)?.iter().all(|b| *b == 0));
+        Ok(())
+    })();
+    if external.is_none() {
+        drop(file);
+        std::fs::remove_file(&path).unwrap();
+    }
+    outcome.unwrap();
+}
+
+#[test]
+fn fat32_native_formatter_rejects_noncertified_sizes_and_bounds() {
+    let request = FormatRequest {
+        filesystem: FilesystemKind::Fat32,
+        volume_label: None,
+        volume_serial: Some(7),
+    };
+    for bytes in [0, 256, 1024, 2048, 8192] {
+        assert!(FAT32_DRIVER
+            .build_native_format_plan(FilesystemGeometry::new(63, 70_000, bytes), &request)
+            .is_err());
+    }
+    for (start, count) in [(u64::MAX, 70_000), (63, u64::MAX), (63, 5)] {
+        assert!(FAT32_DRIVER
+            .build_native_format_plan(FilesystemGeometry::new(start, count, 4096), &request)
+            .is_err());
+    }
+    assert!(FAT32_DRIVER
+        .build_format_plan(FilesystemGeometry::new(63, 70_000, 4096), &request)
+        .is_err());
+    assert!(FAT32_DRIVER
+        .build_native_format_plan(FilesystemGeometry::new(63, 80_000_000, 4096), &request)
+        .is_err());
+}
