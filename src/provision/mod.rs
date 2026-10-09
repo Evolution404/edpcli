@@ -45,7 +45,7 @@ pub use layout::{
     PartitionRole, DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
     WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
-pub use lce::{build_lce_ciphertext, lce_plaintext};
+pub use lce::{build_lce_ciphertext, build_native_lce_ciphertext, lce_plaintext};
 pub use native_geometry::{
     NativeEdpExtent, NativeEdpLayoutPlan, NativeEdpPartition, NativeEdpWriteCapability,
 };

@@ -109,6 +109,74 @@ fn u391_native_4kn_lce_locator_matches_official_chs_geometry_not_payload_provena
 }
 
 #[test]
+fn native_lce_512_retains_real_lexar_gold_without_trailing_bytes() {
+    use edpcli::provision::build_native_lce_ciphertext;
+    let layout = locate_lba7_compatibility_extent_from_geometry(15_165, 255, 63, 512).unwrap();
+    let generated = build_native_lce_ciphertext(layout, 512).unwrap();
+    assert_eq!(generated.len(), 3072);
+    assert_eq!(generated.as_slice(), LEXAR_LCE_CIPHER.as_slice());
+}
+
+#[test]
+fn native_lce_4kn_encrypts_original_3072_and_a_zero_plaintext_tail_as_one_stream() {
+    use edpcli::protocol::crypto::a7f0_full;
+    use edpcli::provision::build_native_lce_ciphertext;
+
+    let layout = locate_lba7_compatibility_extent_from_geometry(3889, 255, 63, 4096).unwrap();
+    assert_eq!(layout.start_byte_offset, 62_476_561u64 * 4096);
+    let generated = build_native_lce_ciphertext(layout, 4096).unwrap();
+    assert_eq!(generated.len(), 4096);
+    let mut expected_plain = vec![0u8; 4096];
+    expected_plain[..3072].copy_from_slice(lce_plaintext());
+    assert_eq!(
+        a6b0_full(&generated, &[0u8; 8], layout.start_byte_offset),
+        expected_plain,
+    );
+    assert_eq!(
+        &generated[..3072],
+        a7f0_full(lce_plaintext(), &[0u8; 8], layout.start_byte_offset)
+    );
+    assert!(
+        generated[3072..].iter().any(|b| *b != 0),
+        "the last 1024B MUST be encrypted zeros, never raw zeros"
+    );
+    assert_eq!(
+        &generated[3072..],
+        a7f0_full(&[0u8; 1024], &[0u8; 8], layout.start_byte_offset + 3072),
+    );
+    assert_ne!(
+        &generated[3072..],
+        a7f0_full(&[0u8; 1024], &[0u8; 8], 0),
+        "the tail may not restart its tweak at zero"
+    );
+    let mut modified = generated.clone();
+    modified[3072] ^= 0x01;
+    assert_ne!(
+        &a6b0_full(&modified, &[0u8; 8], layout.start_byte_offset)[3072..],
+        &[0u8; 1024],
+    );
+}
+
+#[test]
+fn native_lce_4kn_rejects_mismatched_geometry_and_offsets() {
+    use edpcli::provision::build_native_lce_ciphertext;
+    let layout = locate_lba7_compatibility_extent_from_geometry(3889, 255, 63, 4096).unwrap();
+    assert!(build_native_lce_ciphertext(layout, 512).is_err());
+    assert!(build_native_lce_ciphertext(layout, 1024).is_err());
+    let mut bad = layout;
+    bad.size_bytes = 3072;
+    assert!(build_native_lce_ciphertext(bad, 4096).is_err());
+    let mut bad = layout;
+    bad.size_sectors = 2;
+    assert!(build_native_lce_ciphertext(bad, 4096).is_err());
+    let mut bad = layout;
+    bad.start_byte_offset += 512;
+    assert!(build_native_lce_ciphertext(bad, 4096).is_err());
+    let mut bad = layout;
+    bad.start_lba = u64::MAX;
+    assert!(build_native_lce_ciphertext(bad, 4096).is_err());
+}
+#[test]
 fn legacy_lce_gold_does_not_have_u391_neighborhood_512b_zero_frame_signature() {
     // For the U391 source and adjacent blocks, every 512B frame was observed
     // to have these five zero offsets. Neither genuine legacy 512B LCE

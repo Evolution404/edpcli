@@ -2080,6 +2080,90 @@ fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
         assert_eq!(offline_plan.total_sectors, 16_777_216);
         assert_eq!(offline_plan.sector_bytes, 4096);
         assert_eq!(offline_plan.writes, staged);
+        // Explicit opt-in LCE regeneration uses the candidate 4Kn producer
+        // rather than the existing source's opaque 1024B tail. The ordinary
+        // source replay above MUST remain byte-perfect and unchanged.
+        let regenerated =
+            edpcli::application::provision::native_image::plan_native_edp_regenerated_lce_image(
+                &native_layout,
+                &native,
+                &did,
+                16_777_216,
+                |lba| {
+                    if lba < 13 {
+                        Ok(native.block(lba as usize).unwrap().to_vec())
+                    } else if lba == lce_start {
+                        Ok(source_lce[0].clone())
+                    } else {
+                        Err("unrecognized source LBA".into())
+                    }
+                },
+            )
+            .unwrap();
+        let fresh_lce = regenerated
+            .writes
+            .iter()
+            .find(|write| write.relative_lba == lce_start)
+            .unwrap();
+        assert_eq!(fresh_lce.data.len(), 4096);
+        assert_ne!(fresh_lce.data, source_lce[0]);
+        let mut expected_lce_plain = vec![0u8; 4096];
+        expected_lce_plain[..3072].copy_from_slice(edpcli::provision::lce_plaintext());
+        assert_eq!(
+            a6b0_full(&fresh_lce.data, &[0u8; 8], lce_start * 4096),
+            expected_lce_plain
+        );
+        for preserved in staged
+            .iter()
+            .filter(|write| write.relative_lba != lce_start)
+        {
+            let rebuilt = regenerated
+                .writes
+                .iter()
+                .find(|write| write.relative_lba == preserved.relative_lba)
+                .unwrap();
+            assert_eq!(rebuilt.data, preserved.data);
+        }
+        assert!(
+            native_layout
+                .verify_source_replay_readback(&native, &did, &source_lce, &regenerated.writes,)
+                .is_err(),
+            "regenerated ciphertext is NOT a lossless source replay"
+        );
+        let regenerated_path = std::env::temp_dir().join(format!(
+            "edpcli-regenerated-native-lce-{}-{}.img",
+            std::process::id(),
+            mode as u8
+        ));
+        assert!(!regenerated_path.exists());
+        edpcli::application::provision::native_image::export_native_edp_regenerated_lce_image(
+            &regenerated_path,
+            &native_layout,
+            &native,
+            &did,
+            16_777_216,
+            |lba| {
+                if lba < 13 {
+                    Ok(native.block(lba as usize).unwrap().to_vec())
+                } else if lba == lce_start {
+                    Ok(source_lce[0].clone())
+                } else {
+                    Err("unknown synthetic source".into())
+                }
+            },
+        )
+        .unwrap();
+        use std::io::SeekFrom as NativeSeekFrom;
+        let mut disk = std::fs::File::open(&regenerated_path).unwrap();
+        disk.seek(NativeSeekFrom::Start(lce_start * 4096)).unwrap();
+        let mut observed_lce = vec![0u8; 4096];
+        disk.read_exact(&mut observed_lce).unwrap();
+        assert_eq!(observed_lce, fresh_lce.data);
+        disk.seek(NativeSeekFrom::Start(0)).unwrap();
+        let mut observed_mbr = vec![0u8; 4096];
+        disk.read_exact(&mut observed_mbr).unwrap();
+        assert_eq!(observed_mbr, native.block(0).unwrap());
+        std::fs::remove_file(&regenerated_path).unwrap();
         // This application entrypoint MUST check the independent protocol
         // snapshot before reading any LCE, even if its decoded 512B projection
         // remains identical and only the native 3584B opaque tail changes.

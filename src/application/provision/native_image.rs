@@ -310,6 +310,82 @@ where
     export_native_plain_image(path, &plan)
 }
 
+/// Explicitly rebuild LCE in an independently verified 4Kn SOURCE-backed
+/// *ordinary-file virtual image* using the candidate zero8+A7F0 producer.
+///
+/// This differs intentionally from lossless source replay: the entire source
+/// 4096B LCE is replaced with freshly generated ciphertext, including the
+/// final 1024B encrypted-zero tail. The immutable native protocol LBA0..12
+/// remains source-preserved. This is NOT a validated OEM 4Kn write image or a
+/// path to a physical disk: fresh 4Kn EDP metadata is not synthesized.
+pub fn plan_native_edp_regenerated_lce_image<F>(
+    layout: &crate::provision::NativeEdpLayoutPlan,
+    source_protocol: &crate::protocol::image::NativeProtocolImage,
+    device_id: &str,
+    source_total_sectors: u64,
+    read_native: F,
+) -> Result<NativeVirtualDiskPlan, String>
+where
+    F: FnMut(u64) -> Result<Vec<u8>, String>,
+{
+    if layout.logical_sector_bytes != 4096 || layout.lce.sector_count != 1 {
+        return Err("重新生成LCE仅支持完整原生4096B虚拟盘".into());
+    }
+    let mut plan = plan_native_edp_source_replay_image(
+        layout,
+        source_protocol,
+        device_id,
+        source_total_sectors,
+        read_native,
+    )?;
+    let start_byte_offset = layout
+        .lce
+        .start_lba
+        .checked_mul(4096)
+        .ok_or("新LCE原生字节偏移溢出")?;
+    let chs_bytes = start_byte_offset
+        .checked_add(crate::protocol::lba7_compat::LBA7_COMPAT_CHS_TAIL_DISTANCE_BYTES)
+        .ok_or("新LCE CHS位置溢出")?;
+    let lce_layout = crate::protocol::lba7_compat::Lba7CompatibilityExtentLayout {
+        chs_bytes,
+        start_byte_offset,
+        start_lba: layout.lce.start_lba,
+        size_bytes: 4096,
+        size_sectors: 1,
+    };
+    let ciphertext = crate::provision::build_native_lce_ciphertext(lce_layout, 4096)?;
+    let block = plan
+        .writes
+        .iter_mut()
+        .find(|write| write.relative_lba == layout.lce.start_lba)
+        .ok_or("已验证来源重放缺少原生LCE块")?;
+    block.data = ciphertext;
+    Ok(plan)
+}
+
+/// Export the explicitly regenerated 4Kn LCE candidate to a freshly created
+/// regular-file image, using the common MBR-last native transaction/readback.
+pub fn export_native_edp_regenerated_lce_image<F>(
+    path: &Path,
+    layout: &crate::provision::NativeEdpLayoutPlan,
+    source_protocol: &crate::protocol::image::NativeProtocolImage,
+    device_id: &str,
+    source_total_sectors: u64,
+    read_native: F,
+) -> Result<(), String>
+where
+    F: FnMut(u64) -> Result<Vec<u8>, String>,
+{
+    let plan = plan_native_edp_regenerated_lce_image(
+        layout,
+        source_protocol,
+        device_id,
+        source_total_sectors,
+        read_native,
+    )?;
+    export_native_plain_image(path, &plan)
+}
+
 /// One optional *offline-only* filesystem initialization over a confirmed
 /// source partition. The password is used only to authenticate the original
 /// wrapped FileKey (including CRC); it is never stored in the write plan.

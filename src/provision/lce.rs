@@ -33,3 +33,43 @@ pub fn build_lce_ciphertext(
         .try_into()
         .map_err(|_| "LCE ciphertext length mismatch".into())
 }
+/// Generate a complete native LCE using the existing zero8+A7F0 cipher.
+///
+/// 512B delegates to the independently gold-verified 3072B producer. On 4Kn,
+/// the **candidate new-provision policy** is the 3072B FAT16 plaintext plus
+/// 1024 plaintext zero bytes, encrypted continuously as one full 4096B block
+/// with the real physical byte-offset tweak (not plaintext zero padding).
+///
+/// The 4Kn OEM writer has NOT been independently authenticated. This offline
+/// constructor does not permit physical writes and must not replace an existing
+/// source LCE's unowned 1024B tail during exact byte-for-byte source replay.
+pub fn build_native_lce_ciphertext(
+    layout: Lba7CompatibilityExtentLayout,
+    logical_sector_bytes: u32,
+) -> Result<Vec<u8>, String> {
+    if !matches!(logical_sector_bytes, 512 | 4096) {
+        return Err("unsupported native LCE logical sector size".into());
+    }
+    let logical = u64::from(logical_sector_bytes);
+    let expected_sectors = (LBA7_COMPAT_EXTENT_TOTAL_SIZE as u64).div_ceil(logical);
+    let expected_bytes = expected_sectors
+        .checked_mul(logical)
+        .ok_or("native LCE length overflow")?;
+    if layout.size_bytes != expected_bytes || layout.size_sectors != expected_sectors {
+        return Err("native LCE extent length does not match sector geometry".into());
+    }
+    if layout.start_lba.checked_mul(logical) != Some(layout.start_byte_offset)
+        || layout
+            .start_byte_offset
+            .checked_add(expected_bytes)
+            .is_none()
+    {
+        return Err("native LCE start address or byte range is invalid".into());
+    }
+    if logical_sector_bytes == 512 {
+        return build_lce_ciphertext(layout).map(Vec::from);
+    }
+    let mut plaintext = vec![0u8; expected_bytes as usize];
+    plaintext[..LBA7_COMPAT_EXTENT_TOTAL_SIZE].copy_from_slice(LCE_PLAINTEXT);
+    Ok(a7f0_full(&plaintext, &ZERO8, layout.start_byte_offset))
+}
