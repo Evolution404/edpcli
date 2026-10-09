@@ -234,6 +234,52 @@ impl NativeEdpLayoutPlan {
         self.source_replay_native_blocks(protocol, source_lce)
     }
 
+    /// Compare every observed complete native block against a freshly
+    /// verified source replay, including the 3584B unowned protocol tails and
+    /// the unowned bytes beyond the 3072B LCE compatibility payload.
+    ///
+    /// The observations may arrive in any order, but missing, duplicate,
+    /// unexpected, truncated, or byte-altered LBAs are all rejected. This is
+    /// *source byte equivalence*, never independent LCE cryptographic proof
+    /// or authorization for an actual disk write.
+    pub fn verify_source_replay_readback(
+        &self,
+        protocol: &NativeProtocolImage,
+        device_id: &str,
+        source_lce: &[Vec<u8>],
+        observed: &[NativeFilesystemWrite],
+    ) -> Result<(), String> {
+        let expected =
+            self.verified_source_replay_native_blocks(protocol, device_id, source_lce)?;
+        if observed.len() != expected.len() {
+            return Err("虚拟重放回读块数与已验证来源不一致".into());
+        }
+        let mut by_lba = std::collections::BTreeMap::new();
+        for block in observed {
+            if block.data.len() != self.logical_sector_bytes as usize {
+                return Err(format!(
+                    "虚拟重放回读LBA{}不是完整原生块",
+                    block.relative_lba
+                ));
+            }
+            if by_lba.insert(block.relative_lba, &block.data).is_some() {
+                return Err(format!("虚拟重放回读LBA{}重复", block.relative_lba));
+            }
+        }
+        for source in expected {
+            match by_lba.get(&source.relative_lba) {
+                Some(bytes) if bytes.as_slice() == source.data.as_slice() => {}
+                Some(_) => {
+                    return Err(format!("虚拟重放回读LBA{}内容不匹配", source.relative_lba));
+                }
+                None => {
+                    return Err(format!("虚拟重放回读缺少LBA{}", source.relative_lba));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Stage an exact existing-source protocol+LCE replay into a *virtual*
     /// image. This is not protocol generation or an authorized disk write.
     /// All native opaque tails are copied unchanged, including LBA11.
