@@ -33,6 +33,78 @@ fn sector_reader_range_is_checked_and_lossless() {
 }
 
 #[test]
+fn native_sector_range_preserves_full_blocks_for_parameterized_geometry() {
+    struct NativeRangeReader {
+        width: u32,
+        sectors: Vec<Vec<u8>>,
+        reads: Vec<u64>,
+    }
+    impl SectorReader for NativeRangeReader {
+        fn logical_sector_bytes(&self) -> u32 {
+            self.width
+        }
+        fn read_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+            Ok(self
+                .sectors
+                .get(lba as usize)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no sector"))?
+                [..512]
+                .to_vec())
+        }
+        fn read_native_sector(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+            self.reads.push(lba);
+            self.sectors
+                .get(lba as usize)
+                .cloned()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no sector"))
+        }
+    }
+
+    for width in [512u32, 1024, 2048, 4096, 8192] {
+        let mut reader = NativeRangeReader {
+            width,
+            sectors: (0..3).map(|index| vec![index + 13; width as usize]).collect(),
+            reads: Vec::new(),
+        };
+        let native = reader.read_native_range(1, 2).unwrap();
+        assert_eq!(native.len(), 2 * width as usize);
+        assert_eq!(native[..width as usize], reader.sectors[1]);
+        assert_eq!(native[width as usize..], reader.sectors[2]);
+        assert_eq!(reader.reads, vec![1, 2]);
+        reader.reads.clear();
+        let legacy = reader.read_range(1, 2).unwrap();
+        assert_eq!(legacy.len(), 1024, "512B wire projection must stay independent");
+        assert_eq!(reader.reads, Vec::<u64>::new());
+
+        reader.sectors[2].pop();
+        let failure = reader.read_native_range(1, 2).unwrap_err();
+        assert_eq!(failure.kind(), io::ErrorKind::UnexpectedEof);
+        assert!(failure.to_string().contains("完整原生扇区"));
+    }
+
+    let mut reader = NativeRangeReader {
+        width: 4096,
+        sectors: vec![vec![0; 4096]],
+        reads: Vec::new(),
+    };
+    for (first, count) in [(u64::MAX, 2), (0, usize::MAX), (0, 2049)] {
+        assert_eq!(
+            reader.read_native_range(first, count).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert!(reader.reads.is_empty(), "invalid request must not read");
+    }
+    for invalid_width in [0u32, 256, 1000, 65_537] {
+        reader.width = invalid_width;
+        assert_eq!(
+            reader.read_native_range(0, 1).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert!(reader.reads.is_empty());
+    }
+}
+
+#[test]
 fn decoder_registry_fails_closed_outside_registered_regions() {
     let context = crate::inspect_target::InspectDiskContext::new_with_partition_table(
         vec![0; METADATA_IMAGE_LEN],
