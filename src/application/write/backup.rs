@@ -2,6 +2,28 @@
 
 use super::*;
 
+/// The v3 capture/restore contract still assumes 512B sectors, even though
+/// native 4Kn protocol reads are already supported. Reject rather than create
+/// a misleading truncated backup that cannot be round-trip restored.
+fn verify_native_backup_capture_compatibility(
+    geometry: Option<crate::domain::hardware::ObservedDeviceGeometry>,
+) -> EdpCliResult<()> {
+    // Missing geometry retains legacy behavior; only *known* non-512B
+    // geometries are newly refused. This ensures unchanged 512B/unknown
+    // discovery flows while preventing known 4Kn protocol truncation.
+    if let Some(logical) = geometry.and_then(|observed| observed.logical_sector_bytes) {
+        if logical != SECTOR as u32 {
+            return Err(err(
+                EXIT_BACKUP,
+                format!(
+                    "错误: 当前 EDPB 元数据备份仅通过 512B 逻辑扇区验证，目标扇区大小 {logical}B；原生备份与同几何恢复尚未完成，不创建不完整备份"
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// 为当前已选定 U 盘创建 Metadata 级 EDPB 备份。
 ///
 /// 这是纯只读介质路径：读取身份、LBA0-12、分区关键元数据和盘尾证据，
@@ -142,6 +164,9 @@ pub fn backup_create_on_disk(
     expected_onlyid: Option<&str>,
     expected_device_id: Option<&str>,
 ) -> EdpCliResult<crate::application::post_restore::MetadataBackupReport> {
+    verify_native_backup_capture_compatibility(crate::platform::system::device_geometry(
+        runner, disk,
+    ))?;
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     verify_expected_identity(runner, disk, expected_onlyid, expected_device_id, &mut dev)?;
     let mut ctx = Ctx {
@@ -160,6 +185,9 @@ pub fn backup_create_on_disk_with_pin(
     prompt: &mut dyn Prompter,
     expected: &MediaIdentityResumePin,
 ) -> EdpCliResult<crate::application::post_restore::MetadataBackupReport> {
+    verify_native_backup_capture_compatibility(crate::platform::system::device_geometry(
+        runner, disk,
+    ))?;
     let mut dev = open_readonly_usb_disk(runner, disk)?;
     verify_resume_identity_pin(runner, disk, expected, &mut dev)?;
     let mut ctx = Ctx {
@@ -169,4 +197,25 @@ pub fn backup_create_on_disk_with_pin(
         backup_dir,
     };
     backup_create_flow(disk, &mut ctx, &mut dev)
+}
+
+#[cfg(test)]
+mod native_backup_capture_gate_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_edpb_capture_keeps_512b_path_and_rejects_unverified_4kn() {
+        let observed = |logical_sector_bytes| crate::domain::hardware::ObservedDeviceGeometry {
+            capacity_bytes: 255_944_818_688,
+            logical_sector_bytes,
+            physical_sector_bytes: Some(4096),
+        };
+        assert!(verify_native_backup_capture_compatibility(Some(observed(Some(512)))).is_ok());
+        assert!(verify_native_backup_capture_compatibility(None).is_ok());
+        assert!(verify_native_backup_capture_compatibility(Some(observed(None))).is_ok());
+        let four_kn = verify_native_backup_capture_compatibility(Some(observed(Some(4096))))
+            .expect_err("incompatible backup must be refused");
+        assert_eq!(four_kn.code, EXIT_BACKUP);
+        assert!(four_kn.msg.contains("不创建不完整备份"));
+    }
 }
