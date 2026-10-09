@@ -614,6 +614,38 @@ impl EvidenceSource {
         &self.identity
     }
 
+    /// UI-neutral entry point for verified native source replay from a disk
+    /// or EDPB backup. Uses this source's observed identity and the original
+    /// snapshot; callers cannot override the identity or provide LCE bytes
+    /// from a different reader.
+    ///
+    /// This API never obtains a writable handle. It does not enable native
+    /// provisioning or certify the 4Kn LCE's cryptographic content.
+    pub fn verified_native_replay(
+        &mut self,
+        plan: &crate::provision::NativeEdpLayoutPlan,
+    ) -> Result<Vec<crate::filesystem::NativeFilesystemWrite>, String> {
+        let device_id = self
+            .identity
+            .device_id
+            .as_deref()
+            .ok_or("只读来源未确认device_id")?
+            .to_owned();
+        let snapshot = match &self.native_protocol {
+            Some(image) => image.clone(),
+            None if self.logical_sector_bytes() == SECTOR as u32 => {
+                crate::protocol::image::NativeProtocolImage::from_native_bytes(
+                    SECTOR as u32,
+                    self.protocol.clone(),
+                )
+                .map_err(|error| format!("来源协议快照构造失败: {error}"))?
+            }
+            None => return Err("原生来源缺少完整协议扇区快照".into()),
+        };
+        let source_total_sectors = self.total_sectors;
+        verified_native_source_replay(self, plan, &snapshot, &device_id, source_total_sectors)
+    }
+
     pub fn read_artifact(&mut self, artifact_id: &str) -> io::Result<Option<Vec<u8>>> {
         match &mut self.reader {
             EvidenceReader::Disk(_) => Ok(None),
@@ -622,6 +654,41 @@ impl EvidenceSource {
                 .map(|data| data.map(<[u8]>::to_vec)),
         }
     }
+}
+
+/// Read a source's entire native EDP protocol and LCE through the same
+/// read-only sector abstraction, with an independently captured protocol
+/// snapshot as a second source-consistency check. This authenticates the
+/// *consistency* of reads against the provided evidence, not the hardware
+/// identity or cryptographic content of LCE.
+pub fn verified_native_source_replay<R: SectorReader + ?Sized>(
+    reader: &mut R,
+    plan: &crate::provision::NativeEdpLayoutPlan,
+    source_protocol: &crate::protocol::image::NativeProtocolImage,
+    device_id: &str,
+    source_total_sectors: u64,
+) -> Result<Vec<crate::filesystem::NativeFilesystemWrite>, String> {
+    if !matches!(reader.logical_sector_bytes(), 512 | 4096)
+        || reader.logical_sector_bytes() != plan.logical_sector_bytes
+        || source_protocol.logical_sector_bytes() != plan.logical_sector_bytes
+        || source_total_sectors != plan.total_sectors
+    {
+        return Err("来源与重放计划的原生扇区大小或容量不一致".into());
+    }
+    if device_id.is_empty() {
+        return Err("来源缺少设备身份，拒绝生成重放计划".into());
+    }
+    plan.verified_source_replay_from_reader(device_id, |lba| {
+        let block = reader
+            .read_native_sector(lba)
+            .map_err(|error| format!("来源原生LBA{lba}只读失败: {error}"))?;
+        if lba < METADATA_SECTOR_COUNT as u64
+            && source_protocol.block(lba as usize) != Some(block.as_slice())
+        {
+            return Err(format!("来源协议LBA{lba}与已采集原生快照不一致"));
+        }
+        Ok(block)
+    })
 }
 
 impl SectorReader for EvidenceSource {

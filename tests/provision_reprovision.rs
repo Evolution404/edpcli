@@ -21,6 +21,30 @@ use edpcli::{
 const SECTOR_SIZE: u64 = 512;
 const MIB_SECTORS: u64 = 2048;
 
+/// Synthetic-only source reader. It never opens a physical disk or file.
+struct OfflineNativeFixtureReader {
+    sector_bytes: u32,
+    blocks: std::collections::BTreeMap<u64, Vec<u8>>,
+    calls: Vec<u64>,
+}
+impl edpcli::application::evidence::SectorReader for OfflineNativeFixtureReader {
+    fn read_sector(&mut self, lba: u64) -> std::io::Result<Vec<u8>> {
+        let bytes = self.blocks.get(&lba).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "missing synthetic sector")
+        })?;
+        Ok(bytes[..512].to_vec())
+    }
+    fn logical_sector_bytes(&self) -> u32 {
+        self.sector_bytes
+    }
+    fn read_native_sector(&mut self, lba: u64) -> std::io::Result<Vec<u8>> {
+        self.calls.push(lba);
+        self.blocks.get(&lba).cloned().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "missing synthetic sector")
+        })
+    }
+}
+
 // Geometry-only scenarios have no source key record. Use the same canonical
 // compatibility engine as production with both key profiles explicitly absent.
 fn geometry_preserve_candidate(
@@ -2032,6 +2056,98 @@ fn native_4kn_edpf_source_password_verification_matrix_is_fail_closed() {
             })
             .unwrap();
         assert_eq!(from_one_source, staged);
+
+        // Application evidence reader must use the same source for the
+        // original protocol and LCE and confirm the *entire native snapshot*.
+        let fixture_blocks = (0..13u64)
+            .map(|lba| (lba, native.block(lba as usize).unwrap().to_vec()))
+            .chain(std::iter::once((lce_start, source_lce[0].clone())))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut reader = OfflineNativeFixtureReader {
+            sector_bytes: 4096,
+            blocks: fixture_blocks,
+            calls: Vec::new(),
+        };
+        let verified = edpcli::application::evidence::verified_native_source_replay(
+            &mut reader,
+            &native_layout,
+            &native,
+            &did,
+            16_777_216,
+        )
+        .unwrap();
+        assert_eq!(verified, staged);
+        assert_eq!(reader.calls, observed_lbas);
+
+        // A stale capacity, incompatible reader geometry or untrusted DID
+        // must stop before the first source read.
+        for bad_capacity in [16_777_215, 16_777_217] {
+            reader.calls.clear();
+            assert!(
+                edpcli::application::evidence::verified_native_source_replay(
+                    &mut reader,
+                    &native_layout,
+                    &native,
+                    &did,
+                    bad_capacity,
+                )
+                .is_err()
+            );
+            assert!(reader.calls.is_empty());
+        }
+        reader.sector_bytes = 512;
+        assert!(
+            edpcli::application::evidence::verified_native_source_replay(
+                &mut reader,
+                &native_layout,
+                &native,
+                &did,
+                16_777_216,
+            )
+            .is_err()
+        );
+        assert!(reader.calls.is_empty());
+        reader.sector_bytes = 4096;
+        assert!(
+            edpcli::application::evidence::verified_native_source_replay(
+                &mut reader,
+                &native_layout,
+                &native,
+                "",
+                16_777_216,
+            )
+            .is_err()
+        );
+        assert!(reader.calls.is_empty());
+
+        // A changed native opaque tail fails even though the 512B protocol
+        // projection and all decoded partitions are still identical.
+        reader.blocks.get_mut(&7).unwrap()[4095] ^= 1;
+        assert!(
+            edpcli::application::evidence::verified_native_source_replay(
+                &mut reader,
+                &native_layout,
+                &native,
+                &did,
+                16_777_216,
+            )
+            .unwrap_err()
+            .contains("快照不一致")
+        );
+        assert!(!reader.calls.contains(&lce_start));
+        reader.blocks.get_mut(&7).unwrap()[4095] ^= 1;
+        reader.calls.clear();
+        assert!(
+            edpcli::application::evidence::verified_native_source_replay(
+                &mut reader,
+                &native_layout,
+                &native,
+                &did,
+                16_777_216,
+            )
+            .is_ok()
+        );
+
         assert_eq!(
             observed_lbas,
             (0..13u64)

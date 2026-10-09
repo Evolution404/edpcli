@@ -354,3 +354,84 @@ fn native_edp_replay_copies_complete_source_blocks_and_lce_without_rewriting_opa
             .is_err());
     }
 }
+
+/// Matrix of already-supported *offline* native-sector transforms. This tests
+/// data cipher semantics, NOT manufacturer's native4Kn protocol production,
+/// password validity, secure hardware callback selection, or USB writes.
+#[test]
+fn offline_cipher_matrix_four_layouts_two_native_sector_widths() {
+    use edpcli::application::inspect::{
+        transform_native_sector_offline, NativeCipherDirection, NativePartitionDataCipher,
+    };
+
+    let key = std::array::from_fn(|index| (index as u8).wrapping_add(7));
+    let mut visited = 0usize;
+    let mut unencrypted = 0usize;
+    for native_bytes in [512u32, 4096] {
+        for mode in [
+            OfficialPartitionMode::DefaultThreePartition,
+            OfficialPartitionMode::BootShareCombined,
+            OfficialPartitionMode::WholeDiskEncrypted,
+            OfficialPartitionMode::IntranetExtranetDualPartition,
+        ] {
+            let (total, lce_start, parts) = sample(mode, native_bytes);
+            let lce_count = if native_bytes == 4096 { 1 } else { 6 };
+            let plan = NativeEdpLayoutPlan::from_confirmed_geometry(
+                mode,
+                total,
+                native_bytes,
+                &parts,
+                lce_start,
+                lce_count,
+            )
+            .unwrap();
+            assert!(!plan.may_write());
+            for partition in &plan.partitions {
+                let sample_plain = (0..native_bytes as usize)
+                    .map(|i| (i as u8).wrapping_mul(29).wrapping_add(11))
+                    .collect::<Vec<_>>();
+                if !partition.semantics.physically_encrypted() {
+                    // Mode1 combined BootShare has NeedEncrypt protocol set,
+                    // but is physically PLAINTEXT. Never infer encryption from
+                    // LBA12 NeedEncrypt alone.
+                    assert_eq!(sample_plain.len(), native_bytes as usize);
+                    unencrypted += 1;
+                    continue;
+                }
+                for encrypt_mode in [1, 2, 3] {
+                    let algorithm =
+                        NativePartitionDataCipher::from_encrypt_mode(encrypt_mode).unwrap();
+                    let ciphertext = transform_native_sector_offline(
+                        algorithm,
+                        NativeCipherDirection::Encrypt,
+                        &sample_plain,
+                        &key,
+                        partition.geometry.start_lba,
+                        native_bytes,
+                    )
+                    .unwrap();
+                    assert_ne!(ciphertext, sample_plain);
+                    let recovered = transform_native_sector_offline(
+                        algorithm,
+                        NativeCipherDirection::Decrypt,
+                        &ciphertext,
+                        &key,
+                        partition.geometry.start_lba,
+                        native_bytes,
+                    )
+                    .unwrap();
+                    assert_eq!(recovered, sample_plain);
+                    visited += 1;
+                }
+            }
+            for not_supported in [0, 4, 255] {
+                assert!(NativePartitionDataCipher::from_encrypt_mode(not_supported).is_err());
+            }
+        }
+    }
+    assert!(visited >= 24, "the matrix must exercise encrypted regions");
+    assert!(
+        unencrypted >= 4,
+        "the matrix must exercise physical plaintext regions"
+    );
+}
