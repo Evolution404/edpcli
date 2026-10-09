@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use edpcli::application::filesystem::{
     DetectionConfidence, DetectionResult, DriverRegistry, FilesystemCapabilities, FilesystemDriver,
     FilesystemError, FilesystemErrorKind, FilesystemGeometry, FilesystemKind, FilesystemReader,
-    FormatRequest, EXFAT_DRIVER, FAT16_DRIVER, FAT32_DRIVER,
+    FormatRequest, EXFAT_DRIVER, FAT12_DRIVER, FAT16_DRIVER, FAT32_DRIVER,
 };
 
 struct MemoryReader {
@@ -953,4 +953,254 @@ fn exfat_native_4kn_geometry_and_legacy_write_guards() {
             .build_native_format_plan(FilesystemGeometry::new(start, count, 4096), &request)
             .is_err());
     }
+}
+
+#[test]
+fn fat12_legacy_512_detection_remains_read_only_with_new_virtual_writer() {
+    let request = FormatRequest {
+        filesystem: FilesystemKind::Fat12,
+        volume_label: Some("BOOT".to_string()),
+        volume_serial: Some(0x0102_0304),
+    };
+    let geometry = FilesystemGeometry::new(63, 2497, 512);
+    let plan = FAT12_DRIVER
+        .build_native_format_plan(geometry, &request)
+        .unwrap();
+    assert_eq!(plan.expected_metadata.kind, FilesystemKind::Fat12);
+    assert!(!FAT12_DRIVER.capabilities().format);
+    assert!(!FAT12_DRIVER.capabilities().verify_format);
+    assert_eq!(
+        FAT12_DRIVER
+            .build_format_plan(geometry, &request)
+            .unwrap_err()
+            .kind,
+        FilesystemErrorKind::FormatUnsupported
+    );
+    let sectors = plan
+        .writes
+        .into_iter()
+        .map(|write| {
+            (
+                write.relative_lba,
+                <[u8; 512]>::try_from(write.data).unwrap(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut reader = PlanReader {
+        sector_count: geometry.sector_count,
+        sectors,
+    };
+    assert_eq!(
+        FAT12_DRIVER.detect(&mut reader).unwrap().confidence,
+        DetectionConfidence::Exact
+    );
+    assert_eq!(
+        FAT12_DRIVER.read_metadata(&mut reader).unwrap().kind,
+        FilesystemKind::Fat12
+    );
+}
+
+#[test]
+fn fat12_u391_native_virtual_4kn_image_independently_checks_fat_and_root() {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    const SIZE: u64 = 4096;
+    const COUNT: u64 = 2497; // Actual U391 FAT12 boot partition native sector count
+    let geometry = FilesystemGeometry::new(63, COUNT, SIZE as u32);
+    let request = FormatRequest {
+        filesystem: FilesystemKind::Fat12,
+        volume_label: Some("BOOT".to_string()),
+        volume_serial: Some(0x1234_5678),
+    };
+    let plan = FAT12_DRIVER
+        .build_native_format_plan(geometry, &request)
+        .unwrap();
+    assert_eq!(plan.geometry, geometry);
+    let external = std::env::var_os("EDPCLI_NATIVE_FAT12_IMAGE_PATH");
+    let path = external
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("edpcli-fat12-4kn-{}.img", std::process::id()))
+        });
+    let mut file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    let result = (|| -> std::io::Result<()> {
+        file.set_len(SIZE * COUNT)?;
+        for sector in &plan.writes {
+            assert!(sector.relative_lba < COUNT);
+            assert_eq!(sector.data.len(), SIZE as usize);
+            file.seek(SeekFrom::Start(sector.relative_lba * SIZE))?;
+            file.write_all(&sector.data)?;
+        }
+        file.flush()?;
+
+        // Independent FAT12 parser: reads the regular-file bytes directly,
+        // without invoking any edpcli boot-sector detector/reader.
+        let block = |file: &mut std::fs::File, lba: u64| -> std::io::Result<Vec<u8>> {
+            let mut bytes = vec![0u8; SIZE as usize];
+            file.seek(SeekFrom::Start(lba * SIZE))?;
+            file.read_exact(&mut bytes)?;
+            Ok(bytes)
+        };
+        let boot = block(&mut file, 0)?;
+        let le16 = |off: usize| u16::from_le_bytes(boot[off..off + 2].try_into().unwrap()) as u64;
+        let le32 = |off: usize| u32::from_le_bytes(boot[off..off + 4].try_into().unwrap()) as u64;
+        assert_eq!(&boot[3..11], b"MSDOS5.0");
+        assert_eq!(le16(11), SIZE);
+        assert_eq!(boot[13], 1); // U391 boot partition SPC=1
+        assert_eq!(le16(14), 1);
+        assert_eq!(boot[16], 2);
+        assert_eq!(le16(17), 512);
+        assert_eq!(le16(19), COUNT);
+        assert_eq!(le32(32), 0);
+        assert_eq!(le16(22), 1); // U391 sample has one 4Kn block per FAT copy
+        assert_eq!(le32(28), 63);
+        assert_eq!(&boot[54..62], b"FAT12   ");
+        assert_eq!(&boot[510..512], &[0x55, 0xaa]);
+        assert!(boot[512..].iter().all(|byte| *byte == 0));
+        let root_sectors = (le16(17) * 32).div_ceil(SIZE);
+        let fat_len = le16(22);
+        let fat_start = le16(14);
+        let root_start = fat_start + fat_len * u64::from(boot[16]);
+        let data_start = root_start + root_sectors;
+        let cluster_count = (COUNT - data_start) / u64::from(boot[13]);
+        assert_eq!(root_sectors, 4);
+        assert_eq!(root_start, 3);
+        assert_eq!(cluster_count, 2490);
+        assert!(cluster_count < 4085);
+        assert!((cluster_count + 2) * 3 <= fat_len * SIZE * 2);
+        assert_eq!(plan.writes.len() as u64, data_start);
+        let fat1 = block(&mut file, fat_start)?;
+        let fat2 = block(&mut file, fat_start + fat_len)?;
+        assert_eq!(fat1, fat2);
+        // Decode packed 12-bit FAT[0] and FAT[1] independently.
+        let entry0 = u16::from(fat1[0]) | (u16::from(fat1[1] & 0x0f) << 8);
+        let entry1 = (u16::from(fat1[1]) >> 4) | (u16::from(fat1[2]) << 4);
+        assert_eq!(entry0, 0x0ff8);
+        assert_eq!(entry1, 0x0fff);
+        assert!(fat1[3..].iter().all(|byte| *byte == 0));
+        let root = block(&mut file, root_start)?;
+        assert_eq!(&root[0..11], b"BOOT       ");
+        assert_eq!(root[11], 0x08);
+        assert!(root[32..].iter().all(|byte| *byte == 0));
+        for index in 1..root_sectors {
+            assert!(block(&mut file, root_start + index)?
+                .iter()
+                .all(|byte| *byte == 0));
+        }
+        assert!(block(&mut file, COUNT - 1)?.iter().all(|byte| *byte == 0));
+        Ok(())
+    })();
+    if external.is_none() {
+        drop(file);
+        std::fs::remove_file(&path).unwrap();
+    }
+    result.unwrap();
+}
+
+#[test]
+fn fat12_native_virtual_rejects_uncertified_sizes_and_overflow() {
+    let request = FormatRequest {
+        filesystem: FilesystemKind::Fat12,
+        volume_label: None,
+        volume_serial: Some(7),
+    };
+    for bytes in [0, 256, 1024, 2048, 8192] {
+        assert!(FAT12_DRIVER
+            .build_native_format_plan(FilesystemGeometry::new(63, 2497, bytes), &request)
+            .is_err());
+    }
+    for (start, count) in [
+        (63, 0),
+        (u64::MAX, 2497),
+        (63, u64::MAX),
+        (u32::MAX as u64 + 1, 2497),
+        (63, 1),
+    ] {
+        assert!(FAT12_DRIVER
+            .build_native_format_plan(FilesystemGeometry::new(start, count, 4096), &request)
+            .is_err());
+    }
+    assert!(FAT12_DRIVER
+        .build_native_format_plan(
+            FilesystemGeometry::new(63, 2497, 4096),
+            &FormatRequest {
+                filesystem: FilesystemKind::Fat16,
+                ..request.clone()
+            },
+        )
+        .is_err());
+    assert!(FAT12_DRIVER
+        .build_native_format_plan(
+            FilesystemGeometry::new(63, 2497, 4096),
+            &FormatRequest {
+                volume_serial: None,
+                ..request
+            },
+        )
+        .is_err());
+}
+
+#[test]
+fn fat12_native_geometry_changes_only_for_source_device() {
+    let request = FormatRequest {
+        filesystem: FilesystemKind::Fat12,
+        volume_label: None,
+        volume_serial: Some(0x1234_5678),
+    };
+    for count in [2497, 20_417, 32_768] {
+        let legacy = FAT12_DRIVER
+            .build_native_format_plan(FilesystemGeometry::new(63, count, 512), &request)
+            .unwrap();
+        let native = FAT12_DRIVER
+            .build_native_format_plan(FilesystemGeometry::new(63, count, 4096), &request)
+            .unwrap();
+        let boot_512 = &legacy.writes[0].data;
+        let boot_4kn = &native.writes[0].data;
+        let le16 =
+            |raw: &[u8], off| u16::from_le_bytes(raw[off..off + 2].try_into().unwrap()) as u64;
+        assert_eq!(le16(boot_512, 11), 512);
+        assert_eq!(le16(boot_4kn, 11), 4096);
+        assert_eq!(legacy.geometry.sector_count, native.geometry.sector_count);
+        for plan in [&legacy, &native] {
+            let bps = u64::from(plan.geometry.sector_size);
+            let boot = &plan.writes[0].data;
+            let spc = u64::from(boot[13]);
+            let root = le16(boot, 17) * 32 / bps;
+            let fat_sectors = le16(boot, 22);
+            let overhead = le16(boot, 14) + u64::from(boot[16]) * fat_sectors + root;
+            let clusters = (count - overhead) / spc;
+            assert!((1..4085).contains(&clusters));
+            assert!((clusters + 2) * 3 <= fat_sectors * bps * 2);
+            assert_eq!(plan.writes.len() as u64, overhead);
+            assert_eq!(plan.writes[0].relative_lba, 0);
+            assert_eq!(plan.writes.last().unwrap().relative_lba, overhead - 1);
+            assert!(plan
+                .writes
+                .iter()
+                .all(|write| write.data.len() == bps as usize));
+        }
+        assert_eq!(le16(&legacy.writes[0].data, 11), 512); // no global mutation
+    }
+
+    // 65535 x 4Kn cannot fit FAT12's <=4084 clusters when clusters
+    // are limited to 64KiB; it must be rejected, not silently become FAT16.
+    assert!(FAT12_DRIVER
+        .build_native_format_plan(FilesystemGeometry::new(63, 65_535, 4096), &request,)
+        .is_err());
+    let invalid_label = FAT12_DRIVER
+        .build_native_format_plan(
+            FilesystemGeometry::new(63, 2497, 4096),
+            &FormatRequest {
+                volume_label: Some("BAD/NAME".into()),
+                ..request
+            },
+        )
+        .unwrap_err();
+    assert_eq!(invalid_label.filesystem, Some(FilesystemKind::Fat12));
+    assert_eq!(invalid_label.kind, FilesystemErrorKind::InvalidVolumeLabel);
 }

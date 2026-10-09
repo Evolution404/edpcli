@@ -75,7 +75,7 @@ fn fat16_geometry(boot: &[u8; SECTOR_SIZE], partition_sectors: u64) -> Option<(u
     Some((total, root_start))
 }
 
-fn encode_label(label: Option<&str>) -> Result<[u8; 11], FilesystemError> {
+pub(super) fn encode_label(label: Option<&str>) -> Result<[u8; 11], FilesystemError> {
     let Some(label) = label else {
         return Ok(*b"NO NAME    ");
     };
@@ -110,7 +110,7 @@ fn encode_label(label: Option<&str>) -> Result<[u8; 11], FilesystemError> {
     Ok(out)
 }
 
-fn decode_label(raw: &[u8]) -> Result<Option<String>, FilesystemError> {
+pub(super) fn decode_label(raw: &[u8]) -> Result<Option<String>, FilesystemError> {
     if raw.len() != 11 {
         return Err(FilesystemError::for_filesystem(
             FilesystemKind::Fat16,
