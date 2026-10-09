@@ -47,7 +47,9 @@ fn lce_builder_rejects_noncanonical_extent_geometry() {
 fn native_lce_producer_audit_certifies_exact_legacy_512_source_only() {
     use edpcli::provision::audit_native_lce_against_legacy_producer;
     let blocks = LEXAR_LCE_CIPHER
-        .chunks_exact(512)
+        .as_chunks::<512>()
+        .0
+        .iter()
         .map(|chunk| chunk.to_vec())
         .collect::<Vec<_>>();
     let result = audit_native_lce_against_legacy_producer(512, 243_623_933, &blocks).unwrap();
@@ -112,13 +114,17 @@ fn legacy_lce_gold_does_not_have_u391_neighborhood_512b_zero_frame_signature() {
     // to have these five zero offsets. Neither genuine legacy 512B LCE
     // ciphertext fixture has this signature; it is not an OEM payload gold.
     let zero_slots = [0usize, 5, 6, 7, 256];
-    let frames = LEXAR_LCE_CIPHER.chunks_exact(512).collect::<Vec<_>>();
+    let frames = LEXAR_LCE_CIPHER
+        .as_chunks::<512>()
+        .0
+        .iter()
+        .collect::<Vec<_>>();
     assert_eq!(frames.len(), 6);
     assert!(!zero_slots
         .iter()
         .all(|offset| { frames.iter().all(|frame| frame[*offset] == 0) }));
     let mut synthetic_4kn = vec![0x8Au8; 4096];
-    for subframe in synthetic_4kn.chunks_exact_mut(512) {
+    for subframe in synthetic_4kn.as_chunks_mut::<512>().0 {
         for offset in zero_slots {
             subframe[offset] = 0;
         }

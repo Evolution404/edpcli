@@ -609,6 +609,64 @@ fn fat16_fat32_and_exfat_can_all_flow_through_official_partition_formatting() {
 }
 
 #[test]
+fn offline_aes_and_aes_cross_partition_formats_round_trip_at_absolute_lba() {
+    use edpcli::protocol::crypto::{a6b0_full, aes128_ecb_decrypt_block};
+    let key = [0x53u8; 16];
+    for wrap in [FileKeyWrapMode::A7f0, FileKeyWrapMode::Aes128Ecb] {
+        let plan = official_plan(OfficialPartitionMode::DefaultThreePartition)
+            .with_partition_key_material(
+                1,
+                wrap_legacy_lba7_file_key(b"ProofPass1!", [0x17; 8]),
+                wrap_file_key(b"ProofPass1!", key, wrap),
+            )
+            .unwrap()
+            .with_filesystems(OfficialPartitionFilesystems {
+                boot: FilesystemKind::Fat16,
+                share: FilesystemKind::Fat32,
+                encrypt: FilesystemKind::ExFat,
+            });
+        let target = plan.format_targets().unwrap()[1];
+        let built = build_official_partition_filesystem(&plan, &target, &key, "SHARE", 0x1234_5678)
+            .unwrap();
+        let plain = build_empty_fat32(
+            target.geometry.start_sector,
+            target.geometry.sector_count(),
+            0x1234_5678,
+            "SHARE",
+        )
+        .unwrap();
+        for (&relative_lba, expected_plain) in plain.sectors() {
+            let absolute_lba = target.geometry.start_sector + relative_lba;
+            let raw = built.image.sectors().get(&relative_lba).unwrap();
+            assert_ne!(raw, expected_plain);
+            let decoded = match wrap {
+                FileKeyWrapMode::A7f0 => a6b0_full(raw, &key, absolute_lba * 512),
+                FileKeyWrapMode::Aes128Ecb => raw
+                    .as_chunks::<16>()
+                    .0
+                    .iter()
+                    .flat_map(|block| aes128_ecb_decrypt_block(block, &key))
+                    .collect(),
+                FileKeyWrapMode::Sm4 => unreachable!(),
+            };
+            assert_eq!(
+                &decoded, expected_plain,
+                "AES at absolute LBA{absolute_lba}"
+            );
+        }
+        assert!(build_official_partition_filesystem(
+            &plan,
+            &target,
+            &[0x44; 16],
+            "SHARE",
+            0x1234_5678,
+        )
+        .unwrap_err()
+        .contains("FileKeyCRC"));
+    }
+}
+
+#[test]
 fn partition_filesystem_uses_partition_key_material_and_plaintext_skips_file_key_crc() {
     let mut plan = official_plan(OfficialPartitionMode::DefaultThreePartition);
     let keys = [[0x11; 16], [0x22; 16], [0x33; 16]];

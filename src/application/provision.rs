@@ -5,7 +5,6 @@
 //! duplicate these checks or construct alternative raw-write patches.
 
 use std::collections::BTreeMap;
-use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 

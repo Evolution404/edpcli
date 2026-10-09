@@ -148,6 +148,71 @@ impl NativeBlockDevice for NewImageBlockDevice<'_> {
     }
 }
 
+/// Write an already planned virtual image using full native blocks, with
+/// preflight snapshots, MBR-last commit and independent double readback.
+/// Only a caller-owned ordinary file may enter this adapter, not a device node.
+pub(crate) fn write_native_virtual_plan(
+    file: &mut fs::File,
+    plan: &NativeVirtualDiskPlan,
+) -> Result<(), String> {
+    let byte_len = plan
+        .total_sectors
+        .checked_mul(u64::from(plan.sector_bytes))
+        .ok_or("虚拟整盘字节长度溢出")?;
+    if !matches!(plan.sector_bytes, 512 | 4096) || byte_len == 0 {
+        return Err("不支持的原生镜像逻辑扇区几何".into());
+    }
+    if !file.metadata().is_ok_and(|m| m.file_type().is_file()) {
+        return Err("目标不是普通文件".into());
+    }
+    file.set_len(byte_len)
+        .map_err(|e| format!("无法设置镜像容量: {e}"))?;
+    let mut device = NewImageBlockDevice {
+        file,
+        total_sectors: plan.total_sectors,
+        sector_bytes: plan.sector_bytes,
+    };
+    execute_native_transaction(&mut device, plan).map_err(|e| format!("镜像原生事务失败: {e}"))
+}
+
+/// Build a genuine offline 512B EDP target from the same protocol producer
+/// and filesystem/key-domain formatter as the prepared physical workflow.
+///
+/// The caller supplies a *synthetic* verified identity, per-partition FileKeys,
+/// serials and a 512B official layout. No USB probe, mount or raw-device handle
+/// is used. The returned plan can only be exported to an ordinary image file;
+/// it is NOT manufacturer certification for 4Kn or physical writes.
+pub fn plan_native_edp_512_image(
+    spec: &crate::provision::ProvisionSpec,
+    entropy: &crate::provision::ProvisionEntropy,
+    plan: &crate::provision::OfficialProvisionPlan,
+    options: &super::FormatOptions,
+    serials: &[u32],
+    file_keys: &[[u8; 16]],
+) -> Result<NativeVirtualDiskPlan, String> {
+    let protocol = crate::provision::build_official_provision_protocol_image(spec, entropy, plan)?;
+    let format_choices =
+        super::format_plan::plan_format_targets_with_keys(plan, options, serials, file_keys)
+            .map_err(|error| error.to_string())?;
+    super::export::assemble_official_virtual_plan(&protocol, &format_choices)
+        .map_err(|error| error.msg)
+}
+
+/// Author the independently produced EDP layout to a *new* ordinary file.
+/// The native transaction performs a sync, MBR-last commit and double readback.
+pub fn export_native_edp_512_image(
+    path: &Path,
+    spec: &crate::provision::ProvisionSpec,
+    entropy: &crate::provision::ProvisionEntropy,
+    plan: &crate::provision::OfficialProvisionPlan,
+    options: &super::FormatOptions,
+    serials: &[u32],
+    file_keys: &[[u8; 16]],
+) -> Result<(), String> {
+    let native = plan_native_edp_512_image(spec, entropy, plan, options, serials, file_keys)?;
+    export_native_plain_image(path, &native)
+}
+
 pub fn export_native_plain_image(path: &Path, plan: &NativeVirtualDiskPlan) -> Result<(), String> {
     let byte_len = plan
         .total_sectors
@@ -179,22 +244,7 @@ pub fn export_native_plain_image(path: &Path, plan: &NativeVirtualDiskPlan) -> R
         .create_new(true)
         .open(path)
         .map_err(|error| format!("无法排他创建新的普通文件镜像: {error}"))?;
-    let result: Result<(), String> = (|| {
-        if !file.metadata().is_ok_and(|m| m.file_type().is_file()) {
-            return Err("目标不是普通文件".into());
-        }
-        file.set_len(byte_len)
-            .map_err(|error| format!("无法设置镜像容量: {error}"))?;
-        // Both 512B and 4Kn virtual images reuse the same verified staged
-        // transaction core; only a brand-new regular-file adapter exists.
-        let mut device = NewImageBlockDevice {
-            file: &mut file,
-            total_sectors: plan.total_sectors,
-            sector_bytes: plan.sector_bytes,
-        };
-        execute_native_transaction(&mut device, plan)
-            .map_err(|error| format!("镜像原生事务失败: {error}"))
-    })();
+    let result = write_native_virtual_plan(&mut file, plan);
     drop(file);
     if result.is_err() {
         // Only a freshly create_new-owned path is ever removed.

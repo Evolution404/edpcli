@@ -5,7 +5,10 @@
 //! partition transform.
 
 use crate::filesystem::{build_empty_filesystem, FilesystemKind, SparseFilesystemImage};
-use crate::partition_transform::EdpSm4Transform;
+use crate::partition_transform::{
+    transform_native_sector_offline, EdpSm4Transform, NativeCipherDirection,
+    NativePartitionDataCipher,
+};
 use crate::protocol::crypto::crc32_bare;
 
 use super::{
@@ -49,7 +52,7 @@ fn build_official_partition_filesystem_with_format(
     volume_serial: u32,
     format: FilesystemKind,
 ) -> Result<PartitionFilesystemImage, String> {
-    validate_official_format_target(plan, target, file_key)?;
+    let cipher = validate_official_format_target(plan, target, file_key)?;
     let plain = build_empty_filesystem(
         format,
         target.geometry.start_sector,
@@ -57,14 +60,14 @@ fn build_official_partition_filesystem_with_format(
         volume_serial,
         Some(volume_label),
     )?;
-    Ok(prepared_from_plain(target, file_key, &plain))
+    prepared_from_plain(target, file_key, &plain, cipher)
 }
 
 fn validate_official_format_target(
     plan: &OfficialProvisionPlan,
     target: &PartitionFormatTarget,
     file_key: &[u8; 16],
-) -> Result<(), String> {
+) -> Result<Option<FileKeyWrapMode>, String> {
     let targets = plan.format_targets()?;
     let Some(index) = targets.iter().position(|candidate| candidate == target) else {
         return Err("partition is not a format-capable target in this plan".into());
@@ -77,15 +80,12 @@ fn validate_official_format_target(
         if crc32_bare(file_key) != material.file_key_crc {
             return Err("filesystem file key does not match LBA12 FileKeyCRC".into());
         }
-        if material.encrypt_mode != FileKeyWrapMode::Sm4 {
-            return Err(
-                "portable encrypted filesystem writer is validated only for current mode2 SM4"
-                    .into(),
-            );
-        }
+        // Logical ciphertext production is independently tested for all three
+        // EncryptMode values. This does not relax the physical-write capability
+        // gate enforced by the application commit path.
+        return Ok(Some(material.encrypt_mode));
     }
-
-    Ok(())
+    Ok(None)
 }
 
 /// Planning already built a fully validated plain image. Reuse it directly
@@ -101,26 +101,47 @@ pub(crate) fn build_official_partition_filesystem_from_plain(
         .filesystem
         .ok_or("compatibility reserve is not a filesystem")?;
     crate::filesystem::validate_writable_filesystem(format).map_err(|error| error.to_string())?;
-    validate_official_format_target(plan, target, file_key)?;
+    let cipher = validate_official_format_target(plan, target, file_key)?;
     if plain.volume_sectors() != target.geometry.sector_count() {
         return Err("plain filesystem image size does not match target geometry".into());
     }
-    Ok(prepared_from_plain(target, file_key, plain))
+    prepared_from_plain(target, file_key, plain, cipher)
 }
 
 fn prepared_from_plain(
     target: &PartitionFormatTarget,
     file_key: &[u8; 16],
     plain: &SparseFilesystemImage,
-) -> PartitionFilesystemImage {
-    let image = if target.physically_encrypted {
-        plain.transformed(&EdpSm4Transform::new(*file_key))
-    } else {
-        plain.clone()
+    cipher: Option<FileKeyWrapMode>,
+) -> Result<PartitionFilesystemImage, String> {
+    let image = match cipher {
+        None => plain.clone(),
+        Some(FileKeyWrapMode::Sm4) => plain.transformed(&EdpSm4Transform::new(*file_key)),
+        Some(mode) => {
+            let data_cipher = NativePartitionDataCipher::from_encrypt_mode(mode.raw())?;
+            plain.try_transformed(|relative_lba, block| {
+                let absolute_lba = target
+                    .geometry
+                    .start_sector
+                    .checked_add(relative_lba)
+                    .ok_or("分区数据绝对LBA溢出")?;
+                let output = transform_native_sector_offline(
+                    data_cipher,
+                    NativeCipherDirection::Encrypt,
+                    block,
+                    file_key,
+                    absolute_lba,
+                    512,
+                )?;
+                output
+                    .try_into()
+                    .map_err(|_| "原生512B分区加密输出长度不符".to_string())
+            })?
+        }
     };
-    PartitionFilesystemImage {
+    Ok(PartitionFilesystemImage {
         geometry: target.geometry,
         physically_encrypted: target.physically_encrypted,
         image,
-    }
+    })
 }

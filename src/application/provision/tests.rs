@@ -714,6 +714,54 @@ fn portable_test_temp_file_name_uses_safe_ascii_components() {
 }
 
 #[test]
+fn plain_export_uses_native_transaction_preserves_lba3_and_rejects_device_target() {
+    use std::io::{Read, Seek, SeekFrom};
+    let total_sectors = 100_000;
+    let plan = PlainProvisionPlan::default_for_disk(total_sectors).unwrap();
+    let write_plan = build_plain_provision_write_plan(&plan, None, &[0x1234_5678]).unwrap();
+    let mut source_metadata = vec![0u8; 13 * SECTOR];
+    source_metadata[3 * SECTOR..4 * SECTOR].fill(0xa5);
+    let prepared = PreparedPlainProvision {
+        disk: 4,
+        device_id: "disk&ven_aigo&prod_u335".into(),
+        plan,
+        write_plan,
+        source_kind: DiskProvisionKind::Plain,
+        source_lce_start_lba: None,
+        source_metadata,
+        before_pin: fixture_pin(),
+        expected_probe: crate::platform::HardwareProbe {
+            vid: Some(0x3535),
+            pid: Some(0x6300),
+            transport: crate::platform::NativeTransport::Uas,
+            windows_pnp_instance_id: None,
+            inquiry: None,
+        },
+    };
+    assert!(export_sparse_plain_provision_image(Path::new("/dev/disk99"), &prepared).is_err());
+    let path = portable_test_temp_file("edpcli-plain-native-export", "img");
+    let _ = std::fs::remove_file(&path);
+    export_sparse_plain_provision_image(&path, &prepared).unwrap();
+    let mut file = std::fs::File::open(&path).unwrap();
+    let mut mbr = [0u8; SECTOR];
+    file.read_exact(&mut mbr).unwrap();
+    assert_eq!(mbr.as_slice(), prepared.write_plan.mbr);
+    file.seek(SeekFrom::Start(3 * SECTOR as u64)).unwrap();
+    let mut lba3 = [0u8; SECTOR];
+    file.read_exact(&mut lba3).unwrap();
+    assert_eq!(lba3, [0xa5; SECTOR]);
+    file.seek(SeekFrom::Start(7 * SECTOR as u64)).unwrap();
+    let mut lba7 = [0u8; SECTOR];
+    file.read_exact(&mut lba7).unwrap();
+    assert_eq!(lba7, [0; SECTOR]);
+    file.seek(SeekFrom::Start(2048 * SECTOR as u64)).unwrap();
+    let mut boot = [0u8; SECTOR];
+    file.read_exact(&mut boot).unwrap();
+    assert_eq!(&boot[3..11], b"EXFAT   ");
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn sparse_export_includes_selected_format_images() {
     let key = [0x42; 16];
     let plan = format_test_plan(OfficialPartitionMode::DefaultThreePartition, &key);
@@ -764,7 +812,7 @@ fn sparse_export_includes_selected_format_images() {
     let _ = std::fs::remove_file(&path);
     export_sparse_provision_image(&path, &prepared).unwrap();
     let mut file = std::fs::File::open(&path).unwrap();
-    use std::io::{Read, Seek};
+    use std::io::{Read, Seek, SeekFrom};
     let mut mbr = [0u8; SECTOR];
     file.read_exact(&mut mbr).unwrap();
     assert_eq!(mbr, [0x5a; SECTOR]);
@@ -773,6 +821,173 @@ fn sparse_export_includes_selected_format_images() {
     file.read_exact(&mut boot).unwrap();
     assert_eq!(&boot[54..62], b"FAT16   ");
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn all_four_edp_modes_export_produced_512b_virtual_disks_with_independent_readback() {
+    use crate::partition_transform::{
+        transform_native_sector_offline, NativeCipherDirection, NativePartitionDataCipher,
+    };
+    use std::io::{Read, Seek, SeekFrom};
+
+    // Sparse temporary ordinary files only; no device discovery or physical I/O.
+    let total = 4_300_000u64;
+    let key = [0x42; 16];
+    let probe = crate::platform::HardwareProbe {
+        vid: Some(0x0dd8),
+        pid: Some(0x2005),
+        transport: crate::platform::NativeTransport::Uas,
+        windows_pnp_instance_id: None,
+        inquiry: Some(crate::platform::InquiryInfo {
+            vendor: "Netac".into(),
+            product: "OnlyDisk".into(),
+            revision: "1.00".into(),
+        }),
+    };
+    let target = TargetIdentity::from_probe(&probe, total).unwrap();
+    let device_id = target.device_id().to_string();
+    let metadata = ProvisionMetadata::new(
+        OnlyId::parse("1402259934").unwrap(),
+        "TESTUSER",
+        "TESTDEPT",
+        "EDP VIRTUAL",
+    )
+    .unwrap();
+    let spec = ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1()).unwrap();
+    for mode in [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionMode::WholeDiskEncrypted,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ] {
+        let plan = format_test_plan(mode, &key);
+        let image = build_official_provision_protocol_image(
+            &spec,
+            &ProvisionEntropy::new([0x5a; 252]),
+            &plan,
+        )
+        .unwrap();
+        let targets = plan.format_targets().unwrap();
+        let options = FormatOptions {
+            boot: mode == OfficialPartitionMode::DefaultThreePartition
+                || mode == OfficialPartitionMode::IntranetExtranetDualPartition,
+            share: mode != OfficialPartitionMode::WholeDiskEncrypted,
+            encrypt: mode != OfficialPartitionMode::IntranetExtranetDualPartition,
+            ..FormatOptions::default()
+        };
+        let serials = vec![0x1234_5678; targets.len()];
+        let choices = plan_format_targets_typed(&plan, &options, &serials, &key).unwrap();
+        // Exercise the pure offline authoring entrypoint independently of
+        // hardware-bound PreparedNewProvision construction.
+        let offline = native_image::plan_native_edp_512_image(
+            &spec,
+            &ProvisionEntropy::new([0x5a; 252]),
+            &plan,
+            &options,
+            &serials,
+            &vec![key; serials.len()],
+        )
+        .unwrap();
+        assert_eq!(offline.total_sectors, total);
+        assert_eq!(offline.sector_bytes, SECTOR as u32);
+        assert_eq!(offline.writes.last().unwrap().relative_lba, 0);
+        let offline_path = portable_test_temp_file("edpcli-edp-independent-offline", "img");
+        let _ = std::fs::remove_file(&offline_path);
+        native_image::export_native_edp_512_image(
+            &offline_path,
+            &spec,
+            &ProvisionEntropy::new([0x5a; 252]),
+            &plan,
+            &options,
+            &serials,
+            &vec![key; serials.len()],
+        )
+        .unwrap();
+        let prepared = PreparedNewProvision {
+            disk: 4,
+            device_id: device_id.clone(),
+            source_kind: DiskProvisionKind::Mode0,
+            mode,
+            algorithm: crate::provision::OfficialLabelAlgorithm::Sms4,
+            force_change_password: false,
+            pass_info_policy: PassInfoPolicy::default(),
+            lce_start_lba: plan.lba7_compatibility_extent.start_lba,
+            write_image: image,
+            format_targets: choices,
+            target_plan: None,
+            source_metadata: None,
+            before_pin: fixture_pin(),
+            plan,
+            expected_onlyid: "1402259934".into(),
+            expected_serial_digest: None,
+            expected_probe: probe.clone(),
+            expected_lba3: None,
+        };
+        let path = portable_test_temp_file("edpcli-edp-native-virtual", "img");
+        let _ = std::fs::remove_file(&path);
+        assert!(export_sparse_provision_image(Path::new("/dev/disk99"), &prepared).is_err());
+        export_sparse_provision_image(&path, &prepared).unwrap();
+        let mut file = std::fs::File::open(&path).unwrap();
+        let mut native_protocol = vec![0u8; 13 * SECTOR];
+        file.read_exact(&mut native_protocol).unwrap();
+        assert_eq!(
+            native_protocol,
+            prepared.write_image.metadata.as_bytes(),
+            "{mode:?}"
+        );
+        let mut independent = std::fs::File::open(&offline_path).unwrap();
+        let mut independent_protocol = vec![0u8; 13 * SECTOR];
+        independent.read_exact(&mut independent_protocol).unwrap();
+        assert_eq!(
+            independent_protocol, native_protocol,
+            "{mode:?} independent producer"
+        );
+        std::fs::remove_file(&offline_path).unwrap();
+        let decoded = crate::provision::parse_existing_provision(
+            &ProvisionImage::from_bytes(native_protocol).unwrap(),
+            &device_id,
+            total,
+        )
+        .unwrap()
+        .expect("generated 512B EDPF must independently parse");
+        assert_eq!(decoded.profile.source_mode, mode);
+        for (&lba, expected) in &prepared.write_image.patch {
+            file.seek(SeekFrom::Start(u64::from(lba) * SECTOR as u64))
+                .unwrap();
+            let mut actual = [0u8; SECTOR];
+            file.read_exact(&mut actual).unwrap();
+            assert_eq!(actual.as_slice(), expected, "{mode:?} protocol LBA{lba}");
+        }
+        for choice in prepared
+            .format_targets
+            .iter()
+            .filter(|choice| choice.selected)
+        {
+            let lba = choice.target.geometry.start_sector;
+            file.seek(SeekFrom::Start(lba * SECTOR as u64)).unwrap();
+            let mut raw = [0u8; SECTOR];
+            file.read_exact(&mut raw).unwrap();
+            let expected_raw = choice.prepared_image.as_ref().unwrap().image.sectors()[&0];
+            let expected_plain = choice.verification_image.as_ref().unwrap().sectors()[&0];
+            assert_eq!(raw, expected_raw, "{mode:?} formatted LBA{lba}");
+            if choice.target.physically_encrypted {
+                assert_ne!(raw, expected_plain);
+                let decoded = transform_native_sector_offline(
+                    NativePartitionDataCipher::Sm4Ecb,
+                    NativeCipherDirection::Decrypt,
+                    &raw,
+                    &key,
+                    lba,
+                    SECTOR as u32,
+                )
+                .unwrap();
+                assert_eq!(decoded, expected_plain, "{mode:?} decrypted LBA{lba}");
+            } else {
+                assert_eq!(raw, expected_plain, "{mode:?} unencrypted LBA{lba}");
+            }
+        }
+        std::fs::remove_file(&path).unwrap();
+    }
 }
 
 #[test]

@@ -63,6 +63,23 @@ impl SparseFilesystemImage {
             ),
         }
     }
+
+    /// Fallible sparse-sector transform for position-dependent native ciphers.
+    /// Preserve only the authored filesystem metadata writes; untouched blocks
+    /// remain sparse and must be handled by the partition writer's policy.
+    pub fn try_transformed<F, E>(&self, mut transform: F) -> Result<Self, E>
+    where
+        F: FnMut(u64, &[u8; SECTOR_SIZE]) -> Result<[u8; SECTOR_SIZE], E>,
+    {
+        let mut sectors = BTreeMap::new();
+        for (&lba, block) in self.sectors.iter() {
+            sectors.insert(lba, transform(lba, block)?);
+        }
+        Ok(Self {
+            volume_sectors: self.volume_sectors,
+            sectors: Arc::new(sectors),
+        })
+    }
 }
 
 pub fn validate_volume_label_typed(
