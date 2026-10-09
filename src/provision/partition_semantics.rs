@@ -23,7 +23,9 @@ impl PhysicalPartitionEncryption {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Plaintext => "物理明文",
-            Self::Sm4Sector => "SM4 扇区密文",
+            // Legacy variant describes the old write algorithm; source data
+            // cipher is independently selected by the entry's EncryptMode.
+            Self::Sm4Sector => "物理密文扇区（算法依 EncryptMode）",
         }
     }
 }

@@ -48,10 +48,10 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
         if request.mode != AdvancedInspectMode::Raw {
             if let Some(partition_start) = context.partition_start_for_lba(lba) {
                 if partition_start == lba {
-                    partition_boot = Some(protocol_raw.to_vec());
+                    partition_boot = Some(raw.clone());
                 } else {
-                    match reader.read_sector(partition_start) {
-                        Ok(boot) if boot.len() == SECTOR => partition_boot = Some(boot),
+                    match reader.read_native_sector(partition_start) {
+                        Ok(boot) if boot.len() == native_bytes => partition_boot = Some(boot),
                         Ok(boot) => {
                             partition_boot_issue = Some(format!(
                                 "分区起始 LBA{} 只读取到 {}B",
@@ -135,10 +135,17 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
         };
 
         if native_bytes > SECTOR {
-            item.notes.push(format!(
-                "原生扇区 {native_bytes}B：前512B按已知协议处理，余下 {}B 未归属，原样保留",
-                native_bytes - SECTOR,
-            ));
+            if protocol_view.is_some() {
+                item.notes.push(format!(
+                    "原生协议扇区 {native_bytes}B：前512B按已知协议处理，余下 {}B 未归属，原样保留",
+                    native_bytes - SECTOR,
+                ));
+            } else {
+                item.notes.push(format!(
+                    "原生数据扇区 {native_bytes}B：RAW完整保留，超出512B的 {}B 不被误判为协议尾部",
+                    native_bytes - SECTOR,
+                ));
+            }
         }
         match request.mode {
             AdvancedInspectMode::Raw => {
@@ -159,9 +166,16 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
                         ))
                     }
                 } else if native_bytes > SECTOR {
-                    Err(InspectError::decode(format!(
-                        "LBA{lba} 4Kn 分区数据尚无完整原生块解密证据；仅允许 raw，只能解码已验证的前512B协议字段"
-                    )))
+                    context
+                        .decode_native_mode3_with_boot(lba, &raw, partition_boot.as_deref())
+                        .map(|(decoded, method)| {
+                            (
+                                decoded,
+                                method,
+                                vec![crate::inspect_adapter::DecodeRange::new(0, native_bytes)],
+                            )
+                        })
+                        .map_err(InspectError::decode)
                 } else {
                     decode_sector(
                         &context,
@@ -173,11 +187,18 @@ pub(super) fn run_advanced_source<R: SectorReader + ?Sized>(
                 };
                 match decoded {
                     Ok((mut decoded, method, decode_ranges)) => {
-                        if native_bytes > SECTOR {
-                            if decoded.len() != SECTOR {
-                                return Err(InspectError::decode("协议解析器未返回512B固定负载"));
+                        if native_bytes > SECTOR && decoded.len() == SECTOR {
+                            // Only the first 512B are owned by the protocol.
+                            // Native partition sectors instead must be fully
+                            // decoded or rejected, never half-decoded.
+                            if lba > u64::from(crate::common::METADATA_LAST_LBA) {
+                                return Err(InspectError::decode(
+                                    "原生分区只解码前512B，拒绝部分转换",
+                                ));
                             }
                             decoded.extend_from_slice(&raw[SECTOR..]);
+                        } else if decoded.len() != native_bytes {
+                            return Err(InspectError::decode("原生解码结果长度与逻辑扇区不符"));
                         }
                         item.decoded_sha256 = Some(crate::sha256::sha256_hex(&decoded));
                         item.method = Some(method);

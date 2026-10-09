@@ -256,6 +256,112 @@ fn encrypted_type4_requires_valid_file_key_and_decoded_boot_sector() {
 }
 
 #[test]
+fn aes_cross_native_4kn_inspect_requires_crc_valid_default_key_and_strict_filesystem() {
+    use edpcli::protocol::crypto::aes128_ecb_encrypt_block;
+    use edpcli::provision::{wrap_file_key, FileKeyWrapMode};
+
+    let mut image = LEXAR_PROTOCOL.to_vec();
+    let mut partitions =
+        parse_partition_geometry(&image, LEXAR_DEVICE_ID, LEXAR_TOTAL_SECTORS).unwrap();
+    let partition = partitions
+        .iter()
+        .find(|partition| partition.partition_type == 2 && partition.need_encrypt != 0)
+        .unwrap()
+        .clone();
+    let raw_file_key = default_file_key(&image, LEXAR_DEVICE_ID, partition.index).unwrap();
+    let wrapped = wrap_file_key(b"0000aaaa", raw_file_key, FileKeyWrapMode::Aes128Ecb);
+    let crc = crc32_bare(LEXAR_DEVICE_ID.as_bytes());
+    let mut plain_lba12 = a6b0_full(&image[12 * SECTOR..13 * SECTOR], &crc.to_le_bytes(), 0);
+    let start = partition.index * 0x60;
+    plain_lba12[start + 0x30..start + 0x48].copy_from_slice(&wrapped.packed24());
+    plain_lba12[start + 0x58] = 3;
+    image[12 * SECTOR..13 * SECTOR].copy_from_slice(&a7f0_full(
+        &plain_lba12,
+        &crc.to_le_bytes(),
+        0,
+    ));
+    assert_eq!(
+        default_file_key(&image, LEXAR_DEVICE_ID, partition.index).unwrap(),
+        raw_file_key
+    );
+
+    let mut context = InspectDiskContext::new(
+        image.clone(),
+        Some(LEXAR_DEVICE_ID.into()),
+        LEXAR_TOTAL_SECTORS,
+    );
+    // The synthetic fixture deliberately reuses documented EDPF numeric
+    // geometry while exercising the 4096B-only reader. Not a real U391 image.
+    context.logical_sector_bytes = 4096;
+    partitions[partition.index].encrypt_mode = 3;
+    context.partitions = partitions;
+    let mut plaintext_boot = vec![0u8; 4096];
+    plaintext_boot[..SECTOR].copy_from_slice(&valid_exfat_boot(
+        partition.start_sector,
+        partition.sector_count,
+    ));
+    plaintext_boot[108] = 12; // exFAT bytes-per-sector shift for native4Kn
+    let mut encrypted_boot = vec![0u8; 4096];
+    for (source, target) in plaintext_boot
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .zip(encrypted_boot.as_chunks_mut::<16>().0.iter_mut())
+    {
+        target.copy_from_slice(&aes128_ecb_encrypt_block(source, &raw_file_key));
+    }
+
+    let (decoded, method) = context
+        .decode_native_mode3_with_boot(partition.start_sector, &encrypted_boot, None)
+        .unwrap();
+    assert_eq!(decoded, plaintext_boot);
+    assert!(method.contains("AES_CROSS") && method.contains("FileKeyCRC=PASS"));
+
+    let next_plain = vec![0x69; 4096];
+    let mut next_raw = vec![0u8; 4096];
+    for (source, target) in next_plain
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .zip(next_raw.as_chunks_mut::<16>().0.iter_mut())
+    {
+        target.copy_from_slice(&aes128_ecb_encrypt_block(source, &raw_file_key));
+    }
+    let (next_decoded, _) = context
+        .decode_native_mode3_with_boot(partition.start_sector + 1, &next_raw, Some(&encrypted_boot))
+        .unwrap();
+    assert_eq!(next_decoded, next_plain);
+
+    assert!(context
+        .decode_native_mode3_with_boot(partition.start_sector + 1, &next_raw, None)
+        .unwrap_err()
+        .contains("缺少完整原生"));
+    assert!(context
+        .decode_native_mode3_with_boot(partition.start_sector, &encrypted_boot[..512], None)
+        .is_err());
+    let mut corrupted_boot = encrypted_boot.clone();
+    corrupted_boot[0] ^= 1;
+    assert!(context
+        .decode_native_mode3_with_boot(partition.start_sector, &corrupted_boot, None)
+        .unwrap_err()
+        .contains("文件系统校验"));
+    let mut mismatched_image = image.clone();
+    let mut decoded_lba12 = a6b0_full(&image[12 * SECTOR..13 * SECTOR], &crc.to_le_bytes(), 0);
+    decoded_lba12[start + 0x34] ^= 1;
+    mismatched_image[12 * SECTOR..13 * SECTOR].copy_from_slice(&a7f0_full(
+        &decoded_lba12,
+        &crc.to_le_bytes(),
+        0,
+    ));
+    let mut bad_context = context.clone();
+    bad_context.protocol_image = mismatched_image;
+    assert!(bad_context
+        .decode_native_mode3_with_boot(partition.start_sector, &encrypted_boot, None)
+        .unwrap_err()
+        .contains("FileKeyCRC"));
+}
+
+#[test]
 fn encrypted_partition_decode_fails_closed_when_wrapped_key_crc_breaks() {
     let mut image = LEXAR_PROTOCOL.to_vec();
     let crc = crc32_bare(LEXAR_DEVICE_ID.as_bytes());

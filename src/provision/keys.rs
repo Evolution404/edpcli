@@ -453,7 +453,7 @@ mod tests {
     }
 }
 
-/// Recover a mode2 file key from an LBA12 v0x0206 default-password entry.
+/// Recover a mode2/mode3 FileKey from an LBA12 v0x0206 default-password entry.
 /// The first-party default-password substitution and the entry's FileKeyCRC
 /// must both agree before the key can be used for partition-sector reads.
 pub fn default_file_key(image: &[u8], device_id: &str, index: usize) -> Result<[u8; 16], String> {
@@ -466,7 +466,7 @@ pub enum DefaultFileKeyError {
     DeviceIdMismatch,
     UnsupportedPassInfo,
     InvalidEntry(crate::protocol::types::ProtocolError),
-    NotEncryptedMode2,
+    UnsupportedDefaultEncryptedMode,
     NotDefaultPassword,
     FileKeyCrcMismatch,
 }
@@ -484,8 +484,8 @@ impl std::fmt::Display for DefaultFileKeyError {
                 formatter.write_str("default key unwrap supports PassInfo v0x0206 only")
             }
             Self::InvalidEntry(error) => error.fmt(formatter),
-            Self::NotEncryptedMode2 => {
-                formatter.write_str("default key unwrap requires an encrypted mode2 entry")
+            Self::UnsupportedDefaultEncryptedMode => {
+                formatter.write_str("default key unwrap requires an encrypted mode2/mode3 entry")
             }
             Self::NotDefaultPassword => {
                 formatter.write_str("partition does not advertise the default password")
@@ -526,9 +526,11 @@ pub fn default_file_key_checked(
         .and_then(|bytes| bytes.try_into().ok())
         .ok_or(DefaultFileKeyError::InvalidImageOrIndex)?;
     let entry = EdpfEntry96::parse(entry_bytes).map_err(DefaultFileKeyError::InvalidEntry)?;
-    if index >= entry.partition_count as usize || entry.need_encrypt == 0 || entry.encrypt_mode != 2
+    if index >= entry.partition_count as usize
+        || entry.need_encrypt == 0
+        || !matches!(entry.encrypt_mode, 2 | 3)
     {
-        return Err(DefaultFileKeyError::NotEncryptedMode2);
+        return Err(DefaultFileKeyError::UnsupportedDefaultEncryptedMode);
     }
     if entry.user_key_crc != crc32_bare(DEFAULT_KEY_DOMAIN_PASSWORD) {
         return Err(DefaultFileKeyError::NotDefaultPassword);
@@ -539,7 +541,14 @@ pub fn default_file_key_checked(
         0x54, 0x8b, 0x07, 0x2c, 0xba, 0x7f, 0x10, 0x4d, 0x88, 0xa4, 0x46, 0x55, 0x6c, 0xc3, 0xc4,
         0x32,
     ];
-    let key = sm4_decrypt_block(&entry.encrypted_file_key, &EFFECTIVE_MD5);
+    let key = match entry.encrypt_mode {
+        2 => sm4_decrypt_block(&entry.encrypted_file_key, &EFFECTIVE_MD5),
+        3 => crate::protocol::crypto::aes128_ecb_decrypt_block(
+            &entry.encrypted_file_key,
+            &EFFECTIVE_MD5,
+        ),
+        _ => unreachable!("validated mode2/mode3 above"),
+    };
     if crc32_bare(&key) != entry.file_key_crc {
         return Err(DefaultFileKeyError::FileKeyCrcMismatch);
     }

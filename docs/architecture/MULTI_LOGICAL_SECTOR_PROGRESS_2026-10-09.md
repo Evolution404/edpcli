@@ -214,3 +214,12 @@
 - 此结果替代第二十批的Windows mode3数据加密「未知」阶段性结论：**数据算法已证实AES-128-ECB，尚未证实真实U391分区内容完成全链回读。** 不能因此开放实体AES_CROSS制盘。
 
 - 追加独立硬件后端门禁：挂载参数+0x164 -> 请求包+0x54 -> 驱动context+0xA1，非零时可能经安全模块回调而非上述软件Cipher处理，条件路径已静态定位；U391是否设置该标志未知。**不能把软件模式3的公开向量验证冒充实盘数据已解密的证据。**
+
+## 2026-10-09 第二十二批：原生4Kn加密分区只读解码接入
+
+- 真实 U391 依然连接于 Mac 的 /dev/disk4，已识别为4096B原生逻辑扇区，交换区及保密区均为 `EncryptMode`=3；**此前默认密码探测结果仍为Unknown**。没有CRC认证过的真实U391 FileKey，故不可能声明已成功解密其实际文件系统；未猜测或枚举用户密码。
+- partition_transform新增纯只读 `decrypt_mode3_native`，仅接受完整512B或4096B缓冲区，逐16B标准AES-128-ECB解密。4096B合成明文按官方mode3重新加密，密文SHA256 ddb4a6b19a1ccb322887daf997e776e98e90e158141182df47ca741e2d1cef5c 与独立Unicorn执行官方Windows驱动的完整原生块金标一致，恢复明文精确一致；其它长度一律拒绝。
+- default_file_key_checked支持v0x0206默认密码与mode3 AES包装，仍须验证设备身份、`UserKeyCRC`、特殊有效密码的MD5派生规则以及解封后的FileKeyCRC，错误口令、来源CRC损坏及未知模式不会返回密钥。
+- InspectDiskContext新增 `decode_native_mode3_with_boot`：只对有可信EDPF身份及FileKeyCRC的mode3物理密文分区执行4096B解密；独立解密分区起始块，严格调用既有 `filesystem::detect_native_boot_sector` 完整4096B几何校验，未确认FS即拒绝进一步解码。后续任意分区块均需要已认证启动块佐证、不可只解码前512B。
+- `application/inspect/source` 仍对协议区仅解析512B并原样保留3584B不归属尾部；分区mode3则可返回完整4096B的decoded，DecodeRange精确覆盖4096B。没有密钥、错误区域及其它模式均只允许RAW，不能以RAW冒充解码成功。物理加密提示不再误称一律SM4。
+- 使用隔离合成的原生扇区及后续数据块，验证密码密钥校验失败、引导扇区损坏、尺寸异常与检查器完整读取链。真实U391默认密钥尚未认证，硬件安全模块是否启用仍缺实盘证据；U391保持只读、4Kn制盘物理写门禁保留。

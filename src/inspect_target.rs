@@ -556,6 +556,74 @@ impl InspectDiskContext {
         }
     }
 
+    /// Decode one full native 4Kn partition sector only after a CRC-verified
+    /// default FileKey and strict decrypted boot sector identification.
+    /// Never open or write any backing device. Other modes are fail-closed.
+    pub fn decode_native_mode3_with_boot(
+        &self,
+        lba: u64,
+        raw: &[u8],
+        boot_raw: Option<&[u8]>,
+    ) -> Result<(Vec<u8>, String), String> {
+        if self.logical_sector_bytes != 4096 || raw.len() != 4096 {
+            return Err("AES_CROSS原生只读解码仅接受完整4096B逻辑块".into());
+        }
+        let partition = self
+            .partition_for_lba(lba)
+            .ok_or_else(|| format!("4Kn LBA{lba}不属于已验证分区"))?;
+        if partition.encrypt_mode != 3 {
+            return Err(format!(
+                "原生分区encrypt_mode={}无已认证只读解码器",
+                partition.encrypt_mode
+            ));
+        }
+        let boot = if lba == partition.start_sector {
+            raw
+        } else {
+            boot_raw.ok_or_else(|| "缺少完整原生分区起始扇区证据".to_string())?
+        };
+        if boot.len() != 4096 {
+            return Err("起始扇区证据不是完整4096B".into());
+        }
+        let semantics = self.partition_semantics(partition)?;
+        if !semantics.physical_encryption.is_encrypted() {
+            return Err("该分区协议要求物理明文，不允许执行AES_CROSS".into());
+        }
+        let detect = |source: &[u8]| {
+            crate::filesystem::detect_native_boot_sector(
+                source,
+                partition.sector_count,
+                self.logical_sector_bytes,
+            )
+            .ok()
+            .flatten()
+        };
+        if detect(boot).is_some() {
+            return Err("物理密文分区raw已有合法文件系统签名，拒绝二次解密".into());
+        }
+        let did = self
+            .device_id
+            .as_deref()
+            .ok_or_else(|| "缺少device_id，拒绝无身份密钥解封".to_string())?;
+        let key = default_file_key_checked(&self.protocol_image, did, partition.index)
+            .map_err(|error| format!("AES_CROSS默认密码/FileKeyCRC尚未认证：{error}"))?;
+        let boot_plain = crate::partition_transform::decrypt_mode3_native(boot, &key)?;
+        let filesystem = detect(&boot_plain)
+            .ok_or_else(|| "AES_CROSS解码后起始扇区未通过严格文件系统校验".to_string())?;
+        let decoded = if lba == partition.start_sector {
+            boot_plain
+        } else {
+            crate::partition_transform::decrypt_mode3_native(raw, &key)?
+        };
+        Ok((
+            decoded,
+            format!(
+                "AES_CROSS标准AES-128-ECB，默认密码与FileKeyCRC=PASS，4096B原生扇区；起始扇区严格识别为{}；仅软件变换推断，不代表已验证硬件模块",
+                filesystem.label()
+            ),
+        ))
+    }
+
     pub fn decode_non_protocol_with_boot(
         &self,
         lba: u64,

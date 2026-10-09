@@ -88,6 +88,22 @@ impl PartitionTransform for EdpSm4Transform {
     }
 }
 
+/// Read-only AES_CROSS data-sector decoder, independently pinned to the
+/// official Windows driver mode3 (AES-128-ECB). No physical disk I/O here.
+/// Accept exactly one full 512B or 4096B native logical sector.
+pub fn decrypt_mode3_native(data: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, String> {
+    if !matches!(data.len(), 512 | 4096) {
+        return Err("AES_CROSS 只读解密要求完整512B或4096B原生逻辑扇区".into());
+    }
+    let mut plain = Vec::with_capacity(data.len());
+    for block in data.as_chunks::<16>().0 {
+        plain.extend_from_slice(&crate::protocol::crypto::aes128_ecb_decrypt_block(
+            block, key,
+        ));
+    }
+    Ok(plain)
+}
+
 pub fn decrypt_mode2(data: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, String> {
     let (blocks, remainder) = data.as_chunks::<16>();
     if !remainder.is_empty() {
@@ -176,6 +192,36 @@ mod tests {
         let debug = format!("{:?}", EdpSm4Transform::new(key));
         assert_eq!(debug, "EdpSm4Transform { .. }");
         assert_eq!(debug, format!("{:?}", EdpSm4Transform::new([0x18; 16])),);
+    }
+
+    #[test]
+    fn mode3_native_read_only_matches_official_driver_4096_sha_golden() {
+        use crate::protocol::crypto::aes128_ecb_encrypt_block;
+        let key = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let source = (0..4096)
+            .map(|index| (index * 37 + 13) as u8)
+            .collect::<Vec<_>>();
+        let mut encrypted = Vec::with_capacity(4096);
+        for block in source.as_chunks::<16>().0 {
+            encrypted.extend_from_slice(&aes128_ecb_encrypt_block(block, &key));
+        }
+        // Produced independently by Unicorn executing official EdpEDisk64.sys
+        // mode3 encrypt @0x160E0, SHA-pinned to driver 724544a96f89... .
+        assert_eq!(
+            crate::sha256::sha256_hex(&encrypted),
+            "ddb4a6b19a1ccb322887daf997e776e98e90e158141182df47ca741e2d1cef5c"
+        );
+        assert_eq!(
+            super::decrypt_mode3_native(&encrypted, &key).unwrap(),
+            source
+        );
+        assert_eq!(
+            super::decrypt_mode3_native(&encrypted[..512], &key).unwrap(),
+            source[..512]
+        );
+        for len in [0, 1, 16, 511, 513, 1024, 4095, 4097] {
+            assert!(super::decrypt_mode3_native(&vec![0; len], &key).is_err());
+        }
     }
 
     #[test]
