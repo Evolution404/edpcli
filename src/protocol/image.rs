@@ -315,3 +315,166 @@ pub fn parse_protocol_image(
     validate_cross_lba(&view, &context)?;
     Ok(view)
 }
+
+/// Complete, byte-preserving native LBA0..12 image. The existing
+/// `PROTOCOL_IMAGE_BYTES` projection is a 512B *per LBA wire contract*, not a
+/// native-device read/write size. This type never writes to a physical disk.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeProtocolImage {
+    logical_sector_bytes: u32,
+    native_bytes: Vec<u8>,
+}
+
+impl NativeProtocolImage {
+    pub fn from_native_bytes(logical_sector_bytes: u32, native_bytes: Vec<u8>) -> Result<Self> {
+        if !(512..=65_536).contains(&logical_sector_bytes)
+            || !logical_sector_bytes.is_power_of_two()
+        {
+            return Err(ProtocolError::UnsupportedProfile {
+                axis: "native_sector_size",
+            });
+        }
+        let expected = 13usize * logical_sector_bytes as usize;
+        if native_bytes.len() != expected {
+            return Err(ProtocolError::InvalidLength {
+                expected,
+                actual: native_bytes.len(),
+            });
+        }
+        Ok(Self {
+            logical_sector_bytes,
+            native_bytes,
+        })
+    }
+
+    /// For creating a new native image: zero-initialize every unowned byte,
+    /// instead of reproducing the official 4Kn LBA11 stack-overread defect.
+    pub fn from_protocol_zero_tailed(protocol: &[u8], logical_sector_bytes: u32) -> Result<Self> {
+        if protocol.len() != PROTOCOL_IMAGE_BYTES {
+            return Err(ProtocolError::InvalidLength {
+                expected: PROTOCOL_IMAGE_BYTES,
+                actual: protocol.len(),
+            });
+        }
+        if !(512..=65_536).contains(&logical_sector_bytes)
+            || !logical_sector_bytes.is_power_of_two()
+        {
+            return Err(ProtocolError::UnsupportedProfile {
+                axis: "native_sector_size",
+            });
+        }
+        let mut image = Self::from_native_bytes(
+            logical_sector_bytes,
+            vec![0; 13 * logical_sector_bytes as usize],
+        )?;
+        image.overlay_protocol_preserve_native_tail(protocol)?;
+        Ok(image)
+    }
+
+    /// Read the official fixed 512B protocol structure at each native LBA.
+    pub fn protocol_projection(&self) -> [u8; PROTOCOL_IMAGE_BYTES] {
+        let mut projected = [0u8; PROTOCOL_IMAGE_BYTES];
+        for lba in 0..13 {
+            let native = lba * self.logical_sector_bytes as usize;
+            let logical = lba * 512;
+            projected[logical..logical + 512]
+                .copy_from_slice(&self.native_bytes[native..native + 512]);
+        }
+        projected
+    }
+
+    /// Update only the first 512B of each LBA. Existing unknown tails remain
+    /// byte-identical; this is a pure in-memory primitive for future planning.
+    pub fn overlay_protocol_preserve_native_tail(&mut self, protocol: &[u8]) -> Result<()> {
+        if protocol.len() != PROTOCOL_IMAGE_BYTES {
+            return Err(ProtocolError::InvalidLength {
+                expected: PROTOCOL_IMAGE_BYTES,
+                actual: protocol.len(),
+            });
+        }
+        for lba in 0..13 {
+            let native = lba * self.logical_sector_bytes as usize;
+            let logical = lba * 512;
+            self.native_bytes[native..native + 512]
+                .copy_from_slice(&protocol[logical..logical + 512]);
+        }
+        Ok(())
+    }
+
+    pub fn logical_sector_bytes(&self) -> u32 {
+        self.logical_sector_bytes
+    }
+
+    pub fn native_bytes(&self) -> &[u8] {
+        &self.native_bytes
+    }
+
+    pub fn block(&self, lba: usize) -> Option<&[u8]> {
+        if lba >= 13 {
+            return None;
+        }
+        let start = lba * self.logical_sector_bytes as usize;
+        self.native_bytes
+            .get(start..start + self.logical_sector_bytes as usize)
+    }
+}
+
+#[cfg(test)]
+mod native_sector_image_tests {
+    use super::*;
+
+    const AUTHENTIC: &[u8; PROTOCOL_IMAGE_BYTES] = include_bytes!(
+        "../../audit/protocol/gold/authentic-mode1/sandisk_ultra_20260823_lba0_12.bin"
+    );
+
+    #[test]
+    fn native_projection_keeps_all_512b_official_gold_bytes_exact() {
+        for logical in [512, 1024, 2048, 4096, 8192] {
+            let image = NativeProtocolImage::from_protocol_zero_tailed(AUTHENTIC, logical)
+                .expect("valid native envelope");
+            assert_eq!(image.logical_sector_bytes(), logical);
+            assert_eq!(image.native_bytes().len(), 13 * logical as usize);
+            assert_eq!(&image.protocol_projection(), AUTHENTIC);
+            for lba in 0..13 {
+                assert_eq!(
+                    &image.block(lba).unwrap()[..512],
+                    &AUTHENTIC[lba * 512..(lba + 1) * 512]
+                );
+                assert!(image.block(lba).unwrap()[512..]
+                    .iter()
+                    .all(|byte| *byte == 0));
+            }
+            if logical == 512 {
+                assert_eq!(image.native_bytes(), AUTHENTIC);
+            }
+        }
+    }
+
+    #[test]
+    fn native_4kn_overlay_changes_only_official_protocol_prefix_not_lba11_tail() {
+        let mut image = NativeProtocolImage::from_protocol_zero_tailed(AUTHENTIC, 4096).unwrap();
+        let mut raw = image.native_bytes().to_vec();
+        raw[11 * 4096 + 512..12 * 4096].fill(0xa7);
+        image = NativeProtocolImage::from_native_bytes(4096, raw.clone()).unwrap();
+        let mut modified = AUTHENTIC.to_vec();
+        modified[11 * 512 + 0x104] ^= 0x37;
+        image
+            .overlay_protocol_preserve_native_tail(&modified)
+            .unwrap();
+        assert_eq!(image.protocol_projection(), modified.as_slice());
+        assert_eq!(
+            &image.block(11).unwrap()[512..],
+            &raw[11 * 4096 + 512..12 * 4096]
+        );
+        assert_eq!(image.native_bytes()[0..11 * 4096], raw[0..11 * 4096]);
+        assert_eq!(image.native_bytes()[12 * 4096..], raw[12 * 4096..]);
+    }
+
+    #[test]
+    fn native_image_rejects_short_blocks_and_invalid_sector_geometry() {
+        assert!(NativeProtocolImage::from_native_bytes(4096, vec![0; 13 * 512]).is_err());
+        assert!(NativeProtocolImage::from_protocol_zero_tailed(AUTHENTIC, 513).is_err());
+        assert!(NativeProtocolImage::from_protocol_zero_tailed(&AUTHENTIC[..6655], 4096).is_err());
+        assert!(NativeProtocolImage::from_protocol_zero_tailed(AUTHENTIC, 0).is_err());
+    }
+}

@@ -226,6 +226,8 @@ pub struct EvidenceSource {
     source_label: String,
     total_sectors: u64,
     protocol: Vec<u8>,
+    /// Full native LBA0..12 retained for 4Kn physical sources; never log raw tails.
+    native_protocol: Option<crate::protocol::image::NativeProtocolImage>,
     identity: EvidenceIdentity,
     reader: EvidenceReader,
 }
@@ -406,6 +408,7 @@ impl EvidenceSource {
             source_label: path.display().to_string(),
             total_sectors,
             protocol: protocol.clone(),
+            native_protocol: None,
             identity,
             reader: EvidenceReader::Backup(Box::new(BackupSectorReader {
                 snapshot,
@@ -435,12 +438,43 @@ impl EvidenceSource {
             disk,
             message: error.to_string(),
         })?;
-        let protocol = dev.read_range(0, METADATA_SECTOR_COUNT).map_err(|error| {
-            EvidenceError::DiskProtocolRead {
+        let (protocol, native_protocol) = if let Some(geometry) =
+            native_geometry.filter(|geometry| geometry.logical_sector_bytes > 512)
+        {
+            // Read the complete native envelope before producing the stable
+            // 6656B official protocol projection. Never discard unknown tails
+            // in a physical read; future EDPB captures consume the same type.
+            let mut native_bytes =
+                Vec::with_capacity(METADATA_SECTOR_COUNT * geometry.logical_sector_bytes as usize);
+            for lba in 0..METADATA_SECTOR_COUNT as u64 {
+                let block = SectorReader::read_native_sector(&mut dev, lba).map_err(|error| {
+                    EvidenceError::DiskProtocolRead {
+                        disk,
+                        message: error.to_string(),
+                    }
+                })?;
+                native_bytes.extend_from_slice(&block);
+            }
+            let image = crate::protocol::image::NativeProtocolImage::from_native_bytes(
+                geometry.logical_sector_bytes,
+                native_bytes,
+            )
+            .map_err(|error| EvidenceError::DiskProtocolRead {
                 disk,
                 message: error.to_string(),
-            }
-        })?;
+            })?;
+            (image.protocol_projection().to_vec(), Some(image))
+        } else {
+            (
+                dev.read_range(0, METADATA_SECTOR_COUNT).map_err(|error| {
+                    EvidenceError::DiskProtocolRead {
+                        disk,
+                        message: error.to_string(),
+                    }
+                })?,
+                None,
+            )
+        };
         debug_assert_eq!(protocol.len(), METADATA_IMAGE_LEN);
 
         let canonical =
@@ -468,6 +502,7 @@ impl EvidenceSource {
             source_label: format!("物理盘 disk{disk} ({path})"),
             total_sectors,
             protocol,
+            native_protocol,
             identity,
             reader: EvidenceReader::Disk(dev),
         })
@@ -483,6 +518,11 @@ impl EvidenceSource {
 
     pub fn protocol(&self) -> &[u8] {
         &self.protocol
+    }
+
+    /// Full native blocks, when the physical source provides >512B logical sectors.
+    pub fn native_protocol_image(&self) -> Option<&crate::protocol::image::NativeProtocolImage> {
+        self.native_protocol.as_ref()
     }
 
     pub fn identity(&self) -> &EvidenceIdentity {
