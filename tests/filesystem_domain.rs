@@ -747,3 +747,210 @@ fn fat32_native_formatter_rejects_noncertified_sizes_and_bounds() {
         .build_native_format_plan(FilesystemGeometry::new(63, 80_000_000, 4096), &request)
         .is_err());
 }
+
+#[test]
+fn exfat_legacy_512_goldens_survive_native_formatter() {
+    use sha2::{Digest, Sha256};
+    // Captured from pre-P6 exFAT writer: LBA little-endian u64 followed by full 512B.
+    let request = FormatRequest {
+        filesystem: FilesystemKind::ExFat,
+        volume_label: Some("DATA".into()),
+        volume_serial: Some(0x1020_3040),
+    };
+    for (start, count, golden) in [
+        (
+            63,
+            32_768,
+            "21760f0aad2e6b8fb7dcffb26c95a9eb1dd7067a43ea5140da12064f8345ef73",
+        ),
+        (
+            2048,
+            262_144,
+            "858556bd69486ca9a0dbec722cd73ca8fca02571e2836e929e54e78b176986ec",
+        ),
+        (
+            63,
+            1_048_576,
+            "5a422ccbdb60c5c8d4df8c0a9df0f83e3be4647b6a92f03436bb2379570dcc08",
+        ),
+    ] {
+        let geometry = FilesystemGeometry::new(start, count, 512);
+        let legacy = EXFAT_DRIVER.build_format_plan(geometry, &request).unwrap();
+        let native = EXFAT_DRIVER
+            .build_native_format_plan(geometry, &request)
+            .unwrap();
+        assert_eq!(legacy.expected_metadata, native.expected_metadata);
+        assert_eq!(legacy.writes.len(), native.writes.len());
+        let mut hash = Sha256::new();
+        for (old, new) in legacy.writes.iter().zip(&native.writes) {
+            assert_eq!(old.relative_lba, new.relative_lba);
+            assert_eq!(old.data.as_slice(), new.data.as_slice());
+            hash.update(old.relative_lba.to_le_bytes());
+            hash.update(old.data);
+        }
+        let digest = hash
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            digest, golden,
+            "exFAT 512B metadata changed at {start}:{count}"
+        );
+    }
+}
+
+#[test]
+fn exfat_native_4kn_virtual_metadata_and_checksum_independent() {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    const SIZE: u64 = 4096;
+    const COUNT: u64 = 32_768;
+    let geometry = FilesystemGeometry::new(63, COUNT, SIZE as u32);
+    let request = FormatRequest {
+        filesystem: FilesystemKind::ExFat,
+        volume_label: Some("FOURKN".into()),
+        volume_serial: Some(0x5643_2190),
+    };
+    let plan = EXFAT_DRIVER
+        .build_native_format_plan(geometry, &request)
+        .unwrap();
+    let external = std::env::var_os("EDPCLI_NATIVE_EXFAT_IMAGE_PATH");
+    let path = external
+        .as_ref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("edpcli-exfat-4kn-{}.img", std::process::id()))
+        });
+    let mut file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    let outcome = (|| -> std::io::Result<()> {
+        file.set_len(COUNT * SIZE)?;
+        for write in &plan.writes {
+            assert!(write.relative_lba < COUNT);
+            assert_eq!(write.data.len(), SIZE as usize);
+            file.seek(SeekFrom::Start(write.relative_lba * SIZE))?;
+            file.write_all(&write.data)?;
+        }
+        file.flush()?;
+        let block = |file: &mut std::fs::File, lba: u64| -> std::io::Result<Vec<u8>> {
+            let mut bytes = vec![0u8; SIZE as usize];
+            file.seek(SeekFrom::Start(lba * SIZE))?;
+            file.read_exact(&mut bytes)?;
+            Ok(bytes)
+        };
+        let read16 =
+            |v: &[u8], i: usize| u16::from_le_bytes(v[i..i + 2].try_into().unwrap()) as u64;
+        let read32 =
+            |v: &[u8], i: usize| u32::from_le_bytes(v[i..i + 4].try_into().unwrap()) as u64;
+        let read64 = |v: &[u8], i: usize| u64::from_le_bytes(v[i..i + 8].try_into().unwrap());
+        let boot = block(&mut file, 0)?;
+        assert_eq!(&boot[3..11], b"EXFAT   ");
+        assert_eq!(read64(&boot, 64), 63);
+        assert_eq!(read64(&boot, 72), COUNT);
+        assert_eq!(boot[108], 12);
+        assert_eq!(&boot[510..512], &[0x55, 0xaa]);
+        assert!(boot[512..].iter().all(|b| *b == 0));
+        let fat_start = read32(&boot, 80);
+        let fat_len = read32(&boot, 84);
+        let heap_start = read32(&boot, 88);
+        let clusters = read32(&boot, 92);
+        let spc = 1u64 << boot[109];
+        assert_eq!(fat_start, 24);
+        assert_eq!(read32(&boot, 96), 2);
+        assert_eq!(read16(&boot, 104), 0x0100);
+        assert_eq!(boot[110], 1);
+        assert!(fat_len * SIZE >= (clusters + 2) * 4);
+        assert!(heap_start >= fat_start + fat_len);
+        assert!(heap_start + clusters * spc <= COUNT);
+        let mut checksum = 0u32;
+        for lba in 0..11 {
+            let bytes = block(&mut file, lba)?;
+            if (1..=8).contains(&lba) {
+                assert_eq!(&bytes[SIZE as usize - 4..], &[0, 0, 0x55, 0xaa]);
+            }
+            assert_eq!(block(&mut file, lba + 12)?, bytes);
+            for (i, byte) in bytes.iter().enumerate() {
+                if lba == 0 && matches!(i, 106 | 107 | 112) {
+                    continue;
+                }
+                checksum = checksum.rotate_right(1).wrapping_add(u32::from(*byte));
+            }
+        }
+        let boot_sum = block(&mut file, 11)?;
+        assert!(boot_sum
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|chunk| u32::from_le_bytes(*chunk) == checksum));
+        assert_eq!(block(&mut file, 23)?, boot_sum);
+        let fat = block(&mut file, fat_start)?;
+        assert_eq!(read32(&fat, 0), 0xffff_fff8);
+        assert_eq!(read32(&fat, 4), 0xffff_ffff);
+        assert_eq!(read32(&fat, 8), 0xffff_ffff); // root cluster 2
+        let root = block(&mut file, heap_start)?;
+        assert_eq!(root[0], 0x81); // bitmap entry
+        assert_eq!(root[32], 0x82); // upcase table entry
+        assert_eq!(root[64], 0x83); // UTF-16 volume label entry
+        assert_eq!(root[65], 6);
+        let bitmap_cluster = read32(&root, 20);
+        let bitmap_bytes = read64(&root, 24);
+        let upcase_cluster = read32(&root, 52);
+        let upcase_bytes = read64(&root, 56);
+        assert_eq!(bitmap_cluster, 3);
+        assert_eq!(bitmap_bytes, clusters.div_ceil(8));
+        assert!(upcase_cluster >= 4);
+        assert!(upcase_bytes > 0);
+        let bitmap_lba = heap_start + (bitmap_cluster - 2) * spc;
+        let bitmap = block(&mut file, bitmap_lba)?;
+        assert_eq!(bitmap[0] & 0b0000_0111, 0b0000_0111); // root, bitmap, upcase
+        let upcase_lba = heap_start + (upcase_cluster - 2) * spc;
+        let mut upcase = Vec::new();
+        for lba in 0..upcase_bytes.div_ceil(SIZE) {
+            upcase.extend_from_slice(&block(&mut file, upcase_lba + lba)?);
+        }
+        upcase.truncate(upcase_bytes as usize);
+        let upcase_sum = upcase.iter().fold(0u32, |sum, byte| {
+            sum.rotate_right(1).wrapping_add(u32::from(*byte))
+        });
+        assert_eq!(read32(&root, 36), u64::from(upcase_sum));
+        assert_eq!(
+            plan.writes.len() as u64,
+            24 + fat_len
+                + ((bitmap_bytes.div_ceil(spc * SIZE) + upcase_bytes.div_ceil(spc * SIZE) + 1)
+                    * spc)
+        );
+        assert!(block(&mut file, COUNT - 1)?.iter().all(|b| *b == 0));
+        Ok(())
+    })();
+    if external.is_none() {
+        drop(file);
+        std::fs::remove_file(&path).unwrap();
+    }
+    outcome.unwrap();
+}
+
+#[test]
+fn exfat_native_4kn_geometry_and_legacy_write_guards() {
+    let request = FormatRequest {
+        filesystem: FilesystemKind::ExFat,
+        volume_label: Some("DATA".into()),
+        volume_serial: Some(7),
+    };
+    for bytes in [0, 256, 1024, 2048, 8192] {
+        assert!(EXFAT_DRIVER
+            .build_native_format_plan(FilesystemGeometry::new(63, 32_768, bytes), &request)
+            .is_err());
+    }
+    assert!(EXFAT_DRIVER
+        .build_format_plan(FilesystemGeometry::new(63, 32_768, 4096), &request)
+        .is_err());
+    for (start, count) in [(63, 0), (u64::MAX, 32_768), (63, u64::MAX), (63, 8)] {
+        assert!(EXFAT_DRIVER
+            .build_native_format_plan(FilesystemGeometry::new(start, count, 4096), &request)
+            .is_err());
+    }
+}

@@ -4,6 +4,7 @@ use super::{
     DetectionConfidence, DetectionResult, FilesystemCapabilities, FilesystemDriver,
     FilesystemError, FilesystemErrorKind, FilesystemGeometry, FilesystemKind, FilesystemMetadata,
     FilesystemReader, FilesystemWrite, FormatPlan, FormatRequest, FormatVerification,
+    NativeFilesystemWrite, NativeFormatPlan,
 };
 
 const BOOT_REGION_SECTORS: u64 = 24;
@@ -273,31 +274,33 @@ fn align_up(v: u64, a: u64) -> Option<u64> {
         .checked_div(a)?
         .checked_mul(a)
 }
-fn preferred_shift(sectors: u64) -> u8 {
-    const G: u64 = 1024 * 1024 * 1024 / 512;
-    const M: u64 = 1024 * 1024 / 512;
-    if sectors >= 64 * G {
+fn preferred_shift_native(sectors: u64, sector_bytes: u32) -> Option<u8> {
+    let bytes = sectors.checked_mul(u64::from(sector_bytes))?;
+    const G: u64 = 1024 * 1024 * 1024;
+    const M: u64 = 1024 * 1024;
+    Some(if bytes >= 64 * G {
         7
-    } else if sectors >= G {
+    } else if bytes >= G {
         6
-    } else if sectors >= 64 * M {
+    } else if bytes >= 64 * M {
         4
     } else {
         3
-    }
+    })
 }
-fn layout(sectors: u64, shift: u8) -> Option<(u64, u64, u32)> {
-    if sectors <= 24 {
+
+fn layout_native(sectors: u64, shift: u8, sector_bytes: u32) -> Option<(u64, u64, u32)> {
+    if sectors <= BOOT_REGION_SECTORS || sector_bytes == 0 {
         return None;
     }
     let spc = 1u64.checked_shl(shift.into())?;
-    let mut count = (sectors - 24) / spc;
+    let mut count = (sectors - BOOT_REGION_SECTORS) / spc;
     for _ in 0..16 {
         if count == 0 || count > u32::MAX as u64 - 2 {
             return None;
         }
-        let fat_len = ((count + 2).checked_mul(4)?).div_ceil(512);
-        let heap = align_up(24u64.checked_add(fat_len)?, spc)?;
+        let fat_len = ((count + 2).checked_mul(4)?).div_ceil(u64::from(sector_bytes));
+        let heap = align_up(FAT_OFFSET.checked_add(fat_len)?, spc)?;
         if heap >= sectors {
             return None;
         }
@@ -309,13 +312,23 @@ fn layout(sectors: u64, shift: u8) -> Option<(u64, u64, u32)> {
     }
     None
 }
-fn choose_shift(sectors: u64) -> Result<u8, FilesystemError> {
+
+fn layout(sectors: u64, shift: u8) -> Option<(u64, u64, u32)> {
+    layout_native(sectors, shift, 512)
+}
+
+fn choose_shift_native(sectors: u64, sector_bytes: u32) -> Result<u8, FilesystemError> {
     let mut tried = Vec::new();
-    for shift in
-        preferred_shift(sectors)..=crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTER_SHIFT
-    {
+    let initial = preferred_shift_native(sectors, sector_bytes).ok_or_else(|| {
+        FilesystemError::for_filesystem(
+            FilesystemKind::ExFat,
+            FilesystemErrorKind::InvalidGeometry,
+            format!("无法为 {sectors} 扇区生成受支持的 exFAT 布局（容量字节溢出）"),
+        )
+    })?;
+    for shift in initial..=crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTER_SHIFT {
         tried.push(shift);
-        if let Some((_, _, count)) = layout(sectors, shift) {
+        if let Some((_, _, count)) = layout_native(sectors, shift, sector_bytes) {
             if count <= crate::filesystem_capability::EXFAT_MAX_VALIDATED_CLUSTERS {
                 return Ok(shift);
             }
@@ -327,14 +340,20 @@ fn choose_shift(sectors: u64) -> Result<u8, FilesystemError> {
         format!("无法为 {sectors} 扇区生成受支持的 exFAT 布局（已尝试 shift {tried:?}）"),
     ))
 }
-pub(crate) fn exfat_boot_checksum(sectors: &[[u8; 512]]) -> u32 {
+fn choose_shift(sectors: u64) -> Result<u8, FilesystemError> {
+    choose_shift_native(sectors, 512)
+}
+
+/// exFAT checksums cover eleven *complete native* blocks. The volume flags
+/// and percent-in-use fields are excluded by the on-disk specification.
+fn exfat_boot_checksum_native(sectors: &[Vec<u8>]) -> u32 {
     let mut sum = 0u32;
     for (si, sec) in sectors.iter().take(11).enumerate() {
         for (o, b) in sec.iter().enumerate() {
             if si == 0 && matches!(o, 106 | 107 | 112) {
                 continue;
             }
-            sum = sum.rotate_right(1).wrapping_add(*b as u32);
+            sum = sum.rotate_right(1).wrapping_add(u32::from(*b));
         }
     }
     sum
@@ -406,24 +425,41 @@ pub(crate) fn fat_chain(fat: &mut [u8], first: u32, count: u32) -> Result<(), Fi
     }
     Ok(())
 }
-pub(crate) fn put_stream(
-    sectors: &mut BTreeMap<u64, [u8; 512]>,
+fn put_native_stream(
+    sectors: &mut BTreeMap<u64, Vec<u8>>,
     heap: u64,
     spc: u64,
     first: u32,
     count: u32,
     bytes: &[u8],
+    sector_bytes: u32,
 ) -> Result<(), FilesystemError> {
-    let capacity = u64::from(count) * spc * 512;
-    if bytes.len() as u64 > capacity {
+    let sector_bytes = u64::from(sector_bytes);
+    let capacity = u64::from(count)
+        .checked_mul(spc)
+        .and_then(|v| v.checked_mul(sector_bytes))
+        .ok_or_else(|| {
+            FilesystemError::for_filesystem(
+                FilesystemKind::ExFat,
+                FilesystemErrorKind::InvalidGeometry,
+                "exFAT 元数据流容量溢出",
+            )
+        })?;
+    if bytes.len() as u64 > capacity || first < 2 {
         return Err(FilesystemError::for_filesystem(
             FilesystemKind::ExFat,
             FilesystemErrorKind::InvalidGeometry,
-            "exFAT 元数据流超过已分配簇容量",
+            "exFAT 元数据流超过已分配簇容量或簇编号无效",
         ));
     }
     let first_lba = heap
-        .checked_add((u64::from(first) - 2) * spc)
+        .checked_add((u64::from(first) - 2).checked_mul(spc).ok_or_else(|| {
+            FilesystemError::for_filesystem(
+                FilesystemKind::ExFat,
+                FilesystemErrorKind::InvalidGeometry,
+                "exFAT 元数据流相对簇偏移溢出",
+            )
+        })?)
         .ok_or_else(|| {
             FilesystemError::for_filesystem(
                 FilesystemKind::ExFat,
@@ -432,15 +468,270 @@ pub(crate) fn put_stream(
             )
         })?;
     for i in 0..u64::from(count) * spc {
-        let mut sec = [0u8; 512];
-        let start = i as usize * 512;
+        let mut sec = vec![0u8; sector_bytes as usize];
+        let start = (i * sector_bytes) as usize;
         if start < bytes.len() {
-            let end = (start + 512).min(bytes.len());
+            let end = (start + sector_bytes as usize).min(bytes.len());
             sec[..end - start].copy_from_slice(&bytes[start..end]);
         }
         sectors.insert(first_lba + i, sec);
     }
     Ok(())
+}
+
+impl ExFatDriver {
+    /// Produce complete native-block exFAT metadata for regular-file virtual disks.
+    /// Legacy physical formatting still consumes 512-byte FormatPlan exclusively.
+    pub fn build_native_format_plan(
+        &self,
+        geometry: FilesystemGeometry,
+        request: &FormatRequest,
+    ) -> Result<NativeFormatPlan, FilesystemError> {
+        self.validate_format_request(request)?;
+        if !matches!(geometry.sector_size, 512 | 4096) || geometry.sector_count == 0 {
+            return Err(FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidGeometry,
+                "仅允许已认证512B和4096B的exFAT虚拟格式化",
+            ));
+        }
+        let sector_size = geometry.sector_size;
+        if geometry
+            .partition_offset
+            .checked_mul(u64::from(sector_size))
+            .is_none()
+            || geometry
+                .partition_offset
+                .checked_add(geometry.sector_count)
+                .is_none()
+        {
+            return Err(FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidGeometry,
+                "exFAT原生分区起点或末端字节偏移溢出",
+            ));
+        }
+        let sector_len = sector_size as usize;
+        let serial = request.volume_serial.ok_or_else(|| {
+            FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidMetadata,
+                "exFAT格式化需要卷序列号",
+            )
+        })?;
+        let label = validate_label(request.volume_label.as_deref())?;
+        let shift = choose_shift_native(geometry.sector_count, sector_size)?;
+        let spc = 1u64 << shift;
+        let (fat_len, heap, cluster_count) =
+            layout_native(geometry.sector_count, shift, sector_size).ok_or_else(|| {
+                FilesystemError::for_filesystem(
+                    self.kind(),
+                    FilesystemErrorKind::InvalidGeometry,
+                    "exFAT原生几何计算失败",
+                )
+            })?;
+        let cluster_bytes = spc.checked_mul(u64::from(sector_size)).ok_or_else(|| {
+            FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidGeometry,
+                "exFAT簇字节长度溢出",
+            )
+        })?;
+        let bitmap_len = u64::from(cluster_count).div_ceil(8);
+        let bitmap_clusters = u32::try_from(bitmap_len.div_ceil(cluster_bytes)).map_err(|_| {
+            FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidGeometry,
+                "exFAT分配位图簇数量溢出",
+            )
+        })?;
+        let upcase = exfat_upcase_table();
+        let upcase_clusters = u32::try_from((upcase.len() as u64).div_ceil(cluster_bytes))
+            .map_err(|_| {
+                FilesystemError::for_filesystem(
+                    self.kind(),
+                    FilesystemErrorKind::InvalidGeometry,
+                    "exFAT Upcase簇数量溢出",
+                )
+            })?;
+        let root = 2u32;
+        let bitmap = 3u32;
+        let upcase_cluster = bitmap.checked_add(bitmap_clusters).ok_or_else(|| {
+            FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidGeometry,
+                "exFAT Upcase起始簇溢出",
+            )
+        })?;
+        let allocated = 1u32
+            .checked_add(bitmap_clusters)
+            .and_then(|v| v.checked_add(upcase_clusters))
+            .ok_or_else(|| {
+                FilesystemError::for_filesystem(
+                    self.kind(),
+                    FilesystemErrorKind::InvalidGeometry,
+                    "exFAT已分配簇数量溢出",
+                )
+            })?;
+        if allocated > cluster_count {
+            return Err(FilesystemError::for_filesystem(
+                self.kind(),
+                FilesystemErrorKind::InvalidGeometry,
+                "exFAT空间不足以保存元数据",
+            ));
+        }
+
+        // Preflight materialization budget on full native block payloads.
+        let metadata_sectors = BOOT_REGION_SECTORS
+            .checked_add(fat_len)
+            .and_then(|n| n.checked_add(u64::from(allocated).checked_mul(spc)?))
+            .ok_or_else(|| {
+                FilesystemError::for_filesystem(
+                    self.kind(),
+                    FilesystemErrorKind::InvalidGeometry,
+                    "exFAT元数据块数量溢出",
+                )
+            })?;
+        super::FormatResourceBudget::default().check(
+            super::FormatResourceEstimate::from_native_sectors(metadata_sectors, sector_size)?,
+        )?;
+
+        let mut sectors = BTreeMap::new();
+        let mut main_boot = vec![vec![0u8; sector_len]; 12];
+        let b = &mut main_boot[0];
+        b[0..3].copy_from_slice(&[0xeb, 0x76, 0x90]);
+        b[3..11].copy_from_slice(b"EXFAT   ");
+        put_u64(b, 64, geometry.partition_offset);
+        put_u64(b, 72, geometry.sector_count);
+        put_u32(b, 80, FAT_OFFSET as u32);
+        put_u32(
+            b,
+            84,
+            u32::try_from(fat_len).map_err(|_| {
+                FilesystemError::for_filesystem(
+                    self.kind(),
+                    FilesystemErrorKind::InvalidGeometry,
+                    "exFAT FAT原生扇区数量超出u32",
+                )
+            })?,
+        );
+        put_u32(
+            b,
+            88,
+            u32::try_from(heap).map_err(|_| {
+                FilesystemError::for_filesystem(
+                    self.kind(),
+                    FilesystemErrorKind::InvalidGeometry,
+                    "exFAT数据堆起点超出u32",
+                )
+            })?,
+        );
+        put_u32(b, 92, cluster_count);
+        put_u32(b, 96, root);
+        put_u32(b, 100, serial);
+        put_u16(b, 104, 0x0100);
+        put_u16(b, 106, 0);
+        b[108] = sector_size.trailing_zeros() as u8;
+        b[109] = shift;
+        b[110] = 1;
+        b[111] = 0x80;
+        b[112] = u8::try_from((u64::from(allocated) * 100).div_ceil(u64::from(cluster_count)))
+            .unwrap_or(100)
+            .min(100);
+        b[510..512].copy_from_slice(&[0x55, 0xaa]);
+        // The Extended Boot Signature is the last DWORD of every extended
+        // native sector, not always offset 508 on 4Kn.
+        for sec in &mut main_boot[1..=8] {
+            sec[sector_len - 2..].copy_from_slice(&[0x55, 0xaa]);
+        }
+        let sum = exfat_boot_checksum_native(&main_boot);
+        for chunk in main_boot[11].as_chunks_mut::<4>().0 {
+            chunk.copy_from_slice(&sum.to_le_bytes());
+        }
+        for (i, sec) in main_boot.iter().enumerate() {
+            sectors.insert(i as u64, sec.clone());
+            sectors.insert(i as u64 + 12, sec.clone());
+        }
+
+        let fat_bytes_len =
+            usize::try_from(fat_len.checked_mul(u64::from(sector_size)).ok_or_else(|| {
+                FilesystemError::for_filesystem(
+                    self.kind(),
+                    FilesystemErrorKind::InvalidGeometry,
+                    "exFAT FAT字节长度溢出",
+                )
+            })?)
+            .map_err(|_| {
+                FilesystemError::for_filesystem(
+                    self.kind(),
+                    FilesystemErrorKind::InvalidGeometry,
+                    "exFAT FAT过大",
+                )
+            })?;
+        let mut fat = vec![0u8; fat_bytes_len];
+        put_u32(&mut fat, 0, 0xffff_fff8);
+        put_u32(&mut fat, 4, 0xffff_ffff);
+        fat_chain(&mut fat, root, 1)?;
+        fat_chain(&mut fat, bitmap, bitmap_clusters)?;
+        fat_chain(&mut fat, upcase_cluster, upcase_clusters)?;
+        for (i, chunk) in fat.chunks_exact(sector_len).enumerate() {
+            sectors.insert(FAT_OFFSET + i as u64, chunk.to_vec());
+        }
+
+        let mut bitmap_bytes = vec![0u8; bitmap_len as usize];
+        for bit in 0..allocated as usize {
+            bitmap_bytes[bit / 8] |= 1 << (bit % 8);
+        }
+        put_native_stream(
+            &mut sectors,
+            heap,
+            spc,
+            bitmap,
+            bitmap_clusters,
+            &bitmap_bytes,
+            sector_size,
+        )?;
+        put_native_stream(
+            &mut sectors,
+            heap,
+            spc,
+            upcase_cluster,
+            upcase_clusters,
+            &upcase,
+            sector_size,
+        )?;
+        let mut root_bytes = vec![0u8; cluster_bytes as usize];
+        root_bytes[0] = 0x81;
+        root_bytes[1] = 0;
+        put_u32(&mut root_bytes, 20, bitmap);
+        put_u64(&mut root_bytes, 24, bitmap_len);
+        root_bytes[32] = 0x82;
+        put_u32(&mut root_bytes, 36, checksum32(&upcase));
+        put_u32(&mut root_bytes, 52, upcase_cluster);
+        put_u64(&mut root_bytes, 56, upcase.len() as u64);
+        if !label.is_empty() {
+            root_bytes[64] = 0x83;
+            root_bytes[65] = label.len() as u8;
+            for (i, v) in label.iter().enumerate() {
+                put_u16(&mut root_bytes, 66 + i * 2, *v);
+            }
+        }
+        put_native_stream(&mut sectors, heap, spc, root, 1, &root_bytes, sector_size)?;
+
+        Ok(NativeFormatPlan {
+            filesystem: self.kind(),
+            geometry,
+            writes: sectors
+                .into_iter()
+                .map(|(relative_lba, data)| NativeFilesystemWrite { relative_lba, data })
+                .collect(),
+            expected_metadata: FilesystemMetadata {
+                kind: self.kind(),
+                volume_label: request.volume_label.clone(),
+                volume_serial: Some(serial),
+            },
+        })
+    }
 }
 
 impl FilesystemDriver for ExFatDriver {
@@ -543,200 +834,37 @@ impl FilesystemDriver for ExFatDriver {
         geometry: FilesystemGeometry,
         request: &FormatRequest,
     ) -> Result<FormatPlan, FilesystemError> {
-        self.validate_format_request(request)?;
+        // The physical provision writer is still a strict [u8;512] consumer.
         if geometry.sector_size != 512 {
             return Err(FilesystemError::for_filesystem(
                 self.kind(),
                 FilesystemErrorKind::InvalidGeometry,
-                "exFAT 仅支持 512B 扇区",
+                "exFAT旧格式化写入器仅支持512B逻辑扇区",
             ));
         }
-        let serial = request.volume_serial.ok_or_else(|| {
-            FilesystemError::for_filesystem(
-                self.kind(),
-                FilesystemErrorKind::InvalidMetadata,
-                "exFAT 格式化需要卷序列号",
-            )
-        })?;
-        let label = validate_label(request.volume_label.as_deref())?;
-        let shift = choose_shift(geometry.sector_count)?;
-        let spc = 1u64 << shift;
-        let (fat_len, heap, cluster_count) =
-            layout(geometry.sector_count, shift).ok_or_else(|| {
-                FilesystemError::for_filesystem(
-                    self.kind(),
-                    FilesystemErrorKind::InvalidGeometry,
-                    "exFAT 几何计算失败",
-                )
-            })?;
-        let cluster_bytes = spc * 512;
-        let bitmap_len = u64::from(cluster_count).div_ceil(8);
-        let bitmap_clusters = bitmap_len.div_ceil(cluster_bytes) as u32;
-        let upcase = exfat_upcase_table();
-        let upcase_clusters = (upcase.len() as u64).div_ceil(cluster_bytes) as u32;
-        let root = 2u32;
-        let bitmap = 3u32;
-        let upcase_cluster = bitmap.checked_add(bitmap_clusters).ok_or_else(|| {
-            FilesystemError::for_filesystem(
-                self.kind(),
-                FilesystemErrorKind::InvalidGeometry,
-                "exFAT 元数据簇编号溢出",
-            )
-        })?;
-        let allocated = 1u32
-            .checked_add(bitmap_clusters)
-            .and_then(|v| v.checked_add(upcase_clusters))
-            .ok_or_else(|| {
-                FilesystemError::for_filesystem(
-                    self.kind(),
-                    FilesystemErrorKind::InvalidGeometry,
-                    "exFAT 已分配簇数量溢出",
-                )
-            })?;
-        if allocated > cluster_count {
-            return Err(FilesystemError::for_filesystem(
-                self.kind(),
-                FilesystemErrorKind::InvalidGeometry,
-                "exFAT 卷过小，无法容纳系统元数据",
-            ));
-        }
-
-        super::FormatResourceBudget::default().check(super::estimate_format_resources(
-            self.kind(),
-            geometry.sector_count,
-        )?)?;
-
-        let mut sectors = BTreeMap::new();
-        let mut main_boot = [[0u8; 512]; 12];
-        let b = &mut main_boot[0];
-        b[0..3].copy_from_slice(&[0xeb, 0x76, 0x90]);
-        b[3..11].copy_from_slice(b"EXFAT   ");
-        put_u64(b, 64, geometry.partition_offset);
-        put_u64(b, 72, geometry.sector_count);
-        put_u32(b, 80, FAT_OFFSET as u32);
-        put_u32(
-            b,
-            84,
-            u32::try_from(fat_len).map_err(|_| {
-                FilesystemError::for_filesystem(
-                    self.kind(),
-                    FilesystemErrorKind::InvalidGeometry,
-                    "exFAT FAT 长度超过 u32",
-                )
-            })?,
-        );
-        put_u32(
-            b,
-            88,
-            u32::try_from(heap).map_err(|_| {
-                FilesystemError::for_filesystem(
-                    self.kind(),
-                    FilesystemErrorKind::InvalidGeometry,
-                    "exFAT heap offset 超过 u32",
-                )
-            })?,
-        );
-        put_u32(b, 92, cluster_count);
-        put_u32(b, 96, root);
-        put_u32(b, 100, serial);
-        put_u16(b, 104, 0x0100);
-        put_u16(b, 106, 0);
-        b[108] = 9;
-        b[109] = shift;
-        b[110] = 1;
-        b[111] = 0x80;
-        b[112] = u8::try_from((u64::from(allocated) * 100).div_ceil(u64::from(cluster_count)))
-            .unwrap_or(100)
-            .min(100);
-        b[510..512].copy_from_slice(&[0x55, 0xaa]);
-        for sec in &mut main_boot[1..=8] {
-            sec[510..512].copy_from_slice(&[0x55, 0xaa]);
-        }
-        let sum = exfat_boot_checksum(&main_boot);
-        for chunk in main_boot[11].as_chunks_mut::<4>().0 {
-            chunk.copy_from_slice(&sum.to_le_bytes());
-        }
-        for (i, sec) in main_boot.iter().enumerate() {
-            sectors.insert(i as u64, *sec);
-            sectors.insert(i as u64 + 12, *sec);
-        }
-
-        let fat_bytes_len = usize::try_from(fat_len.checked_mul(512).ok_or_else(|| {
-            FilesystemError::for_filesystem(
-                self.kind(),
-                FilesystemErrorKind::InvalidGeometry,
-                "exFAT FAT 字节长度溢出",
-            )
-        })?)
-        .map_err(|_| {
-            FilesystemError::for_filesystem(
-                self.kind(),
-                FilesystemErrorKind::InvalidGeometry,
-                "exFAT FAT 过大",
-            )
-        })?;
-        let mut fat = vec![0u8; fat_bytes_len];
-        put_u32(&mut fat, 0, 0xffff_fff8);
-        put_u32(&mut fat, 4, 0xffff_ffff);
-        fat_chain(&mut fat, root, 1)?;
-        fat_chain(&mut fat, bitmap, bitmap_clusters)?;
-        fat_chain(&mut fat, upcase_cluster, upcase_clusters)?;
-        for (i, chunk) in fat.as_chunks::<512>().0.iter().enumerate() {
-            let mut sec = [0u8; 512];
-            sec.copy_from_slice(chunk);
-            sectors.insert(FAT_OFFSET + i as u64, sec);
-        }
-
-        let mut bitmap_bytes = vec![0u8; bitmap_len as usize];
-        for bit in 0..allocated as usize {
-            bitmap_bytes[bit / 8] |= 1 << (bit % 8);
-        }
-        put_stream(
-            &mut sectors,
-            heap,
-            spc,
-            bitmap,
-            bitmap_clusters,
-            &bitmap_bytes,
-        )?;
-        put_stream(
-            &mut sectors,
-            heap,
-            spc,
-            upcase_cluster,
-            upcase_clusters,
-            &upcase,
-        )?;
-        let mut root_bytes = vec![0u8; cluster_bytes as usize];
-        root_bytes[0] = 0x81;
-        root_bytes[1] = 0;
-        put_u32(&mut root_bytes, 20, bitmap);
-        put_u64(&mut root_bytes, 24, bitmap_len);
-        root_bytes[32] = 0x82;
-        put_u32(&mut root_bytes, 36, checksum32(&upcase));
-        put_u32(&mut root_bytes, 52, upcase_cluster);
-        put_u64(&mut root_bytes, 56, upcase.len() as u64);
-        if !label.is_empty() {
-            root_bytes[64] = 0x83;
-            root_bytes[65] = label.len() as u8;
-            for (i, v) in label.iter().enumerate() {
-                put_u16(&mut root_bytes, 66 + i * 2, *v);
-            }
-        }
-        put_stream(&mut sectors, heap, spc, root, 1, &root_bytes)?;
-
+        let native = self.build_native_format_plan(geometry, request)?;
+        let writes = native
+            .writes
+            .into_iter()
+            .map(|write| {
+                let data = write.data.try_into().map_err(|_| {
+                    FilesystemError::for_filesystem(
+                        self.kind(),
+                        FilesystemErrorKind::InvalidGeometry,
+                        "exFAT旧格式化块长度不符合512B",
+                    )
+                })?;
+                Ok(FilesystemWrite {
+                    relative_lba: write.relative_lba,
+                    data,
+                })
+            })
+            .collect::<Result<Vec<_>, FilesystemError>>()?;
         Ok(FormatPlan {
-            filesystem: self.kind(),
+            filesystem: native.filesystem,
             geometry,
-            writes: sectors
-                .into_iter()
-                .map(|(relative_lba, data)| FilesystemWrite { relative_lba, data })
-                .collect(),
-            expected_metadata: FilesystemMetadata {
-                kind: self.kind(),
-                volume_label: request.volume_label.clone(),
-                volume_serial: Some(serial),
-            },
+            writes,
+            expected_metadata: native.expected_metadata,
         })
     }
     fn verify_format(
