@@ -21,6 +21,37 @@ from datetime import datetime
 READ_ONLY_KEYS = {"q", "\x1b", "\t", "j", "k", "g", "G", "r", "i", ":devices\r", ":backups\r"}
 
 
+class OutputBurstTracker:
+    """First PTY output and first 20ms-quiet burst, ignoring later animations.
+
+    The time of the LAST byte in the first settled burst is returned, not the
+    20ms quiet confirmation time. This is a capture proxy, not semantic render.
+    """
+
+    QUIET_SECONDS = 0.020
+
+    def __init__(self, action_at):
+        self.action_at = action_at
+        self.first_ms = None
+        self.last_at = None
+        self.settled_ms = None
+
+    def on_data(self, now):
+        if self.action_at is None:
+            return
+        if self.first_ms is None:
+            self.first_ms = (now - self.action_at) * 1000
+        self.advance(now)
+        if self.settled_ms is None:
+            self.last_at = now
+
+    def advance(self, now):
+        if (self.settled_ms is None and self.action_at is not None
+                and self.last_at is not None
+                and now - self.last_at >= self.QUIET_SECONDS):
+            self.settled_ms = (self.last_at - self.action_at) * 1000
+
+
 def parse_size(value):
     width, height = map(int, value.lower().split("x"))
     if not (20 <= width <= 1000 and 10 <= height <= 300):
@@ -121,16 +152,20 @@ def run(args):
             # Measure only after the input/resize was delivered. This is first
             # PTY output, not an assertion about semantic/frame completion.
             action_at = None
-            first_output_ms = None
             if "resize" in step:
                 resize(step["resize"])
                 action_at = time.monotonic()
             if "keys" in step:
                 os.write(master, step["keys"].encode())
                 action_at = time.monotonic()
+            burst = OutputBurstTracker(action_at)
             end = min(deadline, time.monotonic() + step.get("wait", 1))
             while time.monotonic() < end:
-                if not selector.select(min(0.1, end - time.monotonic())):
+                # Short poll only until the FIRST repaint burst has settled.
+                # Subsequent unrelated animations must not move this timestamp.
+                poll_seconds = 0.005 if action_at is not None and burst.settled_ms is None else 0.1
+                if not selector.select(min(poll_seconds, end - time.monotonic())):
+                    burst.advance(time.monotonic())
                     continue
                 try:
                     data = os.read(master, 65536)
@@ -140,8 +175,7 @@ def run(args):
                     break
                 if not data:
                     break
-                if action_at is not None and first_output_ms is None:
-                    first_output_ms = (time.monotonic() - action_at) * 1000.0
+                burst.on_data(time.monotonic())
                 raw.write(data)
                 pending += data
                 # Terminal capability/cursor queries can arrive across read boundaries.
@@ -152,7 +186,8 @@ def run(args):
                         pending = pending.replace(query, b"")
                 pending = pending[-16:]
             raw.flush()
-            metadata["frames"].append({"step": index, "elapsed_seconds": time.monotonic() - started, "ansi_offset": raw.tell(), "first_pty_output_ms": first_output_ms})
+            burst.advance(time.monotonic())
+            metadata["frames"].append({"step": index, "elapsed_seconds": time.monotonic() - started, "ansi_offset": raw.tell(), "first_pty_output_ms": burst.first_ms, "settled_pty_burst_ms": burst.settled_ms})
             save()
             if process.poll() is not None:
                 break

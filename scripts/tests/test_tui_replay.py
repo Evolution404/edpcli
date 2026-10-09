@@ -14,6 +14,19 @@ SPEC.loader.exec_module(REPLAY)
 
 
 class ReplayTests(unittest.TestCase):
+    def test_first_settled_burst_ignores_later_animation(self):
+        burst = REPLAY.OutputBurstTracker(10.0)
+        burst.on_data(10.001)
+        burst.on_data(10.004)
+        self.assertIsNone(burst.settled_ms)
+        burst.advance(10.025)
+        self.assertAlmostEqual(burst.first_ms, 1.0)
+        self.assertAlmostEqual(burst.settled_ms, 4.0)
+        burst.on_data(10.150)
+        self.assertAlmostEqual(burst.settled_ms, 4.0)
+        self.assertAlmostEqual(burst.last_at, 10.004)
+        self.assertIsNone(REPLAY.OutputBurstTracker(None).settled_ms)
+
     def test_live_mode_rejects_write_keys_before_launch(self):
         with tempfile.TemporaryDirectory() as temp:
             steps = Path(temp) / "steps.json"

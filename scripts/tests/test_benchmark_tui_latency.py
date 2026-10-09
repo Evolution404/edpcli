@@ -18,6 +18,9 @@ class LatencyBenchTests(unittest.TestCase):
         frames=[{'ansi_offset':300}, {'ansi_offset':320,'first_pty_output_ms':25.}, {'ansi_offset':320}]
         manifest={'frames':frames,'steps':steps,'exit_code':0,'timed_out':False}
         self.assertEqual(module.samples_for(manifest,'test'),[25.])
+        with self.assertRaises(ValueError):module.samples_for(manifest,'test','settled_pty_burst_ms')
+        frames[1]['settled_pty_burst_ms']=26.
+        self.assertEqual(module.samples_for(manifest,'test','settled_pty_burst_ms'),[26.])
         for broken in [dict(frames=[frames[0]]+frames[2:]), dict(frames=[frames[0],{'ansi_offset':300,'first_pty_output_ms':5.},frames[2:]]),dict(frames=[frames[0],{'ansi_offset':321,'first_pty_output_ms':None},frames[2:]]),dict(exit_code=1)]:
             with self.assertRaises(ValueError):module.samples_for({**manifest,**broken},'test')
 if __name__=='__main__':unittest.main()
