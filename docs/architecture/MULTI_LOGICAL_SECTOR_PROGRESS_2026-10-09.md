@@ -204,3 +204,11 @@
 - 模式3 AES_CROSS的FileKey包装为AES-128-ECB，4Kn U391真实盘采用该模式，但当前Linux GetPartitionHeader明确不支持模式3，因此Windows数据扇区算法仍未认证，不能由模式名或封装算法推断数据区采用AES-ECB、AES-CBC或XTS。
 - 另对libsectorManage.so确定其ReadEncrypt/WriteEncrypt采用SM4-ECB、设备元数据及DataKey管理调用AES-256-CBC；该库也导出SM4-CFB函数但未发现分区数据读写调用点。不能把不同组件出现的算法简单拼成官方三种加密选项的分区算法矩阵。
 - 全部机器码函数地址、SHA-256、已验证模式对应与未闭合证据记录在 docs/protocol/EDP_PROTOCOL_REVERSE_ENGINEERING.md 新专题。写盘实现必须把FileKey封装和PartitionCrypto分层但遵照官方映射；SMS4以外正式制盘与4Kn实体写入保持禁止，U391从未写入。
+
+## 2026-10-09 第二十一批：官方 Windows 数据分区 EncryptMode=1/2/3 真正算法闭环
+
+- EdpEDiskEx.dll::EdpMountFile -> sub_10007480 -> EdpEDisk64.sys::sub_205D0 已确认 EncryptMode 原样从 LBA12+0x58 经用户挂载参数+0x44、请求包+0x3F传到驱动上下文+0xA0，没有数值重新编号。驱动实现版本0x013305C5才支持AES_CROSS mode3。
+- 驱动数据层：AES mode1 = A7F0/A6B0带**真实物理ByteOffset**扰动；SMS4 mode2 = 标准SM4-128-ECB；AES_CROSS mode3 = 标准AES-128-ECB。三者分别调用明确独立的写入前加密和读取后解密函数。内部值4也是SM4实现，不是分区布局Mode4。
+- 在纯离线隔离Unicorn执行官方驱动的FIPS-197 AES已知向量、GB/T 32907 SM4向量、模式1的offset 0/4096差异、模式2整块512B往返以及模式3完整4096B往返，全部PASS。官方二进制SHA锁定的可复现脚本：scripts/protocol/probe_driver_partition_crypto.py；不会启动驱动或触及真实盘。
+- 驱动挂载字段按 max(SectorSize,512)计算字节长度，分区物理字节偏移按StartSector*SectorSize计算。4Kn数据变换算法可处理4096B缓冲区，但并非U391实盘成功挂载证明。后续仍需官方密文与CRC认证FileKey的只读配对校验；U391读保护及4Kn写入硬门禁保持不变。
+- 此结果替代第二十批的Windows mode3数据加密「未知」阶段性结论：**数据算法已证实AES-128-ECB，尚未证实真实U391分区内容完成全链回读。** 不能因此开放实体AES_CROSS制盘。

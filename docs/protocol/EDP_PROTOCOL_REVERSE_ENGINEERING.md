@@ -6950,3 +6950,46 @@ USB/SCSI 修订号、控制器、固件、ID_BLK 或 NAND ID。保存的 macOS i
 - libedpedisk.so还含通用的EncryptionModeXTS和CipherEDPOPENSSLAES等类型；类型存在不等于官方EDPF mode0/1/2/3全部使用这些模式。
 
 工程结论：edpcli 应将 FileKeyWrapMode 与 PartitionCryptoMode 分层建模，但采用经版本/平台认证的官方组合映射，不能让用户任意交叉配置。当前只认证SMS4数据写入；AES模式1需要拿厂家扇区明文/密文金标验证；AES_CROSS mode3在本版Linux不支持，需要继续追Windows EdpMountFile->EdpEDisk64.sys驱动、扇区消费者及U391官方密文配对。保持4Kn硬写保护与U391只读，旧512B官方金标不能回退。
+
+### 2026-10-09 补证：官方 Windows 驱动的 EncryptMode=1/2/3 实际分区数据算法闭环
+
+本节取代前一节“Windows 模式3 数据算法未知”的阶段性结论，仍不代表 U391 实盘通过 Windows 整盘挂载/解密。
+
+**官方二进制：** VRV/edp/EdpEDiskEx.dll (SHA256 9a665e5c46eaa4076e14e2208d467d2110d33fd5bf1d363b34cc40c517fccaca)；VRV/edp/EdpEDisk64.sys (SHA256 724544a96f899b9bb0f87a8adedd08a961d8e4b8ec40aa90bc8144e5ae7e0620，与 out_raw_data 同名驱动字节相同)。
+
+#### 参数传递和版本门禁
+
+1. 前文已确认 Windows UserLogin 把每条 LBA12 EDPF 紧凑记录的 EncryptMode@+0x58 送入挂载参数。官方 EdpEDiskEx.dll 导出的 EdpMountFile @0x100098B0 调用 sub_10007480 @0x10007480。
+2. sub_10007480 直接将挂载参数+0x44的模式字节复制到请求包+0x3F；还将挂载参数+0x20的逻辑 SectorSize 复制到包+0x1B，将挂载参数+0x18的 StartSector 复制到包+0x13，挂载参数+0x0C的 NeedEncrypt复制到包+0x05；FileKey复制到包+0x1F起的密钥区。
+3. 驱动 EdpEDisk64.sys::sub_205D0 直接执行 context+0xA0 = packed+0x3F；context+0x138 = packed+0x00 (版本)。**算法值没有重新编号。** 驱动将逻辑 sector_bytes 设为 max(packed+0x1B,512)；物理分区基址字节偏移 = packed.start_sector * sector_bytes，再加读写时的分区内 ByteOffset。这是4096B设备应当保留原生扇区字节换算的独立机器码证据，不是实盘4Kn挂载认证。
+4. 挂载端 DLL @0x100075BF..0x10007629 会请求 DeviceIoControl(0x8200E018) 返回驱动实现版本：mode1/2允许0x013305BB或0x013305C5，**mode3仅允许0x013305C5**，否则用户态拒绝；该驱动实现版本不能与LBA12协议版本0x0206混同。
+5. 正式驱动 0x0206 版本的数据读写在 write @0x12208..0x122CE 与 read @0x124E0..0x1259A 从 context+0xA0 读取算法模式，并以如下可执行密码函数进行分派：
+
+| EncryptMode (非分区布局Mode编号) | 对应官方选项 | 驱动写加密/读解密入口 | 数据层算法和关键参数 |
+|---|---|---|---|
+| 1 | AES | 0x13450 / 0x13160 | 厂家A7F0/A6B0 AES-128，16B FileKey 和实体物理ByteOffset的per-block counter扰动，非标准ECB/CBC |
+| 2 | SMS4 | 0x13F40 / 0x14020 | **标准SM4-128-ECB**，每分组16B，FileKey16B |
+| 3 | AES_CROSS | 0x160E0 / 0x16330 | **标准AES-128-ECB**，每分组16B，FileKey16B |
+| 4 | 驱动兼容模式字节；非官方分区布局Mode4 | 0x18140 / 0x181E0 | 另一套标准SM4-128-ECB分组实现，不是当前UI产生的配置类型 |
+
+mode1及驱动不认识的其它模式会进入旧A7F0变换的回退分支；edpcli不得据此接受未知模式，必须fail-closed。mode4可执行密码函数存在不意味着标准UI能创建这类分区记录。
+
+#### 官方二进制执行而非算法名猜测
+
+新增仓库脚本 scripts/protocol/probe_driver_partition_crypto.py。该脚本只允许SHA256完全匹配的**普通PE驱动文件**，Unicorn x64隔离内存中执行官方本体四组加解密函数。它不加载内核驱动，不触碰实体磁盘，不使用真实密码或真实FileKey，所有输入均为公开向量与确定性合成缓冲区。
+
+执行示例：
+
+```bash
+uv run --locked python scripts/protocol/probe_driver_partition_crypto.py --driver /Users/zhangyuxi/Desktop/u_disk/VRV/edp/EdpEDisk64.sys
+```
+
+已执行并锁定下列结果：
+- 模式2和内部兼容模式4：标准GB/T 32907 SM4已知向量 key=plaintext=0123456789abcdeffedcba9876543210，官方驱动生成681edf34d206965e86b3e94f536e4246，解密逐字节还原；模式2另外整块512B密文SHA256 = 12afec563ab2f58e81690eab87fc85fd99080662fd96da905ac6310cb15e88a6。
+- 模式3：FIPS-197 AES-128明文00112233445566778899aabbccddeeff，key=000102030405060708090a0b0c0d0e0f，官方驱动生成69c4e0d86a7b0430d8cdb78070b4c55a，精确符合AES-128-ECB；两个相同明文16B块生成相同密文块；连续**4096B**缓冲区加/解密逐字节还原，密文SHA256 = ddb4a6b19a1ccb322887daf997e776e98e90e158141182df47ca741e2d1cef5c。
+- 模式1：输入16B FileKey和固定重复512B明文，物理偏移为0和4096时分别生成SHA256 b290b2e6e598e027e78453d2db0a91fe5ebb9676b6e05712f986affae34094c9 和 163d9a5c52dbdde281042fe08272fec8f058c65ebc7eb792f0dded1df9bec66a；解密在对应偏移下完全回原，且同缓冲区内两个相同16B块也不同，证明不能把AES模式1当作标准ECB。
+- 该离线脚本对四组官方入口的标准向量、模式1偏移变化、512/4096B完整往返和4个整缓冲区SHA金标全强制断言PASS，任何驱动字节版本不匹配都拒绝使用旧地址映射。
+
+**两层与密钥职责：** mode3的密码包装阶段使用 MD5(effective_password) 对16B FileKey做 AES-128-ECB；分区数据阶段改用**解封后的FileKey**对用户数据做 AES-128-ECB。即使两阶段标准算法相同，也绝不能使用密码MD5摘要直接当分区数据密钥。mode2的两层同理都是SM4-ECB但密钥各异，mode1数据阶段除原语外还使用物理字节偏移扰动。
+
+已闭环的是本版官方Windows驱动算法/版本门禁/参数和独立标准向量；未闭环的仍是 U391 原生4Kn真实密文配对、成功挂载和文件系统识别等真实链路。非SMS4制盘实体盘写入和原生4Kn写入继续保留硬性门禁；严禁对U391写入。
