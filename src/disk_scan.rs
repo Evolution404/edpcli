@@ -196,7 +196,8 @@ impl Row {
     pub fn canonical_layout(&self) -> Result<crate::disk_layout::DiskLayoutModel, String> {
         use crate::disk_layout::{DiskLayoutModel, DiskLayoutSegment, DiskRegionKind};
 
-        let total_sectors = self.layout_geometry()?.native_sector_count;
+        let geometry = self.layout_geometry()?;
+        let total_sectors = geometry.native_sector_count;
         match self.confirmed_provision_kind() {
             Some(DiskProvisionKind::Plain) => {
                 let table = self.partition_table.as_ref().ok_or_else(|| {
@@ -204,7 +205,8 @@ impl Row {
                         .clone()
                         .unwrap_or_else(|| "普通盘分区表尚未完整读取".into())
                 })?;
-                DiskLayoutModel::canonical_plain(total_sectors, table)
+                DiskLayoutModel::canonical_plain(total_sectors, table)?
+                    .with_logical_sector_bytes(geometry.logical_sector_bytes)
             }
             Some(_) => {
                 let profile = self
@@ -229,7 +231,7 @@ impl Row {
                     partitions,
                     lce.start_lba,
                     lce.sector_count,
-                    self.layout_geometry()?.logical_sector_bytes,
+                    geometry.logical_sector_bytes,
                 )
             }
             None => Err("介质类型尚未确认，无法建立可靠容量布局".into()),

@@ -225,6 +225,48 @@ fn four_kn_capacity_uses_native_lbas_and_does_not_fabricate_512b_tail_mirrors() 
         s.kind,
         DiskRegionKind::BackupMirror | DiskRegionKind::RestoreNode
     )));
+
+    // Exact U391 4Kn values must propagate to every shared display consumer.
+    assert_eq!(layout.logical_sector_bytes, 4096);
+    assert_eq!(layout.sector_byte_len(layout.total_sectors), Some(row.size));
+    assert_eq!(layout.sector_byte_len(49_976_864), Some(204_705_234_944));
+    assert_eq!(layout.sector_byte_len(12_494_112), Some(51_175_882_752));
+    let collapsed = layout.collapsed_tail_model();
+    assert_eq!(collapsed.logical_sector_bytes, 4096);
+    let lines = edpcli::tui::disk_layout::DiskCapacityMap::new(
+        &layout,
+        edpcli::tui::disk_layout::DiskCapacityMapProfile::Full,
+    )
+    .lines(160);
+    let text = lines
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("204.71GB"), "4Kn exchange map: {text}");
+    assert!(text.contains("51.18GB"), "4Kn encrypted map: {text}");
+    assert!(!text.contains("25.59GB"), "stale 512B exchange: {text}");
+    let legend = layout.legend_lines().join("\n");
+    assert!(legend.contains("204705234944 bytes"), "{legend}");
+    assert!(legend.contains("51175882752 bytes"), "{legend}");
+
+    let mut app = AppState::new();
+    app.replace_devices(vec![row]);
+    let rows = app.device_info_tree_rows();
+    for (name, expected) in [
+        ("容量布局", "255.94GB"),
+        ("EDP 主协议区", "53.25KB"),
+        ("保留区域", "204.80KB"),
+        ("启动区", "10.23MB"),
+        ("交换区", "204.71GB"),
+        ("保密区", "51.18GB"),
+    ] {
+        let node = rows
+            .iter()
+            .find(|node| node.label == name)
+            .unwrap_or_else(|| panic!("missing {name} in device tree: {rows:?}"));
+        assert_eq!(node.value.as_deref(), Some(expected), "{name}");
+    }
 }
 
 fn inspect_state() -> AppState {

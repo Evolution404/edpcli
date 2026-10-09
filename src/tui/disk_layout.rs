@@ -89,14 +89,16 @@ impl<'a> DiskLayoutPresentation<'a> {
                     segment.label.clone()
                 };
                 let capacity = match self.profile {
-                    DiskLayoutProfile::CompactHuman => format_sector_size(segment.sector_count),
+                    DiskLayoutProfile::CompactHuman => {
+                        format_layout_capacity(&visible, segment.sector_count)
+                    }
                     DiskLayoutProfile::DetailedExact | DiskLayoutProfile::EditorExact => {
                         format!(
                             "{} sectors / {} bytes",
                             segment.sector_count,
-                            segment
-                                .sector_count
-                                .saturating_mul(crate::common::SECTOR as u64)
+                            visible
+                                .sector_byte_len(segment.sector_count)
+                                .map_or_else(|| "溢出".into(), |bytes| bytes.to_string())
                         )
                     }
                 };
@@ -117,8 +119,12 @@ impl<'a> DiskLayoutPresentation<'a> {
     }
 }
 
-fn format_sector_size(sectors: u64) -> String {
-    crate::common::fmt_capacity_sectors(sectors)
+/// All shared disk layout presentations must use the model's native units.
+pub(crate) fn format_layout_capacity(model: &DiskLayoutModel, sectors: u64) -> String {
+    model
+        .sector_byte_len(sectors)
+        .map(crate::common::fmt_capacity)
+        .unwrap_or_else(|| "容量溢出".into())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

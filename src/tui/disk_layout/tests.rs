@@ -447,3 +447,32 @@ fn canonical_layout_bar_preserves_lce_and_complete_coverage() {
         Some(DiskRegionKind::Tail)
     );
 }
+
+#[test]
+fn model_native_capacity_is_per_device_and_checked_for_overflow() {
+    let legacy = capacity_map_fixture();
+    let native = legacy.clone().with_logical_sector_bytes(4096).unwrap();
+    assert_eq!(legacy.logical_sector_bytes, 512);
+    assert_eq!(legacy.sector_byte_len(700), Some(358_400));
+    assert_eq!(native.sector_byte_len(700), Some(2_867_200));
+    assert_eq!(legacy.sector_byte_len(700), Some(358_400)); // no process-global mutation
+    assert_eq!(native.sector_byte_len(u64::MAX), None);
+    assert_eq!(super::format_layout_capacity(&native, u64::MAX), "容量溢出");
+    assert!(DiskLayoutModel::new(u64::MAX, Vec::new())
+        .with_logical_sector_bytes(4096)
+        .is_err());
+    for invalid in [0, 256, 513, 1000, 100_000] {
+        assert!(legacy.clone().with_logical_sector_bytes(invalid).is_err());
+    }
+    let map_512 = DiskCapacityMap::new(&legacy, DiskCapacityMapProfile::Full).lines(95);
+    let map_4096 = DiskCapacityMap::new(&native, DiskCapacityMapProfile::Full).lines(95);
+    let flat = |lines: Vec<ratatui::text::Line<'static>>| {
+        lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert!(flat(map_512).contains("358.40KB"));
+    assert!(flat(map_4096).contains("2.87MB"));
+}

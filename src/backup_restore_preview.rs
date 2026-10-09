@@ -170,7 +170,8 @@ fn build_layout(manifest: &Manifest, is_plain: bool) -> Result<DiskLayoutModel, 
         })
         .collect::<Vec<_>>();
     known.extend(partitions);
-    DiskLayoutModel::canonical_from_known(total, known)
+    DiskLayoutModel::canonical_from_known(total, known)?
+        .with_logical_sector_bytes(manifest.geometry.logical_sector_size)
 }
 
 impl BackupRestorePreview {

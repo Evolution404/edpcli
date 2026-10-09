@@ -205,32 +205,28 @@ impl AppState {
                             key,
                             depth: 1,
                             label: segment.label.clone(),
-                            value: Some(size_text(
-                                segment
-                                    .sector_count
-                                    .saturating_mul(crate::common::SECTOR as u64),
+                            value: Some(crate::tui::disk_layout::format_layout_capacity(
+                                &model,
+                                segment.sector_count,
                             )),
                             expandable: is_tail && model.tail_group().is_some(),
                             expanded: is_tail && expanded(DeviceInfoNodeKey::TailGroup),
                         });
                         if is_tail && expanded(DeviceInfoNodeKey::TailGroup) {
                             if let Some(tail) = model.tail_group() {
-                                rows.extend(tail.children.iter().map(|child| {
-                                    DeviceInfoTreeNode {
-                                        key: DeviceInfoNodeKey::LayoutSegment {
-                                            start_lba: child.start_lba,
-                                            kind: child.kind,
-                                        },
-                                        depth: 2,
-                                        label: child.label.clone(),
-                                        value: Some(size_text(
-                                            child
-                                                .sector_count
-                                                .saturating_mul(crate::common::SECTOR as u64),
-                                        )),
-                                        expandable: false,
-                                        expanded: false,
-                                    }
+                                rows.extend(tail.children.iter().map(|child| DeviceInfoTreeNode {
+                                    key: DeviceInfoNodeKey::LayoutSegment {
+                                        start_lba: child.start_lba,
+                                        kind: child.kind,
+                                    },
+                                    depth: 2,
+                                    label: child.label.clone(),
+                                    value: Some(crate::tui::disk_layout::format_layout_capacity(
+                                        &model,
+                                        child.sector_count,
+                                    )),
+                                    expandable: false,
+                                    expanded: false,
                                 }));
                             }
                         }
