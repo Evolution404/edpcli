@@ -42,3 +42,50 @@ fn lce_builder_rejects_noncanonical_extent_geometry() {
         .unwrap_err()
         .contains("size mismatch"));
 }
+
+#[test]
+fn native_lce_producer_audit_certifies_exact_legacy_512_source_only() {
+    use edpcli::provision::audit_native_lce_against_legacy_producer;
+    let blocks = LEXAR_LCE_CIPHER
+        .chunks_exact(512)
+        .map(|chunk| chunk.to_vec())
+        .collect::<Vec<_>>();
+    let result = audit_native_lce_against_legacy_producer(512, 243_623_933, &blocks).unwrap();
+    assert!(result.certified_legacy_512b_reproduction);
+    assert_eq!(result.mismatching_legacy_payload_bytes, 0);
+    assert_eq!(result.opaque_tail_bytes, 0);
+    assert_eq!(result.source_native_bytes, 3072);
+}
+
+#[test]
+fn native_lce_producer_audit_preserves_4kn_unowned_tail_and_never_certifies_writer() {
+    use edpcli::protocol::crypto::a7f0_full;
+    use edpcli::provision::audit_native_lce_against_legacy_producer;
+    let start = 62_476_561u64;
+    let mut sector = a7f0_full(lce_plaintext(), &[0u8; 8], start * 4096);
+    sector.extend((0..1024).map(|n| if n % 5 == 0 { 0u8 } else { 0x9b }));
+    let blocks = vec![sector.clone()];
+    let matched = audit_native_lce_against_legacy_producer(4096, start, &blocks).unwrap();
+    assert_eq!(matched.mismatching_legacy_payload_bytes, 0);
+    assert_eq!(matched.opaque_tail_bytes, 1024);
+    assert_eq!(matched.opaque_tail_nonzero, 819);
+    assert!(!matched.certified_legacy_512b_reproduction);
+    sector[3072] = 0x42;
+    assert_eq!(
+        audit_native_lce_against_legacy_producer(4096, start, &[sector.clone()])
+            .unwrap()
+            .mismatching_legacy_payload_bytes,
+        0
+    );
+    sector[3071] ^= 0xff;
+    assert_eq!(
+        audit_native_lce_against_legacy_producer(4096, start, &[sector])
+            .unwrap()
+            .mismatching_legacy_payload_bytes,
+        1
+    );
+    assert!(audit_native_lce_against_legacy_producer(4096, start, &vec![vec![0; 512]; 6]).is_err());
+    assert!(audit_native_lce_against_legacy_producer(512, start, &[vec![0; 4096]]).is_err());
+    assert!(audit_native_lce_against_legacy_producer(1024, start, &[vec![0; 1024]]).is_err());
+    assert!(audit_native_lce_against_legacy_producer(4096, u64::MAX, &blocks).is_err());
+}
