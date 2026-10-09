@@ -1028,3 +1028,96 @@ fn native_four_kn_exfat_real_file_roundtrip_all_official_data_ciphers() {
     drop(plain);
     std::fs::remove_file(&plain_path).unwrap();
 }
+
+#[test]
+fn offline_native_plain_image_supports_per_device_512_and_4kn_geometry_without_usb() {
+    use edpcli::application::provision::native_image::{
+        export_native_plain_image, plan_native_plain_image,
+    };
+    use edpcli::application::provision::{PlainPartitionRequest, PlainPartitionSize};
+
+    let make = |bytes: u32| {
+        let sectors = 16 * 1024 * 1024 / bytes as u64;
+        let partitions = [PlainPartitionRequest {
+            start_lba: 2048,
+            size: PlainPartitionSize::MiB(16),
+            filesystem: FilesystemKind::Fat16,
+            volume_label: "NATIVE".into(),
+        }];
+        let plan = plan_native_plain_image(100_000, bytes, &partitions).unwrap();
+        assert_eq!(plan.sector_bytes, bytes);
+        assert_eq!(plan.total_sectors, 100_000);
+        let mbr = &plan.writes.last().unwrap().data;
+        assert_eq!(plan.writes.last().unwrap().relative_lba, 0);
+        assert_eq!(
+            u32::from_le_bytes(mbr[458..462].try_into().unwrap()),
+            sectors as u32
+        );
+        let name = format!(
+            "edpcli-native-offline-{}-{}-{}.img",
+            std::process::id(),
+            bytes,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let path = std::env::temp_dir().join(name);
+        export_native_plain_image(&path, &plan).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().len(),
+            100_000 * bytes as u64
+        );
+        let mut f = std::fs::File::open(&path).unwrap();
+        let mut actual_mbr = [0u8; 512];
+        f.read_exact(&mut actual_mbr).unwrap();
+        assert_eq!(&actual_mbr[..], &mbr[..512]);
+        f.seek(SeekFrom::Start(2048 * bytes as u64)).unwrap();
+        let mut bpb = [0u8; 512];
+        f.read_exact(&mut bpb).unwrap();
+        assert_eq!(u16::from_le_bytes([bpb[11], bpb[12]]), bytes as u16);
+        assert_eq!(&bpb[54..62], b"FAT16   ");
+        assert!(export_native_plain_image(&path, &plan).is_err());
+        std::fs::remove_file(path).unwrap();
+    };
+    make(512);
+    make(4096);
+}
+
+#[test]
+fn offline_native_plain_image_rejects_unknown_geometry_overlap_and_existing_files() {
+    use edpcli::application::provision::native_image::{
+        export_native_plain_image, plan_native_plain_image,
+    };
+    use edpcli::application::provision::{PlainPartitionRequest, PlainPartitionSize};
+
+    let small = PlainPartitionRequest {
+        start_lba: 2048,
+        size: PlainPartitionSize::MiB(16),
+        filesystem: FilesystemKind::Fat16,
+        volume_label: "NATIVE".into(),
+    };
+    for invalid in [0, 256, 1024, 2048, 8192] {
+        assert!(plan_native_plain_image(100_000, invalid, std::slice::from_ref(&small)).is_err());
+    }
+    let mut duplicated = small.clone();
+    duplicated.start_lba = 2049;
+    assert!(plan_native_plain_image(100_000, 4096, &[small.clone(), duplicated]).is_err());
+    let mut too_big = small.clone();
+    too_big.start_lba = 99_999;
+    assert!(plan_native_plain_image(100_000, 4096, &[too_big]).is_err());
+    let plan = plan_native_plain_image(100_000, 4096, &[small]).unwrap();
+    assert!(export_native_plain_image(std::path::Path::new("/dev/disk99"), &plan).is_err());
+    let mut bad = plan.clone();
+    bad.writes[0].data.pop();
+    let path = std::env::temp_dir().join(format!(
+        "edpcli-native-invalid-{}-{}.img",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    assert!(export_native_plain_image(&path, &bad).is_err());
+    assert!(!path.exists());
+}

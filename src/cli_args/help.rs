@@ -48,6 +48,7 @@ fn print_topic_help(topic: &str) {
             println!("    Plain 不是 mode4；它是独立的普通盘目标。");
             println!("    Plain 分区: 可重复 --partition START:SIZE:fat16|fat32|exfat[:LABEL]；SIZE 支持 sectors/MiB/GiB/fill。");
             println!("    Plain 未指定 --partition 时默认 P1 从 LBA2048 占满至盘尾。");
+            println!("    离线原生镜像：provision image --target plain --total-sectors N --sector-bytes 512|4096 --out FILE [--partition ...]；仅创建新普通文件，不连接U盘。");
             println!("    mode1 若识别到现有 mode0，将保留原 type4 位置/密钥并让 type2 扩满前部。");
             println!("    可选格式化: --format-boot --format-share --format-encrypt");
             println!("    文件系统: --boot-fs fat16|fat32|exfat --share-fs fat16|fat32|exfat --encrypt-fs fat16|fat32|exfat");

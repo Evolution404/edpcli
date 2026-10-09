@@ -271,6 +271,35 @@ fn print_provision_summary(prepared: &crate::application::provision::PreparedPro
 
 pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
     match action {
+        ProvisionAction::NativeImage {
+            out,
+            total_sectors,
+            sector_bytes,
+            partitions,
+        } => {
+            // No device lookup, no elevation, and no raw disk write path.
+            // This branch can only create a brand-new ordinary file image.
+            let plan = match crate::application::provision::native_image::plan_native_plain_image(
+                total_sectors,
+                sector_bytes,
+                &partitions,
+            ) {
+                Ok(value) => value,
+                Err(message) => {
+                    return finish(Err(crate::common::EdpCliError::new(EXIT_TARGET, message)))
+                }
+            };
+            match crate::application::provision::native_image::export_native_plain_image(
+                Path::new(&out),
+                &plan,
+            ) {
+                Ok(()) => {
+                    println!("离线原生Plain制盘镜像: {}（{}个{}B扇区，{}个分区；仅新建普通文件，未访问USB）", out, total_sectors, sector_bytes, partitions.len().max(1));
+                    EXIT_OK
+                }
+                Err(message) => finish(Err(crate::common::EdpCliError::new(EXIT_IO, message))),
+            }
+        }
         ProvisionAction::Plan(mut opts) => {
             if let Some(disk) = opts.disk {
                 if let Err(error) = guard_usb_disk(runner, disk) {
