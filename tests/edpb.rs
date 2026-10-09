@@ -495,6 +495,12 @@ fn virtual_native_4kn_metadata() -> (Vec<u8>, Vec<u8>) {
     use edpcli::protocol::crypto::{a7f0_full, crc32_bare, xor_rolling};
     let did = "disk&ven_test&prod_native";
     let mut projection = vec![0u8; 13 * 512];
+    // Independent native MBR geometry must agree with EDPF source entry0.
+    // Mode0's FAT16 visible partition uses the official 0x0e type.
+    projection[446 + 4] = 0x0e;
+    projection[454..458].copy_from_slice(&63u32.to_le_bytes());
+    projection[458..462].copy_from_slice(&400u32.to_le_bytes());
+    projection[510..512].copy_from_slice(&[0x55, 0xaa]);
     let crc = crc32_bare(did.as_bytes());
     let mut lba7 = [0u8; 512];
     let mut lba12 = [0u8; 512];
@@ -506,6 +512,7 @@ fn virtual_native_4kn_metadata() -> (Vec<u8>, Vec<u8>) {
         lba12[p..p + 4].copy_from_slice(b"EDPF");
         lba12[p + 8..p + 12].copy_from_slice(&3u32.to_le_bytes());
         lba12[p + 12..p + 16].copy_from_slice(&kind.to_le_bytes());
+        lba12[p + 20..p + 24].copy_from_slice(&u32::from(kind != 1).to_le_bytes());
         lba12[p + 24..p + 32].copy_from_slice(&start.to_le_bytes());
         lba12[p + 32..p + 40].copy_from_slice(&4096u64.to_le_bytes());
         lba12[p + 40..p + 48].copy_from_slice(&(blocks * 4096).to_le_bytes());
@@ -513,6 +520,7 @@ fn virtual_native_4kn_metadata() -> (Vec<u8>, Vec<u8>) {
         lba7[q..q + 4].copy_from_slice(b"EDPF");
         lba7[q + 8..q + 12].copy_from_slice(&3u32.to_le_bytes());
         lba7[q + 12..q + 16].copy_from_slice(&kind.to_le_bytes());
+        lba7[q + 20..q + 24].copy_from_slice(&u32::from(kind != 1).to_le_bytes());
         lba7[q + 24..q + 32]
             .copy_from_slice(&(if index == 0 { 63u64 } else { 10_000u64 }).to_le_bytes());
         lba7[q + 32..q + 40].copy_from_slice(&4096u64.to_le_bytes());
@@ -633,6 +641,121 @@ fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
     );
     assert_eq!(source.read_native_sector(10_000).unwrap(), lce);
     assert!(source.read_native_sector(10_001).is_err());
+
+    // Full EDPB v4 archive -> verified integrity -> EvidenceSource identity,
+    // native 13-block snapshot -> strict EDPF/LBA7/LCE replay. The replay
+    // content comes directly from the SAME reopened EDPB file, not a
+    // test-supplied LCE vector or a synthetic reader.
+    use edpcli::application::filesystem::FilesystemKind;
+    use edpcli::protocol::edpf::EdpPartitionType;
+    use edpcli::provision::{
+        NativeEdpLayoutPlan, OfficialPartitionMode, PartitionRole, TargetPartitionGeometry,
+    };
+    let parts = [
+        TargetPartitionGeometry {
+            role: PartitionRole::Boot,
+            partition_type: EdpPartitionType::Boot,
+            start_lba: 63,
+            sector_count: 400,
+            physically_encrypted: false,
+            filesystem: Some(FilesystemKind::Fat16),
+        },
+        TargetPartitionGeometry {
+            role: PartitionRole::Share,
+            partition_type: EdpPartitionType::Share,
+            start_lba: 512,
+            sector_count: 1500,
+            physically_encrypted: true,
+            filesystem: Some(FilesystemKind::ExFat),
+        },
+        TargetPartitionGeometry {
+            role: PartitionRole::Encrypt,
+            partition_type: EdpPartitionType::Encrypt,
+            start_lba: 2012,
+            sector_count: 1000,
+            physically_encrypted: true,
+            filesystem: Some(FilesystemKind::ExFat),
+        },
+    ];
+    let plan = NativeEdpLayoutPlan::from_confirmed_geometry(
+        OfficialPartitionMode::DefaultThreePartition,
+        12_000,
+        4096,
+        &parts,
+        10_000,
+        1,
+    )
+    .unwrap();
+    assert!(!plan.may_write());
+    let verified_writes = source.verified_native_replay(&plan).unwrap();
+    assert_eq!(verified_writes.len(), 14);
+    assert_eq!(verified_writes.last().unwrap().relative_lba, 0);
+    for native_lba in 0..13u64 {
+        let block = verified_writes
+            .iter()
+            .find(|item| item.relative_lba == native_lba)
+            .unwrap();
+        assert_eq!(
+            block.data,
+            protocol[native_lba as usize * 4096..(native_lba as usize + 1) * 4096]
+        );
+    }
+    assert_eq!(
+        verified_writes
+            .iter()
+            .find(|item| item.relative_lba == 10_000)
+            .unwrap()
+            .data,
+        lce
+    );
+    let snapshot = source.native_protocol_image().unwrap();
+    plan.verify_source_replay_readback(
+        snapshot,
+        "disk&ven_test&prod_native",
+        std::slice::from_ref(&lce),
+        &verified_writes,
+    )
+    .unwrap();
+    let mut changed = verified_writes.clone();
+    changed
+        .iter_mut()
+        .find(|block| block.relative_lba == 11)
+        .unwrap()
+        .data[4095] ^= 1;
+    assert!(plan
+        .verify_source_replay_readback(
+            snapshot,
+            "disk&ven_test&prod_native",
+            std::slice::from_ref(&lce),
+            &changed
+        )
+        .is_err());
+    let mut changed_lce = verified_writes.clone();
+    changed_lce
+        .iter_mut()
+        .find(|block| block.relative_lba == 10_000)
+        .unwrap()
+        .data[4095] ^= 1;
+    assert!(plan
+        .verify_source_replay_readback(
+            snapshot,
+            "disk&ven_test&prod_native",
+            std::slice::from_ref(&lce),
+            &changed_lce
+        )
+        .is_err());
+    // Contradictory geometry is rejected instead of becoming a new writer
+    // authority; the archive's source LCE points at 10000, not 10001.
+    let wrong_lce_plan = NativeEdpLayoutPlan::from_confirmed_geometry(
+        OfficialPartitionMode::DefaultThreePartition,
+        12_000,
+        4096,
+        &parts,
+        10_001,
+        1,
+    )
+    .unwrap();
+    assert!(source.verified_native_replay(&wrong_lce_plan).is_err());
     let bad = tmp.0.join("tampered.edpb");
     let mut altered = fs::read(&path).unwrap();
     let payload = verified
