@@ -106,6 +106,8 @@ pub struct PasswordDomainPreflight {
     pub preserve_intent: PasswordIntent,
     pub format_intent: PasswordIntent,
     pub opaque_profile: bool,
+    /// Mandatory native LBA12 mode match for any source-region data preservation.
+    pub algorithm_compatible: bool,
 }
 
 pub struct ProvisionPreflightInput<'a> {
@@ -196,6 +198,11 @@ impl ProvisionPreflightInput<'_> {
         let source_part = source.and_then(|profile| profile.partition(role));
         let assessment =
             crate::application::provision::PreserveAssessment::for_partition(source_part, target);
+        let algorithm_rebuild_required = crate::provision::KeyDomainRole::from_partition_role(role)
+            .is_some_and(|domain| {
+                !self.domain(domain).algorithm_compatible
+                    && self.domain(domain).source_state != SourcePasswordState::Verifying
+            });
         let structural_rebuild_required = if source_part.is_none() {
             if self.source_is_plain && KeyDomainRole::from_partition_role(role).is_none() {
                 !self.provision_plain_extent_candidate(target)
@@ -208,6 +215,7 @@ impl ProvisionPreflightInput<'_> {
 
         let baseline = self.provision_partition_preflight_for_format(source, target, false);
         let required = structural_rebuild_required
+            || algorithm_rebuild_required
             || matches!(
                 baseline.kind,
                 ProvisionPreflightKind::BlockedNeedsFormat | ProvisionPreflightKind::Rebuild
@@ -391,6 +399,17 @@ impl ProvisionPreflightInput<'_> {
 
         let intent = self.provision_password_intent(domain, format_selected);
         let source_state = self.provision_source_password_state(domain);
+        if !self.domain(domain).algorithm_compatible
+            && !format_selected
+            && intent != PasswordIntent::Waiting
+        {
+            return ProvisionPartitionPreflight {
+                role,
+                kind: ProvisionPreflightKind::BlockedNeedsFormat,
+                reason: "目标加密算法不同于来源 EncryptMode；原密钥材料与密文不能透传或仅Rewrap，必须完整格式化重建".into(),
+                target_password_requested: true,
+            };
+        }
         let opaque_profile = match domain {
             KeyDomainRole::Share => self.password_domains[0].opaque_profile,
             KeyDomainRole::Encrypt => self.password_domains[1].opaque_profile,

@@ -139,6 +139,8 @@ fn native_4kn_mode0_requests_readonly_key_probe_and_independent_password_verific
     // Default attempt is unknown; typed source values are independently
     // verified via the read-only application service, not a 512B-only shim.
     state.provision_finish_key_probe(Ok(crate::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(crate::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(crate::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: DiskProvisionKind::Mode0,
         share: Some(SourcePasswordKnowledge::Unknown),
         encrypt: Some(SourcePasswordKnowledge::Unknown),

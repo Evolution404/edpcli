@@ -39,12 +39,28 @@ impl AppState {
         }
     }
 
+    /// A password-only passthrough is valid only if its underlying file and
+    /// data cipher mode is identical to the source region's LBA12 EncryptMode.
+    pub(crate) fn provision_source_algorithm_matches_target(
+        &self,
+        domain: crate::provision::KeyDomainRole,
+    ) -> bool {
+        let source = match domain {
+            crate::provision::KeyDomainRole::Share => self.provision.form.share_source_algorithm,
+            crate::provision::KeyDomainRole::Encrypt => {
+                self.provision.form.encrypt_source_algorithm
+            }
+        };
+        source == Some(self.provision.form.encryption_algorithm)
+    }
+
     pub(crate) fn provision_target_password_is_passthrough(
         &self,
         domain: crate::provision::KeyDomainRole,
     ) -> bool {
         self.provision_target_password_mode(domain)
             == password_verification::TargetPasswordMode::Passthrough
+            && self.provision_source_algorithm_matches_target(domain)
     }
 
     pub(crate) fn provision_source_password_state(
@@ -144,13 +160,21 @@ impl AppState {
                 self.provision.form.encrypt_target_password.as_str(),
             ),
         };
-        password_model::decide_password_intent(
+        let intent = password_model::decide_password_intent(
             self.provision_source_password_state(domain),
             self.provision_target_password_mode(domain),
             source,
             target,
             format_selected,
-        )
+        );
+        if self.provision_source_has_password_domain(domain)
+            && !self.provision_source_algorithm_matches_target(domain)
+            && !format_selected
+            && intent != password_verification::PasswordIntent::Waiting
+        {
+            return password_verification::PasswordIntent::BlockedNeedsFormat;
+        }
+        intent
     }
 
     pub(crate) fn provision_toggle_target_password_mode(

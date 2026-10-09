@@ -116,6 +116,14 @@ impl OfficialLabelAlgorithm {
         }
     }
 
+    pub const fn from_file_key_wrap_mode(mode: FileKeyWrapMode) -> Self {
+        match mode {
+            FileKeyWrapMode::Sm4 => Self::Sms4,
+            FileKeyWrapMode::A7f0 => Self::Aes,
+            FileKeyWrapMode::Aes128Ecb => Self::AesCross,
+        }
+    }
+
     pub fn shift(self, reverse: bool) -> Self {
         let index = Self::ALL.iter().position(|choice| *choice == self).unwrap();
         let next = if reverse {

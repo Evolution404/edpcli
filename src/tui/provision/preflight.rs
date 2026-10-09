@@ -41,6 +41,7 @@ impl AppState {
         let password_domains =
             [KeyDomainRole::Share, KeyDomainRole::Encrypt].map(|domain| PasswordDomainPreflight {
                 source_state: self.provision_source_password_state(domain),
+                algorithm_compatible: self.provision_source_algorithm_matches_target(domain),
                 preserve_intent: self.provision_password_intent(domain, false),
                 format_intent: self.provision_password_intent(domain, true),
                 opaque_profile: match domain {

@@ -99,9 +99,9 @@ impl AppState {
             ));
             out.push((
                 "新密码".into(),
-                if self.provision_target_password_mode(crate::provision::KeyDomainRole::Share)
-                    == password_verification::TargetPasswordMode::Passthrough
-                {
+                if self.provision_target_password_is_passthrough(
+                    crate::provision::KeyDomainRole::Share,
+                ) {
                     "透传"
                 } else {
                     self.provision.form.share_target_password.as_str()
@@ -118,9 +118,9 @@ impl AppState {
             ));
             out.push((
                 "新密码".into(),
-                if self.provision_target_password_mode(crate::provision::KeyDomainRole::Encrypt)
-                    == password_verification::TargetPasswordMode::Passthrough
-                {
+                if self.provision_target_password_is_passthrough(
+                    crate::provision::KeyDomainRole::Encrypt,
+                ) {
                     "透传"
                 } else {
                     self.provision.form.encrypt_target_password.as_str()

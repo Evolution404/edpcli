@@ -81,6 +81,8 @@ fn key_probe_batch_cannot_mutate_a_reopened_form() {
     };
     assert_ne!(old.session_id, new.session_id);
     let probe = crate::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(crate::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(crate::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: crate::provision::DiskProvisionKind::Mode0,
         share: None,
         encrypt: None,

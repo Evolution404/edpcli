@@ -202,6 +202,26 @@ pub fn prepare_target_provision(
             format!("错误: 无法生成统一目标制盘计划: {message}"),
         )
     })?;
+    // Do not carry an old cipher mode with target global cipher changed,
+    // even when geometry, password, and FileKey are otherwise unchanged.
+    for part in &target_plan.partitions {
+        if let Some(record) = part.preserved_record {
+            if record.lba12.need_encrypt != 0
+                && record.lba12.encrypt_mode != request.algorithm.file_key_wrap_mode().raw()
+                && !request.format.choice(part.geometry.role).0
+            {
+                return Err(err(
+                    EXIT_TARGET,
+                    format!(
+                        "错误: {}来源 EncryptMode={} 与目标算法 {} 不同；禁止原密钥/密文透传或仅Rewrap，必须显式格式化重建",
+                        part.geometry.role.label(),
+                        record.lba12.encrypt_mode,
+                        request.algorithm.name(),
+                    ),
+                ));
+            }
+        }
+    }
     let explicit_rebuild_roles = target_plan
         .partitions
         .iter()

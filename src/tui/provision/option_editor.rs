@@ -61,6 +61,7 @@ impl AppState {
             Some(ProvisionFieldId::EncryptionAlgorithm) => {
                 self.provision.form.encryption_algorithm =
                     self.provision.form.encryption_algorithm.shift(false);
+                self.provision.form.algorithm_user_edited = true;
                 self.provision.message = None;
                 true
             }
@@ -190,6 +191,7 @@ impl AppState {
             Some(ProvisionFieldId::EncryptionAlgorithm) => {
                 self.provision.form.encryption_algorithm =
                     self.provision.form.encryption_algorithm.shift(reverse);
+                self.provision.form.algorithm_user_edited = true;
                 self.provision.message = None;
                 true
             }

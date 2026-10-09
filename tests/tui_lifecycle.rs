@@ -8,7 +8,7 @@ use edpcli::tui::{
 use ratatui::{backend::TestBackend, style::Modifier, Terminal};
 
 #[test]
-fn compact_password_rows_identify_domains_and_show_passthrough_without_exposing_secrets() {
+fn compact_password_rows_identify_domains_and_hide_passthrough_until_source_algorithm_verified() {
     let mut state = edpcli::tui::demo::build_scene("provision-form").unwrap();
     state.provision_mut().form.share_source_password = "render-test-secret".repeat(6).into();
     for (kind, share) in [
@@ -37,7 +37,7 @@ fn compact_password_rows_identify_domains_and_show_passthrough_without_exposing_
             for label in [format!("{share}新密码"), "保密区新密码".into()] {
                 assert!(
                     rows.iter()
-                        .any(|row| row.contains(&label) && row.contains("透传")),
+                        .any(|row| row.contains(&label) && row.contains("请输入")),
                     "{rows:?}"
                 );
             }

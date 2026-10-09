@@ -264,6 +264,8 @@ fn provision_verified_source_status_is_success_and_normal_values_have_no_input_f
 
     let mut state = provision_state();
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: edpcli::provision::DiskProvisionKind::Mode0,
         share: Some(SourcePasswordKnowledge::DefaultVerified),
         share_opaque_profile: true,
@@ -473,6 +475,8 @@ fn provision_default_source_password_is_visible_while_verifying_and_separator_ne
     );
 
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: edpcli::provision::DiskProvisionKind::Mode0,
         share: Some(SourcePasswordKnowledge::DefaultVerified),
         share_opaque_profile: true,
@@ -617,6 +621,8 @@ fn provision_source_password_failure_uses_red_cross_and_keeps_opaque_passthrough
     state.provision_begin_selected();
     state.provision_enter_form_workspace();
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: edpcli::provision::DiskProvisionKind::Mode0,
         share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
         share_opaque_profile: true,

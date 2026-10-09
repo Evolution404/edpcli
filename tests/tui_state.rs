@@ -597,6 +597,8 @@ fn finish_default_key_probe_for_selected_source(state: &mut AppState) {
         DiskProvisionKind::Mode3 => (Some(SourcePasswordKnowledge::DefaultVerified), None),
     };
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind,
         share,
         share_opaque_profile: share.is_some(),
@@ -962,6 +964,8 @@ fn verified_edp_source_target_matrix_has_no_pending_backend_status() {
             DiskProvisionKind::Plain => unreachable!(),
         };
         state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+            share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+            encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
             source_kind: case.source,
             share,
             share_opaque_profile: share.is_some(),
@@ -1027,6 +1031,8 @@ fn unknown_nonopaque_key_profile_is_rebuild_not_pending_backend() {
     assert_eq!(state.provision_begin_selected(), ProvisionKind::Mode0);
     state.provision_enter_form_workspace();
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: DiskProvisionKind::Mode0,
         share: Some(SourcePasswordKnowledge::Unknown),
         share_opaque_profile: false,
@@ -1446,6 +1452,8 @@ fn provision_key_probe_keeps_default_candidates_and_updates_verification_state()
     enter_provision(&mut state);
 
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: edpcli::provision::DiskProvisionKind::Mode0,
         share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
         share_opaque_profile: true,
@@ -1475,6 +1483,8 @@ fn provision_key_probe_never_overwrites_user_entered_source_password() {
         edpcli::provision::SourcePasswordKnowledge::Unknown;
 
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: edpcli::provision::DiskProvisionKind::Mode0,
         share: Some(edpcli::provision::SourcePasswordKnowledge::DefaultVerified),
         share_opaque_profile: true,
@@ -1552,6 +1562,8 @@ fn mode0_to_mode1_unknown_encrypt_requires_explicit_format_for_password_change()
     assert_eq!(enter_provision_kind(&mut state, 1), ProvisionKind::Mode1);
     state.provision_mut().form.format_share = true;
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: DiskProvisionKind::Mode0,
         share: Some(SourcePasswordKnowledge::Unknown),
         share_opaque_profile: true,
@@ -1640,6 +1652,8 @@ fn unknown_source_password_geometry_change_is_blocked_synchronously_by_same_pref
     state.replace_devices(vec![row]);
     assert_eq!(enter_provision_kind(&mut state, 0), ProvisionKind::Mode0);
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: DiskProvisionKind::Mode0,
         share: Some(SourcePasswordKnowledge::Unknown),
         share_opaque_profile: true,
@@ -1688,6 +1702,8 @@ fn target_password_space_and_insert_model_passthrough_explicit_without_format_si
     state.replace_devices(vec![mode0_device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: DiskProvisionKind::Mode0,
         share: Some(SourcePasswordKnowledge::Unknown),
         share_opaque_profile: true,
@@ -1736,6 +1752,8 @@ fn failed_source_with_explicit_target_equal_to_failed_candidate_is_still_blocked
     state.replace_devices(vec![mode0_device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: DiskProvisionKind::Mode0,
         share: Some(SourcePasswordKnowledge::Unknown),
         share_opaque_profile: true,
@@ -1797,6 +1815,8 @@ fn user_target_password_draft_survives_source_reverification_and_passthrough_nor
     state.replace_devices(vec![mode0_device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: DiskProvisionKind::Mode0,
         share: Some(SourcePasswordKnowledge::Unknown),
         share_opaque_profile: true,
@@ -1884,6 +1904,8 @@ fn verified_equal_target_password_normalizes_back_to_passthrough() {
     state.replace_devices(vec![mode0_device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: DiskProvisionKind::Mode0,
         share: Some(SourcePasswordKnowledge::DefaultVerified),
         share_opaque_profile: true,
@@ -1922,6 +1944,8 @@ fn verified_different_target_password_requests_rewrap_without_formatting() {
     state.replace_devices(vec![mode0_device(64_000_000_000)]);
     assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
     state.provision_finish_key_probe(Ok(edpcli::application::provision::ProvisionKeyProbe {
+        share_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
+        encrypt_source_algorithm: Some(edpcli::provision::OfficialLabelAlgorithm::Sms4),
         source_kind: DiskProvisionKind::Mode0,
         share: Some(SourcePasswordKnowledge::DefaultVerified),
         share_opaque_profile: true,
@@ -3658,4 +3682,101 @@ fn mode1_geometry_validation_names_the_combined_region() {
     let error = state.provision_request().unwrap_err();
     assert!(error.contains("二合一区"), "{error}");
     assert!(!error.contains("交换区"), "{error}");
+}
+
+#[test]
+fn source_algorithms_prefill_both_domains_and_algorithm_change_requires_rebuild() {
+    use edpcli::application::provision::ProvisionKeyProbe;
+    use edpcli::provision::{DiskProvisionKind, OfficialLabelAlgorithm, SourcePasswordKnowledge};
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![mode0_device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_finish_key_probe(Ok(ProvisionKeyProbe {
+        source_kind: DiskProvisionKind::Mode0,
+        share_source_algorithm: Some(OfficialLabelAlgorithm::AesCross),
+        encrypt_source_algorithm: Some(OfficialLabelAlgorithm::AesCross),
+        share: Some(SourcePasswordKnowledge::UserVerified),
+        encrypt: Some(SourcePasswordKnowledge::UserVerified),
+        share_opaque_profile: true,
+        encrypt_opaque_profile: true,
+    }));
+    assert_eq!(
+        state.provision().form.encryption_algorithm,
+        OfficialLabelAlgorithm::AesCross
+    );
+    assert!(!state.provision().form.source_algorithm_mixed);
+    assert_eq!(
+        state.provision().form.share_source_knowledge,
+        SourcePasswordKnowledge::UserVerified
+    );
+    let original = state.provision_layout_editor_details();
+    assert!(
+        original
+            .iter()
+            .filter_map(|row| row.columns.as_ref())
+            .any(|row| row[0].contains("交换区") && row[3].contains("透传")),
+        "{:?}",
+        original
+            .iter()
+            .filter_map(|row| row.columns.as_ref())
+            .collect::<Vec<_>>()
+    );
+    state.provision_mut().form.encryption_algorithm = OfficialLabelAlgorithm::Sms4;
+    let changed = state.provision_layout_editor_details();
+    for label in ["交换区", "保密区"] {
+        assert!(
+            changed
+                .iter()
+                .filter_map(|row| row.columns.as_ref())
+                .any(|row| row[0].contains(label) && row[3].contains("需重建")),
+            "{label}: {:?}",
+            changed
+                .iter()
+                .filter_map(|row| row.columns.as_ref())
+                .collect::<Vec<_>>()
+        );
+    }
+    let rendered = state.provision_visible_fields();
+    let target_labels = rendered
+        .iter()
+        .filter(|(label, _, _)| label == "新密码")
+        .map(|(_, value, _)| *value)
+        .collect::<Vec<_>>();
+    assert_eq!(target_labels.len(), 2);
+    assert!(target_labels.iter().all(|label| *label != "透传"));
+}
+
+#[test]
+fn different_source_domain_algorithms_never_silently_select_one_global_target() {
+    use edpcli::application::provision::ProvisionKeyProbe;
+    use edpcli::provision::{DiskProvisionKind, OfficialLabelAlgorithm, SourcePasswordKnowledge};
+    let mut state = AppState::new();
+    state.replace_devices(vec![mode0_device(64_000_000_000)]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    state.provision_finish_key_probe(Ok(ProvisionKeyProbe {
+        source_kind: DiskProvisionKind::Mode0,
+        share_source_algorithm: Some(OfficialLabelAlgorithm::AesCross),
+        encrypt_source_algorithm: Some(OfficialLabelAlgorithm::Sms4),
+        share: Some(SourcePasswordKnowledge::UserVerified),
+        encrypt: Some(SourcePasswordKnowledge::UserVerified),
+        share_opaque_profile: true,
+        encrypt_opaque_profile: true,
+    }));
+    assert!(state.provision().form.source_algorithm_mixed);
+    assert_eq!(
+        state.provision().form.encryption_algorithm,
+        OfficialLabelAlgorithm::Sms4
+    );
+    let before = state.provision_layout_editor_details();
+    assert!(before
+        .iter()
+        .filter_map(|row| row.columns.as_ref())
+        .any(|row| row[0].contains("交换区") && row[3].contains("需重建")));
+    state.provision_mut().form.encryption_algorithm = OfficialLabelAlgorithm::AesCross;
+    let after = state.provision_layout_editor_details();
+    assert!(after
+        .iter()
+        .filter_map(|row| row.columns.as_ref())
+        .any(|row| row[0].contains("保密区") && row[3].contains("需重建")));
 }

@@ -102,8 +102,18 @@ fn native_key_probe_on_disk(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult<P
     };
     let (share, share_opaque_profile) = classify(KeyDomainRole::Share);
     let (encrypt, encrypt_opaque_profile) = classify(KeyDomainRole::Encrypt);
+    let source_algorithm = |domain| {
+        parsed
+            .as_ref()
+            .and_then(|source| source.record_for_domain(domain))
+            .filter(|record| record.lba12.need_encrypt != 0)
+            .and_then(|record| FileKeyWrapMode::from_raw(record.lba12.encrypt_mode))
+            .map(crate::provision::OfficialLabelAlgorithm::from_file_key_wrap_mode)
+    };
     Ok(ProvisionKeyProbe {
         source_kind,
+        share_source_algorithm: source_algorithm(KeyDomainRole::Share),
+        encrypt_source_algorithm: source_algorithm(KeyDomainRole::Encrypt),
         share,
         share_opaque_profile,
         encrypt,
@@ -178,6 +188,8 @@ pub fn probe_provision_key_domains_on_disk(
     if source_kind == crate::provision::DiskProvisionKind::Plain {
         return Ok(ProvisionKeyProbe {
             source_kind,
+            share_source_algorithm: None,
+            encrypt_source_algorithm: None,
             share: None,
             share_opaque_profile: false,
             encrypt: None,
@@ -213,8 +225,18 @@ pub fn probe_provision_key_domains_on_disk(
     };
     let (share, share_opaque_profile) = domain_probe(KeyDomainRole::Share);
     let (encrypt, encrypt_opaque_profile) = domain_probe(KeyDomainRole::Encrypt);
+    let source_algorithm = |domain| {
+        parsed
+            .as_ref()
+            .and_then(|source| source.record_for_domain(domain))
+            .filter(|record| record.lba12.need_encrypt != 0)
+            .and_then(|record| FileKeyWrapMode::from_raw(record.lba12.encrypt_mode))
+            .map(crate::provision::OfficialLabelAlgorithm::from_file_key_wrap_mode)
+    };
     Ok(ProvisionKeyProbe {
         source_kind,
+        share_source_algorithm: source_algorithm(KeyDomainRole::Share),
+        encrypt_source_algorithm: source_algorithm(KeyDomainRole::Encrypt),
         share,
         share_opaque_profile,
         encrypt,

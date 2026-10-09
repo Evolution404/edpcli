@@ -429,6 +429,9 @@ pub enum ProvisionWarning {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProvisionKeyProbe {
     pub source_kind: crate::provision::DiskProvisionKind,
+    /// Decoded per-partition on-disk LBA12 EncryptMode; not a target write permit.
+    pub share_source_algorithm: Option<crate::provision::OfficialLabelAlgorithm>,
+    pub encrypt_source_algorithm: Option<crate::provision::OfficialLabelAlgorithm>,
     pub share: Option<SourcePasswordKnowledge>,
     pub share_opaque_profile: bool,
     pub encrypt: Option<SourcePasswordKnowledge>,

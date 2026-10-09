@@ -13,6 +13,10 @@ impl AppState {
         // Official label tool defaults to SMS4 for each new form session.
         // Never carry a blocked AES policy silently to another target disk.
         self.provision.form.encryption_algorithm = crate::provision::OfficialLabelAlgorithm::Sms4;
+        self.provision.form.share_source_algorithm = None;
+        self.provision.form.encrypt_source_algorithm = None;
+        self.provision.form.source_algorithm_mixed = false;
+        self.provision.form.algorithm_user_edited = false;
         self.provision.form.share_source_password.clear();
         self.provision.form.encrypt_source_password.clear();
         self.provision.form.share_target_password.clear();
