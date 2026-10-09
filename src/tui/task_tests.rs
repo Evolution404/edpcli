@@ -17,16 +17,22 @@ fn key_probe_keeps_latest_form_and_discards_requests_on_exit() {
         .unwrap();
     }
     assert!(hub.provision.key_probe_slot.single_flight.is_running());
-    match hub.provision.key_probe_slot.finish_latest(generation) {
-        LatestCompletion::Restart { request, .. } => assert_eq!(
+    let restarted_generation = match hub.provision.key_probe_slot.finish_latest(generation) {
+        LatestCompletion::Restart {
+            generation,
             request,
-            KeyProbeContext {
-                disk: 7,
-                session_id: 1100
-            }
-        ),
+        } => {
+            assert_eq!(
+                request,
+                KeyProbeContext {
+                    disk: 7,
+                    session_id: 1100
+                }
+            );
+            generation
+        }
         _ => panic!("latest target must be restarted after old read completes"),
-    }
+    };
     hub.request_key_probe_session(KeyProbeContext {
         disk: 8,
         session_id: 1101,
@@ -39,6 +45,21 @@ fn key_probe_keeps_latest_form_and_discards_requests_on_exit() {
             generation,
             context: first,
             result: Err("stale".into()),
+        }))
+        .unwrap();
+    assert!(hub.poll().provision.key_probe.is_none());
+    assert!(
+        hub.provision.key_probe_slot.single_flight.is_running(),
+        "stale completion must not release the restarted worker"
+    );
+    hub.tx
+        .send(WorkerResult::Provision(ProvisionWorkerResult::KeyProbe {
+            generation: restarted_generation,
+            context: KeyProbeContext {
+                disk: 7,
+                session_id: 1100,
+            },
+            result: Err("invalidated".into()),
         }))
         .unwrap();
     assert!(hub.poll().provision.key_probe.is_none());
@@ -304,4 +325,132 @@ fn background_work_polling_reflects_singleflight_lifecycle() {
     assert!(hub.has_pending_work());
     assert!(hub.device_slot.finish(generation));
     assert!(!hub.has_pending_work());
+}
+
+#[test]
+fn old_or_duplicate_worker_completion_cannot_release_a_newer_singleflight() {
+    let mut slot = TaskSlot::<u32>::new();
+    let first = match slot.request_latest(10) {
+        LatestRequest::Started { generation, .. } => generation,
+        other => panic!("expected first start: {other:?}"),
+    };
+    let queued = match slot.request_latest(20) {
+        LatestRequest::Queued { generation } => generation,
+        other => panic!("expected queued update: {other:?}"),
+    };
+    match slot.finish_latest(first) {
+        LatestCompletion::Restart {
+            generation,
+            request,
+        } => {
+            assert_eq!((generation, request), (queued, 20));
+        }
+        other => panic!("expected latest restart: {other:?}"),
+    }
+    assert!(slot.single_flight.is_running());
+    // A delayed duplicate of the old scan must not clear the new active task.
+    assert!(matches!(
+        slot.finish_latest(first),
+        LatestCompletion::Deliver(false)
+    ));
+    assert!(!slot.finish(first));
+    assert!(slot.single_flight.is_running());
+    let newest = match slot.request_latest(30) {
+        LatestRequest::Queued { generation } => generation,
+        other => panic!("new request must remain queued: {other:?}"),
+    };
+    assert!(matches!(
+        slot.finish_latest(first),
+        LatestCompletion::Deliver(false)
+    ));
+    match slot.finish_latest(queued) {
+        LatestCompletion::Restart {
+            generation,
+            request,
+        } => {
+            assert_eq!((generation, request), (newest, 30));
+        }
+        other => panic!("latest request lost: {other:?}"),
+    }
+    assert!(slot.single_flight.is_running());
+    assert!(matches!(
+        slot.finish_latest(newest),
+        LatestCompletion::Deliver(true)
+    ));
+    assert!(!slot.single_flight.is_running());
+}
+
+#[test]
+fn invalidated_pending_worker_completion_does_not_publish_stale_data() {
+    let mut slot = TaskSlot::<u32>::new();
+    let old = slot.try_begin().unwrap();
+    slot.invalidate_pending();
+    assert!(slot.single_flight.is_running());
+    assert!(!slot.finish(old));
+    assert!(!slot.single_flight.is_running());
+    let current = slot.try_begin().unwrap();
+    assert!(slot.finish(current));
+    assert!(!slot.finish(current), "duplicate cannot be accepted");
+}
+
+#[test]
+fn late_restore_and_write_completions_cannot_finish_a_new_critical_operation() {
+    use crate::application::error::{MediaState, OperationError};
+    use crate::common::{EdpCliError, EXIT_INTERMEDIATE};
+    let mut hub = TaskHub::new();
+    let old = hub.begin_operation().unwrap();
+    assert!(hub.finish_operation(old));
+    let active = hub.begin_operation().unwrap();
+    assert!(
+        hub.begin_operation().is_err(),
+        "duplicate Enter cannot start a second write"
+    );
+    hub.tx
+        .send(WorkerResult::Write {
+            operation_id: old,
+            result: Err(OperationError::from(EdpCliError::new(
+                EXIT_INTERMEDIATE,
+                "late write",
+            ))),
+        })
+        .unwrap();
+    hub.tx
+        .send(WorkerResult::Restore {
+            operation_id: old,
+            result: Err(OperationError::from(EdpCliError::new(
+                EXIT_INTERMEDIATE,
+                "late restore",
+            ))),
+        })
+        .unwrap();
+    hub.tx
+        .send(WorkerResult::WriteProgress {
+            operation_id: old,
+            event: crate::application::WriteEvent::RestoreWriteCompleted,
+        })
+        .unwrap();
+    let updates = hub.poll();
+    assert!(updates.write.is_none());
+    assert!(updates.restore.is_none());
+    assert!(updates.write_progress.is_empty());
+    assert_eq!(hub.active_operation(), Some(active));
+    hub.tx
+        .send(WorkerResult::Write {
+            operation_id: active,
+            result: Err(OperationError::from(EdpCliError::new(
+                EXIT_INTERMEDIATE,
+                "rollback failed",
+            ))),
+        })
+        .unwrap();
+    let updates = hub.poll();
+    let (id, result) = updates
+        .write
+        .expect("active worker completion must deliver");
+    assert_eq!(id, active);
+    let error = result.unwrap_err();
+    assert_eq!(error.media_state, Some(MediaState::Intermediate));
+    assert_eq!(error.exit_code(), EXIT_INTERMEDIATE);
+    assert_eq!(hub.active_operation(), None);
+    assert!(hub.begin_operation().is_ok());
 }

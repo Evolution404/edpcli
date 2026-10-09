@@ -136,10 +136,10 @@ fn domain_secrets(
     )
 }
 
-fn part<'a>(
-    plan: &'a TargetProvisionPlan,
+fn part(
+    plan: &TargetProvisionPlan,
     role: PartitionRole,
-) -> &'a edpcli::provision::TargetPartitionPlan {
+) -> &edpcli::provision::TargetPartitionPlan {
     plan.partitions
         .iter()
         .find(|part| part.geometry.role == role)
@@ -445,4 +445,81 @@ fn raw_virtual_disk_atomic_roundtrip_and_restore() {
         original,
         "Chapter 12 HIL must restore LBA0-12 bit-for-bit"
     );
+}
+
+// This HIL fixture must never run without the CI-only feature AND the platform's
+// existing disposable-virtual-disk guard. It is intentionally `#[ignore]`.
+struct FailOnceVirtualWrite<'a> {
+    inner: &'a mut FileDev,
+    fail_at: usize,
+    writes: usize,
+}
+impl SectorDev for FailOnceVirtualWrite<'_> {
+    fn read_sector(&mut self, lba: u32) -> std::io::Result<Vec<u8>> {
+        self.inner.read_sector(lba)
+    }
+    fn write_sector(&mut self, lba: u32, bytes: &[u8]) -> std::io::Result<()> {
+        self.writes += 1;
+        if self.writes == self.fail_at {
+            // Deliberately fail *after* mutating the target sector: a controller
+            // error does not prove that it wrote no bytes. The full rollback
+            // must restore everything including this LBA.
+            let mut partly = self.inner.read_sector(lba)?;
+            partly[..SECTOR / 2].copy_from_slice(&bytes[..SECTOR / 2]);
+            self.inner.write_sector(lba, &partly)?;
+            return Err(std::io::Error::other("injected partial virtual HIL write"));
+        }
+        self.inner.write_sector(lba, bytes)
+    }
+    fn sync(&mut self) -> std::io::Result<()> {
+        self.inner.sync()
+    }
+    fn reopen_rdwr(&mut self, wait: Duration) -> std::io::Result<()> {
+        self.inner.reopen_rdwr(wait)
+    }
+}
+
+#[test]
+#[ignore = "requires an explicitly created and guarded disposable OS loop/VHD/disk image"]
+fn virtual_disk_partial_write_faults_restore_entire_metadata_exactly() {
+    let _serial = HIL_LOCK.lock().expect("serialize destructive virtual HIL");
+    let path = std::env::var("EDPCLI_VIRTUAL_DISK_PATH")
+        .expect("CI must provide disposable virtual disk path");
+    assert!(
+        edpcli::platform::is_raw_device_path(&path),
+        "refuse any non-raw HIL target: {path}"
+    );
+    let _guard = edpcli::platform::ci_prepare_virtual_write(&path)
+        .expect("must prove disposable virtual disk before any write");
+    let mut dev = FileDev::open_rdwr(&path, Duration::from_secs(5)).unwrap();
+    let original = read_metadata(&mut dev);
+    let mut patch = deterministic_patch();
+    // The normal HIL test might have used this exact patch already, but it
+    // always restores. Ensure every touched sector actually changes here.
+    for (lba, sector) in &mut patch {
+        sector[0] ^= (*lba as u8).wrapping_add(0xb7);
+    }
+    assert_ne!(original, patch);
+    for fail_at in [1, 7, METADATA_SECTOR_COUNT] {
+        let mut faulty = FailOnceVirtualWrite {
+            inner: &mut dev,
+            fail_at,
+            writes: 0,
+        };
+        let error = atomic_write_sectors(&mut faulty, &patch)
+            .expect_err("partial write must trigger a verified rollback");
+        assert_eq!(
+            error.code,
+            edpcli::application::support::EXIT_ROLLED_BACK,
+            "failed at {fail_at}: {}",
+            error.msg
+        );
+        assert_eq!(faulty.writes, fail_at + METADATA_SECTOR_COUNT);
+        assert_eq!(
+            read_metadata(faulty.inner),
+            original,
+            "LBA0-12 after failed write {fail_at}"
+        );
+    }
+    assert_eq!(read_metadata(&mut dev), original);
 }

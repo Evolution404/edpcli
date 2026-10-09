@@ -2,6 +2,14 @@
 use super::*;
 
 impl AppState {
+    fn post_restore_failure_suffix(requires_reinspection: bool) -> &'static str {
+        if requires_reinspection {
+            "介质状态未确认，已停止后续写入；请重新检查设备或从备份恢复。"
+        } else {
+            "元数据恢复仍保持成功。"
+        }
+    }
+
     fn quarantine_post_restore(wizard: &mut WizardState) {
         if let Some(outcome) = wizard.restore_outcome.as_mut() {
             outcome.format_target_pin = None;
@@ -105,13 +113,13 @@ impl AppState {
         let Some(wizard) = self.restore.wizard.as_mut() else {
             return;
         };
-        if result
+        let requires_reinspection = result
             .result
             .as_ref()
             .err()
             .and_then(|error| error.media_state())
-            .is_some_and(|state| state.requires_reinspection())
-        {
+            .is_some_and(|state| state.requires_reinspection());
+        if requires_reinspection {
             Self::quarantine_post_restore(wizard);
         }
         Self::record_post_restore_format_result(
@@ -142,8 +150,10 @@ impl AppState {
             }
             Err(message) => {
                 wizard.message = Some(crate::tui::ui::UiMessage::error(format!(
-                    "分区 {} 格式化失败：{}；元数据恢复仍保持成功。",
-                    result.partition_index, message
+                    "分区 {} 格式化失败：{}；{}",
+                    result.partition_index,
+                    message,
+                    Self::post_restore_failure_suffix(requires_reinspection)
                 )));
             }
         }
@@ -163,8 +173,8 @@ impl AppState {
         let Some(wizard) = self.restore.wizard.as_mut() else {
             return;
         };
-        if matches!(result.result.as_ref(), Err(EncryptedPostRestoreError::Operation(error)) if error.media_state().is_some_and(|state| state.requires_reinspection()))
-        {
+        let requires_reinspection = matches!(result.result.as_ref(), Err(EncryptedPostRestoreError::Operation(error)) if error.media_state().is_some_and(|state| state.requires_reinspection()));
+        if requires_reinspection {
             Self::quarantine_post_restore(wizard);
         }
         Self::record_post_restore_format_result(
@@ -249,8 +259,10 @@ impl AppState {
                 wizard.stage = WizardStage::PostRestore;
                 Self::clear_post_restore_volume_label(wizard);
                 wizard.message = Some(crate::tui::ui::UiMessage::error(format!(
-                    "分区 {} 加密格式化失败：{}；元数据恢复仍保持成功。",
-                    result.partition_index, message
+                    "分区 {} 加密格式化失败：{}；{}",
+                    result.partition_index,
+                    message,
+                    Self::post_restore_failure_suffix(requires_reinspection)
                 )));
                 self.shell.input_mode = InputMode::Normal;
             }
@@ -280,13 +292,13 @@ impl AppState {
         let Some(wizard) = self.restore.wizard.as_mut() else {
             return;
         };
-        if result
+        let requires_reinspection = result
             .result
             .as_ref()
             .err()
             .and_then(|error| error.media_state)
-            .is_some_and(|state| state.requires_reinspection())
-        {
+            .is_some_and(|state| state.requires_reinspection());
+        if requires_reinspection {
             Self::quarantine_post_restore(wizard);
         }
         wizard.pending_format = None;
@@ -317,10 +329,27 @@ impl AppState {
             }
             Err(message) => {
                 wizard.message = Some(crate::tui::ui::UiMessage::error(format!(
-                    "分区 {} 重建失败：{}；元数据恢复仍保持成功。",
-                    result.partition_index, message
+                    "分区 {} 重建失败：{}；{}",
+                    result.partition_index,
+                    message,
+                    Self::post_restore_failure_suffix(requires_reinspection)
                 )));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod s5_failure_notice_tests {
+    use super::*;
+
+    #[test]
+    fn unsafe_format_or_reinitialize_failure_never_claims_restored_media_is_safe() {
+        let unsafe_notice = AppState::post_restore_failure_suffix(true);
+        assert!(unsafe_notice.contains("介质状态未确认"));
+        assert!(unsafe_notice.contains("已停止后续写入"));
+        assert!(!unsafe_notice.contains("恢复仍保持成功"));
+        let verified_rollback = AppState::post_restore_failure_suffix(false);
+        assert!(verified_rollback.contains("元数据恢复仍保持成功"));
     }
 }

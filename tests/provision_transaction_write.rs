@@ -830,6 +830,10 @@ struct TransactionFaultMatrixDev {
     fail_write: Vec<usize>,
     fail_read_from: Option<usize>,
     fail_write_from: Option<usize>,
+    corrupt_read_calls: Vec<usize>,
+    // Emulate a controller acknowledging no success after partially committing
+    // a 512-byte sector; the transaction must still restore that sector.
+    mutate_then_fail_write: Vec<usize>,
 }
 impl SectorDev for TransactionFaultMatrixDev {
     fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
@@ -844,10 +848,29 @@ impl SectorDev for TransactionFaultMatrixDev {
                 self.read_calls
             )));
         }
-        self.inner.read_sector(lba)
+        let mut bytes = self.inner.read_sector(lba)?;
+        if self.corrupt_read_calls.contains(&self.read_calls) {
+            bytes[0] ^= 0xff;
+        }
+        Ok(bytes)
     }
     fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()> {
         self.inner.calls += 1;
+        if self.mutate_then_fail_write.contains(&self.inner.calls) {
+            let mut partial = self
+                .inner
+                .sectors
+                .get(&lba)
+                .cloned()
+                .unwrap_or(vec![0; SECTOR]);
+            partial[..SECTOR / 2].copy_from_slice(&data[..SECTOR / 2]);
+            self.inner.sectors.insert(lba, partial);
+            self.inner.writes.push(lba);
+            return Err(io::Error::other(format!(
+                "injected partial write #{}",
+                self.inner.calls
+            )));
+        }
         if self.fail_write.contains(&self.inner.calls)
             || self
                 .fail_write_from
@@ -949,6 +972,176 @@ fn fault_matrix_post_write_failures_restore_exact_bytes_and_commit_order() {
         );
     }
 }
+#[test]
+fn fault_matrix_every_write_stage_failure_rolls_back_all_bytes() {
+    // Actual order: data 63,64 -> metadata 12 -> MBR LBA0 commit last.
+    for (step, expected_lba) in [(1, 63), (2, 64), (3, 12), (4, 0)] {
+        for partial in [false, true] {
+            let mut dev = fault_matrix_dev();
+            let original = dev.inner.sectors.clone();
+            if partial {
+                dev.mutate_then_fail_write.push(step);
+            } else {
+                dev.fail_write.push(step);
+            }
+            let mut progress = Vec::new();
+            let error =
+                execute_write_transaction_observed(&mut dev, &fault_matrix_plan(), &mut |event| {
+                    progress.push(event)
+                })
+                .unwrap_err();
+            assert_eq!(
+                error.code, EXIT_ROLLED_BACK,
+                "step={step} partial={partial}: {}",
+                error.msg
+            );
+            assert_eq!(dev.inner.sectors, original, "step={step} partial={partial}");
+            assert_eq!(
+                dev.inner.writes.last(),
+                Some(&0),
+                "rollback must commit original MBR last"
+            );
+            assert_eq!(dev.inner.syncs, 2, "preflight + rollback sync");
+            assert!(progress.iter().any(|event| event.phase
+                == TransactionActivityPhase::RollbackReadback
+                && event.current == 4));
+            let attempted = if partial {
+                &dev.inner.writes[..step]
+            } else {
+                &dev.inner.writes[..step - 1]
+            };
+            assert_eq!(
+                attempted.last().copied(),
+                if partial {
+                    Some(expected_lba)
+                } else if step == 1 {
+                    None
+                } else {
+                    Some([63, 64, 12][step - 2])
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn fault_matrix_each_readback_position_and_corruption_must_rollback() {
+    // Four write-set sectors mirrored on read #1..4, then read back #5..8.
+    for readback_call in 5..=8 {
+        for corrupt in [false, true] {
+            let mut dev = fault_matrix_dev();
+            let original = dev.inner.sectors.clone();
+            if corrupt {
+                dev.corrupt_read_calls.push(readback_call);
+            } else {
+                dev.fail_read.push(readback_call);
+            }
+            let error = execute_write_transaction(&mut dev, &fault_matrix_plan()).unwrap_err();
+            assert_eq!(
+                error.code, EXIT_ROLLED_BACK,
+                "read={readback_call} corrupt={corrupt}: {}",
+                error.msg
+            );
+            assert_eq!(dev.inner.sectors, original);
+            assert_eq!(dev.inner.writes.last(), Some(&0));
+            assert_eq!(dev.inner.syncs, 3, "preflight + write sync + rollback sync");
+        }
+    }
+}
+
+#[test]
+fn fault_matrix_every_reinitialize_stage_rolls_back_data_and_lba7_lba12() {
+    let data = [(100_u32, [0x51; SECTOR]), (101, [0x52; SECTOR])];
+    let writes = data
+        .iter()
+        .map(|(lba, bytes)| (*lba, bytes))
+        .collect::<Vec<_>>();
+    for failed_step in 1..=4 {
+        let mut dev = TransactionFaultMatrixDev::default();
+        for lba in [7, 12, 100, 101] {
+            dev.inner.sectors.insert(lba, vec![0x91; SECTOR]);
+        }
+        let original = dev.inner.sectors.clone();
+        dev.fail_write.push(failed_step);
+        let error = execute_borrowed_reinitialize_transaction(
+            &mut dev,
+            1000,
+            100,
+            40,
+            &writes,
+            &[0x67; SECTOR],
+            &[0x6c; SECTOR],
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.code, EXIT_ROLLED_BACK,
+            "LBA7/LBA12 stage step={failed_step}: {}",
+            error.msg
+        );
+        assert_eq!(dev.inner.sectors, original);
+        assert_eq!(
+            dev.inner.writes.last(),
+            Some(&12),
+            "restore final key-domain metadata last"
+        );
+    }
+}
+
+#[test]
+fn scoped_edp_and_plain_format_failures_restore_exact_partition_bytes() {
+    // All official encrypted/plain mode formatting uses the same bounded
+    // borrowed transaction executor; Plain has a distinct LBA3 exclusion.
+    for (layout, start) in [
+        (BorrowedFormatLayout::Edp, 63_u32),
+        (BorrowedFormatLayout::Plain, 2048_u32),
+    ] {
+        let first = [0x53_u8; SECTOR];
+        let second = [0x81_u8; SECTOR];
+        let writes = [(start, &first), (start + 1, &second)];
+        for failure in 1..=5 {
+            let mut dev = TransactionFaultMatrixDev::default();
+            for lba in [start, start + 1] {
+                dev.inner.sectors.insert(lba, vec![0x39; SECTOR]);
+            }
+            let original = dev.inner.sectors.clone();
+            match failure {
+                1 | 2 => dev.mutate_then_fail_write.push(failure),
+                3 | 4 => dev.corrupt_read_calls.push(failure),
+                5 => dev.fail_sync.push(2),
+                _ => unreachable!(),
+            }
+            let error = execute_borrowed_data_transaction_scoped_observed(
+                &mut dev,
+                4096,
+                &writes,
+                BorrowedFormatBounds {
+                    start_lba: start as u64,
+                    end_exclusive: (start + 2) as u64,
+                    layout,
+                },
+                &mut |_| {},
+            )
+            .unwrap_err();
+            assert_eq!(
+                error.code, EXIT_ROLLED_BACK,
+                "{layout:?} failure {failure}: {}",
+                error.msg
+            );
+            assert_eq!(dev.inner.sectors, original);
+            assert_eq!(dev.inner.writes.last(), Some(&(start + 1)));
+            assert!(dev
+                .inner
+                .writes
+                .iter()
+                .all(|&lba| lba == start || lba == start + 1));
+            assert!(
+                !dev.inner.writes.contains(&3),
+                "manufacturer LBA3 must be preserved"
+            );
+        }
+    }
+}
+
 #[test]
 fn fault_matrix_rollback_retry_can_recover_from_transient_failures() {
     let mut dev = fault_matrix_dev();

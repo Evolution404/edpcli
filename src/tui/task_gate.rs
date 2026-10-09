@@ -13,6 +13,10 @@ pub(super) struct TaskSlot<P> {
     pub(super) generation: GenerationGate,
     pub(super) single_flight: SingleFlightGate,
     pub(super) pending_latest: Option<(u64, P)>,
+    // The in-flight generation is distinct from `generation.current()`:
+    // invalidating or superseding a request never cancels a running worker.
+    // An old/duplicate completion must not release the next worker's slot.
+    running_generation: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -39,6 +43,7 @@ impl<P> TaskSlot<P> {
             generation: GenerationGate::new(),
             single_flight: SingleFlightGate::new(),
             pending_latest: None,
+            running_generation: None,
         }
     }
 
@@ -48,14 +53,19 @@ impl<P> TaskSlot<P> {
     }
 
     pub(super) fn try_begin(&mut self) -> Option<u64> {
-        self.single_flight
-            .try_start()
-            .then(|| self.generation.begin())
+        if self.single_flight.try_start() {
+            let generation = self.generation.begin();
+            self.running_generation = Some(generation);
+            Some(generation)
+        } else {
+            None
+        }
     }
 
     pub(super) fn request_latest(&mut self, request: P) -> LatestRequest<P> {
         let generation = self.generation.begin();
         if self.single_flight.try_start() {
+            self.running_generation = Some(generation);
             LatestRequest::Started {
                 generation,
                 request,
@@ -67,15 +77,26 @@ impl<P> TaskSlot<P> {
     }
 
     pub(super) fn finish(&mut self, generation: u64) -> bool {
+        // In particular, do not release an active new worker when an old
+        // generation reports a duplicate or delayed completion.
+        if self.running_generation != Some(generation) {
+            return false;
+        }
+        self.running_generation = None;
         self.single_flight.finish();
         self.generation.is_current(generation)
     }
 
     pub(super) fn finish_latest(&mut self, generation: u64) -> LatestCompletion<P> {
+        if self.running_generation != Some(generation) {
+            return LatestCompletion::Deliver(false);
+        }
+        self.running_generation = None;
         self.single_flight.finish();
         if let Some((next_generation, request)) = self.pending_latest.take() {
             let started = self.single_flight.try_start();
             debug_assert!(started);
+            self.running_generation = Some(next_generation);
             LatestCompletion::Restart {
                 generation: next_generation,
                 request,
