@@ -14,7 +14,42 @@ pub struct ObservedDeviceGeometry {
     pub physical_sector_bytes: Option<u32>,
 }
 
+/// Validated, byte-accurate geometry for reading native logical disk blocks.
+/// This is intentionally separate from the existing 512B physical write grant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NativeReadGeometry {
+    pub capacity_bytes: u64,
+    pub logical_sector_bytes: u32,
+    pub native_sector_count: u64,
+}
+
+impl NativeReadGeometry {
+    pub fn byte_offset(self, lba: u64) -> Result<u64, &'static str> {
+        if lba >= self.native_sector_count {
+            return Err("原生 LBA 超出设备容量");
+        }
+        lba.checked_mul(u64::from(self.logical_sector_bytes))
+            .ok_or("原生 LBA 字节偏移溢出")
+    }
+}
+
 impl ObservedDeviceGeometry {
+    /// Accept block geometries for READ ONLY use. Writes are independently gated.
+    pub fn native_read_geometry(self) -> Result<NativeReadGeometry, &'static str> {
+        let logical = self.logical_sector_bytes.ok_or("设备逻辑扇区大小未知")?;
+        if !(512..=65_536).contains(&logical) || !logical.is_power_of_two() {
+            return Err("设备逻辑扇区大小无效或不受支持");
+        }
+        if self.capacity_bytes == 0 || !self.capacity_bytes.is_multiple_of(u64::from(logical)) {
+            return Err("设备容量与逻辑扇区大小不一致");
+        }
+        Ok(NativeReadGeometry {
+            capacity_bytes: self.capacity_bytes,
+            logical_sector_bytes: logical,
+            native_sector_count: self.capacity_bytes / u64::from(logical),
+        })
+    }
+
     pub fn writable_protocol_sectors(self) -> Result<u64, &'static str> {
         if self.logical_sector_bytes != Some(512) {
             return Err("设备逻辑扇区大小未知或不是 512B，禁止写入");
@@ -33,6 +68,38 @@ impl ObservedDeviceGeometry {
 #[cfg(test)]
 mod geometry_tests {
     use super::*;
+    #[test]
+    fn native_read_geometry_preserves_block_units_and_rejects_invalid_values() {
+        for (logical, blocks) in [(512, 500_000), (1024, 250_000), (4096, 62_500)] {
+            let geometry = ObservedDeviceGeometry {
+                capacity_bytes: 256_000_000,
+                logical_sector_bytes: Some(logical),
+                physical_sector_bytes: Some(4096),
+            };
+            let native = geometry.native_read_geometry().unwrap();
+            assert_eq!(native.native_sector_count, blocks);
+            assert_eq!(native.byte_offset(11).unwrap(), 11 * u64::from(logical));
+            assert!(native.byte_offset(native.native_sector_count).is_err());
+            // Preserve 512-only write gate during read-path migration.
+            assert_eq!(geometry.writable_protocol_sectors().is_ok(), logical == 512);
+        }
+        for logical in [None, Some(0), Some(511), Some(513), Some(131_072)] {
+            assert!(ObservedDeviceGeometry {
+                capacity_bytes: 256_000_000,
+                logical_sector_bytes: logical,
+                physical_sector_bytes: None,
+            }
+            .native_read_geometry()
+            .is_err());
+        }
+        let invalid_capacity = ObservedDeviceGeometry {
+            capacity_bytes: 4097,
+            logical_sector_bytes: Some(4096),
+            physical_sector_bytes: Some(4096),
+        };
+        assert!(invalid_capacity.native_read_geometry().is_err());
+    }
+
     #[test]
     fn writable_geometry_distinguishes_protocol_units_and_native_blocks() {
         let mut geometry = ObservedDeviceGeometry {

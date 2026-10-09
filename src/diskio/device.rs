@@ -100,6 +100,9 @@ pub struct FileDev {
     file: File,
     writable: bool,
     media_kind: FileMediaKind,
+    /// Optional native geometry for read-only projection of fixed 512B EDP fields.
+    /// The stable 512B writer never receives this override.
+    native_read_geometry: Option<crate::domain::hardware::NativeReadGeometry>,
 }
 
 fn try_open_rdwr(path: &str, wait: Duration) -> io::Result<File> {
@@ -127,7 +130,34 @@ impl FileDev {
             file,
             writable: false,
             media_kind,
+            native_read_geometry: None,
         })
+    }
+
+    /// Only for read-only physical media: attach a *validated* native geometry.
+    /// Existing 512-byte callers still use `open_rdonly` without any change.
+    pub fn open_rdonly_native(
+        path: &str,
+        geometry: crate::domain::hardware::NativeReadGeometry,
+    ) -> io::Result<Self> {
+        let mut dev = Self::open_rdonly(path)?;
+        dev.native_read_geometry = Some(geometry);
+        Ok(dev)
+    }
+
+    /// Returns the entire native block, including unowned bytes beyond the
+    /// first 512B. Never writes, truncates, or assumes protocol block length.
+    pub fn read_native_sector_u64(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        let geometry = self
+            .native_read_geometry
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "未提供原生扇区几何"))?;
+        let offset = geometry
+            .byte_offset(lba)
+            .map_err(|reason| io::Error::new(io::ErrorKind::InvalidInput, reason))?;
+        let mut full = vec![0u8; geometry.logical_sector_bytes as usize];
+        self.file.seek(SeekFrom::Start(offset))?;
+        self.file.read_exact(&mut full)?;
+        Ok(full)
     }
 
     pub fn open_rdwr(path: &str, wait: Duration) -> io::Result<Self> {
@@ -138,12 +168,19 @@ impl FileDev {
             file,
             writable: true,
             media_kind,
+            native_read_geometry: None,
         })
     }
 
     /// Switching to write access must never silently change the opened target.
     /// Validate the newly opened handle *before* replacing the original one.
     pub fn reopen_rdwr(&mut self, wait: Duration) -> io::Result<()> {
+        if self.native_read_geometry.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "原生逻辑块只读适配器禁止提升到写入权限",
+            ));
+        }
         if self.writable {
             return Ok(());
         }
@@ -168,6 +205,17 @@ impl FileDev {
     }
 
     fn read_exact_sector(&mut self, lba: u64, out: &mut [u8]) -> io::Result<()> {
+        if self.native_read_geometry.is_some() {
+            if out.len() != SECTOR {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "协议投影必须恰好 512B；完整原生读取请使用 read_native_sector_u64",
+                ));
+            }
+            let block = self.read_native_sector_u64(lba)?;
+            out.copy_from_slice(&block[..SECTOR]);
+            return Ok(());
+        }
         let base = lba
             .checked_mul(SECTOR as u64)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "LBA 字节偏移溢出"))?;
@@ -230,6 +278,11 @@ impl SectorDev for FileDev {
     }
 
     fn max_contiguous_sectors(&self) -> usize {
+        // Native-read adapters are never allowed to coalesce 512B projections
+        // as though they were adjacent native blocks.
+        if self.native_read_geometry.is_some() {
+            return 1;
+        }
         // Never enable batched writes for raw USB/disk devices without a
         // separate hardware failure-injection acceptance gate.
         if self.media_kind == FileMediaKind::RawOrUnknown {
@@ -244,7 +297,7 @@ impl SectorDev for FileDev {
         first_lba: u32,
         sectors: &mut [[u8; SECTOR]],
     ) -> io::Result<()> {
-        if self.media_kind == FileMediaKind::RawOrUnknown {
+        if self.media_kind == FileMediaKind::RawOrUnknown || self.native_read_geometry.is_some() {
             for (index, sector) in sectors.iter_mut().enumerate() {
                 let lba = first_lba
                     .checked_add(index as u32)
@@ -261,6 +314,12 @@ impl SectorDev for FileDev {
         first_lba: u32,
         sectors: &[[u8; SECTOR]],
     ) -> io::Result<()> {
+        if self.native_read_geometry.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "原生扇区只读适配器禁止写入",
+            ));
+        }
         if self.media_kind == FileMediaKind::RawOrUnknown {
             for (index, sector) in sectors.iter().enumerate() {
                 let lba = first_lba
@@ -282,6 +341,12 @@ impl SectorDev for FileDev {
     }
 
     fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()> {
+        if self.native_read_geometry.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "原生扇区只读适配器禁止写入",
+            ));
+        }
         if !self.writable {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -305,6 +370,45 @@ impl SectorDev for FileDev {
 // ══════════════════════════════════════════════════════════════════
 // 1. 原子写入(全有或全无)
 // ══════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod native_read_projection_tests {
+    use super::*;
+    use crate::domain::hardware::ObservedDeviceGeometry;
+
+    #[test]
+    fn four_kn_reads_full_block_then_projects_512_without_losing_tail() -> io::Result<()> {
+        let path =
+            std::env::temp_dir().join(format!("edpcli-4kn-projection-{}", std::process::id()));
+        let mut bytes = vec![0u8; 13 * 4096];
+        bytes[11 * 4096..11 * 4096 + 4].copy_from_slice(b"DRKB");
+        bytes[11 * 4096 + 512..12 * 4096].fill(0xa7);
+        std::fs::write(&path, bytes)?;
+        let path_text = path.to_str().ok_or_else(|| io::Error::other("path"))?;
+        let geometry = ObservedDeviceGeometry {
+            capacity_bytes: 13 * 4096,
+            logical_sector_bytes: Some(4096),
+            physical_sector_bytes: Some(4096),
+        }
+        .native_read_geometry()
+        .map_err(|reason| io::Error::new(io::ErrorKind::InvalidInput, reason))?;
+        let mut dev = FileDev::open_rdonly_native(path_text, geometry)?;
+        assert_eq!(dev.max_contiguous_sectors(), 1);
+        assert_eq!(&dev.read_sector(11)?[..4], b"DRKB");
+        let native = dev.read_native_sector_u64(11)?;
+        assert_eq!(native.len(), 4096);
+        assert!(native[512..].iter().all(|byte| *byte == 0xa7));
+        assert!(dev.read_native_sector_u64(13).is_err());
+        assert!(dev.reopen_rdwr(Duration::ZERO).is_err());
+        assert!(dev.write_sector(11, &[0u8; 512]).is_err());
+        let mut sectors = [[0u8; 512]; 2];
+        dev.read_contiguous_sectors_into(10, &mut sectors)?;
+        assert_eq!(&sectors[1][..4], b"DRKB");
+        drop(dev);
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod contiguous_batch_tests {
