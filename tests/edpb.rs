@@ -717,22 +717,44 @@ fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
     )
     .unwrap();
     let mut changed = verified_writes.clone();
-    changed.iter_mut().find(|block| block.relative_lba == 11)
-        .unwrap().data[4095] ^= 1;
-    assert!(plan.verify_source_replay_readback(
-        snapshot, "disk&ven_test&prod_native", &[lce.clone()], &changed
-    ).is_err());
+    changed
+        .iter_mut()
+        .find(|block| block.relative_lba == 11)
+        .unwrap()
+        .data[4095] ^= 1;
+    assert!(plan
+        .verify_source_replay_readback(
+            snapshot,
+            "disk&ven_test&prod_native",
+            &[lce.clone()],
+            &changed
+        )
+        .is_err());
     let mut changed_lce = verified_writes.clone();
-    changed_lce.iter_mut().find(|block| block.relative_lba == 10_000)
-        .unwrap().data[4095] ^= 1;
-    assert!(plan.verify_source_replay_readback(
-        snapshot, "disk&ven_test&prod_native", &[lce.clone()], &changed_lce
-    ).is_err());
+    changed_lce
+        .iter_mut()
+        .find(|block| block.relative_lba == 10_000)
+        .unwrap()
+        .data[4095] ^= 1;
+    assert!(plan
+        .verify_source_replay_readback(
+            snapshot,
+            "disk&ven_test&prod_native",
+            &[lce.clone()],
+            &changed_lce
+        )
+        .is_err());
     // Contradictory geometry is rejected instead of becoming a new writer
     // authority; the archive's source LCE points at 10000, not 10001.
     let wrong_lce_plan = NativeEdpLayoutPlan::from_confirmed_geometry(
-        OfficialPartitionMode::DefaultThreePartition, 12_000, 4096, &parts, 10_001, 1
-    ).unwrap();
+        OfficialPartitionMode::DefaultThreePartition,
+        12_000,
+        4096,
+        &parts,
+        10_001,
+        1,
+    )
+    .unwrap();
     assert!(source.verified_native_replay(&wrong_lce_plan).is_err());
     let bad = tmp.0.join("tampered.edpb");
     let mut altered = fs::read(&path).unwrap();
