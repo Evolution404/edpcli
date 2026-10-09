@@ -87,6 +87,27 @@ fn native_sector_range_preserves_full_blocks_for_parameterized_geometry() {
         assert!(failure.to_string().contains("完整原生扇区"));
     }
 
+    // The application reads the full 13-block native protocol envelope in
+    // one bounded operation, retaining every unknown byte past the 512B
+    // protocol projection. It must never accept a truncated final 4Kn block.
+    let mut reader = NativeRangeReader {
+        width: 4096,
+        sectors: (0..13).map(|lba| vec![lba + 1; 4096]).collect(),
+        reads: Vec::new(),
+    };
+    let protocol = reader
+        .read_native_range(0, crate::common::METADATA_SECTOR_COUNT)
+        .unwrap();
+    assert_eq!(protocol.len(), 13 * 4096);
+    assert_eq!(reader.reads, (0u64..13).collect::<Vec<_>>());
+    assert_eq!(&protocol[12 * 4096..], vec![13; 4096].as_slice());
+    reader.reads.clear();
+    reader.sectors[12].truncate(4095);
+    let error = reader
+        .read_native_range(0, crate::common::METADATA_SECTOR_COUNT)
+        .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+    assert_eq!(reader.reads, (0u64..13).collect::<Vec<_>>());
     let mut reader = NativeRangeReader {
         width: 4096,
         sectors: vec![vec![0; 4096]],
