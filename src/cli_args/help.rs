@@ -33,6 +33,9 @@ fn print_topic_help(topic: &str) {
     }
 
     match topic {
+        "list" | "tui" => {
+            println!("--include-virtual：显示已验证的外部虚拟 Disk Image 设备；虚拟盘写入另需经过独立身份验证与原生块事务。");
+        }
         "info" => {
             println!("未指定来源且只有一个可用目标盘时自动选择；多盘时交互选择。");
         }

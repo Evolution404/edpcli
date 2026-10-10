@@ -35,6 +35,8 @@ impl crate::ports::DeviceObserver for SystemDeviceAccess<'_> {
     }
     fn is_external_usb_whole(&self, disk: u32) -> bool {
         usb_disk(self.runner, disk).is_some()
+            || (crate::platform::include_virtual()
+                && crate::platform::confirmed_virtual_disk_image(self.runner, disk))
     }
     fn device_geometry(
         &self,

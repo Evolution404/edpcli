@@ -91,7 +91,8 @@ pub fn option(command_name: &str, action: Option<&str>, name: &str) -> Option<&'
 const EMPTY_OPTIONS: &[OptionSpec] = &[];
 const HELP: OptionSpec = switch("--help");
 
-const LIST_OPTIONS: &[OptionSpec] = &[value("--backup-dir"), HELP];
+const LIST_OPTIONS: &[OptionSpec] = &[value("--backup-dir"), switch("--include-virtual"), HELP];
+const TUI_OPTIONS: &[OptionSpec] = &[switch("--include-virtual"), HELP];
 const DEMO_OPTIONS: &[OptionSpec] = &[value("--scene"), switch("--list-scenes"), HELP];
 const INFO_OPTIONS: &[OptionSpec] = &[value("--disk"), value("--id"), value("--backup-dir"), HELP];
 const INSPECT_OPTIONS: &[OptionSpec] = &[
@@ -268,15 +269,15 @@ const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "list",
         summary: "查看当前插入的 U 盘",
-        usage: "edpcli list [--backup-dir D]",
+        usage: "edpcli list [--backup-dir D] [--include-virtual]",
         options: LIST_OPTIONS,
         actions: &[],
     },
     CommandSpec {
         name: "tui",
         summary: "交互式 TUI（Vim 键位）",
-        usage: "edpcli tui",
-        options: EMPTY_OPTIONS,
+        usage: "edpcli tui [--include-virtual]",
+        options: TUI_OPTIONS,
         actions: &[],
     },
     CommandSpec {

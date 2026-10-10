@@ -13,9 +13,10 @@ const NON_HIL_SUITES: [&str; 8] = [
     "repository_suite",
 ];
 
-const HIL_TEST_SOURCES: [&str; 2] = [
+const HIL_TEST_SOURCES: [&str; 3] = [
     "tests/virtual_disk_hil.rs",
     "tests/plain_macos_virtual_hil.rs",
+    "tests/native_macos_4kn_virtual_hil.rs",
 ];
 
 fn repo_root() -> PathBuf {
@@ -60,8 +61,8 @@ fn cargo_registers_bounded_integration_suites() {
     assert!(cargo.contains("autotests = false"));
     assert_eq!(
         cargo.matches("[[test]]").count(),
-        10,
-        "keep eight non-HIL suites plus two explicit virtual-HIL targets"
+        11,
+        "keep eight non-HIL suites plus three explicit virtual-HIL targets"
     );
     for suite in NON_HIL_SUITES {
         assert!(

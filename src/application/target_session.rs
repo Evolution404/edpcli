@@ -46,13 +46,6 @@ pub struct WriteLocked<'d> {
 }
 
 /// Independent native 4Kn writable port, never reinterpreted as SectorDev.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "P1/P2 staging: production native USB entry remains gated pending P3/P4"
-    )
-)]
 pub struct NativeWriteLocked<'d> {
     _guard: Box<dyn WriteLease>,
     dev: &'d mut crate::diskio::NativeRawBlockDevice,
@@ -131,8 +124,8 @@ impl<'a> TargetSession<'a, ReadOnly> {
         })
     }
 
-    pub fn prepare_native_4kn_write(self) -> io::Result<TargetSession<'a, PreparedWrite>> {
-        self.native_4kn_geometry()
+    pub fn prepare_native_write(self) -> io::Result<TargetSession<'a, PreparedWrite>> {
+        self.native_geometry()
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.msg))?;
         if self.capabilities.observer().device_geometry(self.disk) != self.geometry {
             return Err(io::Error::new(
@@ -147,6 +140,10 @@ impl<'a> TargetSession<'a, ReadOnly> {
             state: PreparedWrite { _guard: guard },
             geometry: self.geometry,
         })
+    }
+
+    pub fn prepare_native_4kn_write(self) -> io::Result<TargetSession<'a, PreparedWrite>> {
+        self.prepare_native_write()
     }
 
     pub fn prepare_write(self) -> io::Result<TargetSession<'a, PreparedWrite>> {
@@ -172,13 +169,6 @@ impl<'a> TargetSession<'a, PreparedWrite> {
     /// Reopen is allowed only after the shared USB lease. Verify callback
     /// MUST authenticate the freshly read media identity and source pin.
     /// In particular, CLI/TUI may not substitute geometry-only checks.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "P1/P2 staging: physical commit route not yet certified"
-        )
-    )]
     pub(crate) fn reopen_native_and_verify<'d, E>(
         self,
         dev: &'d mut crate::diskio::NativeRawBlockDevice,
@@ -186,7 +176,7 @@ impl<'a> TargetSession<'a, PreparedWrite> {
         verify: impl FnOnce(&mut crate::diskio::NativeVerificationView<'_>) -> Result<(), E>,
     ) -> Result<TargetSession<'a, NativeWriteLocked<'d>>, ReopenAndVerifyError<E>> {
         let geometry = self
-            .native_4kn_geometry()
+            .native_geometry()
             .map_err(ReopenAndVerifyError::Geometry)?;
         if dev.geometry() != geometry
             || (crate::platform::is_raw_device_path(dev.path())
@@ -196,7 +186,7 @@ impl<'a> TargetSession<'a, PreparedWrite> {
         {
             return Err(ReopenAndVerifyError::Geometry(EdpCliError::new(
                 EXIT_TARGET,
-                "原生写目标路径或完整4096B几何不匹配",
+                "原生写目标路径或完整原生几何不匹配",
             )));
         }
         dev.reopen_after_lease(wait)
@@ -210,7 +200,7 @@ impl<'a> TargetSession<'a, PreparedWrite> {
         {
             return Err(ReopenAndVerifyError::Geometry(EdpCliError::new(
                 EXIT_TARGET,
-                "原生写重开后USB、安全身份或几何变化",
+                "原生写重开后设备身份或几何变化",
             )));
         }
         verify(&mut dev.verification_view()).map_err(ReopenAndVerifyError::Verify)?;
@@ -265,11 +255,15 @@ impl<'a> TargetSession<'a, PreparedWrite> {
 }
 
 impl<State> TargetSession<'_, State> {
-    pub fn native_4kn_geometry(&self) -> EdpCliResult<crate::domain::hardware::NativeReadGeometry> {
+    pub fn native_geometry(&self) -> EdpCliResult<crate::domain::hardware::NativeReadGeometry> {
         self.geometry
-            .ok_or_else(|| EdpCliError::new(EXIT_TARGET, "缺少设备原生几何，禁止4Kn写入"))?
-            .writable_native_4kn_geometry()
+            .ok_or_else(|| EdpCliError::new(EXIT_TARGET, "缺少设备原生几何"))?
+            .writable_native_geometry()
             .map_err(|message| EdpCliError::new(EXIT_TARGET, message))
+    }
+
+    pub fn native_4kn_geometry(&self) -> EdpCliResult<crate::domain::hardware::NativeReadGeometry> {
+        self.native_geometry()
     }
 
     pub fn writable_geometry(
@@ -303,13 +297,6 @@ impl<State> TargetSession<'_, State> {
 impl TargetSession<'_, NativeWriteLocked<'_>> {
     /// Every physical native block goes through the same durable WAL and
     /// double-readback transaction; the temporary WAL must be on host storage.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "P1/P2 staging: physical commit route not yet certified"
-        )
-    )]
     pub(crate) fn execute_native_transaction_with_journal(
         &mut self,
         plan: &crate::filesystem::NativeVirtualDiskPlan,

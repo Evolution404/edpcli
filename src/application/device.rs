@@ -25,7 +25,7 @@ pub fn guard_observed_usb_disk(
     Err(EdpCliError::new(
         EXIT_TARGET,
         format!(
-            "错误: disk{} 当前不是可操作的外接 USB 整盘（要求 WholeDisk=true、Internal=false、非虚拟盘、BusProtocol=USB），拒绝裸盘操作",
+            "错误: disk{} 当前不是已确认的外接 USB 整盘或显式启用的虚拟 Disk Image 整盘",
             disk
         ),
     ))

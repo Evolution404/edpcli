@@ -12,13 +12,6 @@ pub struct NativeRawBlockDevice {
     file: File,
     geometry: NativeReadGeometry,
     writable: bool,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "two-phase write state reserved for guarded native session"
-        )
-    )]
     reopened_after_lease: bool,
     raw: bool,
 }
@@ -78,10 +71,6 @@ impl NativeRawBlockDevice {
 
     /// Only the TargetSession type-state transition may call this once the
     /// shared platform lease and unmount have been acquired.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "guarded USB write transition is not yet enabled")
-    )]
     pub(crate) fn reopen_after_lease(&mut self, wait: Duration) -> io::Result<()> {
         if self.writable {
             return Err(io::Error::new(
@@ -124,20 +113,12 @@ impl NativeRawBlockDevice {
         Ok(())
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "guarded USB write transition is not yet enabled")
-    )]
     pub(crate) fn verification_view(&mut self) -> NativeVerificationView<'_> {
         NativeVerificationView(self)
     }
 
     /// The only production caller is TargetSession after the post-reopen
     /// physical identity/geometry checks and verification callback succeed.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "guarded USB write transition is not yet enabled")
-    )]
     pub(crate) fn arm_verified_write(&mut self) -> io::Result<()> {
         if !self.reopened_after_lease || self.writable {
             return Err(io::Error::new(

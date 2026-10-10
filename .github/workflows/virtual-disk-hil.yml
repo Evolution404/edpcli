@@ -6,6 +6,7 @@ on:
       - "src/**"
       - "tests/virtual_disk_hil.rs"
       - "tests/plain_macos_virtual_hil.rs"
+      - "tests/native_macos_4kn_virtual_hil.rs"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -21,6 +22,7 @@ on:
       - "src/**"
       - "tests/virtual_disk_hil.rs"
       - "tests/plain_macos_virtual_hil.rs"
+      - "tests/native_macos_4kn_virtual_hil.rs"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -105,6 +107,9 @@ jobs:
       - name: Run macOS protocol virtual-disk HIL
         shell: bash
         run: bash scripts/ci/macos-virtual-disk-hil.sh
+      - name: Run macOS 4096B native-block virtual-disk HIL
+        shell: bash
+        run: bash scripts/ci/macos-native-4kn-virtual-disk-hil.sh
       - name: Run macOS Plain virtual-disk HIL
         shell: bash
         run: bash scripts/ci/macos-plain-virtual-disk-hil.sh
