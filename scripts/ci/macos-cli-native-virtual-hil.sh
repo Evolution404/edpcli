@@ -171,6 +171,19 @@ assert v.get("TotalSize") == 536870912
       diskutil mount "$volume" >/dev/null
       mountpoint="$(diskutil info -plist "$volume" | plutil -extract MountPoint raw -o - -)"
       [[ -n "$mountpoint" && -d "$mountpoint" ]]
+      # The second Plain of a Plain->Plain matrix pair must preserve the
+      # source user's actual file. A freshly reformatted target is NOT a pass.
+      if [[ "${EDPCLI_HIL_PAIR_MATRIX:-0}" == "1" && "$matrix_source" == "plain" && "$mode" == "plain" && $((step % 2)) == 1 ]]; then
+        [[ -f "$mountpoint/edpcli-native-hil.txt" ]] || {
+          echo "[matrix] FAIL Plain->Plain silently erased the source file" >&2
+          exit 1
+        }
+        [[ "$(cat "$mountpoint/edpcli-native-hil.txt")" == "edpcli native $sector persisted" ]] || {
+          echo "[matrix] FAIL Plain->Plain changed the source file" >&2
+          exit 1
+        }
+        echo "[matrix] PASS Plain->Plain existing user file preserved, sector=$sector"
+      fi
       printf 'edpcli native %s persisted\n' "$sector" > "$mountpoint/edpcli-native-hil.txt"
       sync
       diskutil unmount "$volume" >/dev/null
