@@ -249,6 +249,31 @@ fn plain_mode0_request_enables_required_formats_without_manual_checkboxes() {
 }
 
 #[test]
+fn preservable_source_boot_is_not_silently_reformatted_at_the_next_step() {
+    let mut state = mode0_plain_state(Some((63, 20_417, Some("FAT16"))));
+    let preflight = state.provision_preflight().unwrap();
+    assert_eq!(
+        preflight.format_disposition(crate::provision::PartitionRole::Boot),
+        Some(crate::application::provision::preflight::ProvisionFormatDisposition::Preserve)
+    );
+    let visible = state.provision_visible_fields();
+    assert!(visible
+        .iter()
+        .any(|(label, value, _)| label == "启动区格式化" && *value == "☐ 保留"));
+    // The TUI preserve decision is passed unchanged into the shared native
+    // source-aware planner; a compatible source preserves the partition.
+    let request = state.provision_request().unwrap();
+    assert!(request.preserve_unformatted);
+    assert!(!request.format.boot);
+    assert!(request.format.share);
+    assert!(request.format.encrypt);
+    // User can explicitly opt into a destructive rebuild without changing
+    // the still read-only drafting behavior.
+    state.provision_mut().form.format_boot = true;
+    assert!(state.provision_request().unwrap().format.boot);
+}
+
+#[test]
 fn preserved_plain_partition_reports_unknown_volume_label_without_inventing_default() {
     let mut row = plain_row(Some((63, 20_417, Some("FAT16"))));
     row.partition_table.as_mut().unwrap().partitions[0].volume_label = None;

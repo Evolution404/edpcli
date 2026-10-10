@@ -35,6 +35,8 @@ impl crate::ports::DeviceObserver for SystemDeviceAccess<'_> {
     }
     fn is_external_usb_whole(&self, disk: u32) -> bool {
         usb_disk(self.runner, disk).is_some()
+            || (crate::platform::include_virtual()
+                && crate::platform::confirmed_virtual_disk_image(self.runner, disk))
     }
     fn device_geometry(
         &self,
@@ -251,6 +253,31 @@ pub fn usb_vid_pid(runner: &dyn CmdRunner, disk: u32) -> (String, String) {
 // ══════════════════════════════════════════════════════════════════
 // 外接盘枚举
 // ══════════════════════════════════════════════════════════════════
+/// Uniform protocol-facing hardware identity source for native provision.
+pub fn native_provision_probe(runner: &dyn CmdRunner, disk: u32) -> Result<HardwareProbe, String> {
+    if crate::platform::include_virtual()
+        && crate::platform::confirmed_virtual_disk_image(runner, disk)
+    {
+        // Synthetic device identity only for OS virtual disk images. This is
+        // protocol metadata, NOT evidence of a physical USB controller.
+        return Ok(HardwareProbe {
+            vid: Some(0x0dd8),
+            pid: Some(0x2005),
+            transport: crate::platform::NativeTransport::Uas,
+            windows_pnp_instance_id: None,
+            inquiry: Some(crate::platform::InquiryInfo {
+                vendor: "EDPTEST".into(),
+                product: "DiskImage".into(),
+                revision: "1.00".into(),
+            }),
+        });
+    }
+    runner
+        .hardware_probe(disk)
+        .or_else(|| crate::platform::fallback_hardware_probe(runner, disk))
+        .ok_or_else(|| "目标介质缺少可信硬件身份，无法生成EDP协议DeviceID".into())
+}
+
 pub fn list_external_disks(runner: &dyn CmdRunner) -> Vec<ExtDisk> {
     crate::platform::list_external_disks(runner)
 }

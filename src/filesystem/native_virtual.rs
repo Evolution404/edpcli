@@ -10,7 +10,7 @@ use super::{
 
 /// An assembled full-disk plan. The protective data after the 512B MBR
 /// header is still one fully-owned native logical block, initialized to zero.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeVirtualDiskPlan {
     pub total_sectors: u64,
     pub sector_bytes: u32,
@@ -32,7 +32,7 @@ impl NativeVirtualDiskPlan {
         sector_bytes: u32,
         partitions: &[NativeFormatPlan],
     ) -> Result<Self, FilesystemError> {
-        if !matches!(sector_bytes, 512 | 4096)
+        if !crate::domain::hardware::valid_native_sector_bytes(sector_bytes)
             || total_sectors < 2
             || total_sectors > u32::MAX as u64
             || !(1..=4).contains(&partitions.len())

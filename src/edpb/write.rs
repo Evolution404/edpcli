@@ -10,7 +10,7 @@ pub(super) fn base_manifest(
     let typed_identity = identity
         .map(manifest_identity_from_snapshot)
         .unwrap_or_else(|| inferred_manifest_identity(capture));
-    let native_evidence = capture.logical_sector_size == 4096;
+    let native_evidence = capture.logical_sector_size != 512;
     let restores_edp_protocol = !capture.device_state.eq_ignore_ascii_case("plain");
     Manifest {
         schema: if native_evidence {
@@ -84,13 +84,13 @@ pub(super) fn base_manifest(
 }
 
 pub(super) fn validate_core_capture(capture: &CoreCapture<'_>) -> Result<(), String> {
-    if capture.logical_sector_size != 512 && capture.logical_sector_size != 4096 {
-        return Err(
-            "EDPB only supports verified 512B legacy or 4096B read-only evidence geometry".into(),
-        );
+    if !crate::domain::hardware::native_sector_capability(capture.logical_sector_size)
+        .is_some_and(|capability| capability.fat_exfat_format)
+    {
+        return Err("EDPB仅支持标准512B/1024B/2048B/4096B原生扇区备份".into());
     }
-    if capture.logical_sector_size == 4096 && capture.device_state.eq_ignore_ascii_case("plain") {
-        return Err("4Kn Plain metadata capture not yet verified".into());
+    if capture.logical_sector_size != 512 && capture.device_state.eq_ignore_ascii_case("plain") {
+        return Err("非512B Plain metadata capture not yet verified".into());
     }
     let expected_len = 13usize
         .checked_mul(capture.logical_sector_size as usize)
@@ -117,16 +117,26 @@ pub(super) fn write_container(
     extra_artifacts: &[ArtifactInput],
     extra_notes: &[String],
     identity: Option<&crate::media_identity::MediaIdentitySnapshot>,
+    native_restorable_for_hil: bool,
 ) -> Result<Manifest, String> {
     validate_core_capture(capture)?;
-    if capture.logical_sector_size == 4096
+    if native_restorable_for_hil
+        && (!cfg!(feature = "ci-virtual-disk")
+            || !matches!(capture.logical_sector_size, 1024 | 2048 | 4096)
+            || capture_level != CaptureLevel::Metadata)
+    {
+        return Err("EDPB v5 HIL writer requires native metadata and ci-virtual-disk".into());
+    }
+    if capture.logical_sector_size != 512
         && (capture_level != CaptureLevel::Metadata
-            || extra_artifacts
-                .iter()
-                .any(|artifact| artifact.restore_policy == RestorePolicy::Restorable))
+            || (!native_restorable_for_hil
+                && extra_artifacts
+                    .iter()
+                    .any(|artifact| artifact.restore_policy == RestorePolicy::Restorable)))
     {
         return Err(
-            "4Kn evidence is read-only metadata; no restorable extents or core-only files".into(),
+            "Native v4 evidence is read-only metadata; no restorable extents or core-only files"
+                .into(),
         );
     }
     if path.extension().and_then(|v| v.to_str()) != Some(EXTENSION) {
@@ -149,6 +159,10 @@ pub(super) fn write_container(
             .map_err(|e| format!("write EDPB header failed: {e}"))?;
 
         let mut manifest = base_manifest(capture, identity);
+        if native_restorable_for_hil {
+            manifest.schema = "edpb.manifest.v5".into();
+            manifest.restore_contract = RestoreContract::metadata_only(true);
+        }
         manifest.snapshot.capture_level = capture_level;
         manifest.partitions.extend_from_slice(extra_partitions);
         let plain_metadata = capture.device_state.eq_ignore_ascii_case("plain")
@@ -169,7 +183,8 @@ pub(super) fn write_container(
                 media_type: "application/octet-stream".into(),
                 source_extent_ids: vec![RAW_PROTOCOL_EXTENT_ID.into()],
                 derivation: None,
-                restore_policy: if capture.logical_sector_size == 4096 {
+                restore_policy: if capture.logical_sector_size != 512 && !native_restorable_for_hil
+                {
                     RestorePolicy::EvidenceOnly
                 } else {
                     RestorePolicy::Restorable
@@ -284,6 +299,7 @@ pub fn write_core_backup(path: &Path, capture: &CoreCapture<'_>) -> Result<Manif
         &[],
         &[],
         None,
+        false,
     )
 }
 
@@ -302,6 +318,7 @@ pub fn write_core_backup_with_identity(
         &[],
         &[],
         Some(identity),
+        false,
     )
 }
 
@@ -319,6 +336,42 @@ pub fn write_metadata_backup(
         &capture.artifacts,
         &capture.notes,
         None,
+        false,
+    )
+}
+
+/// HIL-only new v5 metadata container. This authoring function does not
+/// restore a disk, create a write lease, or promote any existing v4 evidence.
+/// Normal CLI backups continue emitting non-restorable v4 for native disks.
+#[cfg(feature = "ci-virtual-disk")]
+pub fn write_native_restorable_metadata_for_hil(
+    path: &Path,
+    capture: &MetadataCapture<'_>,
+) -> Result<Manifest, String> {
+    if !matches!(capture.core.logical_sector_size, 1024 | 2048 | 4096) {
+        return Err("HIL v5 requires a supported native logical sector size".into());
+    }
+    let mut artifacts = capture.artifacts.clone();
+    for artifact in &mut artifacts {
+        if artifact.kind != "raw_sectors"
+            || artifact.completeness != ArtifactCompleteness::Complete
+            || artifact.restore_policy != RestorePolicy::EvidenceOnly
+        {
+            return Err("HIL v5 cannot promote incomplete or nonraw input".into());
+        }
+        artifact.restore_policy = RestorePolicy::Restorable;
+    }
+    write_container(
+        path,
+        &capture.core,
+        CaptureLevel::Metadata,
+        &capture.partitions,
+        &capture.regions,
+        &capture.extents,
+        &artifacts,
+        &capture.notes,
+        None,
+        true,
     )
 }
 
@@ -337,5 +390,6 @@ pub fn write_metadata_backup_with_identity(
         &capture.artifacts,
         &capture.notes,
         Some(identity),
+        false,
     )
 }

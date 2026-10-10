@@ -488,11 +488,13 @@ impl ExFatDriver {
         request: &FormatRequest,
     ) -> Result<NativeFormatPlan, FilesystemError> {
         self.validate_format_request(request)?;
-        if !matches!(geometry.sector_size, 512 | 4096) || geometry.sector_count == 0 {
+        if !super::format::native_fat_sector_bytes_supported(geometry.sector_size)
+            || geometry.sector_count == 0
+        {
             return Err(FilesystemError::for_filesystem(
                 self.kind(),
                 FilesystemErrorKind::InvalidGeometry,
-                "仅允许已认证512B和4096B的exFAT虚拟格式化",
+                "exFAT仅允许标准512B/1024B/2048B/4096B原生扇区格式化",
             ));
         }
         let sector_size = geometry.sector_size;

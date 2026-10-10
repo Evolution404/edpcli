@@ -320,16 +320,8 @@ pub(super) fn start_provision_plan(state: &mut AppState, tasks: &mut TaskHub) {
         state.set_error_notice("目标 USB 已不存在，请返回设备页重新选择。");
         return;
     };
-    // The physical writer and formatter have not passed native 4Kn write gates.
-    // Block every scheme including Plain before constructing any write request.
-    if state
-        .selected_device()
-        .and_then(|row| row.layout_geometry().ok())
-        .is_none_or(|geometry| geometry.logical_sector_bytes != 512)
-    {
-        state.set_warning_notice("当前逻辑扇区大小尚未认证写盘；只读查看布局，禁止创建制盘计划");
-        return;
-    }
+    // Every supported source geometry now plans through the same native
+    // application service. No 512B-vs-4Kn read-only mode gate.
     let request = if state.provision().kind == state::ProvisionKind::Plain {
         match state.provision_plain_plan() {
             Ok(plan) => crate::application::provision::ProvisionRequest::Plain(

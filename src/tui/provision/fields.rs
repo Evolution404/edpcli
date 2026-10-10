@@ -20,9 +20,10 @@ impl AppState {
         self.provision_sync_cursor_to_end();
     }
 
-    pub(super) fn provision_total_sectors(&self) -> Option<u64> {
+    pub(crate) fn provision_total_sectors(&self) -> Option<u64> {
         self.selected_device()
-            .map(|row| row.size / crate::common::SECTOR as u64)
+            .and_then(|row| row.layout_geometry().ok())
+            .map(|geometry| geometry.native_sector_count)
     }
 
     pub(super) fn provision_field_descriptor(
@@ -335,7 +336,19 @@ impl AppState {
             crate::provision::OfficialPartitionSizes::new(32, 64, 128),
             512,
             crate::provision::OfficialPartitionFilesystems {
-                boot: self.provision.form.boot_fs,
+                boot: self
+                    .provision_resolved_prefill()
+                    .ok()
+                    .and_then(|(prefill, _)| {
+                        Some((prefill.boot_start_lba?, prefill.boot?.sectors()))
+                    })
+                    .and_then(|(start, sectors)| {
+                        self.provision
+                            .form
+                            .effective_boot_filesystem(start, sectors)
+                            .ok()
+                    })
+                    .unwrap_or(self.provision.form.boot_fs),
                 share: self.provision.form.share_fs,
                 encrypt: self.provision.form.encrypt_fs,
             },

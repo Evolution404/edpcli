@@ -4,6 +4,8 @@
 //! geometry and sector-reading interface regardless of where the evidence came
 //! from. This module never enters a write-capable state.
 
+pub mod native_restore_preview;
+
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -720,7 +722,9 @@ fn compare_native_backup_blocks(
             backup_read(lba).map_err(|e| format!("EDPB LBA{lba} 原生证据读取失败: {e}"))?;
         let live = disk_read(lba).map_err(|e| format!("目标介质 LBA{lba} 原生读取失败: {e}"))?;
         if backed.len() != native_sector_bytes || live.len() != native_sector_bytes {
-            return Err(format!("LBA{lba} 备份或实盘不是完整原生4096B块"));
+            return Err(format!(
+                "LBA{lba} 备份或实盘不是完整原生{native_sector_bytes}B块"
+            ));
         }
         if backed != live {
             return Err(format!("LBA{lba} 实盘已偏离原生EDPB备份，拒绝后续提交"));
@@ -730,16 +734,14 @@ fn compare_native_backup_blocks(
     Ok(count)
 }
 
-/// Before a future 4Kn physical provisioning transaction can be considered,
-/// verify that the user's independently verified EDPB v4 is FROM THIS EXACT
-/// CURRENT DISK. The full 13 native protocol blocks, LCE and each backed-up
-/// partition-header block are re-read and compared byte-for-byte. All access
-/// remains read-only, with no unmount, write lease, or device mutation.
+/// Verify a native EDPB v4 snapshot against the same physical device using
+/// only read handles, with *no* permission to restore or provision.
 ///
-/// This check must be repeated after obtaining an exclusive target lock,
-/// before any physical commit. A match does not establish crash recovery or
-/// grant 4Kn physical write permission.
-pub fn verify_native_4kn_backup_against_disk_readonly(
+/// LBA0–12, LCE and every raw extent present in the verified EDPB are checked
+/// byte-for-byte using their original 1024/2048/4096B native geometry. This
+/// only proves that the current media still matches the captured evidence:
+/// it never upgrades evidence-only artifacts to restorable artifacts.
+pub fn verify_native_backup_against_disk_readonly(
     runner: &dyn CmdRunner,
     disk: u32,
     backup_path: &Path,
@@ -751,20 +753,21 @@ pub fn verify_native_4kn_backup_against_disk_readonly(
         .backup_manifest()
         .ok_or("来源必须为完整可校验的EDPB备份")?
         .clone();
+    let sector = manifest.geometry.logical_sector_size;
     if manifest.schema != "edpb.manifest.v4"
-        || manifest.geometry.logical_sector_size != 4096
+        || !matches!(sector, 1024 | 2048 | 4096)
         || manifest.geometry.total_sectors.is_none()
         || manifest.geometry.capacity_bytes
             != manifest
                 .geometry
                 .total_sectors
-                .and_then(|n| n.checked_mul(4096))
+                .and_then(|n| n.checked_mul(u64::from(sector)))
     {
-        return Err("4Kn写前校验要求完整原生几何的EDPB v4备份".into());
+        return Err("原生写前校验要求1024/2048/4096B完整几何的EDPB v4备份".into());
     }
     let mut live = EvidenceSource::open_disk(runner, disk).map_err(|e| e.to_string())?;
     if backup.total_sectors() != live.total_sectors()
-        || live.logical_sector_bytes() != 4096
+        || live.logical_sector_bytes() != sector
         || backup.native_protocol_image().is_none()
         || live.native_protocol_image().is_none()
         || backup.identity() != live.identity()
@@ -807,13 +810,13 @@ pub fn verify_native_4kn_backup_against_disk_readonly(
     }
     let count = compare_native_backup_blocks(
         lbas,
-        4096,
+        sector as usize,
         |lba| SectorReader::read_native_sector(&mut backup, lba),
         |lba| SectorReader::read_native_sector(&mut live, lba),
     )?;
     Ok(NativeBackupDiskMatch {
         disk,
-        logical_sector_bytes: 4096,
+        logical_sector_bytes: sector,
         total_sectors: live.total_sectors(),
         verified_native_blocks: count,
     })
@@ -831,7 +834,8 @@ pub fn verified_native_source_replay<R: SectorReader + ?Sized>(
     device_id: &str,
     source_total_sectors: u64,
 ) -> Result<Vec<crate::filesystem::NativeFilesystemWrite>, String> {
-    if !matches!(reader.logical_sector_bytes(), 512 | 4096)
+    if !crate::domain::hardware::native_sector_capability(reader.logical_sector_bytes())
+        .is_some_and(|capability| capability.fat_exfat_format)
         || reader.logical_sector_bytes() != plan.logical_sector_bytes
         || source_protocol.logical_sector_bytes() != plan.logical_sector_bytes
         || source_total_sectors != plan.total_sectors
@@ -880,6 +884,36 @@ impl SectorReader for EvidenceSource {
 #[cfg(test)]
 mod native_backup_match_tests {
     use super::*;
+
+    #[test]
+    fn native_backup_comparator_covers_each_sector_width_and_unknown_tail() {
+        for sector in [1024usize, 2048, 4096] {
+            let lbas = [0, 1, 12, 100, 101, 102];
+            let fresh = |lba: u64| -> io::Result<Vec<u8>> {
+                let mut buffer = vec![lba as u8; sector];
+                buffer[sector - 1] = (lba as u8).wrapping_add(1);
+                Ok(buffer)
+            };
+            assert_eq!(
+                compare_native_backup_blocks(lbas, sector, fresh, fresh),
+                Ok(6)
+            );
+            let mutated = |lba: u64| -> io::Result<Vec<u8>> {
+                let mut buffer = fresh(lba)?;
+                if lba == 102 {
+                    buffer[sector - 1] ^= 1;
+                }
+                Ok(buffer)
+            };
+            assert!(compare_native_backup_blocks(lbas, sector, fresh, mutated)
+                .unwrap_err()
+                .contains("LBA102"));
+            let truncated = |_: u64| -> io::Result<Vec<u8>> { Ok(vec![0; 512]) };
+            assert!(compare_native_backup_blocks(lbas, sector, fresh, truncated)
+                .unwrap_err()
+                .contains(&format!("原生{sector}B")));
+        }
+    }
 
     #[test]
     fn independent_4096b_backup_vs_disk_rejects_tamper_and_truncated_blocks() {

@@ -10,6 +10,20 @@ pub enum ProvisionKind {
     Plain,
 }
 
+/// Uncredentialed native geometry draft. This is deliberately not a
+/// PreparedProvision, full protocol image, or an authorization to write.
+#[derive(Debug, Clone)]
+pub(crate) struct NativeGeometryReadOnlyReview {
+    pub disk: u32,
+    pub source_kind: crate::provision::DiskProvisionKind,
+    pub target_kind: ProvisionKind,
+    pub total_sectors: u64,
+    pub sector_bytes: u32,
+    pub partitions: Vec<(String, u64, u64)>,
+    pub lce_lba: Option<u64>,
+    pub lce_is_source_verified: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionBarKind {
     Free,
@@ -203,6 +217,7 @@ pub struct ProvisionState {
     pub form: ProvisionForm,
     pub plain_form: PlainProvisionForm,
     pub prepared: Option<crate::application::provision::PreparedProvision>,
+    pub(crate) native_geometry_review: Option<NativeGeometryReadOnlyReview>,
     pub(crate) review_projection: Option<ProvisionConfirmationViewModel>,
     pub confirmation: String,
     pub export_path: String,
@@ -246,6 +261,7 @@ impl Default for ProvisionState {
             form: ProvisionForm::default(),
             plain_form: PlainProvisionForm::default(),
             prepared: None,
+            native_geometry_review: None,
             review_projection: None,
             confirmation: String::new(),
             export_path: String::new(),

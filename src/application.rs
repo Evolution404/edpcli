@@ -117,6 +117,12 @@ pub trait Prompter {
 /// Raw devices are opened read-only and pooled for the duration of one scan; `disk_scan`
 /// additionally caches individual LBAs. No write preparation or write-capable reopen is reachable
 /// from this service.
+/// Keep TUI independent of OS platform details when preserving virtual
+/// disk visibility across an elevated resume.
+pub fn include_virtual_disks() -> bool {
+    crate::platform::include_virtual()
+}
+
 pub fn scan_device_dashboard(runner: &dyn CmdRunner, backup_dir: &Path) -> Vec<Row> {
     scan_dashboard_catalog(runner, || {
         crate::infrastructure::backup_store::catalog::scan_backup_dir_checked(backup_dir)

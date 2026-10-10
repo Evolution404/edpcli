@@ -208,3 +208,25 @@ fn legacy_lce_gold_does_not_have_u391_neighborhood_512b_zero_frame_signature() {
     assert!(audit.opaque_tail_nonzero > 0);
     assert!(!audit.certified_legacy_512b_reproduction);
 }
+
+#[test]
+fn native_lce_cipher_uses_native_byte_geometry_without_special_sector_branches() {
+    use edpcli::protocol::lba7_compat::Lba7CompatibilityExtentLayout;
+    use edpcli::provision::build_native_lce_ciphertext;
+    for sector_bytes in [512u32, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
+        let count = 3072u64.div_ceil(u64::from(sector_bytes));
+        let start = 123_456u64;
+        let offset = start * u64::from(sector_bytes);
+        let layout = Lba7CompatibilityExtentLayout {
+            chs_bytes: offset + 0xe0000,
+            start_byte_offset: offset,
+            start_lba: start,
+            size_bytes: count * u64::from(sector_bytes),
+            size_sectors: count,
+        };
+        let cipher = build_native_lce_ciphertext(layout, sector_bytes).unwrap();
+        let mut plaintext = vec![0; layout.size_bytes as usize];
+        plaintext[..3072].copy_from_slice(lce_plaintext());
+        assert_eq!(a6b0_full(&cipher, &[0u8; 8], offset), plaintext);
+    }
+}

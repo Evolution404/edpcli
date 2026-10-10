@@ -21,7 +21,10 @@ pub(super) fn draw_target_line(
             Span::styled(format!("disk{}", view.target.disk), accent()),
             Span::raw(format!(
                 " · {} · {} · {} · {}",
-                AppState::format_sector_size(view.target.total_sectors),
+                view.layout
+                    .sector_byte_len(view.target.total_sectors)
+                    .map(crate::common::fmt_capacity)
+                    .unwrap_or_else(|| "容量溢出".into()),
                 vid_pid,
                 onlyid,
                 view.target.target.full_name()

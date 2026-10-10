@@ -33,12 +33,14 @@ fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::
                         crate::provision::KeyDomainSecretPair::new(
                             (!opts.share_source_password.is_empty())
                                 .then_some(opts.share_source_password.as_bytes()),
-                            Some(opts.share_target_password.as_bytes()),
+                            (!opts.share_target_password.is_empty())
+                                .then_some(opts.share_target_password.as_bytes()),
                         ),
                         crate::provision::KeyDomainSecretPair::new(
                             (!opts.encrypt_source_password.is_empty())
                                 .then_some(opts.encrypt_source_password.as_bytes()),
-                            Some(opts.encrypt_target_password.as_bytes()),
+                            (!opts.encrypt_target_password.is_empty())
+                                .then_some(opts.encrypt_target_password.as_bytes()),
                         ),
                     ),
                     volume_label: opts.boot_label.clone(),
@@ -53,6 +55,7 @@ fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::
                         share_fs: opts.share_fs,
                         encrypt_fs: opts.encrypt_fs,
                     },
+                    preserve_unformatted: opts.preserve_unformatted,
                     force_change_password: opts.force_change_password,
                     cancel_password_complexity_check: opts.cancel_password_complexity_check,
                     max_share_password_errors: opts.max_share_password_errors,
@@ -266,6 +269,27 @@ fn print_provision_summary(prepared: &crate::application::provision::PreparedPro
         crate::application::provision::PreparedProvision::Plain(prepared) => {
             print_plain_provision_summary(prepared)
         }
+        crate::application::provision::PreparedProvision::Native(native) => {
+            println!(
+                "原生统一制盘计划：disk{}，来源{:?}，目标{}，逻辑扇区{}B，写入{}块",
+                native.disk,
+                native.source,
+                native.target.full_name(),
+                native.plan.sector_bytes,
+                native.plan.writes.len()
+            );
+            let names = |items: &[String]| {
+                if items.is_empty() {
+                    "无".to_owned()
+                } else {
+                    items.join("、")
+                }
+            };
+            println!("来源数据丢弃：{}", names(&native.impact.source_discarded));
+            println!("来源数据保留：{}", names(&native.impact.source_retained));
+            println!("目标格式化：{}", names(&native.impact.target_formatted));
+            println!("密钥操作：{}", names(&native.impact.key_operations));
+        }
     }
 }
 
@@ -343,8 +367,43 @@ fn export_synthetic_4kn_edp_demo(
     )
 }
 
+/// Build a full sparse Mode1 image from a verified 4Kn EDPB without opening
+/// a USB device or producing a command capable of physical writes.
+fn export_native_mode1_from_backup(backup: &str, out: &str) -> Result<(), String> {
+    let plan = crate::application::provision::native_preflight::plan_native_mode1_from_backup(
+        Path::new(backup),
+    )?;
+    crate::application::provision::native_image::export_native_plain_image(Path::new(out), &plan)
+}
+
 pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
     match action {
+        ProvisionAction::SourceBackedPlan { opts, backup } => {
+            let disk = opts
+                .disk
+                .expect("source-backed plan parser requires a disk");
+            if let Err(error) = guard_usb_disk(runner, disk) {
+                return finish(Err(error));
+            }
+            if !elevate::is_root() {
+                let argv = SecretArgv(std::env::args().skip(1).collect());
+                return elevate::ensure_elevated(&argv);
+            }
+            let verified =
+                match crate::application::evidence::verify_native_backup_against_disk_readonly(
+                    runner,
+                    disk,
+                    Path::new(&backup),
+                ) {
+                    Ok(verified) => verified,
+                    Err(error) => return finish(Err(EdpCliError::new(EXIT_TARGET, error))),
+                };
+            println!(
+                "只读来源认证通过：disk{}，{}B逻辑扇区，已逐块核对{}个原生来源证据块；以下目标计划使用统一Native规划器，不单独生成Mode1写集。",
+                disk, verified.logical_sector_bytes, verified.verified_native_blocks
+            );
+            provision_flow(runner, ProvisionAction::Plan(opts))
+        }
         ProvisionAction::VerifySource { disk, backup } => {
             if let Err(error) = guard_usb_disk(runner, disk) {
                 return finish(Err(error));
@@ -353,20 +412,69 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                 let argv = SecretArgv(std::env::args().skip(1).collect());
                 return elevate::ensure_elevated(&argv);
             }
-            match crate::application::evidence::verify_native_4kn_backup_against_disk_readonly(
+            match crate::application::evidence::verify_native_backup_against_disk_readonly(
                 runner,
                 disk,
                 Path::new(&backup),
             ) {
                 Ok(matched) => {
                     println!(
-                        "4Kn只读写前来源比对通过: disk{}，{}个完整{}B原生块，设备总扇区={}；EDPB协议、LCE、分区首块与实盘一致。未卸载、未写盘、未解除实盘制盘门禁。",
+                        "原生只读来源比对通过: disk{}，{}个完整{}B原生块，设备总扇区={}；EDPB协议、LCE、分区首块与实盘一致。未卸载、未写盘、未解除实盘制盘门禁。",
                         matched.disk, matched.verified_native_blocks,
                         matched.logical_sector_bytes, matched.total_sectors,
                     );
                     EXIT_OK
                 }
                 Err(message) => finish(Err(crate::common::EdpCliError::new(EXIT_TARGET, message))),
+            }
+        }
+        ProvisionAction::NativeRestorePreview { disk, backup } => {
+            if let Err(error) = guard_usb_disk(runner, disk) {
+                return finish(Err(error));
+            }
+            if !elevate::is_root() {
+                let argv = SecretArgv(std::env::args().skip(1).collect());
+                return elevate::ensure_elevated(&argv);
+            }
+            let session = match crate::application::target_session::TargetSession::<
+                crate::application::target_session::ReadOnly,
+            >::open_usb(runner, disk)
+            {
+                Ok(session) => session,
+                Err(error) => return finish(Err(error)),
+            };
+            let geometry = match session.native_geometry() {
+                Ok(value) => value,
+                Err(error) => return finish(Err(error)),
+            };
+            let probe = match crate::platform::system::native_provision_probe(runner, disk) {
+                Ok(value) => value,
+                Err(message) => return finish(Err(EdpCliError::new(EXIT_TARGET, message))),
+            };
+            let identity = match crate::provision::TargetIdentity::from_probe(
+                &probe,
+                geometry.native_sector_count,
+            ) {
+                Ok(value) => value,
+                Err(message) => {
+                    return finish(Err(EdpCliError::new(EXIT_TARGET, message.to_string())))
+                }
+            };
+            match crate::application::evidence::native_restore_preview::plan_native_restore_readonly(
+                Path::new(&backup),
+                identity.device_id(),
+                geometry,
+            ) {
+                Ok(plan) => {
+                    println!("EDPB 同几何只读恢复预览：disk{}，{}B，{} 原生块；LCE={}+{}，预期元数据写集={}块，原生LBA0最后提交。",
+                        disk, plan.logical_sector_bytes, plan.total_sectors, plan.native_lce_start,
+                        plan.native_lce_blocks, plan.proposed_lbas_in_write_order.len());
+                    println!("EDPB SHA256：{}", plan.backup_sha256);
+                    println!("写集 SHA256：{}", plan.proposed_write_sha256);
+                    println!("仅证据规划：未卸载、未写盘、未生成恢复授权；v4 evidence-only 不能直接恢复。");
+                    EXIT_OK
+                }
+                Err(message) => finish(Err(EdpCliError::new(EXIT_BACKUP, message))),
             }
         }
         ProvisionAction::NativeEdpDemoImage {
@@ -382,6 +490,15 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
             Err(message) => finish(Err(crate::common::EdpCliError::new(EXIT_TARGET, message))),
         },
 
+        ProvisionAction::NativeMode1BackupImage { backup, out } => {
+            match export_native_mode1_from_backup(&backup, &out) {
+                Ok(()) => {
+                    println!("4Kn Mode0→Mode1离线增量写集稀疏镜像已生成: {out}；包含二合一明文exFAT文件系统元数据与原type4密钥/LCE保留；镜像不包含原保密区用户数据，不可整体dd写盘；未连接、卸载或写入任何U盘。");
+                    EXIT_OK
+                }
+                Err(message) => finish(Err(crate::common::EdpCliError::new(EXIT_TARGET, message))),
+            }
+        }
         ProvisionAction::NativeImage {
             out,
             total_sectors,
@@ -437,12 +554,16 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                 return finish(Err(error));
             }
             let request = provision_request(&opts);
-            match crate::application::provision::prepare_provision_on_disk(runner, disk, &request) {
-                Ok(prepared) => {
-                    print_provision_summary(&prepared);
+            match crate::application::provision::native_flow::prepare_native_provision_on_disk(
+                runner, disk, &request,
+            ) {
+                Ok(native) => {
+                    print_provision_summary(
+                        &crate::application::provision::PreparedProvision::Native(Box::new(native)),
+                    );
                     EXIT_OK
                 }
-                Err(error) => finish(Err(error)),
+                Err(message) => finish(Err(EdpCliError::new(EXIT_TARGET, message))),
             }
         }
         ProvisionAction::Image { mut opts, out } => {
@@ -471,17 +592,22 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                 return finish(Err(error));
             }
             let request = provision_request(&opts);
-            let prepared = match crate::application::provision::prepare_provision_on_disk(
-                runner, disk, &request,
-            ) {
-                Ok(value) => value,
-                Err(error) => return finish(Err(error)),
-            };
+            let native =
+                match crate::application::provision::native_flow::prepare_native_provision_on_disk(
+                    runner, disk, &request,
+                ) {
+                    Ok(value) => value,
+                    Err(message) => return finish(Err(EdpCliError::new(EXIT_TARGET, message))),
+                };
+            let sector_bytes = native.plan.sector_bytes;
+            let prepared =
+                crate::application::provision::PreparedProvision::Native(Box::new(native));
             print_provision_summary(&prepared);
             match crate::application::provision::export_provision_image(Path::new(&out), &prepared)
             {
                 Ok(()) => {
-                    println!("稀疏制盘镜像已写入 {}（已保留目标盘原始 LBA3）", out);
+                    println!("原生稀疏制盘镜像写入完成：{}；{}B逻辑扇区，按来源影响保留或重建目标区域；未写入当前设备",
+                        out, sector_bytes);
                     EXIT_OK
                 }
                 Err(error) => finish(Err(error)),
@@ -491,7 +617,9 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
             mut opts,
             yes,
             backup_dir,
+            include_virtual,
         } => {
+            crate::platform::set_include_virtual(include_virtual);
             if let Some(disk) = opts.disk {
                 if let Err(error) = guard_usb_disk(runner, disk) {
                     return finish(Err(error));
@@ -518,90 +646,74 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                 return finish(Err(error));
             }
             let request = provision_request(&opts);
-            let prepared = match crate::application::provision::prepare_provision_on_disk(
-                runner, disk, &request,
-            ) {
-                Ok(value) => value,
-                Err(error) => return finish(Err(error)),
+            let prepared =
+                match crate::application::provision::native_flow::prepare_native_provision_on_disk(
+                    runner, disk, &request,
+                ) {
+                    Ok(value) => value,
+                    Err(message) => return finish(Err(EdpCliError::new(EXIT_TARGET, message))),
+                };
+            println!(
+                "原生统一制盘规划：disk{}，来源{:?} → 目标{}，逻辑扇区{}B，原生写集{}块。",
+                disk,
+                prepared.source,
+                prepared.target.full_name(),
+                prepared.plan.sector_bytes,
+                prepared.plan.writes.len()
+            );
+            let names = |parts: &[String]| {
+                if parts.is_empty() {
+                    "无".to_owned()
+                } else {
+                    parts.join("、")
+                }
             };
-            print_provision_summary(&prepared);
+            println!("来源数据丢弃：{}", names(&prepared.impact.source_discarded));
+            println!("来源数据保留：{}", names(&prepared.impact.source_retained));
+            println!("目标格式化：{}", names(&prepared.impact.target_formatted));
+            println!("密钥操作：{}", names(&prepared.impact.key_operations));
             let confirmed = if yes {
                 true
             } else {
                 prompt.confirm_yes(&crate::ui::bold(&format!(
-                    "将按上述制盘计划写入 disk{}（{}）；将保留制造商 LBA3，并按共享 application 安全事务执行。输入 YES: ",
+                    "将按上方明确列示的来源数据丢弃/保留和目标格式化方案执行 disk{}（{}）；LBA0–12协议将更新，通过原生WAL事务提交。确认输入 YES: ",
                     disk, opts.target.full_name()
                 )))
             };
             if !confirmed {
                 return finish(Err(EdpCliError::new(EXIT_CANCELLED, "已取消(未写盘)")));
             }
-            let write = match crate::application::provision::commit_provision_with_backup_on_disk_with_progress(
+            let root = crate::application::resolve_backup_dir(backup_dir.as_deref());
+            let native =
+                crate::application::provision::PreparedProvision::Native(Box::new(prepared));
+            match crate::application::provision::commit_provision_with_backup_on_disk_with_progress(
                 runner,
-                &prepared,
-                crate::application::resolve_backup_dir(backup_dir.as_deref()),
+                &native,
+                root,
                 &mut prompt,
                 &mut |event| {
                     if event.work.is_none() {
                         println!(
-                            "[制盘进度 {:.2}%] {}：{}",
+                            "[原生制盘 {:.2}%] {}：{}",
                             f64::from(event.overall.basis_points()) / 100.0,
                             event.phase.label(),
-                            event.step.label(),
+                            event.step.label()
                         );
                     }
                 },
             ) {
-                Ok(value) => value,
-                Err(error) => return finish(Err(error)),
-            };
-            for line in provision_write_summary_lines(&write) {
-                println!("{line}");
+                Ok(outcome) => {
+                    println!(
+                        "原生制盘完成：disk{}，原生写集与WAL已同步及回读；事务WAL：{}",
+                        disk,
+                        outcome.backup.path.display()
+                    );
+                    outcome.exit_code()
+                }
+                Err(error) => finish(Err(error)),
             }
-            write.exit_code()
         }
     }
-}
-
-fn provision_write_summary_lines(
-    outcome: &crate::application::provision::ProvisionWriteOutcome,
-) -> Vec<String> {
-    use crate::application::provision::{ProvisionCommitOutcome, ProvisionExecutionStatus};
-
-    let mut lines = vec![format!("制盘前自动备份：{}", outcome.backup.path.display())];
-    match &outcome.commit {
-            ProvisionCommitOutcome::Official(report) => {
-                lines.push("制盘：成功，协议与几何读回验证通过。".into());
-                if report.formats.is_empty() {
-                    lines.push("格式化：未选择任何分区".into());
-                }
-                for item in &report.formats {
-                    lines.push(match &item.result {
-                        Ok(()) => format!("格式化：✓ {}，读回验证通过", item.role.label()),
-                        Err(message) if message.is_skipped() => format!("格式化：— {}：{message}", item.role.label()),
-                        Err(message) => format!("格式化：✗ {}：{message}", item.role.label()),
-                    });
-                }
-            }
-            ProvisionCommitOutcome::Plain { partition_count } => lines.push(format!(
-                "恢复普通盘：成功，{partition_count} 个 MBR 主分区已写入并读回验证；LBA3 保留，EDP 状态已清除。"
-            )),
-        }
-    lines.extend(
-        outcome
-            .warnings
-            .iter()
-            .map(crate::ui::provision_warning_text),
-    );
-    if matches!(
-        outcome.execution_status(),
-        ProvisionExecutionStatus::MediaIntermediate | ProvisionExecutionStatus::MediaStateUnknown
-    ) {
-        lines.push(
-            "介质状态未安全确认：已停止后续写入；请重新检查设备，禁止直接继续格式化。".into(),
-        );
-    }
-    lines
 }
 
 fn prompt_provision_passwords(

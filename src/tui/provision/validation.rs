@@ -13,31 +13,22 @@ impl AppState {
         self.provision.kind.target().official_mode()
     }
 
-    /// Read-only layout projection uses the observed device-native geometry.
-    /// A 4Kn source may be previewed only with its confirmed LCE and mode.
-    /// This never authorizes a 4Kn write plan.
+    /// Target layout projection uses the same native translated-CHS LCE
+    /// locator as the official application plan. A source LCE is verified
+    /// separately during source classification, even for destructive rebuild.
+    /// Projection itself never grants a write lease or bypasses WAL/identity.
     pub(super) fn provision_preview_geometry(&self) -> Result<(u64, u32, u64), String> {
         let row = self.selected_device().ok_or("目标 USB 已不存在")?;
         let geometry = row.layout_geometry()?;
         let total = geometry.native_sector_count;
-        let lce_start = if geometry.logical_sector_bytes == 512 {
-            crate::application::provision_geometry::verified_usb_compatibility_extent(total)
-                .ok_or("目标不符合已验证的512B制盘几何")?
-                .start_lba
-        } else if geometry.logical_sector_bytes == 4096 {
-            let lce = row.lce.as_ref().ok_or("4Kn 来源 LCE 几何尚未验证")?;
-            if lce.sector_count != 1
-                || lce
-                    .start_lba
-                    .checked_add(lce.sector_count)
-                    .is_none_or(|end| end > total)
-            {
-                return Err("4Kn 来源 LCE 指针或完整块范围无效".into());
-            }
-            lce.start_lba
-        } else {
-            return Err("当前逻辑扇区大小未经验证；拒绝规划".into());
-        };
+        // Destructive target layout uses the *same* translated CHS LCE
+        // locator as the native application writer. Source LCE belongs to
+        // input classification, not to the target's writable capacity.
+        let lce_start = crate::application::provision_geometry::native_compatibility_extent(
+            total,
+            geometry.logical_sector_bytes,
+        )?
+        .start_lba;
         Ok((total, geometry.logical_sector_bytes, lce_start))
     }
 
@@ -49,16 +40,11 @@ impl AppState {
         let row = self.selected_device()?;
         let source = row.existing_profile_for_prefill();
         let (_, logical_bytes, lce_start) = self.provision_preview_geometry().ok()?;
-        if logical_bytes != 512
-            && source.as_ref().map(|existing| existing.source_mode) != Some(target_mode)
-        {
-            return None;
-        }
         crate::provision::prefill_for_target_mode(
             source.as_ref(),
             target_mode,
             lce_start,
-            crate::common::SECTOR as u64,
+            u64::from(logical_bytes),
         )
         .ok()
     }
@@ -85,18 +71,13 @@ impl AppState {
             .ok_or_else(|| "离线快照工具不使用物理制盘表单".to_string())?;
         let (_, logical_bytes, lce_start) = self.provision_preview_geometry()?;
         let source = row.existing_profile_for_prefill();
-        // There is no certified native 4Kn writer. Only an exact-source-mode
-        // preview is permissible until cross-mode native geometry is proven.
-        if logical_bytes != 512
-            && source.as_ref().map(|existing| existing.source_mode) != Some(target_mode)
-        {
-            return Err("4Kn 目前仅支持已确认盘型的只读布局预览；跨模式制盘尚未认证".into());
-        }
+        // All target modes may be evaluated in memory. A valid draft is NOT
+        // physical write authorization, which stays behind the commit gate.
         let base = crate::provision::prefill_for_target_mode(
             source.as_ref(),
             target_mode,
             lce_start,
-            crate::common::SECTOR as u64,
+            u64::from(logical_bytes),
         )?;
         let form = &self.provision.form;
         let capacity = |mode: CapacityInputMode,
@@ -117,7 +98,14 @@ impl AppState {
                     CapacitySource::UserEdited,
                 )?,
                 CapacityInputMode::Quick => CapacityInput::from_quick_sectors(
-                    ProvisionForm::resolve_quick_sectors(quick, exact, unit, edited, label)?,
+                    ProvisionForm::resolve_quick_sectors_native(
+                        quick,
+                        exact,
+                        unit,
+                        edited,
+                        label,
+                        logical_bytes,
+                    )?,
                     CapacitySource::UserEdited,
                 )?,
             };
@@ -244,7 +232,7 @@ impl AppState {
             return Ok(None);
         };
         let (resolved, source) = self.provision_resolved_prefill()?;
-        let mut parts = resolved.target_partitions(crate::common::SECTOR as u64)?;
+        let mut parts = resolved.target_partitions(u64::from(resolved.logical_sector_bytes))?;
         parts.sort_by_key(|part| part.start_lba);
         let Some((index, current)) = parts.iter().enumerate().find(|(_, part)| part.role == role)
         else {
@@ -255,7 +243,7 @@ impl AppState {
                 source.as_ref(),
                 mode,
                 resolved.usable_end_lba,
-                crate::common::SECTOR as u64,
+                u64::from(resolved.logical_sector_bytes),
             )
             .ok()
         });
@@ -319,15 +307,12 @@ impl AppState {
             .form
             .encryption_algorithm
             .validate_first_party_write()?;
-        if self
-            .selected_device()
-            .ok_or("目标 USB 已不存在")?
-            .layout_geometry()?
-            .logical_sector_bytes
-            != 512
-        {
-            return Err("4Kn 制盘尚未通过写入/挂载认证；当前只读预览禁止生成实体写盘计划".into());
-        }
+        // The native CLI and TUI share the exact same application prepare/
+        // commit service. Native block size is a validated geometry input,
+        // not a UI-only write permission switch.
+        self.selected_device()
+            .ok_or("目标设备已不存在")?
+            .layout_geometry()?;
         let mode = self
             .provision
             .kind
@@ -389,7 +374,14 @@ impl AppState {
             let sectors = if mode == exact {
                 parse_sectors(exact_value, label)?
             } else {
-                ProvisionForm::resolve_quick_sectors(quick, exact_value, unit, edited, label)?
+                ProvisionForm::resolve_quick_sectors_native(
+                    quick,
+                    exact_value,
+                    unit,
+                    edited,
+                    label,
+                    form.logical_sector_bytes,
+                )?
             };
             Ok(Some(sectors))
         };
@@ -424,7 +416,7 @@ impl AppState {
         let share_mib = None;
         let encrypt_mib = None;
         let (resolved, _) = self.provision_resolved_prefill()?;
-        resolved.target_partitions(crate::common::SECTOR as u64)?;
+        resolved.target_partitions(u64::from(resolved.logical_sector_bytes))?;
         if self.provision.form.label_id.trim().is_empty()
             || self.provision.form.user.trim().is_empty()
             || self.provision.form.dept.trim().is_empty()
@@ -501,10 +493,17 @@ impl AppState {
                 boot_label: self.provision.form.volume_label.trim().to_string(),
                 share_label: self.provision.form.share_label.trim().to_string(),
                 encrypt_label: self.provision.form.encrypt_label.trim().to_string(),
-                boot_fs: self.provision.form.boot_fs,
+                boot_fs: if let (Some(boot_start), Some(boot)) =
+                    (resolved.boot_start_lba, resolved.boot)
+                {
+                    form.effective_boot_filesystem(boot_start, boot.sectors())?
+                } else {
+                    form.boot_fs
+                },
                 share_fs: self.provision.form.share_fs,
                 encrypt_fs: self.provision.form.encrypt_fs,
             },
+            preserve_unformatted: true,
             force_change_password: Some(self.provision.form.force_change_password),
             cancel_password_complexity_check: Some(
                 self.provision.form.cancel_password_complexity_check,

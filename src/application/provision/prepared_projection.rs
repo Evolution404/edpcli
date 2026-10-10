@@ -5,6 +5,7 @@ impl PreparedProvision {
         match self {
             Self::Official(prepared) => prepared.write_image.total_sectors,
             Self::Plain(prepared) => prepared.plan.total_sectors,
+            Self::Native(native) => native.plan.total_sectors,
         }
     }
 
@@ -12,6 +13,7 @@ impl PreparedProvision {
         match self {
             Self::Official(prepared) => Some(prepared.expected_onlyid.as_str()),
             Self::Plain(_) => None,
+            Self::Native(native) => native.onlyid.as_deref(),
         }
     }
 
@@ -19,6 +21,7 @@ impl PreparedProvision {
         match self {
             Self::Official(prepared) => &prepared.expected_probe,
             Self::Plain(prepared) => &prepared.expected_probe,
+            Self::Native(native) => &native.probe,
         }
     }
 
@@ -29,6 +32,7 @@ impl PreparedProvision {
                 prepared.plan.lba7_compatibility_extent.size_sectors,
             )),
             Self::Plain(_) => None,
+            Self::Native(native) => native.lce_extent,
         }
     }
 }

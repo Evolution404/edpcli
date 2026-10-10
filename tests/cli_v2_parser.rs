@@ -374,6 +374,84 @@ fn provision_label_prefills_from_target_unless_cli_overrides_it() {
 }
 
 #[test]
+fn provision_preserve_flag_is_explicit_and_separate_from_format_selection() {
+    use edpcli::cli_args::{parse_args, Parsed, ProvisionAction};
+    fn parsed(args: &[&str]) -> edpcli::cli_args::ProvisionNewOpts {
+        let args = args.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        match parse_args(&args).expect("official CLI grammar") {
+            Parsed::Provision(ProvisionAction::Plan(opts)) => *opts,
+            Parsed::Provision(ProvisionAction::Write { opts, .. }) => *opts,
+            _ => panic!("expected official provisioning"),
+        }
+    }
+    let base = ["provision", "plan", "--disk", "4", "--target", "mode0"];
+    let default = parsed(&base);
+    assert!(
+        !default.preserve_unformatted,
+        "legacy default remains rebuild"
+    );
+    assert!(!default.format_boot && !default.format_share && !default.format_encrypt);
+    let explicit = parsed(&[
+        "provision",
+        "plan",
+        "--disk",
+        "4",
+        "--target",
+        "mode0",
+        "--preserve-unformatted",
+        "--format-boot",
+    ]);
+    assert!(explicit.preserve_unformatted);
+    assert!(explicit.format_boot && !explicit.format_share && !explicit.format_encrypt);
+    let write = [
+        "provision",
+        "write",
+        "--disk",
+        "4",
+        "--target",
+        "mode1",
+        "--preserve-unformatted",
+    ];
+    let args = write.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert!(matches!(
+        parse_args(&args).expect("write preserve flag"),
+        Parsed::Provision(ProvisionAction::Write { opts, .. }) if opts.preserve_unformatted
+    ));
+    for invalid in [
+        vec![
+            "provision",
+            "plan",
+            "--disk",
+            "4",
+            "--target",
+            "plain",
+            "--preserve-unformatted",
+        ],
+        vec![
+            "provision",
+            "plan",
+            "--disk",
+            "4",
+            "--target",
+            "mode0",
+            "--preserve-unformatted=true",
+        ],
+        vec![
+            "provision",
+            "plan",
+            "--disk",
+            "4",
+            "--target",
+            "mode0",
+            "--preserve-unformatted",
+            "--preserve-unformatted",
+        ],
+    ] {
+        let args = invalid.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(parse_args(&args).is_err(), "must reject: {invalid:?}");
+    }
+}
+#[test]
 fn provision_parses_complete_pass_info_policy_overrides() {
     let base = ["provision", "plan", "--disk", "4", "--target", "mode1"];
     let mut values = base.to_vec();
@@ -433,9 +511,9 @@ fn provision_password_and_volume_label_have_product_defaults() {
     match parse_args(&args).expect("default password and volume label") {
         Parsed::Provision(ProvisionAction::Plan(opts)) => {
             assert!(opts.share_source_password.is_empty());
-            assert_eq!(opts.share_target_password, "0000aaaa");
+            assert!(opts.share_target_password.is_empty()); // absent: retain on existing disk
             assert!(opts.encrypt_source_password.is_empty());
-            assert_eq!(opts.encrypt_target_password, "0000aaaa");
+            assert!(opts.encrypt_target_password.is_empty()); // new disk gets OEM default when rebuilt
             assert_eq!(opts.boot_label, "启动区");
             assert!(!opts.format_boot && !opts.format_share && !opts.format_encrypt);
             assert_eq!(
@@ -1067,4 +1145,156 @@ fn provision_4kn_edp_virtual_demo_requires_explicit_opt_in_and_rejects_live_flag
     bad_size[5] = "512";
     bad_size.push("--synthetic-demo");
     assert!(parse_args(&args(&bad_size)).is_err());
+}
+
+#[test]
+fn source_bound_native_mode1_image_is_offline_only_and_forbids_any_disk_target() {
+    let args_good = [
+        "provision",
+        "image",
+        "--source-backup",
+        "original-native.edpb",
+        "--target",
+        "mode1",
+        "--out",
+        "mode1-virtual.img",
+    ];
+    let Parsed::Provision(ProvisionAction::NativeMode1BackupImage { backup, out }) =
+        parse_args(&args(&args_good)).unwrap()
+    else {
+        panic!("native Mode1 source conversion must have a dedicated offline CLI action");
+    };
+    assert_eq!(backup, "original-native.edpb");
+    assert_eq!(out, "mode1-virtual.img");
+    for forbidden in [
+        vec!["--disk", "4"],
+        vec!["--yes"],
+        vec!["--sector-bytes", "4096"],
+        vec!["--total-sectors", "262144"],
+        vec!["--encrypt-target-password", "SECRET"],
+        vec!["--format-encrypt"],
+        vec!["--partition", "63:100MiB:exfat"],
+        vec!["--synthetic-demo"],
+    ] {
+        let mut argv = args_good.to_vec();
+        argv.extend(forbidden);
+        assert!(
+            parse_args(&args(&argv)).is_err(),
+            "forbidden flags: {argv:?}"
+        );
+    }
+    for mode in ["plain", "mode0", "mode2", "mode3", "mode4"] {
+        let mut argv = args_good.to_vec();
+        argv[5] = mode;
+        assert!(parse_args(&args(&argv)).is_err(), "unexpected mode: {mode}");
+    }
+    let mut duplicate = args_good.to_vec();
+    duplicate.extend(["--source-backup", "another.edpb"]);
+    assert!(parse_args(&args(&duplicate)).is_err());
+    let mut no_backup = args_good.to_vec();
+    no_backup.drain(2..4);
+    // Legacy image has its own parser; omitting the backup never turns it
+    // into this isolated, source-authenticated native conversion action.
+    assert!(matches!(
+        parse_args(&args(&no_backup)),
+        Ok(Parsed::Provision(ProvisionAction::Image { .. }))
+    ));
+}
+
+#[test]
+fn native_edpb_restore_preview_is_readonly_and_requires_explicit_source_and_target() {
+    let good = [
+        "provision",
+        "restore-preview",
+        "--disk",
+        "4",
+        "--backup",
+        "source.edpb",
+        "--include-virtual",
+    ];
+    let Parsed::Provision(ProvisionAction::NativeRestorePreview { disk, backup }) =
+        parse_args(&args(&good)).unwrap()
+    else {
+        panic!("EDPB v4 preview must be read-only");
+    };
+    assert_eq!(disk, 4);
+    assert_eq!(backup, "source.edpb");
+    for extra in [
+        vec!["--yes"],
+        vec!["--format-share"],
+        vec!["--target", "mode0"],
+        vec!["--out", "output.img"],
+        vec!["--source-backup", "other.edpb"],
+    ] {
+        let mut argv = good.to_vec();
+        argv.extend(extra);
+        assert!(
+            parse_args(&args(&argv)).is_err(),
+            "unsafe options: {argv:?}"
+        );
+    }
+    for missing in [
+        vec!["provision", "restore-preview", "--disk", "4"],
+        vec!["provision", "restore-preview", "--backup", "source.edpb"],
+    ] {
+        assert!(parse_args(&args(&missing)).is_err());
+    }
+}
+
+#[test]
+fn source_bound_plan_uses_the_same_native_target_and_format_grammar() {
+    let good = [
+        "provision",
+        "plan",
+        "--target",
+        "mode1",
+        "--disk",
+        "4",
+        "--source-backup",
+        "snapshot.edpb",
+    ];
+    let Parsed::Provision(ProvisionAction::SourceBackedPlan { opts, backup }) =
+        parse_args(&args(&good)).unwrap()
+    else {
+        panic!("source-backed plan must require read-only evidence and shared target intent")
+    };
+    assert_eq!(opts.disk, Some(4));
+    assert_eq!(opts.target, edpcli::provision::ProvisionTarget::OFFICIAL[1]);
+    assert_eq!(backup, "snapshot.edpb");
+
+    // Incompatible regions may require explicit formatting; these options
+    // are now interpreted by the same Application planner as ordinary plans.
+    let mut with_format = good.to_vec();
+    with_format.extend(["--format-share", "--share-fs", "exfat"]);
+    let Parsed::Provision(ProvisionAction::SourceBackedPlan { opts, .. }) =
+        parse_args(&args(&with_format)).unwrap()
+    else {
+        panic!("source-backed plan should accept native format intent");
+    };
+    assert!(opts.format_share);
+
+    for mode in ["plain", "mode0", "mode2", "mode3"] {
+        let mut other = good.to_vec();
+        other[3] = mode;
+        assert!(matches!(
+            parse_args(&args(&other)).unwrap(),
+            Parsed::Provision(ProvisionAction::SourceBackedPlan { .. })
+        ));
+    }
+    for extra in [
+        vec!["--yes"],
+        vec!["--out", "export.img"],
+        vec!["--backup-dir", "unsafe"],
+        vec!["--sector-bytes", "4096"],
+    ] {
+        let mut argv = good.to_vec();
+        argv.extend(extra);
+        assert!(parse_args(&args(&argv)).is_err(), "unsafe extras: {argv:?}");
+    }
+    let mut no_disk = good.to_vec();
+    no_disk.drain(4..6);
+    assert!(parse_args(&args(&no_disk)).is_err());
+    let mut duplicate = good.to_vec();
+    duplicate.extend(["--source-backup", "other.edpb"]);
+    assert!(parse_args(&args(&duplicate)).is_err());
 }

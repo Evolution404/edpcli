@@ -548,3 +548,55 @@ fn official_validator_rejects_mbr_and_lba12_tamper() {
     let err = OfficialProvisionValidator::validate(&spec, &bad_lba12, &plan).unwrap_err();
     assert!(err.contains("LBA12") || err.contains("EDPF"), "{err}");
 }
+
+#[test]
+fn oem_type1_boot_ends_at_configured_byte_boundary_for_all_proven_geometries() {
+    use edpcli::provision::{official_boot_sectors_from_end_mib, DEFAULT_OEM_BOOT_END_MIB};
+    for (native_bytes, boot_blocks) in [(512u64, 20_417u64), (4096, 2_497)] {
+        assert_eq!(
+            official_boot_sectors_from_end_mib(10, native_bytes).unwrap(),
+            boot_blocks
+        );
+        for mode in [
+            OfficialPartitionMode::DefaultThreePartition,
+            OfficialPartitionMode::IntranetExtranetDualPartition,
+        ] {
+            let layout = build_official_partition_layout(
+                mode,
+                OfficialPartitionSizes::new(DEFAULT_OEM_BOOT_END_MIB, 64, 128),
+                native_bytes,
+            )
+            .unwrap();
+            assert_eq!(layout[0].start_sector, 63);
+            assert_eq!(layout[0].sector_count(), boot_blocks);
+            assert_eq!(layout[1].start_sector, 10 * 1024 * 1024 / native_bytes);
+            assert_eq!(
+                layout[0].end_sector_exclusive() * native_bytes,
+                10 * 1024 * 1024
+            );
+        }
+        let mode1 = build_official_partition_layout(
+            OfficialPartitionMode::BootShareCombined,
+            OfficialPartitionSizes::new(10, 64, 128),
+            native_bytes,
+        )
+        .unwrap();
+        assert_eq!(mode1[0].partition_type, EdpPartitionType::Share);
+        let mode2 = build_official_partition_layout(
+            OfficialPartitionMode::WholeDiskEncrypted,
+            OfficialPartitionSizes::new(10, 64, 128),
+            native_bytes,
+        )
+        .unwrap();
+        assert_eq!(mode2[0].sector_count(), (0x7e00u64).div_ceil(native_bytes));
+        assert_ne!(mode2[0].sector_count(), boot_blocks);
+    }
+    assert!(official_boot_sectors_from_end_mib(10, 0).is_err());
+    // Uncertified non-divisor geometry remains valid for protocol-only planning.
+    assert_eq!(
+        official_boot_sectors_from_end_mib(10, 3072).unwrap(),
+        (10 * 1024 * 1024u64).div_ceil(3072) - 63,
+    );
+    assert!(official_boot_sectors_from_end_mib(0, 512).is_err());
+    assert!(official_boot_sectors_from_end_mib(u64::MAX, 512).is_err());
+}

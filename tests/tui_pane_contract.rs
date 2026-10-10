@@ -270,7 +270,7 @@ fn four_kn_capacity_uses_native_lbas_and_does_not_fabricate_512b_tail_mirrors() 
 }
 
 #[test]
-fn four_kn_provision_form_uses_native_source_geometry_and_blocks_unverified_write() {
+fn four_kn_provision_form_uses_native_source_geometry_and_rejects_invalid_lce() {
     use edpcli::protocol::sectors::EdpfPartition;
     use edpcli::tui::disk_layout::{DiskCapacityMap, DiskCapacityMapProfile};
     let mut row = edp_device_with_layout();
@@ -353,11 +353,16 @@ fn four_kn_provision_form_uses_native_source_geometry_and_blocks_unverified_writ
             .any(|v| v[0].contains("保密区") && v[1] == "51.18GB"),
         "{values:?}"
     );
-    assert!(state
-        .provision_request()
-        .unwrap_err()
-        .contains("4Kn 制盘尚未通过"));
-    // Refuse an out-of-range or unverified 4Kn LCE rather than placing a phantom tail.
+    // Native 4Kn is no longer rejected solely by a stale TUI-only gate.
+    let request_or_source_error = state.provision_request();
+    assert!(request_or_source_error
+        .as_ref()
+        .err()
+        .is_none_or(|error| !error.contains("4Kn 制盘尚未通过")));
+
+    // A damaged source LCE cannot be treated as the *target* tail address.
+    // The shared application classifier independently verifies source bytes
+    // before any prepared write may be committed.
     let mut invalid = edp_device_with_layout();
     invalid.size = 255_944_818_688;
     let hw = &mut invalid.identity_pin.as_mut().unwrap().snapshot.hardware;
@@ -369,7 +374,13 @@ fn four_kn_provision_form_uses_native_source_geometry_and_blocks_unverified_writ
     rejected.begin_provision_for_selected_device().unwrap();
     rejected.provision_begin_selected();
     rejected.provision_enter_form_workspace();
-    assert_eq!(rejected.provision_layout_model().total_sectors, 0);
+    let target = rejected.provision_layout_model();
+    assert_eq!(target.total_sectors, 62_486_528);
+    assert!(target.segments.iter().any(|segment| {
+        segment.kind == edpcli::tui::disk_layout::DiskRegionKind::Lce
+            && segment.start_lba == 62_476_561
+            && segment.sector_count == 1
+    }));
     // The 4Kn default key candidate can now be verified via the native
     // read-only worker when controller activation dispatches KeyProbe.
     // Direct state-construction tests leave that asynchronous work pending.

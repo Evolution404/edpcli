@@ -39,11 +39,15 @@ impl AppState {
             return kind;
         }
         if kind == ProvisionKind::Plain {
-            let total_sectors = self
+            let native_geometry = self
                 .selected_device()
-                .map(|row| row.size / crate::common::SECTOR as u64)
+                .and_then(|row| row.layout_geometry().ok());
+            let total_sectors = native_geometry
+                .map(|geometry| geometry.native_sector_count)
                 .unwrap_or_default();
-            match PlainProvisionForm::default_for_disk(total_sectors) {
+            let sector_bytes =
+                native_geometry.map_or(512, |geometry| geometry.logical_sector_bytes);
+            match PlainProvisionForm::default_for_disk_native(total_sectors, sector_bytes) {
                 Ok(form) => {
                     self.provision.plain_form = form;
                     self.provision.form_initialized_for = current_target;

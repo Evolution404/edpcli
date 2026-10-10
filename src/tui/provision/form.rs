@@ -1,6 +1,7 @@
 pub use crate::domain::secret::SecretText;
 #[derive(Clone)]
 pub struct ProvisionForm {
+    pub logical_sector_bytes: u32,
     pub boot_input_mode: crate::provision::CapacityInputMode,
     pub share_input_mode: crate::provision::CapacityInputMode,
     pub encrypt_input_mode: crate::provision::CapacityInputMode,
@@ -77,6 +78,7 @@ impl std::fmt::Debug for ProvisionForm {
 
 #[derive(Debug, Clone)]
 pub struct PlainPartitionForm {
+    pub logical_sector_bytes: u32,
     pub start_lba: String,
     pub input_mode: crate::provision::CapacityInputMode,
     pub quick_unit: crate::provision::QuickCapacityUnit,
@@ -88,14 +90,19 @@ pub struct PlainPartitionForm {
 }
 
 impl PlainPartitionForm {
-    pub(super) fn from_spec(spec: &crate::provision::PlainPartitionSpec) -> Self {
+    pub(super) fn from_spec_native(
+        spec: &crate::provision::PlainPartitionSpec,
+        logical_sector_bytes: u32,
+    ) -> Self {
         Self {
+            logical_sector_bytes,
             start_lba: spec.start_lba.to_string(),
             input_mode: crate::provision::CapacityInputMode::Quick,
             quick_unit: crate::provision::QuickCapacityUnit::GiB,
-            quick_capacity: ProvisionForm::format_sector_unit_3(
+            quick_capacity: ProvisionForm::format_sector_unit_3_native(
                 spec.sector_count,
                 crate::provision::QuickCapacityUnit::GiB,
+                logical_sector_bytes,
             ),
             sector_count: spec.sector_count.to_string(),
             capacity_edited: false,
@@ -113,19 +120,26 @@ impl PlainPartitionForm {
                 .ok()
                 .filter(|value| *value > 0)
                 .ok_or_else(|| format!("{label} sector 必须是大于 0 的整数")),
-            crate::provision::CapacityInputMode::Quick => ProvisionForm::resolve_quick_sectors(
-                &self.quick_capacity,
-                &self.sector_count,
-                self.quick_unit,
-                self.capacity_edited,
-                label,
-            ),
+            crate::provision::CapacityInputMode::Quick => {
+                ProvisionForm::resolve_quick_sectors_native(
+                    &self.quick_capacity,
+                    &self.sector_count,
+                    self.quick_unit,
+                    self.capacity_edited,
+                    label,
+                    self.logical_sector_bytes,
+                )
+            }
         }
     }
 
     pub(super) fn set_sector_count(&mut self, sectors: u64) {
         self.sector_count = sectors.to_string();
-        self.quick_capacity = ProvisionForm::format_sector_unit_3(sectors, self.quick_unit);
+        self.quick_capacity = ProvisionForm::format_sector_unit_3_native(
+            sectors,
+            self.quick_unit,
+            self.logical_sector_bytes,
+        );
         self.capacity_edited = false;
     }
 
@@ -137,27 +151,39 @@ impl PlainPartitionForm {
             (true, CapacityInputMode::Exact, _) => {
                 self.input_mode = CapacityInputMode::Quick;
                 self.quick_unit = QuickCapacityUnit::GiB;
-                self.quick_capacity =
-                    ProvisionForm::format_sector_unit_3(sectors, QuickCapacityUnit::GiB);
+                self.quick_capacity = ProvisionForm::format_sector_unit_3_native(
+                    sectors,
+                    QuickCapacityUnit::GiB,
+                    self.logical_sector_bytes,
+                );
             }
             (true, CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
                 self.input_mode = CapacityInputMode::Exact;
             }
             (true, CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
                 self.quick_unit = QuickCapacityUnit::MiB;
-                self.quick_capacity =
-                    ProvisionForm::format_sector_unit_3(sectors, QuickCapacityUnit::MiB);
+                self.quick_capacity = ProvisionForm::format_sector_unit_3_native(
+                    sectors,
+                    QuickCapacityUnit::MiB,
+                    self.logical_sector_bytes,
+                );
             }
             (false, CapacityInputMode::Exact, _) => {
                 self.input_mode = CapacityInputMode::Quick;
                 self.quick_unit = QuickCapacityUnit::MiB;
-                self.quick_capacity =
-                    ProvisionForm::format_sector_unit_3(sectors, QuickCapacityUnit::MiB);
+                self.quick_capacity = ProvisionForm::format_sector_unit_3_native(
+                    sectors,
+                    QuickCapacityUnit::MiB,
+                    self.logical_sector_bytes,
+                );
             }
             (false, CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
                 self.quick_unit = QuickCapacityUnit::GiB;
-                self.quick_capacity =
-                    ProvisionForm::format_sector_unit_3(sectors, QuickCapacityUnit::GiB);
+                self.quick_capacity = ProvisionForm::format_sector_unit_3_native(
+                    sectors,
+                    QuickCapacityUnit::GiB,
+                    self.logical_sector_bytes,
+                );
             }
             (false, CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
                 self.input_mode = CapacityInputMode::Exact;
@@ -172,19 +198,35 @@ impl PlainPartitionForm {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PlainProvisionForm {
+    pub logical_sector_bytes: u32,
     pub partitions: Vec<PlainPartitionForm>,
 }
 
+impl Default for PlainProvisionForm {
+    fn default() -> Self {
+        Self {
+            logical_sector_bytes: 512,
+            partitions: Vec::new(),
+        }
+    }
+}
 impl PlainProvisionForm {
-    pub(super) fn default_for_disk(total_sectors: u64) -> Result<Self, String> {
+    pub(super) fn default_for_disk_native(
+        total_sectors: u64,
+        sector_bytes: u32,
+    ) -> Result<Self, String> {
+        if !crate::domain::hardware::valid_native_sector_bytes(sector_bytes) {
+            return Err("普通盘原生逻辑扇区大小无效".into());
+        }
         let plan = crate::provision::PlainProvisionPlan::default_for_disk(total_sectors)?;
         Ok(Self {
+            logical_sector_bytes: sector_bytes,
             partitions: plan
                 .partitions
                 .iter()
-                .map(PlainPartitionForm::from_spec)
+                .map(|part| PlainPartitionForm::from_spec_native(part, sector_bytes))
                 .collect(),
         })
     }
@@ -251,6 +293,7 @@ pub(super) fn shift_supported_fs(
 impl Default for ProvisionForm {
     fn default() -> Self {
         Self {
+            logical_sector_bytes: 512,
             boot_input_mode: crate::provision::CapacityInputMode::Exact,
             share_input_mode: crate::provision::CapacityInputMode::Quick,
             encrypt_input_mode: crate::provision::CapacityInputMode::Quick,
@@ -348,7 +391,15 @@ impl ProvisionForm {
         sectors: u64,
         unit: crate::provision::QuickCapacityUnit,
     ) -> String {
-        let bytes = (sectors as u128) * crate::common::SECTOR as u128;
+        Self::format_sector_unit_3_native(sectors, unit, 512)
+    }
+
+    pub(super) fn format_sector_unit_3_native(
+        sectors: u64,
+        unit: crate::provision::QuickCapacityUnit,
+        logical_sector_bytes: u32,
+    ) -> String {
+        let bytes = (sectors as u128) * u128::from(logical_sector_bytes);
         let unit_bytes = Self::quick_unit_bytes(unit) as u128;
         let scaled = (bytes * 1_000 + unit_bytes / 2) / unit_bytes;
         format!("{}.{:03}", scaled / 1_000, scaled % 1_000)
@@ -358,7 +409,11 @@ impl ProvisionForm {
         value: &str,
         unit: crate::provision::QuickCapacityUnit,
         label: &str,
+        logical_sector_bytes: u32,
     ) -> Result<u64, String> {
+        if !crate::domain::hardware::valid_native_sector_bytes(logical_sector_bytes) {
+            return Err("容量输入的原生逻辑扇区大小无效".into());
+        }
         let unit_name = Self::quick_unit_label(unit);
         let unit_bytes = Self::quick_unit_bytes(unit) as u128;
         let value = value.trim();
@@ -397,32 +452,80 @@ impl ProvisionForm {
             .checked_mul(unit_bytes)
             .ok_or_else(|| format!("{label} {unit_name} 容量溢出"))?;
         let sector_denominator = denominator
-            .checked_mul(crate::common::SECTOR as u128)
+            .checked_mul(u128::from(logical_sector_bytes))
             .ok_or_else(|| format!("{label} {unit_name} 容量溢出"))?;
         let quotient = scaled_bytes / sector_denominator;
         let remainder = scaled_bytes % sector_denominator;
-        let rounded = quotient + u128::from(remainder.saturating_mul(2) >= sector_denominator);
+        let rounded = quotient
+            + if logical_sector_bytes == 512 {
+                // Preserve the legacy 512B UI rounding contract.
+                u128::from(remainder.saturating_mul(2) >= sector_denominator)
+            } else {
+                // Non-512B requests must never silently allocate less than entered.
+                u128::from(remainder != 0)
+            };
         u64::try_from(rounded).map_err(|_| format!("{label} {unit_name} 容量溢出"))
     }
 
-    pub(super) fn resolve_quick_sectors(
+    pub(super) fn resolve_quick_sectors_native(
         quick: &str,
         exact: &str,
         unit: crate::provision::QuickCapacityUnit,
         edited: bool,
         label: &str,
+        logical_sector_bytes: u32,
     ) -> Result<u64, String> {
+        if !crate::domain::hardware::valid_native_sector_bytes(logical_sector_bytes) {
+            return Err("容量输入的原生逻辑扇区大小无效".into());
+        }
         if let Some(sectors) = exact.parse::<u64>().ok().filter(|_| !edited) {
-            let generated = Self::format_sector_unit_3(sectors, unit);
+            let generated = Self::format_sector_unit_3_native(sectors, unit, logical_sector_bytes);
             if quick == generated {
                 return Ok(sectors);
             }
         }
-        Self::parse_decimal_unit_to_sectors_rounded(quick, unit, label)
+        Self::parse_decimal_unit_to_sectors_rounded(quick, unit, label, logical_sector_bytes)
+    }
+
+    /// OEM `FAT` selects its FAT width using native cluster geometry.
+    /// Non-FAT family choices (FAT32/exFAT) remain explicit user options.
+    pub(super) fn effective_boot_filesystem(
+        &self,
+        start_lba: u64,
+        sectors: u64,
+    ) -> Result<crate::filesystem::FilesystemKind, String> {
+        use crate::filesystem::FilesystemKind;
+        if matches!(self.boot_fs, FilesystemKind::Fat12 | FilesystemKind::Fat16) {
+            crate::filesystem::select_native_oem_boot_fat(
+                crate::filesystem::FilesystemGeometry::new(
+                    start_lba,
+                    sectors,
+                    self.logical_sector_bytes,
+                ),
+            )
+        } else {
+            Ok(self.boot_fs)
+        }
     }
 
     pub(super) fn apply_prefill(&mut self, prefill: &crate::provision::ProvisionPrefill) {
         use crate::provision::CapacityInputMode;
+        self.logical_sector_bytes = prefill.logical_sector_bytes;
+        // The OEM requests generic "FAT". Infer the actual FAT width from
+        // the native formatter's cluster solver, never from `sector_size==4096`.
+        self.boot_fs = prefill
+            .boot
+            .and_then(|boot| {
+                crate::filesystem::select_native_oem_boot_fat(
+                    crate::filesystem::FilesystemGeometry::new(
+                        prefill.boot_start_lba.unwrap_or(63),
+                        boot.sectors(),
+                        prefill.logical_sector_bytes,
+                    ),
+                )
+                .ok()
+            })
+            .unwrap_or(crate::filesystem::FilesystemKind::Fat16);
         self.boot_capacity_edited = false;
         self.share_capacity_edited = false;
         self.encrypt_capacity_edited = false;
@@ -436,7 +539,11 @@ impl ProvisionForm {
                 *mode = input.mode();
                 *sectors = input.sectors().to_string();
                 *source = input.source();
-                *quick = Self::format_sector_unit_3(input.sectors(), unit);
+                *quick = Self::format_sector_unit_3_native(
+                    input.sectors(),
+                    unit,
+                    prefill.logical_sector_bytes,
+                );
             }
         };
         set(
@@ -487,6 +594,7 @@ impl ProvisionForm {
         reverse: bool,
     ) -> Result<(), String> {
         use crate::provision::{CapacityInputMode, QuickCapacityUnit};
+        let native_bytes = self.logical_sector_bytes;
         let (mode, unit, quick, exact, edited) = match role {
             crate::provision::PartitionRole::Boot => (
                 &mut self.boot_input_mode,
@@ -519,41 +627,81 @@ impl ProvisionForm {
                 let sectors = exact
                     .parse::<u64>()
                     .map_err(|_| "请先输入有效的 sector 数".to_string())?;
-                *quick = Self::format_sector_unit_3(sectors, QuickCapacityUnit::GiB);
+                *quick = Self::format_sector_unit_3_native(
+                    sectors,
+                    QuickCapacityUnit::GiB,
+                    native_bytes,
+                );
                 *mode = CapacityInputMode::Quick;
                 *unit = QuickCapacityUnit::GiB;
             }
             (true, CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
-                let sectors =
-                    Self::resolve_quick_sectors(quick, exact, *unit, *edited, "当前容量")?;
+                let sectors = Self::resolve_quick_sectors_native(
+                    quick,
+                    exact,
+                    *unit,
+                    *edited,
+                    "当前容量",
+                    native_bytes,
+                )?;
                 *exact = sectors.to_string();
                 *mode = CapacityInputMode::Exact;
             }
             (true, CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
-                let sectors =
-                    Self::resolve_quick_sectors(quick, exact, *unit, *edited, "当前容量")?;
+                let sectors = Self::resolve_quick_sectors_native(
+                    quick,
+                    exact,
+                    *unit,
+                    *edited,
+                    "当前容量",
+                    native_bytes,
+                )?;
                 *exact = sectors.to_string();
-                *quick = Self::format_sector_unit_3(sectors, QuickCapacityUnit::MiB);
+                *quick = Self::format_sector_unit_3_native(
+                    sectors,
+                    QuickCapacityUnit::MiB,
+                    native_bytes,
+                );
                 *unit = QuickCapacityUnit::MiB;
             }
             (false, CapacityInputMode::Exact, _) => {
                 let sectors = exact
                     .parse::<u64>()
                     .map_err(|_| "请先输入有效的 sector 数".to_string())?;
-                *quick = Self::format_sector_unit_3(sectors, QuickCapacityUnit::MiB);
+                *quick = Self::format_sector_unit_3_native(
+                    sectors,
+                    QuickCapacityUnit::MiB,
+                    native_bytes,
+                );
                 *mode = CapacityInputMode::Quick;
                 *unit = QuickCapacityUnit::MiB;
             }
             (false, CapacityInputMode::Quick, QuickCapacityUnit::MiB) => {
-                let sectors =
-                    Self::resolve_quick_sectors(quick, exact, *unit, *edited, "当前容量")?;
+                let sectors = Self::resolve_quick_sectors_native(
+                    quick,
+                    exact,
+                    *unit,
+                    *edited,
+                    "当前容量",
+                    native_bytes,
+                )?;
                 *exact = sectors.to_string();
-                *quick = Self::format_sector_unit_3(sectors, QuickCapacityUnit::GiB);
+                *quick = Self::format_sector_unit_3_native(
+                    sectors,
+                    QuickCapacityUnit::GiB,
+                    native_bytes,
+                );
                 *unit = QuickCapacityUnit::GiB;
             }
             (false, CapacityInputMode::Quick, QuickCapacityUnit::GiB) => {
-                let sectors =
-                    Self::resolve_quick_sectors(quick, exact, *unit, *edited, "当前容量")?;
+                let sectors = Self::resolve_quick_sectors_native(
+                    quick,
+                    exact,
+                    *unit,
+                    *edited,
+                    "当前容量",
+                    native_bytes,
+                )?;
                 *exact = sectors.to_string();
                 *mode = CapacityInputMode::Exact;
             }
@@ -585,6 +733,97 @@ impl ProvisionForm {
                 self.encrypt_capacity_edited = true;
             }
             _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod native_capacity_tests {
+    use super::{PlainPartitionForm, PlainProvisionForm, ProvisionForm};
+    use crate::filesystem::FilesystemKind;
+    use crate::provision::{CapacityInputMode, PlainPartitionSpec, QuickCapacityUnit as Unit};
+
+    #[test]
+    fn native_quick_capacity_uses_actual_sector_bytes_and_never_undercounts() {
+        for sector_bytes in [512u32, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
+            let sectors = 131_071u64;
+            let display =
+                ProvisionForm::format_sector_unit_3_native(sectors, Unit::GiB, sector_bytes);
+            let preserved = ProvisionForm::resolve_quick_sectors_native(
+                &display,
+                &sectors.to_string(),
+                Unit::GiB,
+                false,
+                "测试容量",
+                sector_bytes,
+            )
+            .unwrap();
+            assert_eq!(preserved, sectors);
+
+            let requested = ProvisionForm::quick_unit_bytes(Unit::MiB);
+            let parsed = ProvisionForm::resolve_quick_sectors_native(
+                "1",
+                "",
+                Unit::MiB,
+                true,
+                "测试容量",
+                sector_bytes,
+            )
+            .unwrap();
+            if sector_bytes == 512 {
+                let approximate = (requested + 256) / 512;
+                assert_eq!(parsed, approximate);
+            } else {
+                assert_eq!(parsed, requested.div_ceil(u64::from(sector_bytes)));
+                assert!(parsed * u64::from(sector_bytes) >= requested);
+            }
+        }
+        for invalid in [0, 511, 513, 4097] {
+            assert!(ProvisionForm::resolve_quick_sectors_native(
+                "1",
+                "",
+                Unit::MiB,
+                true,
+                "测试容量",
+                invalid
+            )
+            .is_err());
+        }
+        assert_eq!(
+            ProvisionForm::format_sector_unit_3(2048, Unit::MiB),
+            ProvisionForm::format_sector_unit_3_native(2048, Unit::MiB, 512)
+        );
+    }
+
+    #[test]
+    fn plain_native_default_and_mode_toggles_keep_native_lba_count() {
+        for sector_bytes in [512u32, 1024, 2048, 4096] {
+            let total = 120_000;
+            let form = PlainProvisionForm::default_for_disk_native(total, sector_bytes).unwrap();
+            assert_eq!(form.logical_sector_bytes, sector_bytes);
+            assert_eq!(form.plan(total).unwrap().total_sectors, total);
+            assert!(form
+                .partitions
+                .iter()
+                .all(|part| part.logical_sector_bytes == sector_bytes));
+            let mut part = PlainPartitionForm::from_spec_native(
+                &PlainPartitionSpec::new(2048, 4096, FilesystemKind::Fat16, "TEST"),
+                sector_bytes,
+            );
+            assert_eq!(part.resolve_sector_count("普通分区").unwrap(), 4096);
+            part.shift_capacity_unit(false).unwrap();
+            assert_eq!(part.resolve_sector_count("普通分区").unwrap(), 4096);
+            part.input_mode = CapacityInputMode::Quick;
+            part.quick_unit = Unit::MiB;
+            part.quick_capacity = "1".into();
+            part.capacity_edited = true;
+            let unit_bytes = ProvisionForm::quick_unit_bytes(Unit::MiB);
+            let expected = if sector_bytes == 512 {
+                (unit_bytes + 256) / 512
+            } else {
+                unit_bytes.div_ceil(u64::from(sector_bytes))
+            };
+            assert_eq!(part.resolve_sector_count("普通分区").unwrap(), expected);
         }
     }
 }

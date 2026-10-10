@@ -29,7 +29,7 @@ pub(super) fn editor_note(state: &AppState) -> Option<String> {
     let preserves_existing = resolved.encrypt_start_lba == Some(source_encrypt.start_lba)
         && target_encrypt.sectors() == source_encrypt.sector_count;
     let parts = resolved
-        .draft_partitions(crate::common::SECTOR as u64)
+        .draft_partitions(u64::from(resolved.logical_sector_bytes))
         .ok()?;
     let unallocated =
         crate::provision::validate_target_geometry(&parts, resolved.usable_end_lba).ok()?;

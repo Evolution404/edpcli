@@ -84,7 +84,7 @@ fn put32(dst: &mut [u8], offset: usize, value: u32) {
 
 /// Native FAT12 geometry solver. The on-disk FAT uses packed 12-bit entries,
 /// not FAT16's 16-bit indexing, and root directory entries are fixed at 32B.
-fn choose_native_fat12_geometry(total: u64, bps: u32) -> Option<(u8, u16, u64)> {
+pub(super) fn choose_native_fat12_geometry(total: u64, bps: u32) -> Option<(u8, u16, u64)> {
     let root_sectors = (u64::from(ROOT_ENTRIES) * 32).div_ceil(u64::from(bps));
     for spc in [1u64, 2, 4, 8, 16, 32, 64, 128] {
         if spc.checked_mul(u64::from(bps))? > 65_536 {
@@ -115,8 +115,9 @@ fn choose_native_fat12_geometry(total: u64, bps: u32) -> Option<(u8, u16, u64)> 
 }
 
 impl Fat12Driver {
-    /// Virtual-only native FAT12 metadata generator. Does not enable the
-    /// legacy 512B provision writer, whose FAT12 capability remains disabled.
+    /// Build full-native-block FAT12 metadata for the shared provisioning plan.
+    /// The native write lease/WAL separately controls device writes; this does
+    /// not enable the legacy 512B FAT12 formatting implementation.
     pub fn build_native_format_plan(
         &self,
         geometry: FilesystemGeometry,
@@ -129,9 +130,11 @@ impl Fat12Driver {
                 "FAT12 虚拟格式化收到错误文件系统类型",
             ));
         }
-        if !matches!(geometry.sector_size, 512 | 4096) || geometry.sector_count == 0 {
+        if !super::format::native_fat_sector_bytes_supported(geometry.sector_size)
+            || geometry.sector_count == 0
+        {
             return Err(invalid_geometry(
-                "FAT12仅允许认证的512B/4096B原生虚拟格式化",
+                "FAT12仅允许标准512B/1024B/2048B/4096B原生扇区格式化",
             ));
         }
         let sector_bytes = u64::from(geometry.sector_size);

@@ -82,50 +82,28 @@ fn status_line(label: &'static str, value: impl Into<String>, style: Style) -> L
 
 fn overall_lines(view: &ProvisionConfirmationViewModel) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(Span::styled("总体", secondary()))];
-    if view.overall.cleared_regions == 0 {
-        lines.push(Line::from(vec![
-            Span::styled("数据      ", muted()),
-            Span::styled("✓ 无区域清空", success()),
-        ]));
-    } else {
-        lines.push(Line::from(vec![
-            Span::styled("数据      ", muted()),
-            Span::styled(
-                format!("⚠ {} 个区域数据将清空", view.overall.cleared_regions),
-                warning(),
-            ),
-        ]));
-    }
-    lines.push(Line::from(vec![
-        Span::styled("密码      ", muted()),
-        Span::styled(
-            if view.overall.password_changed_regions == 0 {
-                "✓ 无密码变更".into()
-            } else {
-                format!("↻ {} 个密码域变化", view.overall.password_changed_regions)
-            },
-            if view.overall.password_changed_regions == 0 {
-                success()
-            } else {
-                accent()
-            },
-        ),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("文件系统  ", muted()),
-        Span::styled(
-            if view.overall.reformatted_regions == 0 {
-                "✓ 不新建/格式化".into()
-            } else {
-                format!("⚠ {} 个区域新建/格式化", view.overall.reformatted_regions)
-            },
-            if view.overall.reformatted_regions == 0 {
-                success()
-            } else {
-                warning()
-            },
-        ),
-    ]));
+    // Names are source-owned; creating multiple target partitions must never
+    // multiply the number of source partitions reported as discarded.
+    lines.push(source_effect_line(
+        "来源数据丢弃",
+        &view.overall.source_discarded,
+        true,
+    ));
+    lines.push(source_effect_line(
+        "来源数据保留",
+        &view.overall.source_retained,
+        false,
+    ));
+    lines.push(source_effect_line(
+        "目标格式化",
+        &view.overall.target_formatted,
+        true,
+    ));
+    lines.push(source_effect_line(
+        "密钥操作",
+        &view.overall.key_changed,
+        false,
+    ));
     if let Some(note) = view.geometry_note.as_deref() {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
@@ -134,4 +112,28 @@ fn overall_lines(view: &ProvisionConfirmationViewModel) -> Vec<Line<'static>> {
         ]));
     }
     lines
+}
+
+fn source_effect_line(
+    label: &'static str,
+    partitions: &[String],
+    warning_when_present: bool,
+) -> Line<'static> {
+    let has_partitions = !partitions.is_empty();
+    let display = if has_partitions {
+        partitions.join("、")
+    } else {
+        "无".to_string()
+    };
+    let style = if has_partitions && warning_when_present {
+        warning()
+    } else if has_partitions {
+        success()
+    } else {
+        muted()
+    };
+    Line::from(vec![
+        Span::styled(crate::ui::pad_to(label, 16), muted()),
+        Span::styled(safe(&display), style),
+    ])
 }

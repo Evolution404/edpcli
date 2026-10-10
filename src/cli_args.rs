@@ -99,6 +99,10 @@ pub struct ProvisionNewOpts {
     pub format_boot: bool,
     pub format_share: bool,
     pub format_encrypt: bool,
+    /// Strict mode: never automatically format an unselected incompatible region.
+    /// By default, compatible source regions are preserved and only genuinely
+    /// incompatible/new target regions are reformatted.
+    pub preserve_unformatted: bool,
     pub boot_label: String,
     pub share_label: String,
     pub encrypt_label: String,
@@ -147,8 +151,23 @@ pub enum ProvisionAction {
         mode: crate::provision::OfficialPartitionMode,
         algorithm: crate::provision::FileKeyWrapMode,
     },
+    /// Create-only, offline Mode1 ExFAT image from a verified native EDPB v4.
+    NativeMode1BackupImage {
+        backup: String,
+        out: String,
+    },
+    /// Source EDPB is a read-only provenance gate for the ordinary native plan.
+    SourceBackedPlan {
+        opts: Box<ProvisionNewOpts>,
+        backup: String,
+    },
     /// Strictly read-only comparison of the current 4Kn device and EDPB v4.
     VerifySource {
+        disk: u32,
+        backup: String,
+    },
+    /// Verified EDPB v4 read-only same-geometry restore scope; never writes.
+    NativeRestorePreview {
         disk: u32,
         backup: String,
     },
@@ -161,14 +180,18 @@ pub enum ProvisionAction {
         opts: Box<ProvisionNewOpts>,
         yes: bool,
         backup_dir: Option<String>,
+        include_virtual: bool,
     },
 }
 
 pub enum Parsed {
     List {
         backup_dir: Option<String>,
+        include_virtual: bool,
     },
-    Tui,
+    Tui {
+        include_virtual: bool,
+    },
     Demo {
         scene: Option<String>,
         list_scenes: bool,
@@ -221,7 +244,10 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
         .filter(|a| a.as_str() != ELEVATED_FLAG)
         .collect();
     let Some(first) = args.first() else {
-        return Ok(Parsed::List { backup_dir: None });
+        return Ok(Parsed::List {
+            backup_dir: None,
+            include_virtual: false,
+        });
     };
     let rest =
         crate::domain::secret::SecretArguments(args[1..].iter().map(|s| (*s).clone()).collect());
@@ -275,8 +301,22 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                     topic: Some("tui".into()),
                 });
             }
-            crate::tui::parse_resume_args(argv)?;
-            Ok(Parsed::Tui)
+            let include_virtual = rest.iter().any(|s| s.as_str() == "--include-virtual");
+            if rest
+                .iter()
+                .filter(|s| s.as_str() == "--include-virtual")
+                .count()
+                > 1
+            {
+                return Err("错误: --include-virtual 重复指定".into());
+            }
+            let filtered: Vec<String> = argv
+                .iter()
+                .filter(|s| s.as_str() != "--include-virtual")
+                .cloned()
+                .collect();
+            crate::tui::parse_resume_args(&filtered)?;
+            Ok(Parsed::Tui { include_virtual })
         }
         "demo" => {
             if rest.iter().any(|arg| arg == "-h" || arg == "--help") {
@@ -311,9 +351,13 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 });
             }
             let mut backup_dir = None;
+            let mut include_virtual = false;
             let mut i = 0;
             while i < rest.len() {
                 match flag_name(&rest[i]) {
+                    "--include-virtual" => {
+                        set_switch(&mut include_virtual, &rest[i], "--include-virtual")?
+                    }
                     "--backup-dir" => {
                         let v = take_value(&rest, &mut i, "--backup-dir")?;
                         set_once(&mut backup_dir, v, "--backup-dir")?;
@@ -322,7 +366,10 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
                 }
                 i += 1;
             }
-            Ok(Parsed::List { backup_dir })
+            Ok(Parsed::List {
+                backup_dir,
+                include_virtual,
+            })
         }
         "inspect" => inspect::parse_inspect(&rest),
         "info" => info::parse_info(&rest),

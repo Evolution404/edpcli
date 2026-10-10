@@ -45,8 +45,18 @@ fn verification_lines(state: &AppState) -> Vec<(String, crate::tui::ui::ResultTo
     use crate::application::provision::ProvisionCommitOutcome;
     let mut lines = Vec::new();
     if let Some(outcome) = state.provision().result_outcome.as_ref() {
+        let native_wal = outcome
+            .backup
+            .path
+            .extension()
+            .is_some_and(|ext| ext == "wal");
         lines.push((
-            "✓ 制盘前自动备份已创建".into(),
+            if native_wal {
+                "✓ 原生WAL已持久化 · 原始变更块已保存"
+            } else {
+                "✓ 制盘前元数据备份已创建"
+            }
+            .into(),
             crate::tui::ui::ResultTone::Success,
         ));
         match &outcome.commit {
@@ -54,6 +64,12 @@ fn verification_lines(state: &AppState) -> Vec<(String, crate::tui::ui::ResultTo
                 if report.provision_succeeded {
                     lines.push((
                         "✓ 协议与几何读回验证通过".into(),
+                        crate::tui::ui::ResultTone::Success,
+                    ));
+                }
+                if native_wal && report.formats.is_empty() {
+                    lines.push((
+                        "✓ 目标文件系统初始化已纳入原生写集并回读".into(),
                         crate::tui::ui::ResultTone::Success,
                     ));
                 }
@@ -106,7 +122,14 @@ fn verification_lines(state: &AppState) -> Vec<(String, crate::tui::ui::ResultTo
             .and_then(|value| value.to_str())
             .unwrap_or("<无效文件名>");
         lines.push((
-            format!("备份文件  {file}"),
+            format!(
+                "{}  {file}",
+                if native_wal {
+                    "WAL事务文件"
+                } else {
+                    "备份文件"
+                }
+            ),
             crate::tui::ui::ResultTone::Primary,
         ));
     } else {

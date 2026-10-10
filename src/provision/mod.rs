@@ -11,6 +11,7 @@ mod layout;
 mod lce;
 mod native_geometry;
 mod native_lce_audit;
+mod native_source;
 mod partition_format;
 pub(crate) use partition_format::build_official_partition_filesystem_from_plain;
 mod partition_semantics;
@@ -38,11 +39,12 @@ pub use keys::{
     FileKeyWrapMode, LegacyLba7KeyMaterial, OfficialLabelAlgorithm, ProvisionKeyMaterial,
 };
 pub use layout::{
-    build_official_partition_layout, official_format_targets_with_filesystems,
-    official_mbr_partition_type, official_partition_role, physical_partition_encryption,
-    visible_mbr_partition_type, OfficialPartitionFilesystems, OfficialPartitionGeometry,
-    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, PartitionFormatTarget,
-    PartitionRole, DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
+    build_official_partition_layout, official_boot_sectors_from_end_mib,
+    official_format_targets_with_filesystems, official_mbr_partition_type, official_partition_role,
+    physical_partition_encryption, visible_mbr_partition_type, OfficialPartitionFilesystems,
+    OfficialPartitionGeometry, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, PartitionFormatTarget, PartitionRole, DEFAULT_MODE0_BOOT_SECTORS,
+    DEFAULT_OEM_BOOT_END_MIB, OFFICIAL_PARTITION_START_SECTOR,
     WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use lce::{build_lce_ciphertext, build_native_lce_ciphertext, lce_plaintext};
@@ -50,6 +52,7 @@ pub use native_geometry::{
     NativeEdpExtent, NativeEdpLayoutPlan, NativeEdpPartition, NativeEdpWriteCapability,
 };
 pub use native_lce_audit::{audit_native_lce_against_legacy_producer, NativeLceProducerAudit};
+pub use native_source::classify_native_source;
 pub use partition_format::{build_official_partition_filesystem, PartitionFilesystemImage};
 pub use partition_semantics::{
     official_partition_semantics, physical_partition_encryption_semantics,

@@ -190,7 +190,16 @@ fn push_candidate_pair(
 
 pub fn generate_candidates(runner: &dyn CmdRunner, disk: u32) -> Vec<String> {
     let mut cs: Vec<String> = Vec::new();
-    let native = runner.hardware_probe(disk);
+    // A platform-verified virtual Disk Image uses the same synthetic protocol
+    // identity as the native writer; raw macOS inquiry reports a different
+    // host device name. This is opt-in and never applies to physical USB.
+    let native = if crate::platform::include_virtual()
+        && crate::platform::confirmed_virtual_disk_image(runner, disk)
+    {
+        crate::platform::system::native_provision_probe(runner, disk).ok()
+    } else {
+        runner.hardware_probe(disk)
+    };
     let fallback = native
         .as_ref()
         .is_none_or(|probe| {

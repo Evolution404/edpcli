@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// The 4Kn source path is a completely READ-ONLY evidence capture. It uses
+/// The multi-sector source path is a completely READ-ONLY evidence capture. It uses
 /// full native LBA0..12 blocks, a 512B-per-LBA fixed wire projection, and
 /// native-LBA geometry. It does not call the legacy 512B SectorDev reader or
 /// open any write handle.
@@ -14,17 +14,23 @@ fn native_registration_on_disk(
     Option<ParsedExistingProvision>,
 )> {
     let source = crate::application::evidence::EvidenceSource::open_disk(runner, disk)
-        .map_err(|error| err(EXIT_TARGET, format!("错误: 4Kn来源只读取证失败: {error}")))?;
+        .map_err(|error| err(EXIT_TARGET, format!("错误: 原生来源只读取证失败: {error}")))?;
     let native = source
         .native_protocol_image()
         .ok_or_else(|| err(EXIT_TARGET, "错误: 来源不具备完整原生协议只读镜像"))?;
-    if native.logical_sector_bytes() != 4096 {
-        return Err(err(EXIT_TARGET, "错误: 来源逻辑扇区并非已认证4096B"));
+    if !crate::domain::hardware::native_sector_capability(native.logical_sector_bytes())
+        .is_some_and(|capability| capability.fat_exfat_format)
+        || native.logical_sector_bytes() == 512
+    {
+        return Err(err(
+            EXIT_TARGET,
+            "错误: 来源逻辑扇区不在已支持的1024B/2048B/4096B范围",
+        ));
     }
     let identity = source.identity();
     let kind = identity
         .provision_kind
-        .ok_or_else(|| err(EXIT_TARGET, "错误: 4Kn来源盘型尚未确认，不能自动验证密码"))?;
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 原生来源盘型尚未确认，不能自动验证密码"))?;
     if kind == crate::provision::DiskProvisionKind::Plain {
         return Ok((kind, None));
     }
@@ -41,7 +47,7 @@ fn native_registration_on_disk(
         .ok_or_else(|| {
             err(
                 EXIT_TARGET,
-                "错误: 4Kn来源device_id不完整或不可信，不能验证密码",
+                "错误: 原生来源device_id不完整或不可信，不能验证密码",
             )
         })?;
     let parsed =
@@ -49,12 +55,12 @@ fn native_registration_on_disk(
             .map_err(|message| {
                 err(
                     EXIT_TARGET,
-                    format!("错误: 4Kn来源EDPF协议几何或密钥结构不可信: {message}"),
+                    format!("错误: 原生来源EDPF协议几何或密钥结构不可信: {message}"),
                 )
             })?
-            .ok_or_else(|| err(EXIT_TARGET, "错误: 4Kn来源没有完整且可验证的EDPF密码域"))?;
+            .ok_or_else(|| err(EXIT_TARGET, "错误: 原生来源没有完整且可验证的EDPF密码域"))?;
     if kind.official_mode() != Some(parsed.profile.source_mode) {
-        return Err(err(EXIT_TARGET, "错误: 4Kn来源盘型与完整EDPF模式不一致"));
+        return Err(err(EXIT_TARGET, "错误: 原生来源盘型与完整EDPF模式不一致"));
     }
     Ok((kind, Some(parsed)))
 }
@@ -129,14 +135,14 @@ fn native_source_password_on_disk(
 ) -> EdpCliResult<SourcePasswordKnowledge> {
     let (_, parsed) = native_registration_on_disk(runner, disk)?;
     let source =
-        parsed.ok_or_else(|| err(EXIT_TARGET, "错误: 4Kn来源未注册EDP密码域，拒绝密码验证"))?;
+        parsed.ok_or_else(|| err(EXIT_TARGET, "错误: 原生来源未注册EDP密码域，拒绝密码验证"))?;
     let record = source
         .record_for_domain(domain)
-        .ok_or_else(|| err(EXIT_TARGET, "错误: 4Kn来源模式不包含指定密码域"))?;
+        .ok_or_else(|| err(EXIT_TARGET, "错误: 原生来源模式不包含指定密码域"))?;
     verified_native_source_password(*record, password).map_err(|message| {
         err(
             EXIT_TARGET,
-            format!("错误: 4Kn来源原密码/FileKey校验失败: {message}"),
+            format!("错误: 原生来源原密码/FileKey校验失败: {message}"),
         )
     })
 }
@@ -151,10 +157,13 @@ fn source_native_sector_bytes(runner: &dyn CmdRunner, disk: u32) -> EdpCliResult
 }
 
 fn validate_source_password_sector_bytes(observed: Option<u32>) -> EdpCliResult<Option<u32>> {
-    if observed.is_some_and(|bytes| !matches!(bytes, 512 | 4096)) {
+    if observed.is_some_and(|bytes| {
+        !crate::domain::hardware::native_sector_capability(bytes)
+            .is_some_and(|capability| capability.fat_exfat_format)
+    }) {
         return Err(err(
             EXIT_TARGET,
-            "错误: 原密码自动验证仅认证512B与4096B逻辑扇区",
+            "错误: 原密码自动验证仅支持标准512B/1024B/2048B/4096B逻辑扇区",
         ));
     }
     Ok(observed)
@@ -164,7 +173,7 @@ pub fn probe_provision_key_domains_on_disk(
     runner: &dyn CmdRunner,
     disk: u32,
 ) -> EdpCliResult<ProvisionKeyProbe> {
-    if source_native_sector_bytes(runner, disk)? == Some(4096) {
+    if source_native_sector_bytes(runner, disk)?.is_some_and(|bytes| bytes > 512) {
         return native_key_probe_on_disk(runner, disk);
     }
     let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
@@ -253,7 +262,7 @@ pub fn verify_provision_source_password_on_disk(
     if password.is_empty() {
         return Err(err(EXIT_TARGET, "错误: 来源密码不能为空"));
     }
-    if source_native_sector_bytes(runner, disk)? == Some(4096) {
+    if source_native_sector_bytes(runner, disk)?.is_some_and(|bytes| bytes > 512) {
         return native_source_password_on_disk(runner, disk, domain, password);
     }
     let target_session = TargetSession::<ReadOnly>::open_usb(runner, disk)?;
@@ -396,7 +405,7 @@ mod native_sector_probe_policy_tests {
     }
 
     #[test]
-    fn observed_sector_size_routes_4kn_only_and_fails_closed_for_other_sizes() {
+    fn observed_sector_size_routes_all_standard_native_blocks_and_rejects_others() {
         assert_eq!(
             validate_source_password_sector_bytes(Some(512)).unwrap(),
             Some(512)
@@ -406,7 +415,13 @@ mod native_sector_probe_policy_tests {
             Some(4096)
         );
         assert_eq!(validate_source_password_sector_bytes(None).unwrap(), None);
-        for unsupported in [0, 256, 1024, 2048, 8192, 65536] {
+        for supported in [1024, 2048] {
+            assert_eq!(
+                validate_source_password_sector_bytes(Some(supported)).unwrap(),
+                Some(supported)
+            );
+        }
+        for unsupported in [0, 256, 1536, 8192, 65536] {
             assert!(validate_source_password_sector_bytes(Some(unsupported)).is_err());
         }
     }

@@ -8,6 +8,33 @@ use crate::provision::{
 };
 
 #[test]
+fn native_result_uses_actual_partition_disposition_not_forced_rebuild() {
+    for disposition in [
+        Disposition::PreserveVerified,
+        Disposition::PreserveOpaque,
+        Disposition::RewrapVerified,
+        Disposition::Rebuild,
+    ] {
+        let part = crate::application::provision::native_flow::NativePreviewPartition {
+            role: Some(Role::Encrypt),
+            start_lba: 100,
+            sector_count: 200,
+            filesystem: Some(FilesystemKind::ExFat),
+            formatted: disposition == Disposition::Rebuild,
+            physically_encrypted: true,
+            disposition: Some(disposition),
+            password_disposition: None,
+        };
+        for logical_bytes in [512, 1024, 2048, 4096] {
+            let projected = ProvisionResultPartition::from_native(&part, logical_bytes);
+            assert_eq!(projected.disposition, Some(disposition));
+            assert_eq!(projected.size_bytes, 200 * u64::from(logical_bytes));
+            assert_eq!(projected.selected_for_format, part.formatted);
+        }
+    }
+}
+
+#[test]
 fn result_partitions_preserve_evidence_instead_of_format_defaults() {
     for mode in [Mode::DefaultThreePartition, Mode::WholeDiskEncrypted] {
         let targets = crate::provision::official_format_targets_with_filesystems(

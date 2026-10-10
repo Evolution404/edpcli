@@ -187,7 +187,10 @@ impl PlainProvisionForm {
             crate::filesystem::FilesystemKind::ExFat,
             format!("普通卷{number}"),
         );
-        self.partitions.push(PlainPartitionForm::from_spec(&spec));
+        self.partitions.push(PlainPartitionForm::from_spec_native(
+            &spec,
+            self.logical_sector_bytes,
+        ));
         Ok(number - 1)
     }
 

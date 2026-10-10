@@ -120,6 +120,68 @@ fn draw_provision_planning_modal(frame: &mut Frame, state: &AppState) {
     });
 }
 
+/// Source/target choice is independent from the limited, source-authenticated
+/// conversion producer. Geometry drafts are never allowed to reach commit.
+fn draw_native_geometry_readonly_review(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    review: &crate::tui::state::NativeGeometryReadOnlyReview,
+) {
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "任意来源 → 目标模式 · 原生几何只读审核",
+            secondary(),
+        )),
+        Line::from(""),
+        Line::from(format!(
+            "disk{} · {} → {}",
+            review.disk,
+            review.source_kind.target().full_name(),
+            review.target_kind.title()
+        )),
+        Line::from(format!(
+            "容量：{} × {}B",
+            review.total_sectors, review.sector_bytes
+        )),
+        Line::from(""),
+        Line::from("拟建目标分区（仅几何，不代表数据保留或文件系统可挂载）："),
+    ];
+    for (label, start, count) in &review.partitions {
+        lines.push(Line::from(format!(
+            "{} · LBA {}–{} · {} 原生块",
+            label,
+            start,
+            start.saturating_add(*count).saturating_sub(1),
+            count
+        )));
+    }
+    if let Some(lce) = review.lce_lba {
+        lines.push(Line::from(format!(
+            "LCE LBA {} · {}",
+            lce,
+            if review.lce_is_source_verified {
+                "来源原生指针已观测，密码/LCE内容未在本草稿中认证"
+            } else {
+                "普通来源：暂定预留位置，非来源真实LCE"
+            }
+        )));
+    }
+    lines.extend([
+        Line::from(""),
+        Line::from(Span::styled(
+            "只读几何有效 ≠ 转换可执行。未认证来源密码、FileKey、文件系统、LCE写集和设备写权限。",
+            danger(),
+        )),
+        Line::from("Enter / 导出均不可执行 · Esc 返回配置"),
+    ]);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(crate::tui::ui::card("制盘计划 · 原生只读草稿", true))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
 pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, state: &AppState) {
     let provision = state.provision();
     let sections = Layout::vertical([
@@ -141,7 +203,11 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             draw_provision_planning_modal(frame, state);
         }
         ProvisionStage::Review => {
-            draw_provision_review(frame, main_area, state);
+            if let Some(readonly) = provision.native_geometry_review.as_ref() {
+                draw_native_geometry_readonly_review(frame, main_area, readonly);
+            } else {
+                draw_provision_review(frame, main_area, state);
+            }
         }
         ProvisionStage::ExportPath => {
             frame.render_widget(

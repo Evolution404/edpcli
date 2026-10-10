@@ -17,6 +17,31 @@ pub const OFFICIAL_PARTITION_START_SECTOR: u64 = 63;
 pub const WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES: u64 = 0x7e00;
 pub const DEFAULT_MODE0_BOOT_SECTORS: u64 = 20_417;
 const MIB: u64 = 1024 * 1024;
+/// Configured OEM label-tool value: `GLOBAL/bootSize=10` (MiB of the
+/// *end byte boundary*, not the FAT partition capacity).
+pub const DEFAULT_OEM_BOOT_END_MIB: u64 = 10;
+
+/// Official type1 first partition starts at native LBA63. The configured
+/// boot MiB is an absolute byte boundary (512B: LBA20480; 4Kn: LBA2560).
+/// This applies only to independent type1 FAT boot partitions, not the Mode2
+/// fixed-size compatibility entry or the Mode1 combined share partition.
+pub fn official_boot_sectors_from_end_mib(
+    end_mib: u64,
+    logical_sector_bytes: u64,
+) -> Result<u64, String> {
+    if logical_sector_bytes == 0 {
+        return Err("OEM启动区逻辑扇区大小必须为正数".into());
+    }
+    let end_bytes = end_mib.checked_mul(MIB).ok_or("OEM启动区MiB结束边界溢出")?;
+    // Non-power-of-two block sizes are only supported for protocol-only
+    // geometry planning; round the absolute end boundary up to a whole
+    // native block. OEM 512B and 4Kn remain exact with zero rounding.
+    end_bytes
+        .div_ceil(logical_sector_bytes)
+        .checked_sub(OFFICIAL_PARTITION_START_SECTOR)
+        .filter(|blocks| *blocks > 0)
+        .ok_or_else(|| "OEM启动区结束边界未超过LBA63".into())
+}
 
 /// MBR partition-type byte selected by the current first-party writer for the
 /// four official partition modes.  This is the direct result of the producer's
@@ -218,8 +243,8 @@ impl OfficialProvisionPlan {
         self,
         sector_bytes: u32,
     ) -> Result<Vec<PartitionFormatTarget>, String> {
-        if !matches!(sector_bytes, 512 | 4096) {
-            return Err("unsupported native target sector size".into());
+        if !crate::domain::hardware::valid_native_sector_bytes(sector_bytes) {
+            return Err("native logical block size must be a positive multiple of 512".into());
         }
         format_targets_for_geometry(
             self.mode,
@@ -406,6 +431,16 @@ pub fn build_official_partition_layout(
         Some(sectors) => sectors
             .checked_mul(sector_size)
             .ok_or("boot partition sector count overflows bytes")?,
+        None if matches!(
+            mode,
+            OfficialPartitionMode::DefaultThreePartition
+                | OfficialPartitionMode::IntranetExtranetDualPartition
+        ) =>
+        {
+            official_boot_sectors_from_end_mib(sizes.boot_mib, sector_size)?
+                .checked_mul(sector_size)
+                .ok_or("OEM boot capacity byte multiplication overflow")?
+        }
         None => mib_bytes(sizes.boot_mib)?,
     };
     let share = match sizes.share_sectors {
@@ -432,8 +467,8 @@ pub fn build_official_partition_layout(
         ],
         OfficialPartitionMode::WholeDiskEncrypted => {
             // 0x7E00 is an exact 63-sector 512B compatibility reservation.
-            // Native 4Kn geometry must reserve eight WHOLE blocks (0x8000)
-            // rather than emit an unaligned or partially owned 4Kn sector.
+            // Any native geometry rounds this byte reservation up to whole
+            // logical blocks; never emit a partial native block.
             let compat = WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES
                 .checked_add(sector_size - 1)
                 .and_then(|bytes| bytes.checked_div(sector_size))
@@ -467,13 +502,12 @@ pub fn build_official_partition_layout(
                 partition_type.role()
             ));
         }
-        if size_bytes % sector_size != 0 {
-            return Err(format!(
-                "{} partition size {size_bytes} is not aligned to sector size {sector_size}",
-                partition_type.role()
-            ));
-        }
-        let sectors = size_bytes / sector_size;
+        // MiB-based policy is a byte request. Round its allocation up to
+        // whole device-native LBAs; an exact-LBA request was aligned already.
+        let sectors = size_bytes.div_ceil(sector_size);
+        let size_bytes = sectors
+            .checked_mul(sector_size)
+            .ok_or("native partition byte capacity overflow")?;
         let geometry = OfficialPartitionGeometry {
             partition_type,
             start_sector: start,

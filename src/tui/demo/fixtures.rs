@@ -283,9 +283,10 @@ pub(super) fn provision_review_projection(row: &Row) -> ProvisionConfirmationVie
         },
         layout,
         overall: ProvisionConfirmationOverall {
-            cleared_regions: 0,
-            reformatted_regions: 0,
-            password_changed_regions: 0,
+            source_discarded: vec![],
+            source_retained: vec![],
+            target_formatted: vec![],
+            key_changed: vec![],
         },
         algorithm: Some(crate::provision::OfficialLabelAlgorithm::Sms4),
         geometry_note: None,
@@ -369,6 +370,8 @@ pub(super) fn provision_result_snapshot(row: &Row) -> ProvisionResultSnapshot {
         disk: row.disk,
         target,
         total_bytes: row.size,
+        logical_sector_bytes: 512,
+        lce_extent: None,
         partitions,
     }
 }

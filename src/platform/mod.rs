@@ -9,7 +9,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub use crate::domain::hardware::{
-    ExtDisk, HardwareProbe, InquiryInfo, NativeTransport, ObservedDeviceGeometry, PlatformKind,
+    ExtDisk, HardwareProbe, InquiryInfo, NativeReadGeometry, NativeTransport,
+    ObservedDeviceGeometry, PlatformKind,
 };
 
 /// 稳定平台门面下的设备标识推导。
@@ -221,6 +222,41 @@ pub fn fallback_hardware_probe(
 
 pub fn is_system_disk(runner: &dyn crate::ports::CmdRunner, disk: u32) -> bool {
     imp::is_system_disk(runner, disk)
+}
+
+// Explicit opt-in enables discovery of removable disk-image virtual devices.
+// It does not grant write authority to USB or arbitrary block devices.
+#[cfg(target_os = "macos")]
+static INCLUDE_VIRTUAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_include_virtual(enabled: bool) {
+    #[cfg(target_os = "macos")]
+    INCLUDE_VIRTUAL.store(enabled, std::sync::atomic::Ordering::SeqCst);
+    #[cfg(not(target_os = "macos"))]
+    let _ = enabled;
+}
+
+pub fn include_virtual() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        INCLUDE_VIRTUAL.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+pub fn confirmed_virtual_disk_image(runner: &dyn crate::ports::CmdRunner, disk: u32) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        imp::confirmed_virtual_disk_image(runner, disk)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (runner, disk);
+        false
+    }
 }
 
 pub fn list_external_disks(runner: &dyn crate::ports::CmdRunner) -> Vec<ExtDisk> {

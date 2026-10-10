@@ -91,7 +91,8 @@ pub fn option(command_name: &str, action: Option<&str>, name: &str) -> Option<&'
 const EMPTY_OPTIONS: &[OptionSpec] = &[];
 const HELP: OptionSpec = switch("--help");
 
-const LIST_OPTIONS: &[OptionSpec] = &[value("--backup-dir"), HELP];
+const LIST_OPTIONS: &[OptionSpec] = &[value("--backup-dir"), switch("--include-virtual"), HELP];
+const TUI_OPTIONS: &[OptionSpec] = &[switch("--include-virtual"), HELP];
 const DEMO_OPTIONS: &[OptionSpec] = &[value("--scene"), switch("--list-scenes"), HELP];
 const INFO_OPTIONS: &[OptionSpec] = &[value("--disk"), value("--id"), value("--backup-dir"), HELP];
 const INSPECT_OPTIONS: &[OptionSpec] = &[
@@ -179,6 +180,7 @@ const PROVISION_COMMON_OPTIONS: &[OptionSpec] = &[
     switch("--format-boot"),
     switch("--format-share"),
     switch("--format-encrypt"),
+    switch("--preserve-unformatted"),
     value("--boot-label"),
     value("--share-label"),
     value("--encrypt-label"),
@@ -193,15 +195,22 @@ const PROVISION_COMMON_OPTIONS: &[OptionSpec] = &[
     value("--encrypt-max-password-errors"),
     HELP,
 ];
-const PROVISION_PLAN_OPTIONS: &[OptionSpec] = &[];
+const PROVISION_PLAN_OPTIONS: &[OptionSpec] =
+    &[value("--source-backup"), switch("--include-virtual")];
 const PROVISION_IMAGE_OPTIONS: &[OptionSpec] = &[
     value("--out"),
+    switch("--include-virtual"),
+    value("--source-backup"),
     value("--total-sectors"),
     value("--sector-bytes"),
     switch("--synthetic-demo"),
     value("--algorithm"),
 ];
-const PROVISION_WRITE_OPTIONS: &[OptionSpec] = &[switch("--yes"), value("--backup-dir")];
+const PROVISION_WRITE_OPTIONS: &[OptionSpec] = &[
+    switch("--yes"),
+    value("--backup-dir"),
+    switch("--include-virtual"),
+];
 const PROVISION_VERIFY_SOURCE_OPTIONS: &[OptionSpec] = &[value("--backup")];
 
 const PROVISION_ACTIONS: &[ActionSpec] = &[
@@ -222,7 +231,7 @@ const PROVISION_ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "write",
-        summary: "写入物理盘",
+        summary: "向选定USB或虚拟磁盘写入原生制盘计划",
         options: PROVISION_WRITE_OPTIONS,
     },
 ];
@@ -267,15 +276,15 @@ const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "list",
         summary: "查看当前插入的 U 盘",
-        usage: "edpcli list [--backup-dir D]",
+        usage: "edpcli list [--backup-dir D] [--include-virtual]",
         options: LIST_OPTIONS,
         actions: &[],
     },
     CommandSpec {
         name: "tui",
         summary: "交互式 TUI（Vim 键位）",
-        usage: "edpcli tui",
-        options: EMPTY_OPTIONS,
+        usage: "edpcli tui [--include-virtual]",
+        options: TUI_OPTIONS,
         actions: &[],
     },
     CommandSpec {

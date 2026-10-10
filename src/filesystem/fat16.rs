@@ -145,19 +145,22 @@ fn put_u32(dst: &mut [u8], offset: usize, value: u32) {
 }
 
 impl Fat16Driver {
-    /// Generate a full-native-block FAT16 metadata image for a virtual disk.
-    /// Does not enable 4Kn physical formatting or change the legacy 512B writer.
+    /// Build full-native-block FAT16 metadata for the shared provision plan.
+    /// This pure generator cannot grant disk write access or bypass the native
+    /// application's identity pin, write lease, WAL, or verification.
     pub fn build_native_format_plan(
         &self,
         geometry: FilesystemGeometry,
         request: &FormatRequest,
     ) -> Result<NativeFormatPlan, FilesystemError> {
         self.validate_format_request(request)?;
-        if !matches!(geometry.sector_size, 512 | 4096) || geometry.sector_count == 0 {
+        if !super::format::native_fat_sector_bytes_supported(geometry.sector_size)
+            || geometry.sector_count == 0
+        {
             return Err(FilesystemError::for_filesystem(
                 self.kind(),
                 FilesystemErrorKind::InvalidGeometry,
-                "仅允许已认证的 512B/4096B FAT16 虚拟格式化几何",
+                "FAT16仅允许标准512B/1024B/2048B/4096B原生扇区格式化几何",
             ));
         }
         let sector_bytes = u64::from(geometry.sector_size);
@@ -497,7 +500,7 @@ impl FilesystemDriver for Fat16Driver {
 }
 
 /// Shared FAT16 layout solver for 512B and 4Kn. Both paths use native LBAs.
-fn choose_format_geometry_for_sector_size(
+pub(super) fn choose_format_geometry_for_sector_size(
     volume_sectors: u64,
     sector_bytes: u32,
 ) -> Result<(u8, u16), FilesystemError> {

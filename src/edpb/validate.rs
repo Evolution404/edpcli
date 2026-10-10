@@ -5,7 +5,10 @@ pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String>
     super::limits::validate_payload_lengths(
         manifest.artifacts.iter().map(|a| a.storage.stored_length),
     )?;
-    let native_evidence = manifest.schema == "edpb.manifest.v4";
+    let native_evidence = matches!(
+        manifest.schema.as_str(),
+        "edpb.manifest.v4" | "edpb.manifest.v5"
+    );
     let plain = manifest.snapshot.device_state.eq_ignore_ascii_case("plain");
     super::validate_native::validate_schema(manifest)?;
     if manifest.container_version.major != FORMAT_MAJOR {
@@ -161,7 +164,7 @@ pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String>
         let expected_protocol_bytes = 13u64
             .checked_mul(manifest.geometry.logical_sector_size as u64)
             .ok_or_else(|| "EDPB protocol byte length overflow".to_string())?;
-        let required_policy = if native_evidence {
+        let required_policy = if manifest.schema == "edpb.manifest.v4" {
             RestorePolicy::EvidenceOnly
         } else {
             RestorePolicy::Restorable
@@ -266,6 +269,9 @@ pub(super) fn validate_manifest_graph(manifest: &Manifest) -> Result<(), String>
                         == Some(extent.start_lba)
                     && extent.sector_count == 1
             }
+            ("native_partition_header_evidence", "native_partition_header_evidence") => {
+                super::validate_native::authorized_v5_partition_header(manifest, artifact, extent)
+            }
             ("plain_partition_table", _) => plain_metadata,
             _ => false,
         };
@@ -294,7 +300,10 @@ pub(super) fn validate_restore_evidence<'a>(
     manifest: &Manifest,
     mut read: impl FnMut(&str) -> Result<&'a [u8], String>,
 ) -> Result<(), String> {
-    if manifest.schema == "edpb.manifest.v4" {
+    if matches!(
+        manifest.schema.as_str(),
+        "edpb.manifest.v4" | "edpb.manifest.v5"
+    ) {
         return super::validate_native::validate_native_evidence(manifest, &mut read);
     }
     let plain = manifest.snapshot.device_state.eq_ignore_ascii_case("plain");

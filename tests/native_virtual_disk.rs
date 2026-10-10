@@ -1077,10 +1077,20 @@ fn offline_native_plain_image_supports_per_device_512_and_4kn_geometry_without_u
         f.read_exact(&mut bpb).unwrap();
         assert_eq!(u16::from_le_bytes([bpb[11], bpb[12]]), bytes as u16);
         assert_eq!(&bpb[54..62], b"FAT16   ");
+        f.seek(SeekFrom::Start(2048 * bytes as u64)).unwrap();
+        let mut full_boot = vec![0u8; bytes as usize];
+        f.read_exact(&mut full_boot).unwrap();
+        assert_eq!(
+            edpcli::application::filesystem::detect_native_boot_sector(&full_boot, sectors, bytes)
+                .unwrap(),
+            Some(FilesystemKind::Fat16)
+        );
         assert!(export_native_plain_image(&path, &plan).is_err());
         std::fs::remove_file(path).unwrap();
     };
     make(512);
+    make(1024);
+    make(2048);
     make(4096);
 }
 
@@ -1097,7 +1107,7 @@ fn offline_native_plain_image_rejects_unknown_geometry_overlap_and_existing_file
         filesystem: FilesystemKind::Fat16,
         volume_label: "NATIVE".into(),
     };
-    for invalid in [0, 256, 1024, 2048, 8192] {
+    for invalid in [0, 256, 511, 513, 1536, 2560, 8192] {
         assert!(plan_native_plain_image(100_000, invalid, std::slice::from_ref(&small)).is_err());
     }
     let mut duplicated = small.clone();
@@ -1206,5 +1216,108 @@ fn native_virtual_reopen_verifier_rejects_post_sync_corruption_truncation_and_sy
         }
         assert!(verify_native_virtual_image(std::path::Path::new("/dev/disk99"), &plan).is_err());
         std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn generic_native_sparse_file_write_reopen_readback_all_512_multiples() {
+    use edpcli::application::filesystem::NativeFilesystemWrite;
+    use edpcli::application::provision::native_image::{
+        export_native_plain_image, verify_native_virtual_image,
+    };
+    for sector_bytes in [512u32, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
+        let mut mbr = vec![0u8; sector_bytes as usize];
+        mbr[510..512].copy_from_slice(&[0x55, 0xaa]);
+        let data = (0..sector_bytes)
+            .map(|byte| (byte as u8).wrapping_mul(17).wrapping_add(23))
+            .collect::<Vec<_>>();
+        let plan = NativeVirtualDiskPlan {
+            total_sectors: 1000,
+            sector_bytes,
+            writes: vec![
+                NativeFilesystemWrite {
+                    relative_lba: 999,
+                    data,
+                },
+                NativeFilesystemWrite {
+                    relative_lba: 0,
+                    data: mbr,
+                },
+            ],
+        };
+        let path = std::env::temp_dir().join(format!(
+            "edpcli-generic-native-sparse-{}-{}-{}.img",
+            std::process::id(),
+            sector_bytes,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        assert!(!path.exists());
+        export_native_plain_image(&path, &plan).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().len(),
+            1000 * u64::from(sector_bytes)
+        );
+        verify_native_virtual_image(&path, &plan).unwrap();
+        std::fs::remove_file(&path).unwrap();
+    }
+}
+
+#[test]
+fn fat_and_exfat_native_formatters_follow_filesystem_byte_per_sector_rules() {
+    use edpcli::application::filesystem::detect_native_boot_sector;
+    for sector_bytes in [512u32, 1024, 2048, 4096] {
+        for (kind, count) in [
+            (FilesystemKind::Fat16, 16_384u64),
+            (FilesystemKind::Fat32, 90_000u64),
+            (FilesystemKind::ExFat, 90_000u64),
+        ] {
+            let geometry = FilesystemGeometry::new(2048, count, sector_bytes);
+            let request = FormatRequest {
+                filesystem: kind,
+                volume_label: Some("NATIVE".into()),
+                volume_serial: Some(0x2233_4455),
+            };
+            let plan = match kind {
+                FilesystemKind::Fat16 => FAT16_DRIVER.build_native_format_plan(geometry, &request),
+                FilesystemKind::Fat32 => FAT32_DRIVER.build_native_format_plan(geometry, &request),
+                FilesystemKind::ExFat => EXFAT_DRIVER.build_native_format_plan(geometry, &request),
+                _ => unreachable!(),
+            }
+            .unwrap_or_else(|err| panic!("{sector_bytes}B {kind:?} {err}"));
+            assert!(plan
+                .writes
+                .iter()
+                .all(|w| w.data.len() == sector_bytes as usize));
+            let boot = &plan
+                .writes
+                .iter()
+                .find(|w| w.relative_lba == 0)
+                .unwrap()
+                .data;
+            assert_eq!(
+                detect_native_boot_sector(boot, count, sector_bytes).unwrap(),
+                Some(kind),
+                "{sector_bytes}B {kind:?} newly formatted boot detection"
+            );
+        }
+    }
+    for sector_bytes in [1536u32, 2560, 3072, 8192] {
+        let request = FormatRequest {
+            filesystem: FilesystemKind::ExFat,
+            volume_label: Some("UNSUPPORTED".into()),
+            volume_serial: Some(0x1234_5678),
+        };
+        assert!(
+            EXFAT_DRIVER
+                .build_native_format_plan(
+                    FilesystemGeometry::new(2048, 90_000, sector_bytes),
+                    &request
+                )
+                .is_err(),
+            "{sector_bytes}B geometry should be valid for native IO but not a standard exFAT BPB"
+        );
     }
 }

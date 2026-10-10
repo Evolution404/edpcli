@@ -122,6 +122,10 @@ pub(super) fn commit_provision_with_progress(
             commit_new_provision_with_progress(runner, dev, prepared, progress)
                 .map(ProvisionCommitOutcome::Official)
         }
+        PreparedProvision::Native(_) => Err(err(
+            EXIT_TARGET,
+            "此原生计划必须通过统一原生写会话提交，不能使用旧512B SectorDev",
+        )),
         PreparedProvision::Plain(prepared) => {
             let partition_count = prepared.plan.partitions.len();
             commit_plain_provision_with_progress(runner, dev, prepared, progress)

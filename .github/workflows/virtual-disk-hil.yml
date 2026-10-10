@@ -6,6 +6,7 @@ on:
       - "src/**"
       - "tests/virtual_disk_hil.rs"
       - "tests/plain_macos_virtual_hil.rs"
+      - "tests/native_macos_4kn_virtual_hil.rs"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -21,6 +22,7 @@ on:
       - "src/**"
       - "tests/virtual_disk_hil.rs"
       - "tests/plain_macos_virtual_hil.rs"
+      - "tests/native_macos_4kn_virtual_hil.rs"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -105,9 +107,19 @@ jobs:
       - name: Run macOS protocol virtual-disk HIL
         shell: bash
         run: bash scripts/ci/macos-virtual-disk-hil.sh
+      - name: Run macOS 4096B native-block virtual-disk HIL
+        shell: bash
+        run: bash scripts/ci/macos-native-4kn-virtual-disk-hil.sh
       - name: Run macOS Plain virtual-disk HIL
         shell: bash
         run: bash scripts/ci/macos-plain-virtual-disk-hil.sh
+      - name: Run unified formal CLI 512B/4Kn virtual provisioning HIL
+        shell: bash
+        run: bash scripts/ci/macos-cli-native-virtual-hil.sh
+      - name: Run 4Kn source-target mode matrix HIL
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+        shell: bash
+        run: bash scripts/ci/macos-native-mode-matrix-hil.sh
 
   windows:
     name: Windows ${{ matrix.arch }} VHD / raw-write-lock-dismount-restore

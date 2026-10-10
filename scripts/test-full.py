@@ -406,7 +406,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--workers",
         type=int,
-        default=int(os.environ.get("EDPCLI_TEST_WORKERS", "2")),
+        default=int(os.environ.get("EDPCLI_TEST_WORKERS", "3")),
     )
     parser.add_argument(
         "--test-threads",

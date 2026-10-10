@@ -111,7 +111,8 @@ impl AppState {
                     Detail::danger("目标布局尚未通过校验"),
                 ];
             };
-            let Ok(mut parts) = resolved.draft_partitions(crate::common::SECTOR as u64) else {
+            let Ok(mut parts) = resolved.draft_partitions(u64::from(resolved.logical_sector_bytes))
+            else {
                 return vec![
                     Detail::muted(usable_summary),
                     Detail::danger("目标分区几何无效"),
@@ -190,10 +191,11 @@ impl AppState {
         }
 
         rows.push(Detail::muted(usable_summary));
-        if model.logical_sector_bytes == 4096 {
-            rows.push(Detail::warning(
-                "4Kn 原生布局 · 来源密码可独立只读验证 · 实体写盘仍禁用",
-            ));
+        if model.logical_sector_bytes != crate::common::SECTOR as u32 {
+            rows.push(Detail::warning(format!(
+                "{}B 原生布局 · 来源密码独立验证 · 正式写入将再次核验身份、几何及WAL",
+                model.logical_sector_bytes
+            )));
         }
         if let Some(note) = super::mode2_geometry_note::editor_note(self) {
             rows.push(Detail::accent(format!("说明  {note}")));
@@ -309,7 +311,9 @@ impl AppState {
 
         if self.provision.kind != ProvisionKind::Plain {
             if let Ok((resolved, _)) = self.provision_resolved_prefill() {
-                if let Ok(parts) = resolved.draft_partitions(crate::common::SECTOR as u64) {
+                if let Ok(parts) =
+                    resolved.draft_partitions(u64::from(resolved.logical_sector_bytes))
+                {
                     match crate::provision::validate_target_geometry(
                         &parts,
                         resolved.usable_end_lba,

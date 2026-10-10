@@ -101,6 +101,12 @@ pub fn run() -> i32 {
             return EXIT_USAGE;
         }
     };
+    // The opt-in affects eligible device discovery for all provisioning
+    // subcommands, while each commit revalidates the selected target.
+    if matches!(&parsed, Parsed::Provision(_)) && argv.iter().any(|arg| arg == "--include-virtual")
+    {
+        crate::platform::set_include_virtual(true);
+    }
     let runner = SysRunner;
     match parsed {
         Parsed::Help { topic } => {
@@ -126,8 +132,17 @@ pub fn run() -> i32 {
             }
             EXIT_OK
         }
-        Parsed::List { backup_dir } => list_flow(&runner, backup_dir),
-        Parsed::Tui => crate::tui::run(),
+        Parsed::List {
+            backup_dir,
+            include_virtual,
+        } => {
+            crate::platform::set_include_virtual(include_virtual);
+            list_flow(&runner, backup_dir)
+        }
+        Parsed::Tui { include_virtual } => {
+            crate::platform::set_include_virtual(include_virtual);
+            crate::tui::run()
+        }
         Parsed::Demo { scene, list_scenes } => crate::tui::demo::run(scene.as_deref(), list_scenes),
         Parsed::Backup {
             action,

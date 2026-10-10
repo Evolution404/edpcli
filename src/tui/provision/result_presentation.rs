@@ -16,6 +16,21 @@ pub(crate) fn partition_action_label(partition: &ProvisionResultPartition) -> &'
     }
 }
 
+/// A native commit records the full filesystem initialization in its WAL,
+/// then verifies every written native block. The legacy per-partition format
+/// reports are intentionally absent, not failures or unknown statuses.
+fn native_write_set_verified(provision: &ProvisionState) -> bool {
+    use crate::application::provision::{ProvisionCommitOutcome, ProvisionExecutionStatus};
+    provision.result_status == Some(ProvisionExecutionStatus::Success)
+        && provision.result_outcome.as_ref().is_some_and(|outcome| {
+            outcome.backup.path.extension().is_some_and(|ext| ext == "wal")
+                && matches!(
+                    &outcome.commit,
+                    ProvisionCommitOutcome::Official(report) if report.provision_succeeded && report.formats.is_empty()
+                )
+        })
+}
+
 pub(crate) fn partition_filesystem_label(
     provision: &ProvisionState,
     plan: &crate::tui::state::ProvisionResultSnapshot,
@@ -40,6 +55,7 @@ pub(crate) fn partition_filesystem_label(
                 && plan.target != crate::provision::ProvisionTarget::Plain =>
         {
             !partition.selected_for_format
+                || native_write_set_verified(provision)
                 || report
                     .formats
                     .iter()
@@ -99,6 +115,12 @@ pub(crate) fn partition_final_status(
     }
 
     if partition.selected_for_format {
+        if native_write_set_verified(provision) {
+            return (
+                "已初始化 · 原生回读通过".into(),
+                crate::tui::ui::ResultTone::Success,
+            );
+        }
         if let Some(role) = partition.role {
             if let Some(format) = report.formats.iter().find(|item| item.role == role) {
                 return match &format.result {
@@ -141,4 +163,72 @@ pub(crate) fn partition_final_status(
             .into(),
         crate::tui::ui::ResultTone::Success,
     )
+}
+
+#[cfg(test)]
+mod native_result_tests {
+    use super::*;
+    use crate::application::provision::{
+        ProvisionCommitOutcome, ProvisionCommitReport, ProvisionExecutionStatus,
+        ProvisionWriteOutcome,
+    };
+    use crate::provision::{OfficialPartitionMode, PartitionRole, ProvisionTarget};
+
+    #[test]
+    fn native_wal_readback_confirms_each_formatted_partition_but_not_unverified_plans() {
+        let snapshot = crate::tui::state::ProvisionResultSnapshot {
+            disk: 5,
+            target: ProvisionTarget::Official(OfficialPartitionMode::DefaultThreePartition),
+            total_bytes: 4_294_967_296,
+            logical_sector_bytes: 4096,
+            lce_extent: Some((1_044_001, 1)),
+            partitions: vec![crate::tui::state::ProvisionResultPartition {
+                role: Some(PartitionRole::Boot),
+                filesystem: Some(crate::filesystem::FilesystemKind::Fat12),
+                start_lba: 63,
+                size_bytes: 2497 * 4096,
+                selected_for_format: true,
+                disposition: Some(crate::provision::RegionDisposition::Rebuild),
+            }],
+        };
+        let partition = &snapshot.partitions[0];
+        let mut state = ProvisionState::default();
+        assert_eq!(
+            partition_final_status(&state, &snapshot, partition).0,
+            "未确认"
+        );
+        state.result_status = Some(ProvisionExecutionStatus::Success);
+        state.result_outcome = Some(ProvisionWriteOutcome {
+            backup: crate::application::post_restore::MetadataBackupReport {
+                path: std::path::PathBuf::from("native-provision-disk5-test.wal"),
+                partition_count: 1,
+                edp_protocol_saved: true,
+            },
+            commit: ProvisionCommitOutcome::Official(ProvisionCommitReport {
+                provision_succeeded: true,
+                formats: vec![],
+            }),
+            warnings: vec![],
+        });
+        assert_eq!(
+            partition_final_status(&state, &snapshot, partition).0,
+            "已初始化 · 原生回读通过"
+        );
+        assert_eq!(
+            partition_filesystem_label(&state, &snapshot, partition),
+            "FAT12"
+        );
+        // An EDPB backup and no per-partition reports are not native WAL proof.
+        state.result_outcome.as_mut().unwrap().backup.path = "old-backup.edpb".into();
+        assert_eq!(
+            partition_final_status(&state, &snapshot, partition).0,
+            "未确认"
+        );
+        state.result_outcome.as_mut().unwrap().backup.path = "native-provision-test.wal".into();
+        state.result_status = Some(ProvisionExecutionStatus::FatalFailure);
+        assert_eq!(
+            partition_final_status(&state, &snapshot, partition).0,
+            "未确认"
+        );
+    }
 }

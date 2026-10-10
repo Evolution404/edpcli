@@ -19,7 +19,7 @@ pub fn apply_target_geometry_overrides(
     overrides: TargetGeometryOverrides,
 ) -> Result<ProvisionPrefill, String> {
     let prefill = apply_target_geometry_overrides_draft(prefill, source, overrides)?;
-    prefill.target_partitions(512)?;
+    prefill.target_partitions(u64::from(prefill.logical_sector_bytes))?;
     Ok(prefill)
 }
 

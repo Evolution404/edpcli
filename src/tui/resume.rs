@@ -20,6 +20,9 @@ pub fn resume_argv(intent: &state::WriteIntent) -> Vec<String> {
         RESUME_DISK_FLAG.to_string(),
         crate::application::pin_disk_selector(intent.disk),
     ];
+    if crate::application::include_virtual_disks() {
+        argv.push("--include-virtual".to_string());
+    }
     if let Some(path) = &intent.backup {
         argv.push(RESUME_BACKUP_FLAG.to_string());
         argv.push(path.to_string_lossy().into_owned());
@@ -96,6 +99,7 @@ pub fn parse_resume_args(argv: &[String]) -> Result<Option<state::WriteIntent>, 
                 pin.validate().map_err(|error| format!("错误: {error}"))?;
                 identity_pin = Some(pin);
             }
+            "--include-virtual" => {}
             other => return Err(format!("错误: tui 不认识内部 resume 参数 {other}")),
         }
         i += 1;

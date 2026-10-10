@@ -10,7 +10,7 @@ impl AppState {
         };
         use crate::provision::{KeyDomainRole, PartitionRole};
         let (resolved, source) = self.provision_resolved_prefill()?;
-        let parts = resolved.draft_partitions(crate::common::SECTOR as u64)?;
+        let parts = resolved.draft_partitions(u64::from(resolved.logical_sector_bytes))?;
         let extents = self
             .selected_device()
             .and_then(|row| row.partition_table.as_ref())

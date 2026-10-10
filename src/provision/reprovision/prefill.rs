@@ -12,6 +12,8 @@ pub struct ProvisionPrefill {
     pub share_start_lba: Option<u64>,
     pub encrypt_start_lba: Option<u64>,
     pub usable_end_lba: u64,
+    /// Original device native geometry; immutable throughout the plan.
+    pub logical_sector_bytes: u32,
 }
 
 impl ProvisionPrefill {
@@ -19,8 +21,11 @@ impl ProvisionPrefill {
         &self,
         sector_size: u64,
     ) -> Result<Vec<TargetPartitionGeometry>, String> {
-        if sector_size != 512 {
-            return Err("only 512-byte sector targets are supported".into());
+        if !crate::domain::hardware::valid_native_sector_bytes(
+            u32::try_from(sector_size).map_err(|_| "native logical block size exceeds u32")?,
+        ) || sector_size != u64::from(self.logical_sector_bytes)
+        {
+            return Err("target geometry must match its native logical block size".into());
         }
         let mut out = Vec::new();
         let mut push =
@@ -42,7 +47,25 @@ impl ProvisionPrefill {
                     self.boot_start_lba.ok_or("missing boot start")?,
                     self.boot.ok_or("missing boot capacity")?,
                     false,
-                    Some(FilesystemKind::Fat16),
+                    Some(
+                        if crate::domain::hardware::native_sector_capability(
+                            self.logical_sector_bytes,
+                        )
+                        .is_some_and(|capability| capability.fat_exfat_format)
+                        {
+                            crate::filesystem::select_native_oem_boot_fat(
+                                crate::filesystem::FilesystemGeometry::new(
+                                    self.boot_start_lba.ok_or("missing boot start")?,
+                                    self.boot.ok_or("missing boot capacity")?.sectors(),
+                                    self.logical_sector_bytes,
+                                ),
+                            )?
+                        } else {
+                            // Pure protocol geometry accepts positive 512B multiples.
+                            // Uncertified sectors must NOT enter native FAT writes.
+                            FilesystemKind::Fat16
+                        },
+                    ),
                 );
                 push(
                     PartitionRole::Share,
@@ -104,7 +127,25 @@ impl ProvisionPrefill {
                     self.boot_start_lba.ok_or("missing boot start")?,
                     self.boot.ok_or("missing boot capacity")?,
                     false,
-                    Some(FilesystemKind::Fat16),
+                    Some(
+                        if crate::domain::hardware::native_sector_capability(
+                            self.logical_sector_bytes,
+                        )
+                        .is_some_and(|capability| capability.fat_exfat_format)
+                        {
+                            crate::filesystem::select_native_oem_boot_fat(
+                                crate::filesystem::FilesystemGeometry::new(
+                                    self.boot_start_lba.ok_or("missing boot start")?,
+                                    self.boot.ok_or("missing boot capacity")?.sectors(),
+                                    self.logical_sector_bytes,
+                                ),
+                            )?
+                        } else {
+                            // Pure protocol geometry accepts positive 512B multiples.
+                            // Uncertified sectors must NOT enter native FAT writes.
+                            FilesystemKind::Fat16
+                        },
+                    ),
                 );
                 push(
                     PartitionRole::Share,
@@ -146,8 +187,10 @@ pub fn prefill_for_target_mode(
     usable_end_lba: u64,
     sector_size: u64,
 ) -> Result<ProvisionPrefill, String> {
-    if sector_size != 512 {
-        return Err("only 512-byte sector targets are supported".into());
+    let logical_bytes =
+        u32::try_from(sector_size).map_err(|_| "native logical block size exceeds u32")?;
+    if !crate::domain::hardware::valid_native_sector_bytes(logical_bytes) {
+        return Err("native logical block size must be a positive multiple of 512".into());
     }
     let first = OFFICIAL_PARTITION_START_SECTOR;
     if usable_end_lba <= first {
@@ -161,12 +204,12 @@ pub fn prefill_for_target_mode(
         OfficialPartitionMode::DefaultThreePartition
         | OfficialPartitionMode::IntranetExtranetDualPartition => {
             source_capacity(boot_old)?.or(Some(exact(
-                DEFAULT_MODE0_BOOT_SECTORS,
+                official_boot_sectors_from_end_mib(DEFAULT_OEM_BOOT_END_MIB, sector_size)?,
                 CapacitySource::SystemDefault,
             )?))
         }
         OfficialPartitionMode::WholeDiskEncrypted => Some(exact(
-            WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES / sector_size,
+            WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES.div_ceil(sector_size),
             CapacitySource::SystemDefault,
         )?),
         OfficialPartitionMode::BootShareCombined => None,
@@ -189,12 +232,31 @@ pub fn prefill_for_target_mode(
     });
     let encrypt = if matches!(mode, OfficialPartitionMode::IntranetExtranetDualPartition) {
         None
+    } else if let Some(old) = compatible_encrypt_old {
+        source_capacity(Some(old))?
     } else {
-        source_capacity(compatible_encrypt_old)?.or(Some(CapacityInput::from_quick(
-            1024,
+        // A default 1024MiB encrypted area is too large for a 512MiB test
+        // disk (and some real small media). Only NEW areas may be fitted to
+        // the available native geometry. Never resize an existing area.
+        let available = usable_end_lba
+            .checked_sub(boot_end.max(first))
+            .ok_or("device too small for the boot partition")?;
+        // Preserve the OEM Quick capacity intent (including TUI input mode);
+        // round DOWN to whole MiB so no new default crosses the disk boundary.
+        let proposed_mib = (available / 2)
+            .checked_mul(sector_size)
+            .ok_or("native capacity overflow")?
+            / (1024 * 1024);
+        let proposed_mib = proposed_mib.min(1024);
+        if proposed_mib == 0 {
+            return Err("device has no space for encrypted partition".into());
+        }
+        Some(CapacityInput::from_quick_native(
+            proposed_mib,
             QuickCapacityUnit::MiB,
             CapacitySource::SystemDefault,
-        )?))
+            logical_bytes,
+        )?)
     };
     let encrypt_start = if encrypt.is_none() {
         None
@@ -255,10 +317,16 @@ pub fn prefill_for_target_mode(
         if source.is_some() {
             Some(exact(available, CapacitySource::ExistingBoundary)?)
         } else {
-            Some(CapacityInput::from_quick(
-                available / 2048,
+            // Retain legacy whole-MiB default truncation in byte units.
+            let whole_mib = available
+                .checked_mul(sector_size)
+                .ok_or("share capacity byte multiplication overflows")?
+                / (1024 * 1024);
+            Some(CapacityInput::from_quick_native(
+                whole_mib,
                 QuickCapacityUnit::MiB,
                 CapacitySource::SystemDefault,
+                logical_bytes,
             )?)
         }
     };
@@ -292,6 +360,7 @@ pub fn prefill_for_target_mode(
         share_start_lba: share_start,
         encrypt_start_lba: encrypt_start,
         usable_end_lba,
+        logical_sector_bytes: logical_bytes,
     };
     result.target_partitions(sector_size)?;
     Ok(result)

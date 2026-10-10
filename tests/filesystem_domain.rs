@@ -556,7 +556,7 @@ fn fat16_native_writer_refuses_unvalidated_geometry_or_overflow() {
         volume_label: None,
         volume_serial: Some(7),
     };
-    for sector_size in [0, 1024, 2048, 8192] {
+    for sector_size in [0, 256, 511, 513, 1536, 2560, 3072, 8192] {
         let err = FAT16_DRIVER
             .build_native_format_plan(FilesystemGeometry::new(63, 16384, sector_size), &request)
             .unwrap_err();
@@ -733,7 +733,7 @@ fn fat32_native_formatter_rejects_noncertified_sizes_and_bounds() {
         volume_label: None,
         volume_serial: Some(7),
     };
-    for bytes in [0, 256, 1024, 2048, 8192] {
+    for bytes in [0, 256, 511, 513, 1536, 2560, 3072, 8192] {
         assert!(FAT32_DRIVER
             .build_native_format_plan(FilesystemGeometry::new(63, 70_000, bytes), &request)
             .is_err());
@@ -943,7 +943,7 @@ fn exfat_native_4kn_geometry_and_legacy_write_guards() {
         volume_label: Some("DATA".into()),
         volume_serial: Some(7),
     };
-    for bytes in [0, 256, 1024, 2048, 8192] {
+    for bytes in [0, 256, 511, 513, 1536, 2560, 3072, 8192] {
         assert!(EXFAT_DRIVER
             .build_native_format_plan(FilesystemGeometry::new(63, 32_768, bytes), &request)
             .is_err());
@@ -1112,7 +1112,7 @@ fn fat12_native_virtual_rejects_uncertified_sizes_and_overflow() {
         volume_label: None,
         volume_serial: Some(7),
     };
-    for bytes in [0, 256, 1024, 2048, 8192] {
+    for bytes in [0, 256, 511, 513, 1536, 2560, 3072, 8192] {
         assert!(FAT12_DRIVER
             .build_native_format_plan(FilesystemGeometry::new(63, 2497, bytes), &request)
             .is_err());

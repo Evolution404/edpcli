@@ -649,7 +649,7 @@ fn cli_uses_application_boundary_for_raw_disk_access() {
             "cli must acquire raw disks through application service: {forbidden}"
         );
     }
-    assert!(source.contains("prepare_provision_on_disk"));
+    assert!(source.contains("native_flow::prepare_native_provision_on_disk"));
     assert!(source.contains("commit_provision_with_backup_on_disk"));
     assert!(source.contains("backup_create_on_disk"));
     assert!(source.contains("restore_on_disk"));

@@ -358,6 +358,22 @@ pub(super) fn usb_vid_pid(runner: &dyn CmdRunner, disk: u32) -> (String, String)
     ("xxxx".into(), "xxxx".into())
 }
 
+pub(super) fn confirmed_virtual_disk_image(runner: &dyn CmdRunner, disk: u32) -> bool {
+    let Some(info) = disk_info(runner, disk) else {
+        return false;
+    };
+    info.get("WholeDisk").and_then(|v| v.as_bool()) == Some(true)
+        && info.get("Internal").and_then(|v| v.as_bool()) == Some(false)
+        && info.get("VirtualOrPhysical").and_then(|v| v.as_str()) == Some("Virtual")
+        && info.get("BusProtocol").and_then(|v| v.as_str()) == Some("Disk Image")
+        && info
+            .get("DeviceBlockSize")
+            .and_then(|v| v.as_int())
+            .is_some_and(|v| v >= 512 && v % 512 == 0)
+        && physical_disk_size_bytes(&info).is_some_and(|size| size >= 4096 && size % 512 == 0)
+        && !is_system_disk(runner, disk)
+}
+
 fn external_disk_info(runner: &dyn CmdRunner, disk: u32) -> Option<ExtDisk> {
     let info = disk_info(runner, disk)?;
     let whole = info
@@ -369,7 +385,10 @@ fn external_disk_info(runner: &dyn CmdRunner, disk: u32) -> Option<ExtDisk> {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let virtual_disk = info.get("VirtualOrPhysical").and_then(|v| v.as_str()) == Some("Virtual");
-    if !whole || internal || virtual_disk {
+    if !whole || internal {
+        return None;
+    }
+    if virtual_disk && !(super::include_virtual() && confirmed_virtual_disk_image(runner, disk)) {
         return None;
     }
     let proto = info

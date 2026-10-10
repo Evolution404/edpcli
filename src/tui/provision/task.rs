@@ -135,8 +135,13 @@ impl TaskHub {
         std::thread::spawn(move || {
             let result = catch_unwind(AssertUnwindSafe(|| {
                 let runner = system_runner();
-                crate::application::provision::prepare_provision_on_disk(&runner, disk, &request)
-                    .map_err(crate::application::error::OperationError::from)
+                crate::application::provision::native_flow::prepare_native_provision_on_disk(
+                    &runner, disk, &request,
+                )
+                .map(|native| {
+                    crate::application::provision::PreparedProvision::Native(Box::new(native))
+                })
+                .map_err(crate::application::error::OperationError::from)
             }))
             .unwrap_or_else(|payload| {
                 Err(format!("制盘计划后台任务异常终止: {}", panic_message(payload)).into())

@@ -75,10 +75,9 @@ fn parse_plain_partition(
     })
 }
 
-fn parse_provision_opts(
-    rest: &[String],
-    action: &str,
-) -> Result<(ProvisionNewOpts, Option<String>, bool, Option<String>), String> {
+type ProvisionParsedOpts = (ProvisionNewOpts, Option<String>, bool, Option<String>, bool);
+
+fn parse_provision_opts(rest: &[String], action: &str) -> Result<ProvisionParsedOpts, String> {
     let mut disk = None;
     let mut target = None;
     let mut plain_partitions = Vec::new();
@@ -103,6 +102,7 @@ fn parse_provision_opts(
     let mut format_boot = false;
     let mut format_share = false;
     let mut format_encrypt = false;
+    let mut preserve_unformatted = false;
     let mut boot_label = None;
     let mut share_label = None;
     let mut encrypt_label = None;
@@ -115,6 +115,7 @@ fn parse_provision_opts(
     let mut max_encrypt_password_errors = None;
     let mut out = None;
     let mut backup_dir = None;
+    let mut include_virtual = false;
     let mut yes = false;
     let mut i = 0usize;
     while i < rest.len() {
@@ -266,6 +267,11 @@ fn parse_provision_opts(
             "--format-boot" => set_switch(&mut format_boot, &rest[i], "--format-boot")?,
             "--format-share" => set_switch(&mut format_share, &rest[i], "--format-share")?,
             "--format-encrypt" => set_switch(&mut format_encrypt, &rest[i], "--format-encrypt")?,
+            "--preserve-unformatted" => set_switch(
+                &mut preserve_unformatted,
+                &rest[i],
+                "--preserve-unformatted",
+            )?,
             "--boot-label" => {
                 let value = take_value(rest, &mut i, "--boot-label")?;
                 set_once(&mut boot_label, value, "--boot-label")?;
@@ -374,6 +380,7 @@ fn parse_provision_opts(
                 let value = take_value(rest, &mut i, "--backup-dir")?;
                 set_once(&mut backup_dir, value, "--backup-dir")?;
             }
+            "--include-virtual" => set_switch(&mut include_virtual, &rest[i], "--include-virtual")?,
             "--yes" => set_switch(&mut yes, &rest[i], "--yes")?,
             other => return Err(format!("错误: provision 不认识选项 {other}")),
         }
@@ -411,6 +418,7 @@ fn parse_provision_opts(
             || format_boot
             || format_share
             || format_encrypt
+            || preserve_unformatted
             || boot_label.is_some()
             || share_label.is_some()
             || encrypt_label.is_some()
@@ -453,6 +461,7 @@ fn parse_provision_opts(
                 format_boot: false,
                 format_share: false,
                 format_encrypt: false,
+                preserve_unformatted: false,
                 boot_label: String::new(),
                 share_label: String::new(),
                 encrypt_label: String::new(),
@@ -467,6 +476,7 @@ fn parse_provision_opts(
             out,
             yes,
             backup_dir,
+            include_virtual,
         ));
     }
     if !plain_partitions.is_empty() {
@@ -504,15 +514,17 @@ fn parse_provision_opts(
             dept: dept.unwrap_or_default(),
             label: label.unwrap_or_default(),
             share_source_password: share_source_password.unwrap_or_default(),
-            share_target_password: share_target_password
-                .unwrap_or_else(|| crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.into()),
+            // Absent target password means "unchanged", not "reset to default".
+            // A genuinely new/rebuilt partition falls back to the OEM default
+            // inside the shared native provision planner.
+            share_target_password: share_target_password.unwrap_or_default(),
             encrypt_source_password: encrypt_source_password.unwrap_or_default(),
-            encrypt_target_password: encrypt_target_password
-                .unwrap_or_else(|| crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.into()),
+            encrypt_target_password: encrypt_target_password.unwrap_or_default(),
             prompt_passwords,
             format_boot,
             format_share,
             format_encrypt,
+            preserve_unformatted,
             boot_label: boot_label.unwrap_or_else(|| "启动区".into()),
             share_label: share_label.unwrap_or_else(|| "交换区".into()),
             encrypt_label: encrypt_label.unwrap_or_else(|| "保密区".into()),
@@ -527,6 +539,7 @@ fn parse_provision_opts(
         out,
         yes,
         backup_dir,
+        include_virtual,
     ))
 }
 
@@ -641,9 +654,10 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
         return Err("错误: provision 需要动作 plan / image / write".into());
     };
     let tail = &rest[1..];
-    if action == "verify-source" {
+    if matches!(action, "verify-source" | "restore-preview") {
         let mut disk = None;
         let mut backup = None;
+        let mut include_virtual = false;
         let mut i = 0;
         while i < tail.len() {
             match flag_name(&tail[i]) {
@@ -655,13 +669,82 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
                     let arg = take_value(tail, &mut i, "--backup")?;
                     set_once(&mut backup, arg, "--backup")?;
                 }
-                other => return Err(format!("错误: verify-source 不认识选项 {other}")),
+                "--include-virtual" => {
+                    set_switch(&mut include_virtual, &tail[i], "--include-virtual")?;
+                }
+                other => return Err(format!("错误: {action} 不认识选项 {other}")),
             }
             i += 1;
         }
-        return Ok(Parsed::Provision(ProvisionAction::VerifySource {
-            disk: disk.ok_or("错误: verify-source 必须提供 --disk N")?,
-            backup: backup.ok_or("错误: verify-source 必须提供 --backup FILE")?,
+        let disk = disk.ok_or_else(|| format!("错误: {action} 必须提供 --disk N"))?;
+        let backup = backup.ok_or_else(|| format!("错误: {action} 必须提供 --backup FILE"))?;
+        let action = if action == "restore-preview" {
+            ProvisionAction::NativeRestorePreview { disk, backup }
+        } else {
+            ProvisionAction::VerifySource { disk, backup }
+        };
+        return Ok(Parsed::Provision(action));
+    }
+    // Source EDPB is read-only provenance input. Target geometry, passwords,
+    // and formatting intent go through exactly the ordinary native planner.
+    if action == "plan" && tail.iter().any(|a| flag_name(a) == "--source-backup") {
+        let mut backup = None;
+        let mut ordinary = Vec::with_capacity(tail.len());
+        let mut i = 0;
+        while i < tail.len() {
+            if flag_name(&tail[i]) == "--source-backup" {
+                let value = take_value(tail, &mut i, "--source-backup")?;
+                set_once(&mut backup, value, "--source-backup")?;
+            } else {
+                ordinary.push(tail[i].clone());
+            }
+            i += 1;
+        }
+        let (opts, out, yes, backup_dir, _) = parse_provision_opts(&ordinary, "plan")?;
+        if out.is_some() || yes || backup_dir.is_some() {
+            return Err("错误: 来源认证计划不接受--out、--yes或--backup-dir".into());
+        }
+        if opts.disk.is_none() {
+            return Err("错误: --source-backup来源认证计划必须指定--disk N".into());
+        }
+        return Ok(Parsed::Provision(ProvisionAction::SourceBackedPlan {
+            opts: Box::new(opts),
+            backup: backup.ok_or("错误: 必须提供--source-backup FILE.edpb")?,
+        }));
+    }
+    if action == "image" && tail.iter().any(|a| flag_name(a) == "--source-backup") {
+        let mut backup = None;
+        let mut out = None;
+        let mut target = None;
+        let mut i = 0;
+        while i < tail.len() {
+            match flag_name(&tail[i]) {
+                "--source-backup" => {
+                    let value = take_value(tail, &mut i, "--source-backup")?;
+                    set_once(&mut backup, value, "--source-backup")?;
+                }
+                "--out" => {
+                    let value = take_value(tail, &mut i, "--out")?;
+                    set_once(&mut out, value, "--out")?;
+                }
+                "--target" => {
+                    let value = take_value(tail, &mut i, "--target")?;
+                    set_once(&mut target, value, "--target")?;
+                }
+                other => {
+                    return Err(format!(
+                        "错误: 4Kn离线来源转换不接受 {other}；禁止--disk、密码或实体写入参数"
+                    ))
+                }
+            }
+            i += 1;
+        }
+        if target.as_deref() != Some("mode1") {
+            return Err("错误: 来源备份离线转换只接受 --target mode1".into());
+        }
+        return Ok(Parsed::Provision(ProvisionAction::NativeMode1BackupImage {
+            backup: backup.ok_or("错误: 缺少 --source-backup EDPB")?,
+            out: out.ok_or("错误: 缺少 --out FILE")?,
         }));
     }
     // Explicit native geometry opts choose the isolated offline-only image
@@ -675,7 +758,7 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
     }
     match action {
         "plan" | "image" | "write" => {
-            let (opts, out, yes, backup_dir) = parse_provision_opts(tail, action)?;
+            let (opts, out, yes, backup_dir, include_virtual) = parse_provision_opts(tail, action)?;
             match action {
                 "plan" => {
                     if out.is_some() || yes || backup_dir.is_some() {
@@ -703,6 +786,7 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
                         opts: Box::new(opts),
                         yes,
                         backup_dir,
+                        include_virtual,
                     }))
                 }
                 _ => unreachable!(),

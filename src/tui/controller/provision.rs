@@ -227,6 +227,16 @@ pub(super) fn dispatch_provision(
             TuiAction::PageDown => {
                 move_provision(state, viewport_height.max(1) as isize, viewport_height)
             }
+            TuiAction::Activate if state.provision().native_geometry_review.is_some() => {
+                state.set_warning_notice("原生只读草稿尚未通过独立来源认证与物理写入门禁");
+                ActionOutcome::handled()
+            }
+            TuiAction::Export if state.provision().native_geometry_review.is_some() => {
+                state.set_warning_notice(
+                    "原生几何审核不含完整已认证写集；请使用离线镜像工具单独验证",
+                );
+                ActionOutcome::handled()
+            }
             TuiAction::Activate => {
                 state.provision_begin_confirm();
                 ActionOutcome::handled()

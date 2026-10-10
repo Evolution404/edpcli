@@ -458,21 +458,32 @@ mod contiguous_batch_tests {
 mod handle_classification_tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static NEXT_TEMP_FOLDER: AtomicU64 = AtomicU64::new(0);
 
     struct TempFolder(PathBuf);
     impl TempFolder {
         fn new() -> io::Result<Self> {
-            let path = std::env::temp_dir().join(format!(
-                "edpcli-s01-handle-{}-{}",
-                std::process::id(),
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
-            ));
-            std::fs::create_dir(&path)?;
-            Ok(Self(path))
+            // Never reuse an old test's directory, even under concurrent
+            // jobs or if the OS allocates a recently used process id.
+            loop {
+                let path = std::env::temp_dir().join(format!(
+                    "edpcli-s01-handle-{}-{}-{}",
+                    std::process::id(),
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos(),
+                    NEXT_TEMP_FOLDER.fetch_add(1, Ordering::Relaxed),
+                ));
+                match std::fs::create_dir(&path) {
+                    Ok(()) => return Ok(Self(path)),
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => return Err(error),
+                }
+            }
         }
     }
     impl Drop for TempFolder {

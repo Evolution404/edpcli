@@ -14,6 +14,10 @@ pub trait NativeBlockDevice {
     fn total_sectors(&self) -> u64;
     fn sector_bytes(&self) -> u32;
     fn read_block(&mut self, lba: u64) -> io::Result<Vec<u8>>;
+    /// Fresh independent physical read after sync when the device supports it.
+    fn read_block_fresh(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        self.read_block(lba)
+    }
     fn write_block(&mut self, lba: u64, full_block: &[u8]) -> io::Result<()>;
     fn sync_blocks(&mut self) -> io::Result<()>;
 }
@@ -45,21 +49,44 @@ fn fail(reason: impl Into<String>) -> NativeTransactionFailure {
 
 const MAX_MIRROR_BYTES: usize = 128 * 1024 * 1024;
 
-fn rollback(dev: &mut dyn NativeBlockDevice, originals: &[(u64, Vec<u8>)]) -> bool {
+pub(super) fn rollback(dev: &mut dyn NativeBlockDevice, originals: &[(u64, Vec<u8>)]) -> bool {
+    rollback_observed(dev, originals, &mut |_, _, _| {})
+}
+
+fn rollback_observed(
+    dev: &mut dyn NativeBlockDevice,
+    originals: &[(u64, Vec<u8>)],
+    notify: &mut dyn FnMut(crate::diskio::TransactionActivityPhase, u64, u64),
+) -> bool {
+    use crate::diskio::TransactionActivityPhase as Activity;
+    let count = originals.len() as u64;
+    notify(Activity::RollbackWrite, 0, count);
     let mut good = true;
-    for (lba, block) in originals.iter().rev() {
+    // The original MBR must be restored only after all other metadata, just
+    // as new MBR LBA0 is committed last on the success path.
+    for (index, (lba, block)) in originals
+        .iter()
+        .rev()
+        .filter(|(lba, _)| *lba != 0)
+        .chain(originals.iter().filter(|(lba, _)| *lba == 0))
+        .enumerate()
+    {
         if dev.write_block(*lba, block).is_err() {
             good = false;
         }
+        notify(Activity::RollbackWrite, index as u64 + 1, count);
     }
+    notify(Activity::RollbackSync, 0, 0);
     if dev.sync_blocks().is_err() {
         good = false;
     }
-    for (lba, original) in originals {
-        match dev.read_block(*lba) {
+    notify(Activity::RollbackReadback, 0, count);
+    for (index, (lba, original)) in originals.iter().enumerate() {
+        match dev.read_block_fresh(*lba) {
             Ok(actual) if actual == *original => {}
             _ => good = false,
         }
+        notify(Activity::RollbackReadback, index as u64 + 1, count);
     }
     good
 }
@@ -72,7 +99,7 @@ pub fn execute_native_transaction(
     dev: &mut dyn NativeBlockDevice,
     plan: &NativeVirtualDiskPlan,
 ) -> Result<(), NativeTransactionFailure> {
-    if !matches!(plan.sector_bytes, 512 | 4096)
+    if !crate::domain::hardware::valid_native_sector_bytes(plan.sector_bytes)
         || dev.sector_bytes() != plan.sector_bytes
         || dev.total_sectors() != plan.total_sectors
         || plan.writes.is_empty()
@@ -111,8 +138,76 @@ pub fn execute_native_transaction(
         }
         originals.push((write.relative_lba, old));
     }
+    execute_native_transaction_with_snapshot(dev, plan, &originals)
+}
+
+/// Execute using the *same immutable original blocks* already sealed in a
+/// durable pre-write WAL, instead of sampling a second rollback baseline.
+/// This closes the gap in which external changes could otherwise make the
+/// journal disagree with the rollback performed by the transaction.
+pub(super) fn execute_native_transaction_with_snapshot(
+    dev: &mut dyn NativeBlockDevice,
+    plan: &NativeVirtualDiskPlan,
+    originals: &[(u64, Vec<u8>)],
+) -> Result<(), NativeTransactionFailure> {
+    execute_native_transaction_with_snapshot_observed(dev, plan, originals, &mut |_| {})
+}
+
+pub(super) fn execute_native_transaction_with_snapshot_observed(
+    dev: &mut dyn NativeBlockDevice,
+    plan: &NativeVirtualDiskPlan,
+    originals: &[(u64, Vec<u8>)],
+    observer: &mut dyn FnMut(crate::diskio::TransactionActivity),
+) -> Result<(), NativeTransactionFailure> {
+    if !crate::domain::hardware::valid_native_sector_bytes(plan.sector_bytes)
+        || plan.sector_bytes != dev.sector_bytes()
+        || plan.total_sectors != dev.total_sectors()
+        || plan
+            .writes
+            .last()
+            .is_none_or(|write| write.relative_lba != 0)
+        || plan.writes.is_empty()
+        || originals.len() != plan.writes.len()
+        || plan
+            .writes
+            .iter()
+            .zip(originals)
+            .any(|(write, (lba, old))| {
+                write.relative_lba != *lba
+                    || write.relative_lba >= plan.total_sectors
+                    || write.data.len() != plan.sector_bytes as usize
+                    || old.len() != plan.sector_bytes as usize
+            })
+        || plan
+            .writes
+            .len()
+            .checked_mul(plan.sector_bytes as usize)
+            .is_none_or(|size| size > MAX_MIRROR_BYTES)
+    {
+        return Err(fail("WAL原始块与目标写集或原生几何不一致"));
+    }
+    let mut seen = BTreeSet::new();
+    if plan
+        .writes
+        .iter()
+        .any(|write| !seen.insert(write.relative_lba))
+    {
+        return Err(fail("WAL执行计划存在重复LBA"));
+    }
+    use crate::diskio::{TransactionActivity, TransactionActivityPhase as Activity};
+    let count = plan.writes.len() as u64;
+    let mut notify = |phase, current, total| {
+        let event = TransactionActivity {
+            phase,
+            current,
+            total,
+        };
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer(event)));
+    };
+    notify(Activity::SyncPreflight, 0, 0);
     dev.sync_blocks()
         .map_err(|e| fail(format!("预检同步失败: {e}")))?;
+    notify(Activity::Write, 0, count);
     let result: Result<(), String> = (|| {
         for (index, write) in plan.writes.iter().enumerate() {
             if index + 1 == plan.writes.len() {
@@ -127,24 +222,29 @@ pub fn execute_native_transaction(
             if actual != write.data {
                 return Err(format!("LBA{}写后回读不一致", write.relative_lba));
             }
+            notify(Activity::Write, index as u64 + 1, count);
         }
+        notify(Activity::Sync, 0, 0);
         dev.sync_blocks()
             .map_err(|e| format!("最终同步失败: {e}"))?;
         // A second full verification after sync catches deferred corruption.
-        for write in &plan.writes {
+        notify(Activity::Readback, 0, count);
+        for (index, write) in plan.writes.iter().enumerate() {
             let actual = dev
-                .read_block(write.relative_lba)
-                .map_err(|e| format!("LBA{}同步后读取失败: {e}", write.relative_lba))?;
+                .read_block_fresh(write.relative_lba)
+                .map_err(|e| format!("LBA{}同步后独立读取失败: {e}", write.relative_lba))?;
             if actual != write.data {
                 return Err(format!("LBA{}同步后回读不一致", write.relative_lba));
             }
+            notify(Activity::Readback, index as u64 + 1, count);
         }
         Ok(())
     })();
     if let Err(reason) = result {
+        let verified = rollback_observed(dev, originals, &mut notify);
         return Err(NativeTransactionFailure {
             reason,
-            rollback_verified: rollback(dev, &originals),
+            rollback_verified: verified,
         });
     }
     Ok(())
@@ -223,7 +323,7 @@ mod tests {
     }
     #[test]
     fn native_transaction_commits_mbr_last_on_512_and_4096_byte_devices() {
-        for bytes in [512, 4096] {
+        for bytes in [512, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
             let (mut dev, plan) = fixture(bytes);
             execute_native_transaction(&mut dev, &plan).unwrap();
             assert_eq!(dev.wrote_lbas, [16, 17, 0]);
@@ -234,7 +334,7 @@ mod tests {
     }
     #[test]
     fn native_transaction_rolls_back_when_final_mbr_commit_fails() {
-        for bytes in [512, 4096] {
+        for bytes in [512, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
             let (mut dev, plan) = fixture(bytes);
             dev.fail_write_once = Some(0);
             let failure = execute_native_transaction(&mut dev, &plan).unwrap_err();
@@ -247,7 +347,7 @@ mod tests {
 
     #[test]
     fn native_transaction_rolls_back_torn_write_and_rejects_cross_geometry() {
-        for bytes in [512, 4096] {
+        for bytes in [512, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
             let (mut dev, plan) = fixture(bytes);
             dev.fail_write_once = Some(17);
             let err = execute_native_transaction(&mut dev, &plan).unwrap_err();

@@ -107,17 +107,8 @@ impl AppState {
             ));
             return None;
         }
-        let total_bytes = self
-            .provision
-            .prepared
-            .as_ref()?
-            .total_sectors()
-            .saturating_mul(crate::common::SECTOR as u64);
         let prepared = self.provision.prepared.take()?;
-        self.provision.result_plan = Some(ProvisionResultSnapshot::from_prepared(
-            &prepared,
-            total_bytes,
-        ));
+        self.provision.result_plan = Some(ProvisionResultSnapshot::from_prepared(&prepared));
         self.provision_transition_begin_running();
         self.provision.message = Some(crate::tui::ui::UiMessage::progress(
             "事务写盘进行中；退出请求会延迟到安全检查点",
@@ -141,6 +132,11 @@ impl AppState {
         >,
     ) {
         self.shell.critical_operation = false;
+        // Native WAL commits emit no legacy per-partition ProgressEvent.
+        // Freeze elapsed time at actual completion, not the last progress event.
+        if let Some(run) = self.provision.run.as_mut() {
+            run.last_activity_at = std::time::Instant::now();
+        }
         self.provision.apply_write_result(result);
         self.provision_initialize_result_workbench();
         self.provision_transition_finish_running();

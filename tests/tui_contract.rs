@@ -12,7 +12,9 @@ fn tui_is_an_explicit_v2_entrypoint_without_changing_bare_cli() {
     ));
     assert!(matches!(
         parse_args(&args(&["tui"])).expect("tui should parse"),
-        Parsed::Tui
+        Parsed::Tui {
+            include_virtual: false
+        }
     ));
     assert!(usage_text().contains("tui"));
 }

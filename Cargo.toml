@@ -69,6 +69,11 @@ name = "plain_macos_virtual_hil"
 path = "tests/plain_macos_virtual_hil.rs"
 required-features = ["ci-virtual-disk"]
 
+[[test]]
+name = "native_macos_4kn_virtual_hil"
+path = "tests/native_macos_4kn_virtual_hil.rs"
+required-features = ["ci-virtual-disk"]
+
 [profile.release]
 strip = true
 

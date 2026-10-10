@@ -9,8 +9,9 @@ use crate::{
 };
 
 use super::{
-    OfficialPartitionMode, PartitionRole, PassInfoPolicy, DEFAULT_MODE0_BOOT_SECTORS,
-    OFFICIAL_PARTITION_START_SECTOR, WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
+    official_boot_sectors_from_end_mib, OfficialPartitionMode, PartitionRole, PassInfoPolicy,
+    DEFAULT_OEM_BOOT_END_MIB, OFFICIAL_PARTITION_START_SECTOR,
+    WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 
 mod disposition;

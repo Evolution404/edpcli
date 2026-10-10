@@ -6,6 +6,38 @@ pub enum PlatformKind {
     Windows,
 }
 
+/// Native logical block size belongs to the device, not the 512B wire protocol.
+/// Filesystem constraints and physical write eligibility are independent.
+pub const fn valid_native_sector_bytes(bytes: u32) -> bool {
+    bytes >= 512 && bytes.is_multiple_of(512)
+}
+
+/// Single native-sector capability registry. OS HIL certification is independent
+/// from raw I/O and FAT/exFAT formatting eligibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NativeSectorCapability {
+    pub logical_sector_bytes: u32,
+    pub native_io: bool,
+    pub protocol_512_projection: bool,
+    pub native_wal: bool,
+    pub fat_exfat_format: bool,
+    pub os_hil_certified: bool,
+}
+
+pub const fn native_sector_capability(bytes: u32) -> Option<NativeSectorCapability> {
+    if !valid_native_sector_bytes(bytes) {
+        return None;
+    }
+    Some(NativeSectorCapability {
+        logical_sector_bytes: bytes,
+        native_io: true,
+        protocol_512_projection: true,
+        native_wal: true,
+        fat_exfat_format: matches!(bytes, 512 | 1024 | 2048 | 4096),
+        os_hil_certified: matches!(bytes, 512 | 4096),
+    })
+}
+
 /// Observed device blocks, distinct from EDP's fixed 512-byte address unit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObservedDeviceGeometry {
@@ -31,13 +63,39 @@ impl NativeReadGeometry {
         lba.checked_mul(u64::from(self.logical_sector_bytes))
             .ok_or("原生 LBA 字节偏移溢出")
     }
+
+    /// Checked, end-exclusive native extent; zero-length end-of-disk is valid.
+    pub fn byte_range(self, start_lba: u64, count: u64) -> Result<(u64, u64), &'static str> {
+        let end = start_lba.checked_add(count).ok_or("原生 LBA 范围溢出")?;
+        if end > self.native_sector_count {
+            return Err("原生 LBA 范围超出设备容量");
+        }
+        let unit = u64::from(self.logical_sector_bytes);
+        let start = start_lba.checked_mul(unit).ok_or("原生起点字节溢出")?;
+        let length = count.checked_mul(unit).ok_or("原生长度字节溢出")?;
+        Ok((start, length))
+    }
+
+    pub fn exact_lba(self, byte_offset: u64) -> Result<u64, &'static str> {
+        if byte_offset > self.capacity_bytes
+            || !byte_offset.is_multiple_of(u64::from(self.logical_sector_bytes))
+        {
+            return Err("原生字节偏移未对齐或超出设备容量");
+        }
+        Ok(byte_offset / u64::from(self.logical_sector_bytes))
+    }
+
+    pub fn capability(self) -> NativeSectorCapability {
+        native_sector_capability(self.logical_sector_bytes)
+            .expect("validated native geometry always has a capability")
+    }
 }
 
 impl ObservedDeviceGeometry {
     /// Accept block geometries for READ ONLY use. Writes are independently gated.
     pub fn native_read_geometry(self) -> Result<NativeReadGeometry, &'static str> {
         let logical = self.logical_sector_bytes.ok_or("设备逻辑扇区大小未知")?;
-        if !(512..=65_536).contains(&logical) || !logical.is_power_of_two() {
+        if !valid_native_sector_bytes(logical) {
             return Err("设备逻辑扇区大小无效或不受支持");
         }
         if self.capacity_bytes == 0 || !self.capacity_bytes.is_multiple_of(u64::from(logical)) {
@@ -48,6 +106,18 @@ impl ObservedDeviceGeometry {
             logical_sector_bytes: logical,
             native_sector_count: self.capacity_bytes / u64::from(logical),
         })
+    }
+
+    /// Common native-block eligibility for every supported 512*n device,
+    /// whether it is USB or an explicitly selected OS disk image.
+    /// Authorization is a distinct, revalidated TargetSession transition.
+    pub fn writable_native_geometry(self) -> Result<NativeReadGeometry, &'static str> {
+        self.native_read_geometry()
+    }
+
+    /// Backwards-compatible name for previously audited 4Kn-only callers.
+    pub fn writable_native_4kn_geometry(self) -> Result<NativeReadGeometry, &'static str> {
+        self.writable_native_geometry()
     }
 
     pub fn writable_protocol_sectors(self) -> Result<u64, &'static str> {
@@ -70,14 +140,14 @@ mod geometry_tests {
     use super::*;
     #[test]
     fn native_read_geometry_preserves_block_units_and_rejects_invalid_values() {
-        for (logical, blocks) in [(512, 500_000), (1024, 250_000), (4096, 62_500)] {
+        for logical in [512u32, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
             let geometry = ObservedDeviceGeometry {
-                capacity_bytes: 256_000_000,
+                capacity_bytes: 10_000 * u64::from(logical),
                 logical_sector_bytes: Some(logical),
                 physical_sector_bytes: Some(4096),
             };
             let native = geometry.native_read_geometry().unwrap();
-            assert_eq!(native.native_sector_count, blocks);
+            assert_eq!(native.native_sector_count, 10_000);
             assert_eq!(native.byte_offset(11).unwrap(), 11 * u64::from(logical));
             assert!(native.byte_offset(native.native_sector_count).is_err());
             // Preserve 512-only write gate during read-path migration.
@@ -98,6 +168,35 @@ mod geometry_tests {
             physical_sector_bytes: Some(4096),
         };
         assert!(invalid_capacity.native_read_geometry().is_err());
+    }
+
+    #[test]
+    fn sector_registry_and_checked_byte_ranges_cover_supported_sizes() {
+        for bytes in [512, 1024, 2048, 4096, 1536, 8192] {
+            let caps = native_sector_capability(bytes).unwrap();
+            assert!(caps.native_io && caps.native_wal && caps.protocol_512_projection);
+            assert_eq!(
+                caps.fat_exfat_format,
+                matches!(bytes, 512 | 1024 | 2048 | 4096)
+            );
+            let g = ObservedDeviceGeometry {
+                capacity_bytes: 100 * u64::from(bytes),
+                logical_sector_bytes: Some(bytes),
+                physical_sector_bytes: Some(4096),
+            }
+            .native_read_geometry()
+            .unwrap();
+            assert_eq!(
+                g.byte_range(3, 4),
+                Ok((3 * u64::from(bytes), 4 * u64::from(bytes)))
+            );
+            assert_eq!(g.exact_lba(4 * u64::from(bytes)), Ok(4));
+            assert!(g.exact_lba(123).is_err());
+            assert!(g.byte_range(99, 2).is_err());
+            assert_eq!(g.byte_range(100, 0), Ok((100 * u64::from(bytes), 0)));
+        }
+        assert!(native_sector_capability(256).is_none());
+        assert!(native_sector_capability(513).is_none());
     }
 
     #[test]

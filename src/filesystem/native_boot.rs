@@ -23,10 +23,12 @@ pub fn detect_native_boot_sector(
     if logical_sector_bytes == 512 {
         return super::detect_boot_sector(volume_native_sectors, native);
     }
-    if logical_sector_bytes != 4096 || native.len() != 4096 {
+    if !super::format::native_fat_sector_bytes_supported(logical_sector_bytes)
+        || native.len() != logical_sector_bytes as usize
+    {
         return Err(FilesystemError::new(
             FilesystemErrorKind::ReadFailure,
-            "尚未验证的原生引导扇区几何",
+            "当前文件系统不支持该原生扇区长度或启动块不完整",
         ));
     }
     if volume_native_sectors == 0
@@ -46,7 +48,7 @@ pub fn detect_native_boot_sector(
         let clusters = le32(native, 92) as u64;
         let root = le32(native, 96) as u64;
         let cluster_sectors = 1u64.checked_shl(spc as u32);
-        if bps == 12
+        if bps == logical_sector_bytes.trailing_zeros() as u8
             && spc < 26
             && matches!(fats, 1 | 2)
             && native[11..64].iter().all(|b| *b == 0)

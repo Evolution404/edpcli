@@ -47,7 +47,7 @@ impl AppState {
         let Ok((resolved, _)) = self.provision_resolved_prefill() else {
             return DiskLayoutModel::new(0, Vec::new());
         };
-        let Ok(parts) = resolved.draft_partitions(crate::common::SECTOR as u64) else {
+        let Ok(parts) = resolved.draft_partitions(u64::from(logical_bytes)) else {
             return DiskLayoutModel::new(0, Vec::new());
         };
         let partitions = parts
@@ -60,23 +60,27 @@ impl AppState {
             })
             .collect();
 
-        if logical_bytes == 4096 {
-            let Some(source_lce) = self.selected_device().and_then(|row| row.lce.as_ref()) else {
-                return DiskLayoutModel::new(0, Vec::new());
-            };
-            // Read-only draft allows edited extents but not unproven 512B tail mirrors.
-            let mut model = DiskLayoutModel::canonical_edp_with_sector_bytes(
+        if logical_bytes != crate::common::SECTOR as u32 {
+            // A Plain source has no existing LCE record. Show the *target*
+            // reserved extent instead of erasing the entire layout preview.
+            // For registered sources preserve the independently observed LCE
+            // block count. Application-level prepare remains authoritative.
+            let lce_blocks =
+                match crate::application::provision_geometry::native_compatibility_extent(
+                    total_sectors,
+                    logical_bytes,
+                ) {
+                    Ok(extent) => extent.sector_count,
+                    Err(_) => return DiskLayoutModel::new(0, Vec::new()),
+                };
+            return DiskLayoutModel::canonical_edp_with_sector_bytes(
                 total_sectors,
                 partitions,
                 lce_start,
-                source_lce.sector_count,
+                lce_blocks,
                 logical_bytes,
             )
             .unwrap_or_else(|_| DiskLayoutModel::new(0, Vec::new()));
-            if model.total_sectors != 0 {
-                model.logical_sector_bytes = logical_bytes;
-            }
-            return model;
         }
         let lce = crate::application::provision_geometry::verified_usb_compatibility_extent(
             total_sectors,

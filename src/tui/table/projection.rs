@@ -290,7 +290,7 @@ pub fn device_table_view_with_search(
                         ColumnId::ProvisionKind => cells[6].clone(),
                         ColumnId::Bus => row.proto.clone(),
                         ColumnId::State => {
-                            if row.proto != "USB" {
+                            if !matches!(row.proto.as_str(), "USB" | "Disk Image") {
                                 "非 USB".into()
                             } else if row.denied {
                                 "需权限".into()

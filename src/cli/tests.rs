@@ -135,7 +135,10 @@ fn default_tui_requires_bare_interactive_terminal() {
 fn parse_bare_and_subcommands() {
     assert!(matches!(
         parse_args(&[]).unwrap(),
-        Parsed::List { backup_dir: None }
+        Parsed::List {
+            backup_dir: None,
+            include_virtual: false
+        }
     ));
     assert!(matches!(
         parse_args(&["help".into()]).unwrap(),
@@ -435,6 +438,43 @@ fn parse_usage_errors() {
         .unwrap(),
         Parsed::Backup { .. }
     ));
+}
+
+#[test]
+fn include_virtual_is_explicit_and_strictly_scoped() {
+    match parse_args(&["list".into(), "--include-virtual".into()]).unwrap() {
+        Parsed::List {
+            include_virtual: true,
+            ..
+        } => {}
+        _ => panic!("expected virtual device list opt-in"),
+    }
+    match parse_args(&["tui".into(), "--include-virtual".into()]).unwrap() {
+        Parsed::Tui {
+            include_virtual: true,
+        } => {}
+        _ => panic!("expected virtual device TUI opt-in"),
+    }
+    assert!(parse_args(&[
+        "list".into(),
+        "--include-virtual".into(),
+        "--include-virtual".into()
+    ])
+    .is_err());
+    assert!(parse_args(&[
+        "tui".into(),
+        "--include-virtual".into(),
+        "--include-virtual".into()
+    ])
+    .is_err());
+    assert!(parse_args(&["list".into(), "--include-virtual=true".into()]).is_err());
+    assert!(parse_args(&["tui".into(), "--include-virtual=true".into()]).is_err());
+    assert!(parse_args(&[
+        "backup".into(),
+        "restore".into(),
+        "--include-virtual".into()
+    ])
+    .is_err());
 }
 
 #[test]

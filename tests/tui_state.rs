@@ -193,6 +193,8 @@ fn plain_result_plan() -> edpcli::tui::state::ProvisionResultSnapshot {
         disk: 6,
         target: edpcli::provision::ProvisionTarget::Plain,
         total_bytes: 20_000 * 512,
+        logical_sector_bytes: 512,
+        lce_extent: None,
         partitions: vec![
             ProvisionResultPartition {
                 role: None,
@@ -2952,6 +2954,102 @@ fn registered_mode0_to_mode1_preview_keeps_encrypt_anchor_and_blocks_overlap() {
             && detail.text.contains("overlap")
     }));
     assert!(state.provision_request().is_err());
+}
+
+#[test]
+fn four_kn_plain_to_mode0_tui_request_and_layout_use_native_geometry() {
+    use edpcli::tui::disk_layout::DiskRegionKind;
+    let mut row = device(4_294_967_296);
+    let observed = &mut row.identity_pin.as_mut().unwrap().snapshot.hardware;
+    observed.logical_sector_size = Some(4096);
+    observed.total_sectors = Some(1_048_576);
+    // A new Plain Disk Image has no source LCE. The TUI must show a *target*
+    // LCE and allow the shared native planner instead of the old 512B-only gate.
+    assert!(row.lce.is_none());
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+    authorize_plain_mode0_rebuild(&mut state);
+    let model = state.provision_layout_model();
+    assert_eq!(
+        state.provision().form.boot_sectors,
+        "2497",
+        "4Kn default must reproduce OEM 10MiB boundary"
+    );
+    assert_eq!(
+        state.provision().form.boot_fs,
+        edpcli::application::filesystem::FilesystemKind::Fat12
+    );
+    assert_eq!(model.logical_sector_bytes, 4096);
+    assert_eq!(model.total_sectors, 1_048_576);
+    assert!(model
+        .segments
+        .iter()
+        .any(|s| s.kind == DiskRegionKind::Lce && s.start_lba == 1_044_001 && s.sector_count == 1));
+    assert!(model
+        .segments
+        .iter()
+        .any(|s| s.kind == DiskRegionKind::Share));
+    let request = state
+        .provision_request()
+        .expect("4Kn TUI source must use native application plan");
+    assert_eq!(request.boot_start_lba, Some(63));
+    assert_eq!(request.boot_sectors, Some(2497));
+    assert_eq!(
+        request.format.boot_fs,
+        edpcli::application::filesystem::FilesystemKind::Fat12
+    );
+    assert!(request.share_sectors.unwrap() > 0);
+    assert!(request.encrypt_sectors.unwrap() > 0);
+}
+
+#[test]
+fn oem_fat_width_updates_after_native_boot_size_edits_without_changing_device_geometry() {
+    use edpcli::application::filesystem::FilesystemKind;
+    for (sector_bytes, disk_bytes, default_blocks, edited_blocks, expected_after) in [
+        (
+            4096u32,
+            4_294_967_296u64,
+            "2497",
+            "8192",
+            FilesystemKind::Fat16,
+        ),
+        (
+            512u32,
+            4_294_967_296u64,
+            "20417",
+            "2497",
+            FilesystemKind::Fat12,
+        ),
+    ] {
+        let mut row = device(disk_bytes);
+        let hardware = &mut row.identity_pin.as_mut().unwrap().snapshot.hardware;
+        hardware.logical_sector_size = Some(sector_bytes);
+        hardware.total_sectors = Some(disk_bytes / u64::from(sector_bytes));
+        let mut state = AppState::new();
+        state.replace_devices(vec![row]);
+        assert_eq!(enter_provision(&mut state), ProvisionKind::Mode0);
+        authorize_plain_mode0_rebuild(&mut state);
+        assert_eq!(state.provision().form.boot_sectors, default_blocks);
+        if let (Ok(before), Ok(after)) =
+            (default_blocks.parse::<u64>(), edited_blocks.parse::<u64>())
+        {
+            if after > before {
+                // The normal default share consumes all remaining space;
+                // shrink it by the boot delta to test a legal user edit.
+                let share = state.provision().form.share_sectors.parse::<u64>().unwrap();
+                state.provision_mut().form.share_input_mode =
+                    edpcli::provision::CapacityInputMode::Exact;
+                state.provision_mut().form.share_sectors = (share - (after - before)).to_string();
+            }
+        }
+        state.provision_mut().form.boot_sectors = edited_blocks.into();
+        let request = state
+            .provision_request()
+            .expect("native FAT width follows edited capacity");
+        assert_eq!(request.boot_sectors, Some(edited_blocks.parse().unwrap()));
+        assert_eq!(request.format.boot_fs, expected_after);
+    }
 }
 
 #[test]

@@ -183,8 +183,15 @@ fn native_edp_rejects_unverified_geometry_and_role_mismatches() {
     let valid = |parts: &[TargetPartitionGeometry], total, size, lce, count| {
         NativeEdpLayoutPlan::from_confirmed_geometry(mode, total, size, parts, lce, count)
     };
-    for block_bytes in [0, 256, 1024, 2048, 8192] {
+    for block_bytes in [0, 256, 513, 4097, 8191] {
         assert!(valid(&parts, total, block_bytes, lce_start, 1).is_err());
+    }
+    for block_bytes in [512u32, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
+        let lce_count = 3072u64.div_ceil(u64::from(block_bytes));
+        assert!(
+            valid(&parts, total, block_bytes, lce_start, lce_count).is_ok(),
+            "512-multiple native geometry must not be blocked by a fixed size list: {block_bytes}"
+        );
     }
     assert!(valid(&parts, 0, 4096, lce_start, 1).is_err());
     assert!(valid(&parts, u64::MAX, 4096, lce_start, 1).is_err());

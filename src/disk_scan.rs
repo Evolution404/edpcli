@@ -497,6 +497,87 @@ pub fn scan_disks_with_catalog(
                     row.probe_error = Some(e.to_string());
                 }
             }
+        } else if d.proto == "Disk Image"
+            && crate::platform::include_virtual()
+            && crate::platform::confirmed_virtual_disk_image(runner, d.n)
+        {
+            // Same native read path and source classifier used by the actual
+            // CLI/TUI provisioning application. No 512B legacy reader here.
+            let result = (|| -> io::Result<()> {
+                use crate::diskio::NativeBlockDevice;
+                let geometry = system::device_geometry(runner, d.n)
+                    .ok_or_else(|| io::Error::other("磁盘镜像原生几何无法确认"))?
+                    .native_read_geometry()
+                    .map_err(io::Error::other)?;
+                let probe =
+                    system::native_provision_probe(runner, d.n).map_err(io::Error::other)?;
+                let did = crate::provision::TargetIdentity::from_probe(
+                    &probe,
+                    geometry.native_sector_count,
+                )
+                .map_err(io::Error::other)?
+                .device_id()
+                .to_string();
+                let mut dev = crate::diskio::NativeRawBlockDevice::open_readonly(
+                    &crate::platform::raw_disk_path(d.n),
+                    geometry,
+                )?;
+                let mut prefix = Vec::with_capacity(13);
+                for lba in 0..13 {
+                    prefix.push(dev.read_block_fresh(lba)?);
+                }
+                let mode = crate::provision::classify_native_source(
+                    &prefix,
+                    geometry.logical_sector_bytes,
+                    geometry.native_sector_count,
+                    &did,
+                )
+                .map_err(io::Error::other)?;
+                let projection = prefix
+                    .iter()
+                    .flat_map(|block| block[..SECTOR].iter().copied())
+                    .collect::<Vec<_>>();
+                row.provision_kind = mode;
+                row.vid = probe
+                    .vid
+                    .map(|v| format!("{v:04x}"))
+                    .unwrap_or("xxxx".into());
+                row.pid = probe
+                    .pid
+                    .map(|v| format!("{v:04x}"))
+                    .unwrap_or("xxxx".into());
+                let mut snapshot = crate::media_identity::MediaIdentitySnapshot::default();
+                snapshot.hardware.logical_sector_size = Some(geometry.logical_sector_bytes);
+                snapshot.hardware.total_sectors = Some(geometry.native_sector_count);
+                snapshot.hardware.vid = probe.vid;
+                snapshot.hardware.pid = probe.pid;
+                snapshot.protocol.provision_kind = Some(mode);
+                if mode != DiskProvisionKind::Plain {
+                    snapshot.protocol.device_id = Some(did.clone());
+                    row.device_id = Some(did.clone());
+                    row.onlyid = crate::infrastructure::backup_store::catalog::lba4_label_id_from(
+                        &prefix[4][..SECTOR],
+                    );
+                    snapshot.protocol.onlyid = row.onlyid.clone();
+                    row.partitions = parse_lba12(&prefix[12][..SECTOR], &did);
+                    row.lce = crate::domain::geometry::parse_lba7_compatibility_geometry_with_sector_bytes(
+                        &projection, &did, geometry.native_sector_count,
+                        geometry.logical_sector_bytes,
+                    ).ok();
+                }
+                row.identity_pin = Some(crate::media_identity::MediaIdentityPin::new(
+                    snapshot,
+                    &projection,
+                ));
+                Ok(())
+            })();
+            if let Err(e) = result {
+                if e.kind() == io::ErrorKind::PermissionDenied {
+                    row.denied = true;
+                } else {
+                    row.probe_error = Some(e.to_string());
+                }
+            }
         }
         rows.push(row);
     }
