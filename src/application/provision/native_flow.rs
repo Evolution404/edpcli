@@ -85,28 +85,130 @@ fn native_rebuild_format_policy(
         options.share = has_share;
         options.encrypt = has_encrypt;
     }
-    let not_rebuilt = [
-        (has_boot && !options.boot, "启动区"),
-        (
-            has_share && !options.share,
-            if mode == Mode::BootShareCombined {
-                "二合一区"
-            } else {
-                "交换区"
-            },
-        ),
-        (has_encrypt && !options.encrypt, "保密区"),
-    ]
-    .into_iter()
-    .filter_map(|(missing, label)| missing.then_some(label))
-    .collect::<Vec<_>>();
-    if !not_rebuilt.is_empty() {
-        return Err(format!(
-            "{}已选择保留，但统一原生写盘路径尚未复用来源 FileKey 与分区元数据；禁止将‘保留’自动改为‘格式化’，也禁止生成新密钥后保留旧密文。本次计划已停止，不会写盘。需完成来源感知原生保留实现后才能无格式化继续。",
-            not_rebuilt.join("、")
-        ));
-    }
+    // Do not reinterpret an explicit unformatted request as a full rebuild.
+    // Source-aware validation below must prove each unformatted partition is
+    // preserved; with no compatible source, prepare fails before any write.
     Ok(options)
+}
+
+/// Use the same source-aware geometry/disposition machinery as the legacy
+/// provision prepare. All coordinates here are *native* LBAs.
+fn native_source_aware_targets(
+    mode: crate::provision::OfficialPartitionMode,
+    sector: u32,
+    lce_start: u64,
+    request: &OfficialProvisionRequest,
+    options: &mut FormatOptions,
+    source: Option<&crate::provision::ParsedExistingProvision>,
+) -> Result<
+    (
+        Vec<crate::provision::TargetPartitionGeometry>,
+        crate::provision::TargetProvisionPlan,
+    ),
+    String,
+> {
+    use crate::provision::{
+        apply_target_geometry_overrides, prefill_for_target_mode, CapacityInput, CapacitySource,
+        PartitionRole, PasswordDisposition, QuickCapacityUnit, RegionDisposition,
+        TargetGeometryOverrides, TargetProvisionPlan,
+    };
+    let capacity =
+        |mib: Option<u64>, sectors: Option<u64>| -> Result<Option<CapacityInput>, String> {
+            if mib.is_some() && sectors.is_some() {
+                return Err("同一分区不能同时指定MiB与sector".into());
+            }
+            match (mib, sectors) {
+                (Some(mib), None) => CapacityInput::from_quick_native(
+                    mib,
+                    QuickCapacityUnit::MiB,
+                    CapacitySource::UserEdited,
+                    sector,
+                )
+                .map(Some),
+                (None, Some(sectors)) => {
+                    CapacityInput::from_exact(sectors, CapacitySource::UserEdited).map(Some)
+                }
+                _ => Ok(None),
+            }
+        };
+    let boot = if let Some(value) = request.boot_mib {
+        Some(CapacityInput::from_exact(
+            crate::provision::official_boot_sectors_from_end_mib(value, u64::from(sector))?,
+            CapacitySource::UserEdited,
+        )?)
+    } else {
+        capacity(None, request.boot_sectors)?
+    };
+    let prefill = prefill_for_target_mode(
+        source.map(|source| &source.profile),
+        mode,
+        lce_start,
+        u64::from(sector),
+    )?;
+    let prefill = apply_target_geometry_overrides(
+        prefill,
+        source.map(|source| &source.profile),
+        TargetGeometryOverrides {
+            boot,
+            share: capacity(request.share_mib, request.share_sectors)?,
+            encrypt: capacity(request.encrypt_mib, request.encrypt_sectors)?,
+            boot_start_lba: request.boot_start_lba,
+            share_start_lba: request.share_start_lba,
+            encrypt_start_lba: request.encrypt_start_lba,
+        },
+    )?;
+    let mut targets = prefill.target_partitions(u64::from(sector))?;
+    for target in &mut targets {
+        if options.choice(target.role).0 {
+            target.filesystem = options.filesystems().for_role(target.role);
+        } else if let Some(old) = source.and_then(|source| source.profile.partition(target.role)) {
+            target.filesystem = old.filesystem;
+            // A confirmed source filesystem is authoritative on a retained region.
+            if let Some(kind) = old.filesystem {
+                match target.role {
+                    PartitionRole::Boot => options.boot_fs = kind,
+                    PartitionRole::Share | PartitionRole::BootShareCombined => {
+                        options.share_fs = kind
+                    }
+                    PartitionRole::Encrypt => options.encrypt_fs = kind,
+                    PartitionRole::CompatibilityReserve => {}
+                }
+            }
+        }
+    }
+    let mut dispositions =
+        TargetProvisionPlan::build(source, mode, &targets, lce_start, &request.key_domains)?;
+    for target in &targets {
+        if options.choice(target.role).0 {
+            dispositions.force_rebuild_for_format(target.role);
+        }
+    }
+    for part in &dispositions.partitions {
+        if part.geometry.role == PartitionRole::CompatibilityReserve {
+            continue; // Mode2's reserved type1 region has no filesystem.
+        }
+        if !options.choice(part.geometry.role).0 {
+            if part.password_disposition == Some(PasswordDisposition::Blocked)
+                || part.disposition == RegionDisposition::Rebuild
+            {
+                return Err(format!(
+                    "{}无法无损保留：{}；几何/文件系统/密钥不兼容或来源密码不足。未授权格式化，停止写盘。",
+                    part.geometry.role.label(), part.reason,
+                ));
+            }
+            if let Some(record) = part.preserved_record {
+                if record.lba12.need_encrypt != 0
+                    && record.lba12.encrypt_mode != request.algorithm.file_key_wrap_mode().raw()
+                {
+                    return Err(format!(
+                        "{}来源算法与目标算法不一致，不可保留原密文；未授权格式化，停止写盘。",
+                        part.geometry.role.label(),
+                    ));
+                }
+            }
+        }
+    }
+    Ok((targets, dispositions))
 }
 
 fn generate_official_native_plan(
@@ -116,6 +218,8 @@ fn generate_official_native_plan(
     request: &OfficialProvisionRequest,
     inherited_onlyid: Option<&str>,
     inherited_pass_info: Option<PassInfoPolicy>,
+    source: Option<&crate::provision::ParsedExistingProvision>,
+    source_prefix: &[Vec<u8>],
 ) -> Result<NativeOfficialPlanResult, String> {
     request.algorithm.validate_first_party_write()?;
     let mode = request.target.official_mode().ok_or("目标不是官方模式")?;
@@ -269,6 +373,52 @@ fn generate_official_native_plan(
         plan = plan.with_target_geometry(&parts, u64::from(sector))?;
     }
 
+    // Preserve the existing destructive geometry path; only preservation
+    // requests use source-aware anchors, and both resolve into one write plan.
+    let needs_preserve = plan
+        .format_targets_native(sector)?
+        .iter()
+        .any(|part| part.format_capable && !options.choice(part.role).0);
+    let dispositions = if needs_preserve {
+        let (targets, decisions) = native_source_aware_targets(
+            mode,
+            sector,
+            compatibility.start_lba,
+            request,
+            &mut options,
+            source,
+        )?;
+        plan = plan
+            .with_filesystems(options.filesystems())
+            .with_target_geometry(&targets, u64::from(sector))?;
+        decisions
+    } else {
+        let targets = plan
+            .format_targets_native(sector)?
+            .iter()
+            .map(|p| crate::provision::TargetPartitionGeometry {
+                role: p.role,
+                partition_type: p.geometry.partition_type,
+                start_lba: p.geometry.start_sector,
+                sector_count: p.geometry.sector_count(),
+                physically_encrypted: p.physically_encrypted,
+                filesystem: p.filesystem,
+            })
+            .collect::<Vec<_>>();
+        let mut decisions = crate::provision::TargetProvisionPlan::build(
+            source,
+            mode,
+            &targets,
+            compatibility.start_lba,
+            &request.key_domains,
+        )?;
+        for part in &targets {
+            if options.choice(part.role).0 {
+                decisions.force_rebuild_for_format(part.role);
+            }
+        }
+        decisions
+    };
     let targets = plan.format_targets_native(sector)?;
     let mut serials = Vec::with_capacity(targets.len());
     let mut keys = Vec::with_capacity(targets.len());
@@ -276,21 +426,68 @@ fn generate_official_native_plan(
         let mut serial = [0u8; 4];
         getrandom::fill(&mut serial).map_err(|e| format!("卷序列号生成失败: {e}"))?;
         serials.push(u32::from_le_bytes(serial));
-        let mut file_key = [0u8; 16];
-        getrandom::fill(&mut file_key).map_err(|e| format!("分区FileKey生成失败: {e}"))?;
-        let mut legacy_key = [0u8; 8];
-        getrandom::fill(&mut legacy_key).map_err(|e| format!("分区LBA7密钥生成失败: {e}"))?;
-        let password = request
-            .key_domains
-            .target_password(target.role)
-            .filter(|v| !v.is_empty())
-            .unwrap_or(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD);
-        plan = plan.with_partition_key_material(
-            index,
-            wrap_legacy_lba7_file_key(password, legacy_key),
-            wrap_file_key(password, file_key, key_mode),
-        )?;
-        keys.push(file_key);
+        use crate::provision::RegionDisposition;
+        let decision = &dispositions.partitions[index];
+        match decision.disposition {
+            RegionDisposition::PreserveOpaque | RegionDisposition::PreserveVerified => {
+                let record = decision.preserved_record.ok_or_else(|| {
+                    format!(
+                        "{}保留计划缺少来源 LBA7/LBA12 FileKey 记录",
+                        target.role.label()
+                    )
+                })?;
+                if record.lba12.need_encrypt != 0 {
+                    plan = plan.with_partition_key_material(
+                        index,
+                        record.lba7_key_material(),
+                        record.lba12_key_material()?,
+                    )?;
+                }
+                keys.push([0u8; 16]); // No FS writes may consume this placeholder.
+            }
+            RegionDisposition::RewrapVerified => {
+                let record = decision.preserved_record.ok_or("Rewrap 缺少来源密钥记录")?;
+                let old_password = request
+                    .key_domains
+                    .source_password(target.role)
+                    .unwrap_or(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD);
+                let new_password = request
+                    .key_domains
+                    .target_password(target.role)
+                    .ok_or("Rewrap 必须提供目标密码")?;
+                let key = record.verified_sm4_file_key(old_password)?;
+                let mut legacy = crate::provision::unwrap_legacy_lba7_file_key(
+                    old_password,
+                    record.lba7_key_material(),
+                )?;
+                plan = plan.with_partition_key_material(
+                    index,
+                    wrap_legacy_lba7_file_key(new_password, legacy),
+                    wrap_file_key(new_password, key, key_mode),
+                )?;
+                legacy.fill(0);
+                keys.push(key);
+            }
+            RegionDisposition::Rebuild => {
+                let mut file_key = [0u8; 16];
+                getrandom::fill(&mut file_key).map_err(|e| format!("分区FileKey生成失败: {e}"))?;
+                let mut legacy_key = [0u8; 8];
+                getrandom::fill(&mut legacy_key)
+                    .map_err(|e| format!("分区LBA7密钥生成失败: {e}"))?;
+                let password = request
+                    .key_domains
+                    .target_password(target.role)
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD);
+                plan = plan.with_partition_key_material(
+                    index,
+                    wrap_legacy_lba7_file_key(password, legacy_key),
+                    wrap_file_key(password, file_key, key_mode),
+                )?;
+                keys.push(file_key);
+            }
+            RegionDisposition::Drop => return Err("目标分区不允许使用Drop".into()),
+        }
     }
     let mut entropy = [0u8; 252];
     getrandom::fill(&mut entropy).map_err(|e| format!("协议随机字段生成失败: {e}"))?;
@@ -314,7 +511,7 @@ fn generate_official_native_plan(
             }
         })
         .collect::<Vec<_>>();
-    let candidate = super::native_image::plan_native_edp_image(
+    let mut candidate = super::native_image::plan_native_edp_image(
         &spec,
         &ProvisionEntropy::new(entropy),
         &plan,
@@ -323,6 +520,50 @@ fn generate_official_native_plan(
         &keys,
         sector,
     )?;
+    // A preserved partition's cipher text and original LCE are NEVER rewritten.
+    // A new LCE would make retained key records semantically inconsistent.
+    if dispositions.has_preserved_partitions() {
+        let projection = source_prefix
+            .iter()
+            .flat_map(|block| block[..512].iter().copied())
+            .collect::<Vec<_>>();
+        let old_lce = crate::domain::geometry::parse_lba7_compatibility_geometry_with_sector_bytes(
+            &projection,
+            &device_id,
+            total,
+            sector,
+        )
+        .map_err(|e| format!("保留来源LCE尚未认证，拒绝写盘: {e}"))?;
+        if old_lce.start_lba != compatibility.start_lba
+            || old_lce.sector_count != compatibility.size_sectors
+        {
+            return Err("来源LCE原生范围与目标不一致，不能保留密文".into());
+        }
+        candidate.writes.retain(|write| {
+            write.relative_lba < compatibility.start_lba
+                || write.relative_lba >= compatibility.start_lba + compatibility.size_sectors
+        });
+        for (start, count) in dispositions.preserved_extents() {
+            let end = start.checked_add(count).ok_or("保留区原生LBA溢出")?;
+            if candidate
+                .writes
+                .iter()
+                .any(|write| (start..end).contains(&write.relative_lba))
+            {
+                return Err(format!("保留区LBA{start}..{end}与写集合发生冲突，停止写盘"));
+            }
+        }
+    }
+    // OEM protocol owns its first 512B per native block; the remaining bytes
+    // belong to the source media and are not disposable zero-padding.
+    if source_prefix.len() == 13 && source_prefix.iter().all(|b| b.len() == sector as usize) {
+        for write in candidate.writes.iter_mut().filter(|w| w.relative_lba < 13) {
+            if sector > 512 {
+                write.data[512..]
+                    .copy_from_slice(&source_prefix[write.relative_lba as usize][512..]);
+            }
+        }
+    }
     Ok((
         device_id,
         candidate,
@@ -390,9 +631,8 @@ pub fn prepare_native_provision_on_disk(
     disk: u32,
     request: &ProvisionRequest,
 ) -> Result<NativePreparedProvision, String> {
-    // Validate intent before opening even a read-only device. TUI preview and
-    // password verification may still construct requests for preserved data;
-    // it is the *destructive native plan* which must reject unsafe key reuse.
+    // Resolve format intent before read-only evidence capture. The *source-
+    // aware* plan below must reject any unverified preservation before writes.
     if let ProvisionRequest::Official(official) = request {
         let mode = official.target.official_mode().ok_or("目标不是官方模式")?;
         native_rebuild_format_policy(mode, official)?;
@@ -423,7 +663,10 @@ pub fn prepare_native_provision_on_disk(
     } else {
         None
     };
-    let inherited_pass_info = if source != DiskProvisionKind::Plain {
+    // SourceSnapshot: keep native LBA0..12 and independently confirm each
+    // existing partition's filesystem from its real native boot block. The
+    // encrypted probe only decodes after a valid FileKey/CRC/password check.
+    let mut parsed_source = if source != DiskProvisionKind::Plain {
         let native = crate::protocol::image::NativeProtocolImage::from_native_bytes(
             geometry.logical_sector_bytes,
             prefix
@@ -437,10 +680,48 @@ pub fn prepare_native_provision_on_disk(
             &device_id,
             geometry.native_sector_count,
         )?
-        .and_then(|parsed| parsed.pass_info_policy)
     } else {
         None
     };
+    if let (Some(parsed), ProvisionRequest::Official(official)) = (&mut parsed_source, request) {
+        for (index, part) in parsed.profile.partitions.iter_mut().enumerate() {
+            if part.role == crate::provision::PartitionRole::CompatibilityReserve {
+                continue;
+            }
+            let mut boot = dev
+                .read_block_fresh(part.start_lba)
+                .map_err(|e| format!("读取来源分区启动块失败: {e}"))?;
+            if part.physically_encrypted {
+                let record = parsed.records[index];
+                let password = official
+                    .key_domains
+                    .source_password(part.role)
+                    .unwrap_or(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD);
+                let Ok(key) = record.verified_file_key(Some(password)) else {
+                    continue; // Unknown source password: opaque preservation only.
+                };
+                let cipher =
+                    crate::partition_transform::NativePartitionDataCipher::from_encrypt_mode(
+                        record.lba12.encrypt_mode,
+                    )?;
+                boot = crate::partition_transform::transform_native_sector_offline(
+                    cipher,
+                    crate::partition_transform::NativeCipherDirection::Decrypt,
+                    &boot,
+                    &key,
+                    part.start_lba,
+                    geometry.logical_sector_bytes,
+                )?;
+            }
+            part.filesystem = crate::filesystem::detect_native_boot_sector(
+                &boot,
+                part.sector_count,
+                geometry.logical_sector_bytes,
+            )
+            .map_err(|e| format!("来源分区启动块解析失败: {e}"))?;
+        }
+    }
+    let inherited_pass_info = parsed_source.as_ref().and_then(|p| p.pass_info_policy);
     let (target, mut plan, partitions, lce_extent, onlyid) = match request {
         ProvisionRequest::Plain(request) => {
             let mut plan = super::native_image::plan_native_plain_image(
@@ -502,6 +783,8 @@ pub fn prepare_native_provision_on_disk(
                 request,
                 inherited_onlyid.as_deref(),
                 inherited_pass_info,
+                parsed_source.as_ref(),
+                &prefix,
             )?;
             (request.target, plan, partitions, Some(lce), Some(onlyid))
         }
@@ -596,11 +879,19 @@ mod tests {
                 &["启动区", "交换区"][..],
             ),
         ] {
-            let error = native_rebuild_format_policy(mode, &request).unwrap_err();
-            assert!(error.contains("不会写盘"));
-            assert!(error.contains("FileKey"));
-            for role in roles {
-                assert!(error.contains(role), "{mode:?} {role}: {error}");
+            let mut chosen = native_rebuild_format_policy(mode, &request).unwrap();
+            assert!(!chosen.boot && !chosen.share && !chosen.encrypt);
+            let error =
+                native_source_aware_targets(mode, 512, 4_000_000, &request, &mut chosen, None)
+                    .unwrap_err();
+            assert!(
+                error.contains("停止写盘") || error.contains("无法无损保留"),
+                "{error}"
+            );
+            for _role in roles {
+                // Every actual preserved region requires an independently
+                // confirmed source profile; no implicit conversion to format.
+                assert!(!chosen.boot && !chosen.share && !chosen.encrypt);
             }
         }
         // CLI's unselected *default* means a deliberate destructive rebuild,
@@ -623,16 +914,331 @@ mod tests {
             assert_eq!(chosen.share, mode != Mode::WholeDiskEncrypted);
             assert_eq!(chosen.encrypt, mode != Mode::IntranetExtranetDualPartition);
         }
-        // An explicitly partial rebuild is unsafe on either frontend.
+        // Partial rebuild requires a compatible source for each retained region.
         request.format.share = true;
-        let error =
-            native_rebuild_format_policy(Mode::DefaultThreePartition, &request).unwrap_err();
-        assert!(error.contains("启动区"));
-        assert!(error.contains("保密区"));
+        let mut chosen =
+            native_rebuild_format_policy(Mode::DefaultThreePartition, &request).unwrap();
+        assert!(native_source_aware_targets(
+            Mode::DefaultThreePartition,
+            512,
+            4_000_000,
+            &request,
+            &mut chosen,
+            None,
+        )
+        .is_err());
         request.preserve_unformatted = true;
         request.format.boot = true;
         request.format.encrypt = true;
         assert!(native_rebuild_format_policy(Mode::DefaultThreePartition, &request).is_ok());
+    }
+
+    fn offline_request(mode: crate::provision::OfficialPartitionMode) -> OfficialProvisionRequest {
+        use crate::provision::{KeyDomainSecrets, ProvisionTarget};
+        OfficialProvisionRequest {
+            target: ProvisionTarget::Official(mode),
+            algorithm: crate::provision::OfficialLabelAlgorithm::Sms4,
+            boot_start_lba: None,
+            share_start_lba: None,
+            encrypt_start_lba: None,
+            boot_mib: None,
+            boot_sectors: None,
+            share_mib: None,
+            share_sectors: None,
+            encrypt_mib: None,
+            encrypt_sectors: None,
+            label_id: String::new(),
+            user: String::new(),
+            dept: String::new(),
+            label: String::new(),
+            lba8_identity: crate::provision::Lba8Identity::default(),
+            key_domains: KeyDomainSecrets::default(),
+            volume_label: String::new(),
+            format: FormatOptions::default(),
+            preserve_unformatted: true,
+            force_change_password: None,
+            cancel_password_complexity_check: None,
+            max_share_password_errors: None,
+            max_encrypt_password_errors: None,
+        }
+    }
+
+    fn test_native_source(
+        sector: u32,
+        mode: crate::provision::OfficialPartitionMode,
+    ) -> (
+        HardwareProbe,
+        crate::provision::ParsedExistingProvision,
+        Vec<Vec<u8>>,
+        String,
+    ) {
+        use crate::platform::{InquiryInfo, NativeTransport};
+        use crate::provision::OfficialPartitionMode as Mode;
+        let probe = HardwareProbe {
+            vid: Some(0x0dd8),
+            pid: Some(0x2005),
+            transport: NativeTransport::Uas,
+            windows_pnp_instance_id: None,
+            inquiry: Some(InquiryInfo {
+                vendor: "Netac".into(),
+                product: "OnlyDisk".into(),
+                revision: "1.00".into(),
+            }),
+        };
+        let mut request = offline_request(mode);
+        request.preserve_unformatted = false;
+        request.format.boot = matches!(
+            mode,
+            Mode::DefaultThreePartition | Mode::IntranetExtranetDualPartition
+        );
+        request.format.share = mode != Mode::WholeDiskEncrypted;
+        request.format.encrypt = mode != Mode::IntranetExtranetDualPartition;
+        let total = 1_073_741_824 / u64::from(sector);
+        let blank = vec![vec![0u8; sector as usize]; 13];
+        let (did, fresh, previews, _lce, onlyid) = generate_official_native_plan(
+            total, sector, &probe, &request, None, None, None, &blank,
+        )
+        .unwrap();
+        assert!(onlyid.len() >= 8);
+        let prefix = (0..13)
+            .map(|lba| {
+                fresh
+                    .writes
+                    .iter()
+                    .find(|w| w.relative_lba == lba)
+                    .unwrap()
+                    .data
+                    .clone()
+            })
+            .collect::<Vec<_>>();
+        let native = crate::protocol::image::NativeProtocolImage::from_native_bytes(
+            sector,
+            prefix.iter().flat_map(|b| b.iter().copied()).collect(),
+        )
+        .unwrap();
+        let mut parsed = crate::provision::parse_existing_provision_native(&native, &did, total)
+            .unwrap()
+            .unwrap();
+        for (source, preview) in parsed.profile.partitions.iter_mut().zip(&previews) {
+            source.filesystem = preview.filesystem;
+        }
+        (probe, parsed, prefix, did)
+    }
+
+    #[test]
+    fn native_source_aware_preserves_filekey_ciphertext_and_lce_in_512_and_4kn() {
+        use crate::provision::{OfficialPartitionMode as Mode, PartitionRole};
+        for sector in [512, 1024, 2048, 4096] {
+            for (from, to, keep_all) in [
+                (Mode::BootShareCombined, Mode::BootShareCombined, true),
+                (Mode::DefaultThreePartition, Mode::BootShareCombined, false),
+            ] {
+                let (probe, parsed, prefix, did) = test_native_source(sector, from);
+                let mut request = offline_request(to);
+                if !keep_all {
+                    request.format.share = true;
+                }
+                let total = 1_073_741_824 / u64::from(sector);
+                let (_, target, preview, lce, _) = generate_official_native_plan(
+                    total,
+                    sector,
+                    &probe,
+                    &request,
+                    None,
+                    parsed.pass_info_policy,
+                    Some(&parsed),
+                    &prefix,
+                )
+                .unwrap();
+                let src = parsed.record(PartitionRole::Encrypt).unwrap();
+                let target_prefix = (0..13)
+                    .map(|lba| {
+                        target
+                            .writes
+                            .iter()
+                            .find(|w| w.relative_lba == lba)
+                            .unwrap()
+                            .data
+                            .clone()
+                    })
+                    .collect::<Vec<_>>();
+                let native = crate::protocol::image::NativeProtocolImage::from_native_bytes(
+                    sector,
+                    target_prefix
+                        .iter()
+                        .flat_map(|b| b.iter().copied())
+                        .collect(),
+                )
+                .unwrap();
+                let restored =
+                    crate::provision::parse_existing_provision_native(&native, &did, total)
+                        .unwrap()
+                        .unwrap();
+                let retained = restored.record(PartitionRole::Encrypt).unwrap();
+                assert_eq!(
+                    src.lba12_key_material().unwrap(),
+                    retained.lba12_key_material().unwrap()
+                );
+                assert_eq!(src.lba7_key_material(), retained.lba7_key_material());
+                let old = parsed.profile.partition(PartitionRole::Encrypt).unwrap();
+                assert!(!target.writes.iter().any(|w| {
+                    (old.start_lba..old.start_lba + old.sector_count).contains(&w.relative_lba)
+                }));
+                assert!(!target
+                    .writes
+                    .iter()
+                    .any(|w| { (lce.0..lce.0 + lce.1).contains(&w.relative_lba) }));
+                assert!(
+                    !preview
+                        .iter()
+                        .find(|p| p.role == Some(PartitionRole::Encrypt))
+                        .unwrap()
+                        .formatted
+                );
+                if keep_all {
+                    assert!(preview.iter().all(|p| !p.formatted));
+                }
+                for index in 0..13 {
+                    assert_eq!(&target_prefix[index][512..], &prefix[index][512..]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn native_rewrap_keeps_same_filekey_without_reformat() {
+        use crate::provision::{KeyDomainSecretPair, OfficialPartitionMode as Mode, PartitionRole};
+        for sector in [512, 1024, 2048, 4096] {
+            let (probe, parsed, prefix, did) = test_native_source(sector, Mode::BootShareCombined);
+            let mut request = offline_request(Mode::BootShareCombined);
+            let replacement = b"NewPassword2026!";
+            request.key_domains.encrypt = KeyDomainSecretPair::new(
+                Some(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD),
+                Some(replacement.as_slice()),
+            );
+            let total = 1_073_741_824 / u64::from(sector);
+            let (_, plan, preview, lce, _) = generate_official_native_plan(
+                total,
+                sector,
+                &probe,
+                &request,
+                None,
+                parsed.pass_info_policy,
+                Some(&parsed),
+                &prefix,
+            )
+            .unwrap();
+            assert!(preview.iter().all(|p| !p.formatted));
+            assert!(!plan
+                .writes
+                .iter()
+                .any(|w| { (lce.0..lce.0 + lce.1).contains(&w.relative_lba) }));
+            let raw = (0..13)
+                .flat_map(|lba| {
+                    plan.writes
+                        .iter()
+                        .find(|w| w.relative_lba == lba)
+                        .unwrap()
+                        .data
+                        .iter()
+                        .copied()
+                })
+                .collect();
+            let native =
+                crate::protocol::image::NativeProtocolImage::from_native_bytes(sector, raw)
+                    .unwrap();
+            let target = crate::provision::parse_existing_provision_native(&native, &did, total)
+                .unwrap()
+                .unwrap();
+            let before = parsed
+                .record(PartitionRole::Encrypt)
+                .unwrap()
+                .verified_file_key(Some(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD))
+                .unwrap();
+            let after = target
+                .record(PartitionRole::Encrypt)
+                .unwrap()
+                .verified_file_key(Some(replacement))
+                .unwrap();
+            assert_eq!(before, after);
+            assert!(target
+                .record(PartitionRole::Encrypt)
+                .unwrap()
+                .verified_file_key(Some(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD))
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn native_preservation_rejects_wrong_password_geometry_and_cipher() {
+        use crate::provision::{KeyDomainSecretPair, OfficialPartitionMode as Mode, PartitionRole};
+        for sector in [512, 1024, 2048, 4096] {
+            let (probe, parsed, prefix, _) = test_native_source(sector, Mode::BootShareCombined);
+            let total = 1_073_741_824 / u64::from(sector);
+
+            let mut bad_password = offline_request(Mode::BootShareCombined);
+            bad_password.key_domains.encrypt = KeyDomainSecretPair::new(
+                Some(b"wrong-old-password".as_slice()),
+                Some(b"changed-password".as_slice()),
+            );
+            let error = generate_official_native_plan(
+                total,
+                sector,
+                &probe,
+                &bad_password,
+                None,
+                parsed.pass_info_policy,
+                Some(&parsed),
+                &prefix,
+            )
+            .unwrap_err();
+            assert!(
+                error.contains("密码") || error.contains("无损"),
+                "{sector}: {error}"
+            );
+
+            let mut bad_geometry = offline_request(Mode::BootShareCombined);
+            let old = parsed.profile.partition(PartitionRole::Encrypt).unwrap();
+            bad_geometry.encrypt_start_lba = Some(old.start_lba + 1);
+            assert!(
+                generate_official_native_plan(
+                    total,
+                    sector,
+                    &probe,
+                    &bad_geometry,
+                    None,
+                    parsed.pass_info_policy,
+                    Some(&parsed),
+                    &prefix,
+                )
+                .is_err(),
+                "{sector}: moved encrypted region must not be silently preserved"
+            );
+
+            let mut bad_cipher = parsed.clone();
+            let encrypt_idx = bad_cipher
+                .profile
+                .partitions
+                .iter()
+                .position(|part| part.role == PartitionRole::Encrypt)
+                .unwrap();
+            bad_cipher.records[encrypt_idx].lba12.encrypt_mode =
+                crate::provision::FileKeyWrapMode::Aes128Ecb.raw();
+            assert!(
+                generate_official_native_plan(
+                    total,
+                    sector,
+                    &probe,
+                    &offline_request(Mode::BootShareCombined),
+                    None,
+                    bad_cipher.pass_info_policy,
+                    Some(&bad_cipher),
+                    &prefix,
+                )
+                .is_err(),
+                "{sector}: algorithm mismatch cannot preserve old ciphertext"
+            );
+        }
     }
 
     #[test]
