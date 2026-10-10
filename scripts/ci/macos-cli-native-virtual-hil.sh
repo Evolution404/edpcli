@@ -70,6 +70,20 @@ assert v.get("TotalSize") == 536870912
     attach
     # Reopened OS block device: parse/decrypt from real bytes, not authored writes.
     verify_crypto
+    if [[ "${EDPCLI_HIL_VERIFY_CROSS_PRESERVE:-0}" == "1" && "${EDPCLI_HIL_SKIP_CUSTOM_PW:-0}" == "1" ]]; then
+      if [[ "$mode" == "mode0" || "$mode" == "mode1" || "$mode" == "mode2" ]]; then
+        phase="verify"
+        if [[ "$mode" == "mode0" ]]; then phase="capture"; fi
+        raw="/dev/r$(basename "$device")"
+        args=(EDPCLI_CRYPTO_HIL_RAW="$raw" EDPCLI_CRYPTO_HIL_SECTOR="$sector" EDPCLI_CROSS_HIL_PHASE="$phase" EDPCLI_CROSS_HIL_SNAPSHOT="$root/cross-$sector.sha256")
+        if [[ -r "$raw" ]]; then
+          env "${args[@]}" "$verifier" --ignored --exact native_cli_crypto_hil::native_os_cross_mode_encrypt_full_extent_sha256 --nocapture
+        else
+          sudo -n env "${args[@]}" "$verifier" --ignored --exact native_cli_crypto_hil::native_os_cross_mode_encrypt_full_extent_sha256 --nocapture
+        fi
+      fi
+    fi
+
     # HIL-only v4 metadata damage/restore through the standard exclusive lease,
     # durable WAL and fresh native readback. Never grants production v4 restore.
     if [[ "${EDPCLI_HIL_EDPB_WAL:-0}" == "1" && "$mode" == "mode0" && "$sector" != "512" ]]; then
@@ -109,7 +123,7 @@ assert v.get("TotalSize") == 536870912
     attach
     full_digest verify
   fi
-    if [[ "$mode" == "mode0" ]]; then
+    if [[ "$mode" == "mode0" && "${EDPCLI_HIL_SKIP_CUSTOM_PW:-0}" != "1" ]]; then
       # Prove explicit independent passwords, never the implicit default.
       # These are public test-only values, never credentials for real USBs.
       share_password="P1Share2026!"

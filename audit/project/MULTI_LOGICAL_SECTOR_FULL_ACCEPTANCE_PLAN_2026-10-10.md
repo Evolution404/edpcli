@@ -1,5 +1,12 @@
 # edpcli：全逻辑扇区规格、全模式和全工作流实施与验收计划（执行中）
 
+## 2026-10-10 21:38 CST P2 正式 CLI 虚拟盘跨模式验收增量
+
+- **正式 OS 模式链**：512B 和 1024B macOS 临时 Disk Image 完成 Plain→Mode0→Mode1→Mode2→Mode3→Plain，使用生产 CLI 写盘、同一 TargetSession/WAL 与每次卸载重挂的独立协议、LCE、加密卷与文件系统读回；所有节点成功。单项自动改密测试必须与连续模式链隔离：新增 HIL 环境参数 `EDPCLI_HIL_SKIP_CUSTOM_PW=1`，以免上次目标密码泄漏至下一来源。
+- **跨模式真正无损保存**：新增只读 HIL `native_os_cross_mode_encrypt_full_extent_sha256`，在 Mode0 来源保存 Encrypt 保密区全部原生字节 SHA256、起点、扇区数及独立解封装的 FileKey 指纹，再经过 Mode1 和 Mode2 两次正式原生 WAL 转换后复核。**512/1024/2048/4096B 四规格全部通过**；并非只比对首扇区、协议表或“数据保留”的 UI 文案。执行：`EDPCLI_HIL_SKIP_CUSTOM_PW=1 EDPCLI_HIL_VERIFY_CROSS_PRESERVE=1 EDPCLI_HIL_MODES='mode0 mode1 mode2' EDPCLI_HIL_SECTORS='512 1024 2048 4096' scripts/ci/macos-cli-native-virtual-hil.sh`（已逐规格分别执行）。
+- **严格范围**：这些测试证明了 Mode0→Mode1→Mode2 的保密区原样保留，但**不等于全部25种模式转换×四规格的分区级证据**；Mode2→Mode3、Mode3→Plain 明确丢弃来源保密区，需分别验收其格式化重建及风险提示。EDA/WAL 生产恢复权限仍处于 `EvidenceOnly` 未授权状态。全量模式转换自动化与 TUI PTY 仍属于后续 P2/P3。
+
+
 ## 2026-10-10 21:16 CST P0 → P1 原生 EDPB 真正 OS 块设备实证回执
 
 - **P0 身份识别卡点已修复**：原先原生虚拟盘 Writer 使用 `native_provision_probe`，而取证 `media_identity_from_protocol_image → identify` 使用未归一化原始探针；在 1024B Disk Image 上实际制盘成功、备份 `device_id` 校验失败。调整 `identify::generate_candidates` 与 `media_identity_observer::merged_hardware_probe`，仅对明确启用并且系统确认 `Disk Image` 的虚拟设备使用与正式规划一致的协议身份，**绝不为普通 USB 生成合成身份**。真实 1024/2048/4096B macOS OS 虚拟盘均已通过正式备份调用、EDPB v4 verify、完整原生 LBA0–12/LCE/分区首块双句柄比对和重挂后读回。提交 `2ae71495` 已建立。

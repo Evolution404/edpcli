@@ -156,6 +156,112 @@ fn native_cli_full_extent_preservation_sha256() {
         println!("[preserve] PASS full native extents + LCE + FileKeys unchanged");
     }
 }
+
+#[test]
+#[ignore = "read-only whole-preserved-encrypted-partition hash on guarded OS Disk Image"]
+fn native_os_cross_mode_encrypt_full_extent_sha256() {
+    use sha2::{Digest, Sha256};
+    use std::fs::{self, File};
+    use std::io::{Read, Seek, SeekFrom};
+    let raw = std::env::var("EDPCLI_CRYPTO_HIL_RAW").unwrap();
+    assert!(
+        raw.starts_with("/dev/rdisk")
+            && raw["/dev/rdisk".len()..]
+                .chars()
+                .all(|c| c.is_ascii_digit())
+    );
+    let sector: u32 = std::env::var("EDPCLI_CRYPTO_HIL_SECTOR")
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(matches!(sector, 512 | 1024 | 2048 | 4096));
+    let snapshot = std::env::var("EDPCLI_CROSS_HIL_SNAPSHOT").unwrap();
+    let phase = std::env::var("EDPCLI_CROSS_HIL_PHASE").unwrap();
+    assert!(matches!(phase.as_str(), "capture" | "verify"));
+    let capacity = 536_870_912u64;
+    platform::set_include_virtual(true);
+    let disk = platform::parse_disk_selector(&raw).unwrap();
+    assert!(platform::confirmed_virtual_disk_image(
+        &system::SysRunner,
+        disk
+    ));
+    let geometry = ObservedDeviceGeometry {
+        capacity_bytes: capacity,
+        logical_sector_bytes: Some(sector),
+        physical_sector_bytes: None,
+    }
+    .native_read_geometry()
+    .unwrap();
+    assert_eq!(
+        system::device_geometry(&system::SysRunner, disk)
+            .unwrap()
+            .native_read_geometry()
+            .unwrap(),
+        geometry
+    );
+    let did = TargetIdentity::from_probe(
+        &system::native_provision_probe(&system::SysRunner, disk).unwrap(),
+        geometry.native_sector_count,
+    )
+    .unwrap()
+    .device_id()
+    .to_owned();
+    let mut dev = NativeRawBlockDevice::open_readonly(&raw, geometry).unwrap();
+    let mut prefix = Vec::with_capacity(13 * sector as usize);
+    for lba in 0..13 {
+        prefix.extend_from_slice(&dev.read_block_fresh(lba).unwrap());
+    }
+    let projected = NativeProtocolImage::from_native_bytes(sector, prefix).unwrap();
+    let parsed = parse_existing_provision_native(&projected, &did, geometry.native_sector_count)
+        .unwrap()
+        .unwrap();
+    let (part, record) = parsed
+        .profile
+        .partitions
+        .iter()
+        .zip(&parsed.records)
+        .find(|(part, _)| part.role == edpcli::provision::PartitionRole::Encrypt)
+        .expect("Mode0/1/2 must retain encrypted volume");
+    assert!(part.physically_encrypted);
+    let file_key = record
+        .verified_file_key(Some(DEFAULT_KEY_DOMAIN_PASSWORD))
+        .expect("retained FileKey with unchanged source password");
+    let key_digest = Sha256::digest(file_key);
+
+    let mut file = File::open(&raw).unwrap();
+    file.seek(SeekFrom::Start(part.start_lba * u64::from(sector)))
+        .unwrap();
+    let mut remaining = part.sector_count * u64::from(sector);
+    let mut hasher = Sha256::new();
+    let mut chunk = vec![0u8; 1024 * 1024];
+    while remaining != 0 {
+        let len = remaining.min(chunk.len() as u64) as usize;
+        file.read_exact(&mut chunk[..len]).unwrap();
+        hasher.update(&chunk[..len]);
+        remaining -= len as u64;
+    }
+    let full_hash: String = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let key_hash: String = key_digest.iter().map(|b| format!("{b:02x}")).collect();
+    let summary = format!(
+        "sector={sector} start={} blocks={} full_sha256={full_hash} filekey_sha256={key_hash}\n",
+        part.start_lba, part.sector_count,
+    );
+    if phase == "capture" {
+        fs::write(snapshot, &summary).unwrap();
+        println!("[cross] captured complete encrypted extent: {summary}");
+    } else {
+        assert_eq!(
+            fs::read_to_string(&snapshot).unwrap(),
+            summary,
+            "cross-mode retained encrypted region bytes/geometry/FileKey changed"
+        );
+        println!("[cross] PASS complete retained encrypted extent and FileKey: {summary}");
+    }
+}
 // Deliberately independent of the writer's NativeCipherDirection/transform helper.
 fn decode_native(raw: &[u8], key: &[u8; 16], mode: u8, lba: u64, sector: u32) -> Vec<u8> {
     assert_eq!(raw.len(), sector as usize);
