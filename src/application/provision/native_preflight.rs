@@ -96,7 +96,7 @@ pub fn plan_native_mode1_from_backup(backup: &Path) -> Result<NativeVirtualDiskP
 }
 
 /// 只读绑定的完整原生计划：没有物理写权限，不得作为直接提交凭据。
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Native4knReadOnlyPreflight {
     pub disk: u32,
     pub device_identity: String,

@@ -227,6 +227,15 @@ pub(super) fn dispatch_provision(
             TuiAction::PageDown => {
                 move_provision(state, viewport_height.max(1) as isize, viewport_height)
             }
+            TuiAction::Activate if state.provision().native_readonly_review.is_some() => {
+                state.set_warning_notice("4Kn来源绑定计划仅供审核，尚未通过物理写入门禁");
+                ActionOutcome::handled()
+            }
+            TuiAction::Export if state.provision().native_readonly_review.is_some() => {
+                state
+                    .set_warning_notice("4Kn只读审核不导出整盘数据；可通过CLI单独生成离线稀疏镜像");
+                ActionOutcome::handled()
+            }
             TuiAction::Activate => {
                 state.provision_begin_confirm();
                 ActionOutcome::handled()

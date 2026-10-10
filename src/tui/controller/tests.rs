@@ -181,4 +181,81 @@ fn native_4kn_mode0_requests_readonly_key_probe_and_independent_password_verific
     );
     // Source authentication cannot make an unapproved 4Kn physical plan.
     assert!(state.provision_request().unwrap_err().contains("4Kn"));
+
+    // The 4Kn source-bound audit has an independent review state which cannot
+    // be converted into PreparedProvision or accepted by Enter / Export.
+    state.provision_mut().kind = ProvisionKind::Mode1;
+    assert!(state.provision_unique_mode0_native_backup().is_err());
+    let backup = |name: &str| crate::application::BackupWorkspaceItem {
+        display_cached: false,
+        index: 1,
+        path: std::path::PathBuf::from(format!("/tmp/{name}.edpb")),
+        file_name: format!("{name}.edpb"),
+        display_time: "2026-10-10".into(),
+        size_bytes: Some(255_944_818_688),
+        vid: Some("3535".into()),
+        pid: Some("0901".into()),
+        device_id: Some("disk&ven_test&prod_test".into()),
+        onlyid: Some("1402259934".into()),
+        identity: None,
+        user: None,
+        dept: None,
+        provision_kind: Some(DiskProvisionKind::Mode0),
+        integrity_status:
+            crate::infrastructure::backup_store::catalog::BackupIntegrityStatus::Verified,
+        size_ok: true,
+        verification_error: None,
+        content_sha256: Some("a".repeat(64)),
+        coverage: None,
+        restore_preview: None,
+    };
+    state.replace_backups(vec![backup("a")]);
+    assert_eq!(
+        state.provision_unique_mode0_native_backup().unwrap(),
+        std::path::PathBuf::from("/tmp/a.edpb")
+    );
+    state.replace_backups(vec![backup("a"), backup("b")]);
+    assert!(state
+        .provision_unique_mode0_native_backup()
+        .unwrap_err()
+        .contains("多份"));
+    let mut corrupt = backup("bad");
+    corrupt.verification_error = Some("SHA256 mismatch".into());
+    state.replace_backups(vec![corrupt]);
+    assert!(state.provision_unique_mode0_native_backup().is_err());
+    state.provision_set_planning();
+    state.provision_finish_native_readonly_plan(Ok(
+        crate::application::provision::native_preflight::Native4knReadOnlyPreflight {
+            disk: 6,
+            device_identity: "disk&ven_test&prod_test".into(),
+            source_backup_sha256: "a".repeat(64),
+            planned_write_sha256: "b".repeat(64),
+            verified_original_blocks: 17,
+            write_blocks: 100,
+            format_block_count: 84,
+            logical_sector_bytes: 4096,
+            total_sectors: 255_944_818_688 / 4096,
+            first_partition_lba: 63,
+            first_partition_sectors: 49_979_361,
+            preserved_encrypted_partition_lba: 49_979_648,
+        },
+    ));
+    assert_eq!(state.provision().stage, ProvisionStage::Review);
+    assert!(state.provision().native_readonly_review.is_some());
+    assert!(state.provision().prepared.is_none());
+    for action in [TuiAction::Activate, TuiAction::Export] {
+        let outcome = super::provision::dispatch_provision(&mut state, action, 20)
+            .expect("read-only native review handles action");
+        assert!(outcome.handled);
+        assert_eq!(state.provision().stage, ProvisionStage::Review);
+        assert!(state.provision().prepared.is_none());
+    }
+    state.provision_begin_confirm();
+    state.provision_begin_export();
+    assert_eq!(state.provision().stage, ProvisionStage::Review);
+    assert!(state.provision_take_for_write().is_none());
+    assert!(state.provision_take_export().is_none());
+    state.provision_return_review_to_form();
+    assert_eq!(state.provision().stage, ProvisionStage::Form);
+    assert!(state.provision().native_readonly_review.is_none());
 }

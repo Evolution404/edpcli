@@ -203,6 +203,9 @@ pub struct ProvisionState {
     pub form: ProvisionForm,
     pub plain_form: PlainProvisionForm,
     pub prepared: Option<crate::application::provision::PreparedProvision>,
+    /// 已认证来源的4Kn只读摘要；不属于允许写入的PreparedProvision。
+    pub(crate) native_readonly_review:
+        Option<crate::application::provision::native_preflight::Native4knReadOnlyPreflight>,
     pub(crate) review_projection: Option<ProvisionConfirmationViewModel>,
     pub confirmation: String,
     pub export_path: String,
@@ -246,6 +249,7 @@ impl Default for ProvisionState {
             form: ProvisionForm::default(),
             plain_form: PlainProvisionForm::default(),
             prepared: None,
+            native_readonly_review: None,
             review_projection: None,
             confirmation: String::new(),
             export_path: String::new(),

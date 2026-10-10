@@ -149,6 +149,37 @@ impl TaskHub {
         Ok(generation)
     }
 
+    pub fn request_native_mode1_readonly_plan(
+        &mut self,
+        disk: u32,
+        backup: PathBuf,
+    ) -> Result<u64, &'static str> {
+        let generation = self
+            .provision
+            .plan_slot
+            .try_begin()
+            .ok_or("已有制盘计划正在生成")?;
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let runner = system_runner();
+                crate::application::provision::native_preflight::preflight_native_mode1_on_disk(
+                    &runner, disk, &backup,
+                )
+            }))
+            .unwrap_or_else(|payload| {
+                Err(format!(
+                    "4Kn只读计划任务异常终止: {}",
+                    panic_message(payload)
+                ))
+            });
+            let _ = tx.send(WorkerResult::Provision(
+                ProvisionWorkerResult::NativeReadOnlyPlan { generation, result },
+            ));
+        });
+        Ok(generation)
+    }
+
     pub fn request_provision_export(
         &mut self,
         prepared: crate::application::provision::PreparedProvision,

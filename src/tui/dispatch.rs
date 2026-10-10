@@ -320,14 +320,28 @@ pub(super) fn start_provision_plan(state: &mut AppState, tasks: &mut TaskHub) {
         state.set_error_notice("目标 USB 已不存在，请返回设备页重新选择。");
         return;
     };
-    // The physical writer and formatter have not passed native 4Kn write gates.
-    // Block every scheme including Plain before constructing any write request.
-    if state
+    let logical_bytes = state
         .selected_device()
         .and_then(|row| row.layout_geometry().ok())
-        .is_none_or(|geometry| geometry.logical_sector_bytes != 512)
-    {
-        state.set_warning_notice("当前逻辑扇区大小尚未认证写盘；只读查看布局，禁止创建制盘计划");
+        .map(|geometry| geometry.logical_sector_bytes);
+    // Native 4Kn has a strictly read-only EDPB-linked preview, separate from
+    // both PreparedProvision and the 512B physical writer.
+    if logical_bytes == Some(4096) {
+        let backup = match state.provision_unique_mode0_native_backup() {
+            Ok(path) => path,
+            Err(message) => {
+                state.set_warning_notice(message);
+                return;
+            }
+        };
+        state.provision_set_planning();
+        if let Err(message) = tasks.request_native_mode1_readonly_plan(disk, backup) {
+            state.provision_finish_native_readonly_plan(Err(message.into()));
+        }
+        return;
+    }
+    if logical_bytes != Some(512) {
+        state.set_warning_notice("当前逻辑扇区大小尚未认证，禁止创建制盘计划");
         return;
     }
     let request = if state.provision().kind == state::ProvisionKind::Plain {
