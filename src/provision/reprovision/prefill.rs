@@ -241,12 +241,22 @@ pub fn prefill_for_target_mode(
         let available = usable_end_lba
             .checked_sub(boot_end.max(first))
             .ok_or("device too small for the boot partition")?;
-        let default_sectors = (1024u64 * 1024 * 1024).div_ceil(sector_size);
-        let proposed = default_sectors.min(available / 2);
-        if proposed == 0 {
+        // Preserve the OEM Quick capacity intent (including TUI input mode);
+        // round DOWN to whole MiB so no new default crosses the disk boundary.
+        let proposed_mib = (available / 2)
+            .checked_mul(sector_size)
+            .ok_or("native capacity overflow")?
+            / (1024 * 1024);
+        let proposed_mib = proposed_mib.min(1024);
+        if proposed_mib == 0 {
             return Err("device has no space for encrypted partition".into());
         }
-        Some(exact(proposed, CapacitySource::SystemDefault)?)
+        Some(CapacityInput::from_quick_native(
+            proposed_mib,
+            QuickCapacityUnit::MiB,
+            CapacitySource::SystemDefault,
+            logical_bytes,
+        )?)
     };
     let encrypt_start = if encrypt.is_none() {
         None
