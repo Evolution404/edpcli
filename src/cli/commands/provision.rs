@@ -33,12 +33,14 @@ fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::
                         crate::provision::KeyDomainSecretPair::new(
                             (!opts.share_source_password.is_empty())
                                 .then_some(opts.share_source_password.as_bytes()),
-                            Some(opts.share_target_password.as_bytes()),
+                            (!opts.share_target_password.is_empty())
+                                .then_some(opts.share_target_password.as_bytes()),
                         ),
                         crate::provision::KeyDomainSecretPair::new(
                             (!opts.encrypt_source_password.is_empty())
                                 .then_some(opts.encrypt_source_password.as_bytes()),
-                            Some(opts.encrypt_target_password.as_bytes()),
+                            (!opts.encrypt_target_password.is_empty())
+                                .then_some(opts.encrypt_target_password.as_bytes()),
                         ),
                     ),
                     volume_label: opts.boot_label.clone(),
@@ -53,7 +55,7 @@ fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::
                         share_fs: opts.share_fs,
                         encrypt_fs: opts.encrypt_fs,
                     },
-                    preserve_unformatted: false,
+                    preserve_unformatted: opts.preserve_unformatted,
                     force_change_password: opts.force_change_password,
                     cancel_password_complexity_check: opts.cancel_password_complexity_check,
                     max_share_password_errors: opts.max_share_password_errors,
@@ -609,13 +611,30 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                     Ok(value) => value,
                     Err(message) => return finish(Err(EdpCliError::new(EXIT_TARGET, message))),
                 };
-            println!("原生统一制盘规划：disk{}，来源{:?} → 目标{}，逻辑扇区{}B，原生写集{}块，全部目标写入属于破坏性重建。",
-                disk, prepared.source, prepared.target.full_name(), prepared.plan.sector_bytes, prepared.plan.writes.len());
+            println!(
+                "原生统一制盘规划：disk{}，来源{:?} → 目标{}，逻辑扇区{}B，原生写集{}块。",
+                disk,
+                prepared.source,
+                prepared.target.full_name(),
+                prepared.plan.sector_bytes,
+                prepared.plan.writes.len()
+            );
+            let names = |parts: &[String]| {
+                if parts.is_empty() {
+                    "无".to_owned()
+                } else {
+                    parts.join("、")
+                }
+            };
+            println!("来源数据丢弃：{}", names(&prepared.impact.source_discarded));
+            println!("来源数据保留：{}", names(&prepared.impact.source_retained));
+            println!("目标格式化：{}", names(&prepared.impact.target_formatted));
+            println!("密钥操作：{}", names(&prepared.impact.key_operations));
             let confirmed = if yes {
                 true
             } else {
                 prompt.confirm_yes(&crate::ui::bold(&format!(
-                    "将按上述计划破坏性重建 disk{}（{}）；旧数据及原有 LBA0–12 将被新协议覆盖，使用共享原生WAL事务。输入 YES: ",
+                    "将按上方明确列示的来源数据丢弃/保留和目标格式化方案执行 disk{}（{}）；LBA0–12协议将更新，通过原生WAL事务提交。确认输入 YES: ",
                     disk, opts.target.full_name()
                 )))
             };

@@ -58,8 +58,8 @@ fn print_topic_help(topic: &str) {
             println!("    4Kn来源Mode1离线增量写集镜像：provision image --source-backup FILE.edpb --target mode1 --out FILE；重建明文二合一exFAT、保留原加密区元数据，不连接实体U盘；稀疏镜像不包含原保密区用户数据，不可整体dd写盘。");
             println!("    4Kn 实盘只读备份比对：provision verify-source --disk N --backup FILE.edpb（完整原生协议、LCE和分区首块；不卸载、不写盘、不解禁）。");
 
-            println!("    正式 plan / image / write 对当前任意受支持来源模式进行目标破坏性重建；不会保留旧分区文件或原FileKey。");
-            println!("    目标新建文件系统：默认格式化所有目标存在的可格式化分区；可指定 --format-boot --format-share --format-encrypt。");
+            println!("    正式 plan / image / write 默认保留兼容的原分区数据和 FileKey；仅对新建或几何/文件系统不兼容分区规划格式化重建。");
+            println!("    使用 --format-boot / --format-share / --format-encrypt 可主动格式化指定分区。--preserve-unformatted 禁止隐式格式化任何未指定分区（不兼容则拒绝）。");
             println!("    文件系统: --boot-fs fat16|fat32|exfat --share-fs fat16|fat32|exfat --encrypt-fs fat16|fat32|exfat");
             println!("    各区卷标: --boot-label LABEL --share-label LABEL --encrypt-label LABEL");
             println!("新盘身份参数: [--label-id ID] --user USER --dept DEPT [--label LABEL]");
@@ -75,7 +75,7 @@ fn print_topic_help(topic: &str) {
                 crate::provision::DEFAULT_SAFE6_LABEL
             );
             println!(
-                "来源密码未指定表示 Unknown；存在的目标密码域默认 {}；卷标默认值: 启动区。",
+                "来源密码未指定先尝试已证实的默认密码，否则可保持严格同构的原密钥封装；未指定目标密码表示不要求改密，新建分区的密码默认为 {}。",
                 crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT
             );
             println!("标签标识未指定时继承已确认来源OnlyID，普通盘随机生成合法候选；可通过 --label-id 手动覆盖。");

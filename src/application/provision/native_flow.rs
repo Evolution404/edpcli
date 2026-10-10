@@ -130,27 +130,14 @@ type NativeOfficialPlanResult = (
 );
 
 fn native_rebuild_format_policy(
-    mode: crate::provision::OfficialPartitionMode,
+    _mode: crate::provision::OfficialPartitionMode,
     request: &OfficialProvisionRequest,
 ) -> Result<FormatOptions, String> {
-    use crate::provision::OfficialPartitionMode as Mode;
-    let has_boot = matches!(
-        mode,
-        Mode::DefaultThreePartition | Mode::IntranetExtranetDualPartition
-    );
-    let has_share = mode != Mode::WholeDiskEncrypted;
-    let has_encrypt = mode != Mode::IntranetExtranetDualPartition;
-    let mut options = request.format.clone();
-    if !request.preserve_unformatted && !options.boot && !options.share && !options.encrypt {
-        // CLI's implicit full-rebuild default is explicitly destructive.
-        options.boot = has_boot;
-        options.share = has_share;
-        options.encrypt = has_encrypt;
-    }
-    // Do not reinterpret an explicit unformatted request as a full rebuild.
-    // Source-aware validation below must prove each unformatted partition is
-    // preserved; with no compatible source, prepare fails before any write.
-    Ok(options)
+    // Never turn "all formatting checkboxes off" into "format everything".
+    // The source-aware planner below alone determines which *incompatible*
+    // regions must be rebuilt. The strict-preserve flag forbids that automatic
+    // decision; an explicit format checkbox still authorizes one region.
+    Ok(request.format.clone())
 }
 
 /// Use the same source-aware geometry/disposition machinery as the legacy
@@ -240,6 +227,25 @@ fn native_source_aware_targets(
     }
     let mut dispositions =
         TargetProvisionPlan::build(source, mode, &targets, lce_start, &request.key_domains)?;
+    // CLI default: preserve every compatible source region, but rebuild
+    // genuinely incompatible/new regions. TUI already supplies its own
+    // preflight-required format selections and requests strict preservation
+    // of anything not selected. A blocked password change is NOT permission
+    // to destroy the encrypted region: it must fail until credentials or an
+    // explicit formatting choice are supplied.
+    if !request.preserve_unformatted {
+        for part in &dispositions.partitions {
+            if part.disposition != RegionDisposition::Rebuild {
+                continue;
+            }
+            match part.geometry.role {
+                PartitionRole::Boot => options.boot = true,
+                PartitionRole::Share | PartitionRole::BootShareCombined => options.share = true,
+                PartitionRole::Encrypt => options.encrypt = true,
+                PartitionRole::CompatibilityReserve => {}
+            }
+        }
+    }
     for target in &targets {
         if options.choice(target.role).0 {
             dispositions.force_rebuild_for_format(target.role);
@@ -1209,8 +1215,8 @@ mod tests {
                 assert!(!chosen.boot && !chosen.share && !chosen.encrypt);
             }
         }
-        // CLI's unselected *default* means a deliberate destructive rebuild,
-        // not a promise to preserve existing ciphertext or key material.
+        // CLI default now chooses only the *necessary* rebuilds using source
+        // evidence, not unconditional full formatting.
         request.preserve_unformatted = false;
         for mode in [
             Mode::DefaultThreePartition,
@@ -1219,17 +1225,23 @@ mod tests {
             Mode::IntranetExtranetDualPartition,
         ] {
             let chosen = native_rebuild_format_policy(mode, &request).unwrap();
-            assert_eq!(
-                chosen.boot,
-                matches!(
-                    mode,
-                    Mode::DefaultThreePartition | Mode::IntranetExtranetDualPartition
-                )
-            );
-            assert_eq!(chosen.share, mode != Mode::WholeDiskEncrypted);
-            assert_eq!(chosen.encrypt, mode != Mode::IntranetExtranetDualPartition);
+            assert!(!chosen.boot && !chosen.share && !chosen.encrypt);
+            let mut resolved = chosen;
+            let result =
+                native_source_aware_targets(mode, 512, 4_000_000, &request, &mut resolved, None)
+                    .unwrap();
+            for part in &result.1.partitions {
+                if part.geometry.role != crate::provision::PartitionRole::CompatibilityReserve {
+                    assert_eq!(
+                        part.disposition,
+                        crate::provision::RegionDisposition::Rebuild
+                    );
+                    assert!(resolved.choice(part.geometry.role).0);
+                }
+            }
         }
-        // Partial rebuild requires a compatible source for each retained region.
+        // Strict preservation only permits explicitly formatted partitions.
+        request.preserve_unformatted = true;
         request.format.share = true;
         let mut chosen =
             native_rebuild_format_policy(Mode::DefaultThreePartition, &request).unwrap();
@@ -1467,6 +1479,71 @@ mod tests {
                 .iter()
                 .all(|w| w.relative_lba < secret.start_lba
                     || w.relative_lba >= secret.start_lba + secret.sector_count));
+        }
+    }
+
+    #[test]
+    fn auto_rebuild_changes_only_incompatible_source_regions_across_four_sector_sizes() {
+        use crate::provision::{OfficialPartitionMode as Mode, PartitionRole};
+        for sector in [512, 1024, 2048, 4096] {
+            let total = 1_073_741_824 / u64::from(sector);
+            let (probe, parsed, prefix, _) = test_native_source(sector, Mode::BootShareCombined);
+            let mut request = offline_request(Mode::DefaultThreePartition);
+            request.preserve_unformatted = false; // CLI default: source-aware automatic rebuild
+            assert!(!request.format.boot && !request.format.share && !request.format.encrypt);
+            let (_, writes, preview, _, _) = generate_official_native_plan(
+                total,
+                sector,
+                &probe,
+                &request,
+                None,
+                parsed.pass_info_policy,
+                NativePlanSource {
+                    parsed: Some(&parsed),
+                    prefix: &prefix,
+                },
+            )
+            .unwrap();
+            let impact = project_native_impact(
+                capture_source_partitions(
+                    DiskProvisionKind::Mode1,
+                    Some(&parsed),
+                    &prefix,
+                    sector,
+                    total,
+                )
+                .unwrap(),
+                &preview,
+                &writes,
+            )
+            .unwrap();
+            assert_eq!(impact.source_discarded, ["二合一区"]);
+            assert_eq!(impact.source_retained, ["保密区"]);
+            assert_eq!(impact.target_formatted, ["启动区", "交换区"]);
+            let old = parsed.profile.partition(PartitionRole::Encrypt).unwrap();
+            assert!(writes.writes.iter().all(|w| {
+                w.relative_lba < old.start_lba || w.relative_lba >= old.start_lba + old.sector_count
+            }));
+            let protected = preview
+                .iter()
+                .find(|p| p.role == Some(PartitionRole::Encrypt))
+                .unwrap();
+            assert!(!protected.formatted, "sector={sector}");
+            // Strict no-implicit-drop CLI flag must block the same conversion.
+            request.preserve_unformatted = true;
+            assert!(generate_official_native_plan(
+                total,
+                sector,
+                &probe,
+                &request,
+                None,
+                parsed.pass_info_policy,
+                NativePlanSource {
+                    parsed: Some(&parsed),
+                    prefix: &prefix
+                },
+            )
+            .is_err());
         }
     }
 

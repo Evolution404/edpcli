@@ -102,6 +102,7 @@ fn parse_provision_opts(rest: &[String], action: &str) -> Result<ProvisionParsed
     let mut format_boot = false;
     let mut format_share = false;
     let mut format_encrypt = false;
+    let mut preserve_unformatted = false;
     let mut boot_label = None;
     let mut share_label = None;
     let mut encrypt_label = None;
@@ -266,6 +267,11 @@ fn parse_provision_opts(rest: &[String], action: &str) -> Result<ProvisionParsed
             "--format-boot" => set_switch(&mut format_boot, &rest[i], "--format-boot")?,
             "--format-share" => set_switch(&mut format_share, &rest[i], "--format-share")?,
             "--format-encrypt" => set_switch(&mut format_encrypt, &rest[i], "--format-encrypt")?,
+            "--preserve-unformatted" => set_switch(
+                &mut preserve_unformatted,
+                &rest[i],
+                "--preserve-unformatted",
+            )?,
             "--boot-label" => {
                 let value = take_value(rest, &mut i, "--boot-label")?;
                 set_once(&mut boot_label, value, "--boot-label")?;
@@ -412,6 +418,7 @@ fn parse_provision_opts(rest: &[String], action: &str) -> Result<ProvisionParsed
             || format_boot
             || format_share
             || format_encrypt
+            || preserve_unformatted
             || boot_label.is_some()
             || share_label.is_some()
             || encrypt_label.is_some()
@@ -454,6 +461,7 @@ fn parse_provision_opts(rest: &[String], action: &str) -> Result<ProvisionParsed
                 format_boot: false,
                 format_share: false,
                 format_encrypt: false,
+                preserve_unformatted: false,
                 boot_label: String::new(),
                 share_label: String::new(),
                 encrypt_label: String::new(),
@@ -506,15 +514,17 @@ fn parse_provision_opts(rest: &[String], action: &str) -> Result<ProvisionParsed
             dept: dept.unwrap_or_default(),
             label: label.unwrap_or_default(),
             share_source_password: share_source_password.unwrap_or_default(),
-            share_target_password: share_target_password
-                .unwrap_or_else(|| crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.into()),
+            // Absent target password means "unchanged", not "reset to default".
+            // A genuinely new/rebuilt partition falls back to the OEM default
+            // inside the shared native provision planner.
+            share_target_password: share_target_password.unwrap_or_default(),
             encrypt_source_password: encrypt_source_password.unwrap_or_default(),
-            encrypt_target_password: encrypt_target_password
-                .unwrap_or_else(|| crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT.into()),
+            encrypt_target_password: encrypt_target_password.unwrap_or_default(),
             prompt_passwords,
             format_boot,
             format_share,
             format_encrypt,
+            preserve_unformatted,
             boot_label: boot_label.unwrap_or_else(|| "启动区".into()),
             share_label: share_label.unwrap_or_else(|| "交换区".into()),
             encrypt_label: encrypt_label.unwrap_or_else(|| "保密区".into()),

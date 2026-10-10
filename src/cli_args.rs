@@ -99,6 +99,10 @@ pub struct ProvisionNewOpts {
     pub format_boot: bool,
     pub format_share: bool,
     pub format_encrypt: bool,
+    /// Strict mode: never automatically format an unselected incompatible region.
+    /// By default, compatible source regions are preserved and only genuinely
+    /// incompatible/new target regions are reformatted.
+    pub preserve_unformatted: bool,
     pub boot_label: String,
     pub share_label: String,
     pub encrypt_label: String,

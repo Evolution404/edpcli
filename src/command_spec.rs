@@ -180,6 +180,7 @@ const PROVISION_COMMON_OPTIONS: &[OptionSpec] = &[
     switch("--format-boot"),
     switch("--format-share"),
     switch("--format-encrypt"),
+    switch("--preserve-unformatted"),
     value("--boot-label"),
     value("--share-label"),
     value("--encrypt-label"),
