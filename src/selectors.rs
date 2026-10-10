@@ -32,8 +32,13 @@ impl DeviceSelector {
             guard_usb_disk(runner, disk)?;
             return Ok(disk);
         }
-        let disks: Vec<_> = system::list_usb_disks(runner)
+        let disks: Vec<_> = system::list_external_disks(runner)
             .into_iter()
+            .filter(|disk| {
+                disk.proto == "USB"
+                    || (crate::platform::include_virtual()
+                        && crate::platform::confirmed_virtual_disk_image(runner, disk.n))
+            })
             .filter(|disk| !crate::platform::is_system_disk(runner, disk.n))
             .collect();
         let disk = self.choose_from(&disks, prompt)?;

@@ -24,6 +24,18 @@ pub fn commit_native_plan_on_disk(
     plan: &NativeVirtualDiskPlan,
     wal_path: &std::path::Path,
 ) -> Result<(), String> {
+    commit_native_plan_on_disk_with_source(runner, disk, plan, wal_path, None)
+}
+
+/// Apply an immutable planned write set and verify the exact source snapshot
+/// captured *before* interactive confirmation.
+pub fn commit_native_plan_on_disk_with_source(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    plan: &NativeVirtualDiskPlan,
+    wal_path: &std::path::Path,
+    expected_prefix: Option<&[Vec<u8>]>,
+) -> Result<(), String> {
     let session = TargetSession::<ReadOnly>::open_usb(runner, disk)
         .map_err(|e| format!("原生制盘目标校验失败: {}", e.msg))?;
     let geometry = session
@@ -43,6 +55,9 @@ pub fn commit_native_plan_on_disk(
             dev.read_block_fresh(lba)
                 .map_err(|e| format!("提交前读取LBA{lba}失败: {e}"))?,
         );
+    }
+    if expected_prefix.is_some_and(|expected| expected != source_prefix.as_slice()) {
+        return Err("目标源盘协议在规划与确认之间改变，拒绝写入".into());
     }
     let source_hash = Sha256::digest(source_prefix.concat());
     let identity = format!(

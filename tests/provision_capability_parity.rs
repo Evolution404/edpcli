@@ -12,8 +12,8 @@ fn cli_and_tui_share_provision_prepare_commit_and_export_entrypoints() {
     let task = source("src/tui/provision/task.rs");
 
     for entrypoint in [
-        "prepare_provision",
-        "commit_provision",
+        "native_flow::prepare_native_provision_on_disk",
+        "commit_provision_with_backup_on_disk",
         "export_provision_image",
     ] {
         assert!(cli.contains(entrypoint), "CLI missing {entrypoint}");

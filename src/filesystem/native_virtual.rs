@@ -10,7 +10,7 @@ use super::{
 
 /// An assembled full-disk plan. The protective data after the 512B MBR
 /// header is still one fully-owned native logical block, initialized to zero.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeVirtualDiskPlan {
     pub total_sectors: u64,
     pub sector_bytes: u32,

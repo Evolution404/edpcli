@@ -320,40 +320,8 @@ pub(super) fn start_provision_plan(state: &mut AppState, tasks: &mut TaskHub) {
         state.set_error_notice("目标 USB 已不存在，请返回设备页重新选择。");
         return;
     };
-    let logical_bytes = state
-        .selected_device()
-        .and_then(|row| row.layout_geometry().ok())
-        .map(|geometry| geometry.logical_sector_bytes);
-    // Two independent read-only native levels:
-    // (a) only the independently verified 4Kn Mode0 -> Mode1 source path
-    //     can generate a source-bound complete draft write set;
-    // (b) ALL other native source/target pairs can review geometry only.
-    // Neither creates PreparedProvision nor opens a physical write lease.
-    if logical_bytes != Some(512) {
-        if logical_bytes.is_none() {
-            state.set_warning_notice("设备原生逻辑扇区几何无效，无法规划");
-            return;
-        }
-        let source_mode0 = state
-            .selected_device()
-            .is_some_and(|row| row.provision_kind == crate::provision::DiskProvisionKind::Mode0);
-        if logical_bytes == Some(4096)
-            && source_mode0
-            && state.provision().kind == state::ProvisionKind::Mode1
-        {
-            if let Ok(backup) = state.provision_unique_mode0_native_backup() {
-                state.provision_set_planning();
-                if let Err(message) = tasks.request_native_mode1_readonly_plan(disk, backup) {
-                    state.provision_finish_native_readonly_plan(Err(message.into()));
-                }
-                return;
-            }
-        }
-        let draft = state.provision_native_geometry_readonly_plan();
-        state.provision_set_planning();
-        state.provision_finish_native_geometry_readonly_plan(draft);
-        return;
-    }
+    // Every supported source geometry now plans through the same native
+    // application service. No 512B-vs-4Kn read-only mode gate.
     let request = if state.provision().kind == state::ProvisionKind::Plain {
         match state.provision_plain_plan() {
             Ok(plan) => crate::application::provision::ProvisionRequest::Plain(

@@ -29,6 +29,20 @@ impl ProvisionResultSnapshot {
                     ProvisionResultPartition::from_format(item, official.target_plan.as_ref())
                 })
                 .collect(),
+            crate::application::provision::PreparedProvision::Native(native) => native
+                .partitions
+                .iter()
+                .map(|part| ProvisionResultPartition {
+                    role: part.role,
+                    filesystem: part.filesystem,
+                    start_lba: part.start_lba,
+                    size_bytes: part
+                        .sector_count
+                        .saturating_mul(u64::from(native.plan.sector_bytes)),
+                    selected_for_format: part.formatted,
+                    disposition: Some(crate::provision::RegionDisposition::Rebuild),
+                })
+                .collect(),
             crate::application::provision::PreparedProvision::Plain(plain) => plain
                 .plan
                 .partitions

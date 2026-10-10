@@ -524,6 +524,7 @@ impl std::fmt::Debug for PreparedNewProvision {
 pub enum PreparedProvision {
     Official(Box<PreparedNewProvision>),
     Plain(Box<PreparedPlainProvision>),
+    Native(Box<native_flow::NativePreparedProvision>),
 }
 
 impl PreparedProvision {
@@ -531,6 +532,7 @@ impl PreparedProvision {
         match self {
             Self::Official(prepared) => ProvisionTarget::Official(prepared.mode),
             Self::Plain(_) => ProvisionTarget::Plain,
+            Self::Native(native) => native.target,
         }
     }
 
@@ -538,6 +540,7 @@ impl PreparedProvision {
         match self {
             Self::Official(prepared) => prepared.disk,
             Self::Plain(prepared) => prepared.disk,
+            Self::Native(native) => native.disk,
         }
     }
 
@@ -545,6 +548,7 @@ impl PreparedProvision {
         match self {
             Self::Official(prepared) => &prepared.device_id,
             Self::Plain(prepared) => &prepared.device_id,
+            Self::Native(native) => &native.device_id,
         }
     }
 
@@ -552,6 +556,7 @@ impl PreparedProvision {
         match self {
             Self::Official(prepared) => &prepared.before_pin,
             Self::Plain(prepared) => &prepared.before_pin,
+            Self::Native(native) => &native.before_pin,
         }
     }
 
@@ -564,6 +569,7 @@ impl PreparedProvision {
                 )
             }),
             Self::Plain(prepared) => Ok(&prepared.source_metadata),
+            Self::Native(native) => Ok(&native.source_protocol_projection),
         }
     }
 
@@ -929,6 +935,41 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
     use crate::application::progress::{
         emit_isolated, LogPolicy, Phase, ProgressEvent, Severity, Step,
     };
+    if let PreparedProvision::Native(native) = prepared {
+        std::fs::create_dir_all(&backup_dir)
+            .map_err(|e| err(EXIT_IO, format!("原生WAL备份目录创建失败: {e}")))?;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let wal = backup_dir.join(format!("native-provision-disk{}-{stamp}.wal", native.disk));
+        native_flow::commit_prepared_native_provision(runner, native, &wal)
+            .map_err(|message| err(EXIT_IO, message))?;
+        // The original native write blocks are retained as a durable
+        // rollback WAL, not as a portable EDPB backup. The result UI must
+        // identify its actual file type instead of promising an EDPB export.
+        let backup = super::post_restore::MetadataBackupReport {
+            path: wal,
+            partition_count: native.partitions.len(),
+            edp_protocol_saved: true,
+        };
+        let commit = match native.target {
+            ProvisionTarget::Plain => ProvisionCommitOutcome::Plain {
+                partition_count: native.partitions.len(),
+            },
+            ProvisionTarget::Official(_) => {
+                ProvisionCommitOutcome::Official(ProvisionCommitReport {
+                    provision_succeeded: true,
+                    formats: vec![],
+                })
+            }
+        };
+        return Ok(ProvisionWriteOutcome {
+            backup,
+            commit,
+            warnings: Vec::new(),
+        });
+    }
     let format_count = match prepared {
         PreparedProvision::Official(official) => official
             .format_targets
@@ -936,6 +977,9 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
             .filter(|choice| choice.selected)
             .count(),
         PreparedProvision::Plain(_) => 0,
+        PreparedProvision::Native(native) => {
+            native.partitions.iter().filter(|p| p.formatted).count()
+        }
     } as u64;
     let total = 5 + format_count;
     let mut current = 0;
@@ -1045,6 +1089,7 @@ pub mod result_model;
 
 // Offline regular-file-only native block image production.
 pub mod native_commit;
+pub mod native_flow;
 pub mod native_image;
 pub mod native_preflight;
 pub mod native_virtual_transition;

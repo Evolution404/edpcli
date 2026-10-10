@@ -17,15 +17,17 @@ pub fn print_disk_table(rows: &[Row]) -> String {
         .map(|row| {
             let (status, tone) = if row.proto != "USB" && row.proto != "Disk Image" {
                 ("非 USB / 不支持".to_string(), Tone::Dim)
-            } else if row.proto == "Disk Image" {
-                ("虚拟盘 · 原生块".to_string(), Tone::Green)
             } else if row.denied {
                 ("需管理员权限才能识别".to_string(), Tone::Dim)
             } else if let Some(error) = &row.probe_error {
                 (format!("读取异常: {}", error), Tone::Yellow)
             } else if let Some(kind) = row.confirmed_provision_kind() {
                 (
-                    kind.short_name().to_string(),
+                    if row.proto == "Disk Image" {
+                        format!("虚拟 · {}", kind.short_name())
+                    } else {
+                        kind.short_name().to_string()
+                    },
                     if kind == DiskProvisionKind::Plain {
                         Tone::Dim
                     } else {

@@ -12,6 +12,7 @@ impl AppState {
     /// Geometry-only draft for *any* observed source and user-selected target.
     /// Does not inspect passwords, verify a source EDPB, generate a protocol
     /// image, or create a media write intent. LCE proposed on Plain is labelled.
+    #[cfg(test)]
     pub(crate) fn provision_native_geometry_readonly_plan(
         &self,
     ) -> Result<NativeGeometryReadOnlyReview, String> {
@@ -67,6 +68,7 @@ impl AppState {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn provision_finish_native_geometry_readonly_plan(
         &mut self,
         result: Result<NativeGeometryReadOnlyReview, String>,

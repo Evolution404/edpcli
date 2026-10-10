@@ -11,6 +11,7 @@ mod layout;
 mod lce;
 mod native_geometry;
 mod native_lce_audit;
+mod native_source;
 mod partition_format;
 pub(crate) use partition_format::build_official_partition_filesystem_from_plain;
 mod partition_semantics;
@@ -50,6 +51,7 @@ pub use native_geometry::{
     NativeEdpExtent, NativeEdpLayoutPlan, NativeEdpPartition, NativeEdpWriteCapability,
 };
 pub use native_lce_audit::{audit_native_lce_against_legacy_producer, NativeLceProducerAudit};
+pub use native_source::classify_native_source;
 pub use partition_format::{build_official_partition_filesystem, PartitionFilesystemImage};
 pub use partition_semantics::{
     official_partition_semantics, physical_partition_encryption_semantics,

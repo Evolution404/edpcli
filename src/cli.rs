@@ -101,6 +101,12 @@ pub fn run() -> i32 {
             return EXIT_USAGE;
         }
     };
+    // The opt-in affects eligible device discovery for all provisioning
+    // subcommands, while each commit revalidates the selected target.
+    if matches!(&parsed, Parsed::Provision(_)) && argv.iter().any(|arg| arg == "--include-virtual")
+    {
+        crate::platform::set_include_virtual(true);
+    }
     let runner = SysRunner;
     match parsed {
         Parsed::Help { topic } => {

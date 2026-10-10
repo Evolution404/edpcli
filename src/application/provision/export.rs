@@ -154,5 +154,9 @@ pub fn export_provision_image(path: &Path, prepared: &PreparedProvision) -> EdpC
     match prepared {
         PreparedProvision::Official(prepared) => export_sparse_provision_image(path, prepared),
         PreparedProvision::Plain(prepared) => export_sparse_plain_provision_image(path, prepared),
+        PreparedProvision::Native(native) => {
+            super::native_image::export_native_plain_image(path, &native.plan)
+                .map_err(|message| err(EXIT_IO, message))
+        }
     }
 }

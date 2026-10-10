@@ -192,6 +192,95 @@ impl ProvisionConfirmationViewModel {
         };
 
         let (layout, regions, geometry_note) = match prepared {
+            crate::application::provision::PreparedProvision::Native(native) => {
+                let partition_segments = native
+                    .partitions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, part)| {
+                        let label = part
+                            .role
+                            .map(|role| role.label().to_owned())
+                            .unwrap_or_else(|| format!("普通分区[{}]", i + 1));
+                        DiskLayoutSegment {
+                            label,
+                            start_lba: part.start_lba,
+                            sector_count: part.sector_count,
+                            kind: part
+                                .role
+                                .map(DiskRegionKind::from_partition_role)
+                                .unwrap_or(DiskRegionKind::Plain),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let layout = if let Some((lce, count)) = native.lce_extent {
+                    DiskLayoutModel::canonical_edp(
+                        native.plan.total_sectors,
+                        partition_segments,
+                        lce,
+                        count,
+                    )
+                } else {
+                    DiskLayoutModel::canonical_plain_plan(
+                        native.plan.total_sectors,
+                        partition_segments,
+                    )
+                }
+                .map_err(|error| format!("原生制盘最终布局生成失败: {error}"))?;
+                layout
+                    .validate_complete()
+                    .map_err(|error| format!("原生制盘最终布局不完整: {error}"))?;
+                let mut regions = Vec::with_capacity(native.partitions.len());
+                for (i, part) in native.partitions.iter().enumerate() {
+                    let end_exclusive = part
+                        .start_lba
+                        .checked_add(part.sector_count)
+                        .ok_or("原生制盘分区范围溢出")?;
+                    let kind = part
+                        .role
+                        .map(DiskRegionKind::from_partition_role)
+                        .unwrap_or(DiskRegionKind::Plain);
+                    let selection = DiskCapacitySelection {
+                        start_lba: part.start_lba,
+                        end_exclusive,
+                        kind,
+                    };
+                    regions.push(ProvisionConfirmationRegion {
+                        label: part
+                            .role
+                            .map(|role| role.label().to_string())
+                            .unwrap_or_else(|| format!("P{}", i + 1)),
+                        role: part.role,
+                        selection,
+                        sector_count: part.sector_count,
+                        action: ProvisionConfirmationAction::FormatRebuild,
+                        data_effect: ProvisionConfirmationDataEffect::Clear,
+                        password_effect: if part.physically_encrypted {
+                            ProvisionConfirmationPasswordEffect::Rebuild
+                        } else {
+                            ProvisionConfirmationPasswordEffect::None
+                        },
+                        filesystem_effect: if part.formatted {
+                            part.filesystem
+                                .map(ProvisionConfirmationFilesystemEffect::Create)
+                                .unwrap_or(ProvisionConfirmationFilesystemEffect::None)
+                        } else {
+                            ProvisionConfirmationFilesystemEffect::None
+                        },
+                        reason_summary:
+                            "统一原生块破坏性制盘：重建目标协议和目标分区，原用户文件不会保留。"
+                                .into(),
+                        technical_basis: vec![
+                            format!("逻辑块大小  {}B", native.plan.sector_bytes),
+                            format!("LBA 范围    {}–{}", part.start_lba, end_exclusive - 1),
+                            format!("来源模式    {}", native.source.short_name()),
+                            format!("事务写集    {} 块（WAL保存原块）", native.plan.writes.len()),
+                        ],
+                    });
+                }
+                let regions = merge_all_regions(&layout, regions)?;
+                (layout, regions, None)
+            }
             crate::application::provision::PreparedProvision::Official(official) => {
                 let target_plan = official
                     .target_plan
@@ -508,6 +597,7 @@ impl ProvisionConfirmationViewModel {
                     Some(official.algorithm)
                 }
                 crate::application::provision::PreparedProvision::Plain(_) => None,
+                crate::application::provision::PreparedProvision::Native(_) => None,
             },
             geometry_note,
             regions,

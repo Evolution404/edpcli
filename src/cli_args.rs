@@ -172,6 +172,7 @@ pub enum ProvisionAction {
         opts: Box<ProvisionNewOpts>,
         yes: bool,
         backup_dir: Option<String>,
+        include_virtual: bool,
     },
 }
 

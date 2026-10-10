@@ -75,10 +75,9 @@ fn parse_plain_partition(
     })
 }
 
-fn parse_provision_opts(
-    rest: &[String],
-    action: &str,
-) -> Result<(ProvisionNewOpts, Option<String>, bool, Option<String>), String> {
+type ProvisionParsedOpts = (ProvisionNewOpts, Option<String>, bool, Option<String>, bool);
+
+fn parse_provision_opts(rest: &[String], action: &str) -> Result<ProvisionParsedOpts, String> {
     let mut disk = None;
     let mut target = None;
     let mut plain_partitions = Vec::new();
@@ -115,6 +114,7 @@ fn parse_provision_opts(
     let mut max_encrypt_password_errors = None;
     let mut out = None;
     let mut backup_dir = None;
+    let mut include_virtual = false;
     let mut yes = false;
     let mut i = 0usize;
     while i < rest.len() {
@@ -374,6 +374,7 @@ fn parse_provision_opts(
                 let value = take_value(rest, &mut i, "--backup-dir")?;
                 set_once(&mut backup_dir, value, "--backup-dir")?;
             }
+            "--include-virtual" => set_switch(&mut include_virtual, &rest[i], "--include-virtual")?,
             "--yes" => set_switch(&mut yes, &rest[i], "--yes")?,
             other => return Err(format!("错误: provision 不认识选项 {other}")),
         }
@@ -467,6 +468,7 @@ fn parse_provision_opts(
             out,
             yes,
             backup_dir,
+            include_virtual,
         ));
     }
     if !plain_partitions.is_empty() {
@@ -527,6 +529,7 @@ fn parse_provision_opts(
         out,
         yes,
         backup_dir,
+        include_virtual,
     ))
 }
 
@@ -748,7 +751,7 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
     }
     match action {
         "plan" | "image" | "write" => {
-            let (opts, out, yes, backup_dir) = parse_provision_opts(tail, action)?;
+            let (opts, out, yes, backup_dir, include_virtual) = parse_provision_opts(tail, action)?;
             match action {
                 "plan" => {
                     if out.is_some() || yes || backup_dir.is_some() {
@@ -776,6 +779,7 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
                         opts: Box::new(opts),
                         yes,
                         backup_dir,
+                        include_virtual,
                     }))
                 }
                 _ => unreachable!(),

@@ -194,16 +194,22 @@ const PROVISION_COMMON_OPTIONS: &[OptionSpec] = &[
     value("--encrypt-max-password-errors"),
     HELP,
 ];
-const PROVISION_PLAN_OPTIONS: &[OptionSpec] = &[value("--source-backup")];
+const PROVISION_PLAN_OPTIONS: &[OptionSpec] =
+    &[value("--source-backup"), switch("--include-virtual")];
 const PROVISION_IMAGE_OPTIONS: &[OptionSpec] = &[
     value("--out"),
+    switch("--include-virtual"),
     value("--source-backup"),
     value("--total-sectors"),
     value("--sector-bytes"),
     switch("--synthetic-demo"),
     value("--algorithm"),
 ];
-const PROVISION_WRITE_OPTIONS: &[OptionSpec] = &[switch("--yes"), value("--backup-dir")];
+const PROVISION_WRITE_OPTIONS: &[OptionSpec] = &[
+    switch("--yes"),
+    value("--backup-dir"),
+    switch("--include-virtual"),
+];
 const PROVISION_VERIFY_SOURCE_OPTIONS: &[OptionSpec] = &[value("--backup")];
 
 const PROVISION_ACTIONS: &[ActionSpec] = &[

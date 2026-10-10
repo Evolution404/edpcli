@@ -169,7 +169,7 @@ fn input_focused() -> Style {
 }
 
 fn device_status_style(row: &crate::disk_scan::Row) -> Style {
-    if row.proto != "USB" || row.denied {
+    if !matches!(row.proto.as_str(), "USB" | "Disk Image") || row.denied {
         warning()
     } else if row.probe_error.is_some() {
         danger()
@@ -179,7 +179,7 @@ fn device_status_style(row: &crate::disk_scan::Row) -> Style {
 }
 
 fn device_status(row: &crate::disk_scan::Row) -> String {
-    if row.proto != "USB" {
+    if !matches!(row.proto.as_str(), "USB" | "Disk Image") {
         "非 USB / 不支持".into()
     } else if row.denied {
         "需要管理员权限".into()

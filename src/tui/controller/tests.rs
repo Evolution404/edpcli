@@ -417,3 +417,105 @@ fn plain_source_can_review_native_edp_geometry_without_source_lce_or_write_permi
         assert!(state.provision_take_for_write().is_none());
     }
 }
+
+#[test]
+fn virtual_4kn_disk_uses_native_prepared_review_and_write_eligibility() {
+    use crate::application::provision::native_flow::{
+        NativePreparedProvision, NativePreviewPartition,
+    };
+    use crate::domain::hardware::{HardwareProbe, InquiryInfo, NativeTransport};
+    use crate::filesystem::FilesystemKind;
+    use crate::provision::{DiskProvisionKind, ProvisionTarget};
+    use crate::tui::state::ProvisionStage;
+
+    let total = 131_072u64;
+    let mut identity = crate::media_identity::MediaIdentitySnapshot::default();
+    identity.hardware.logical_sector_size = Some(4096);
+    identity.hardware.total_sectors = Some(total);
+    identity.protocol.provision_kind = Some(DiskProvisionKind::Plain);
+    let raw_source = vec![0; 13 * 512];
+    let pin = crate::media_identity::MediaIdentityPin::new(identity.clone(), &raw_source);
+    let row = crate::disk_scan::Row {
+        disk: 6,
+        size: total * 4096,
+        vid: "0dd8".into(),
+        pid: "2005".into(),
+        proto: "Disk Image".into(),
+        serial: None,
+        hardware_model: Some("EDPTEST DiskImage".into()),
+        device_id: None,
+        identity_pin: Some(pin.clone()),
+        onlyid: None,
+        dept: None,
+        user: None,
+        label: None,
+        force_change_password: None,
+        cancel_password_complexity_check: None,
+        max_share_password_errors: None,
+        max_encrypt_password_errors: None,
+        n_baks: 0,
+        n_possible_baks: 0,
+        denied: false,
+        probe_error: None,
+        provision_kind: DiskProvisionKind::Plain,
+        partitions: None,
+        partition_table: None,
+        partition_table_error: None,
+        lce: None,
+    };
+
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    let plan =
+        crate::application::provision::native_image::plan_native_plain_image(total, 4096, &[])
+            .unwrap();
+    let native = NativePreparedProvision {
+        disk: 6,
+        source: DiskProvisionKind::Plain,
+        target: ProvisionTarget::Plain,
+        device_id: "disk&ven_EDPTEST&prod_DiskImage".into(),
+        plan,
+        source_native_prefix: vec![vec![0; 4096]; 13],
+        source_protocol_projection: raw_source,
+        before_pin: pin,
+        probe: HardwareProbe {
+            vid: Some(0x0dd8),
+            pid: Some(0x2005),
+            transport: NativeTransport::Uas,
+            windows_pnp_instance_id: None,
+            inquiry: Some(InquiryInfo {
+                vendor: "EDPTEST".into(),
+                product: "DiskImage".into(),
+                revision: "1.00".into(),
+            }),
+        },
+        onlyid: None,
+        lce_extent: None,
+        partitions: vec![NativePreviewPartition {
+            role: None,
+            start_lba: 2048,
+            sector_count: total - 2048,
+            filesystem: Some(FilesystemKind::ExFat),
+            formatted: true,
+            physically_encrypted: false,
+        }],
+    };
+    state.provision_set_planning();
+    state.provision_finish_plan(Ok(
+        crate::application::provision::PreparedProvision::Native(Box::new(native)),
+    ));
+    assert_eq!(state.provision().stage, ProvisionStage::Review);
+    let preview = state.provision_confirmation_view_model().unwrap();
+    assert_eq!(preview.target.disk, 6);
+    let primary = preview
+        .regions
+        .iter()
+        .find(|region| region.sector_count == total - 2048)
+        .expect("native 4Kn partition in complete review");
+    assert_eq!(
+        primary.data_effect,
+        crate::tui::state::ProvisionConfirmationDataEffect::Clear
+    );
+    assert!(state.provision().prepared.is_some());
+}
