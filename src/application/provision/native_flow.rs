@@ -30,6 +30,42 @@ pub struct NativePreparedProvision {
     pub onlyid: Option<String>,
     pub lce_extent: Option<(u64, u64)>,
     pub partitions: Vec<NativePreviewPartition>,
+    pub impact: NativeProvisionImpact,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum SourcePartitionId {
+    Edp {
+        slot: usize,
+        role: crate::provision::PartitionRole,
+    },
+    PlainMbr {
+        slot: usize,
+    },
+}
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SourcePartition {
+    pub id: SourcePartitionId,
+    pub label: String,
+    pub role: Option<crate::provision::PartitionRole>,
+    pub start_lba: u64,
+    pub sector_count: u64,
+    pub sector_bytes: u32,
+    pub filesystem: Option<crate::filesystem::FilesystemKind>,
+    pub physically_encrypted: bool,
+}
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SourcePartitionMapping {
+    pub source: SourcePartition,
+    pub preserved_target: Option<usize>,
+}
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct NativeProvisionImpact {
+    pub sources: Vec<SourcePartitionMapping>,
+    pub source_discarded: Vec<String>,
+    pub source_retained: Vec<String>,
+    pub target_formatted: Vec<String>,
+    pub key_operations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -871,7 +907,16 @@ pub fn prepare_native_provision_on_disk(
         .collect::<Vec<_>>();
     let before_pin =
         crate::media_identity::MediaIdentityPin::new(snapshot, &source_protocol_projection);
+    let sources = capture_source_partitions(
+        source,
+        parsed_source.as_ref(),
+        &prefix,
+        geometry.logical_sector_bytes,
+        geometry.native_sector_count,
+    )?;
+    let impact = project_native_impact(sources, &partitions, &plan)?;
     Ok(NativePreparedProvision {
+        impact,
         disk,
         source,
         target,
@@ -887,73 +932,193 @@ pub fn prepare_native_provision_on_disk(
     })
 }
 
-/// Snapshot original partition identities for UI and CLI impact reports.
-pub fn source_partition_extents(
-    native: &NativePreparedProvision,
-) -> Result<Vec<(String, u64, u64)>, String> {
-    use crate::provision::{DiskProvisionKind, PartitionRole};
-    if native.source != DiskProvisionKind::Plain {
-        let protocol = crate::protocol::image::NativeProtocolImage::from_native_bytes(
-            native.plan.sector_bytes,
-            native
-                .source_native_prefix
-                .iter()
-                .flat_map(|block| block.iter().copied())
-                .collect(),
-        )
-        .map_err(|e| format!("确认页来源协议解析失败: {e}"))?;
-        let original = crate::provision::parse_existing_provision_native(
-            &protocol,
-            &native.device_id,
-            native.plan.total_sectors,
-        )?
-        .ok_or("确认页无法确认来源 EDP 分区，禁止显示未经证实的数据保留状态")?;
-        return Ok(original
+fn capture_source_partitions(
+    kind: DiskProvisionKind,
+    parsed: Option<&crate::provision::ParsedExistingProvision>,
+    prefix: &[Vec<u8>],
+    sector_bytes: u32,
+    total_sectors: u64,
+) -> Result<Vec<SourcePartition>, String> {
+    use crate::provision::PartitionRole;
+    if kind != DiskProvisionKind::Plain {
+        let parsed = parsed.ok_or("来源 EDP 未验证，数据影响待核验")?;
+        return Ok(parsed
             .profile
             .partitions
             .iter()
-            .filter(|p| p.role != PartitionRole::CompatibilityReserve)
-            .map(|p| (p.role.label().to_string(), p.start_lba, p.sector_count))
+            .enumerate()
+            .filter(|(_, p)| p.role != PartitionRole::CompatibilityReserve)
+            .map(|(slot, p)| SourcePartition {
+                id: SourcePartitionId::Edp { slot, role: p.role },
+                label: p.role.label().to_owned(),
+                role: Some(p.role),
+                start_lba: p.start_lba,
+                sector_count: p.sector_count,
+                sector_bytes,
+                filesystem: p.filesystem,
+                physically_encrypted: p.physically_encrypted,
+            })
             .collect());
     }
-
-    // Plain MBR: derive source partition names from the captured original,
-    // not from a newly generated target. Blank/unpartitioned sources stay empty.
-    let mbr = native
-        .source_native_prefix
-        .first()
-        .ok_or("来源 MBR 快照缺失")?;
-    if mbr.len() < 512 || mbr[510..512] != [0x55, 0xaa] {
-        return Ok(Vec::new());
+    let mbr = prefix.first().ok_or("来源原生 LBA0 缺失")?;
+    if mbr.len() < 512 {
+        return Err("来源 MBR 数据不足".into());
     }
-    let mut parts = Vec::new();
-    for index in 0..4 {
-        let offset = 446 + index * 16;
-        if mbr[offset + 4] == 0 {
+    if mbr[510..512] != [0x55, 0xaa] {
+        if mbr.iter().all(|b| *b == 0) || mbr.iter().all(|b| *b == 0xff) {
+            return Ok(Vec::new());
+        }
+        return Err("来源不是可信 MBR 且非空白，数据影响待核验，停止写盘".into());
+    }
+    let mut parts = Vec::<SourcePartition>::new();
+    for slot in 0..4 {
+        let o = 446 + 16 * slot;
+        let kind = mbr[o + 4];
+        if kind == 0 {
+            if mbr[o..o + 16].iter().any(|byte| *byte != 0) {
+                return Err(format!(
+                    "来源 MBR P{} 类型为空但分区项非空，停止写盘",
+                    slot + 1
+                ));
+            }
             continue;
         }
-        let start = u32::from_le_bytes(
-            mbr[offset + 8..offset + 12]
-                .try_into()
-                .map_err(|_| "来源 MBR 起点无效")?,
-        ) as u64;
-        let count = u32::from_le_bytes(
-            mbr[offset + 12..offset + 16]
-                .try_into()
-                .map_err(|_| "来源 MBR 容量无效")?,
-        ) as u64;
-        if count == 0 {
-            continue;
+        if matches!(kind, 0x05 | 0x0f | 0x85 | 0xee) {
+            return Err(format!("来源 MBR P{} 为扩展/保护分区，停止写盘", slot + 1));
         }
-        if start
-            .checked_add(count)
-            .is_none_or(|end| end > native.plan.total_sectors)
+        let start = u64::from(u32::from_le_bytes(mbr[o + 8..o + 12].try_into().unwrap()));
+        let count = u64::from(u32::from_le_bytes(mbr[o + 12..o + 16].try_into().unwrap()));
+        let end = start.checked_add(count).ok_or("来源 MBR 范围溢出")?;
+        if start == 0
+            || count == 0
+            || end > total_sectors
+            || parts
+                .iter()
+                .any(|p| start < p.start_lba + p.sector_count && p.start_lba < end)
         {
-            return Err("来源普通盘分区超出设备容量，不能报告数据影响".into());
+            return Err(format!("来源 MBR P{} 几何无效或重叠", slot + 1));
         }
-        parts.push((format!("普通分区P{}", index + 1), start, count));
+        parts.push(SourcePartition {
+            id: SourcePartitionId::PlainMbr { slot },
+            label: format!("普通分区P{}", slot + 1),
+            role: None,
+            start_lba: start,
+            sector_count: count,
+            sector_bytes,
+            filesystem: None,
+            physically_encrypted: false,
+        });
+    }
+    if parts.is_empty()
+        && (mbr[..510].iter().any(|byte| *byte != 0) || mbr[512..].iter().any(|byte| *byte != 0))
+    {
+        return Err("来源虽有 MBR 签名但没有可信分区，来源数据待核验".into());
     }
     Ok(parts)
+}
+
+fn project_native_impact(
+    sources: Vec<SourcePartition>,
+    targets: &[NativePreviewPartition],
+    plan: &NativeVirtualDiskPlan,
+) -> Result<NativeProvisionImpact, String> {
+    use crate::provision::RegionDisposition;
+    let mut result = NativeProvisionImpact::default();
+    let mut used = std::collections::HashSet::new();
+    let mut label_counts = std::collections::HashMap::<String, usize>::new();
+    for source in &sources {
+        *label_counts.entry(source.label.clone()).or_default() += 1;
+    }
+    for mut source in sources {
+        if label_counts[&source.label] > 1 {
+            let slot = match source.id {
+                SourcePartitionId::Edp { slot, .. } | SourcePartitionId::PlainMbr { slot } => slot,
+            };
+            source.label = format!("{}P{}", source.label, slot + 1);
+        }
+        let preserved_target = targets.iter().enumerate().find_map(|(i, t)| {
+            (!t.formatted
+                && t.role.is_some()
+                && t.role == source.role
+                && t.start_lba == source.start_lba
+                && t.sector_count == source.sector_count
+                && source.sector_bytes == plan.sector_bytes
+                && t.physically_encrypted == source.physically_encrypted
+                && (source.filesystem.is_none() || t.filesystem == source.filesystem)
+                && matches!(
+                    t.disposition,
+                    Some(
+                        RegionDisposition::PreserveOpaque
+                            | RegionDisposition::PreserveVerified
+                            | RegionDisposition::RewrapVerified
+                    )
+                ))
+            .then_some(i)
+        });
+        if let Some(i) = preserved_target {
+            if !used.insert(i) {
+                return Err("多个来源分区映射同一保留目标".into());
+            }
+            let end = source
+                .start_lba
+                .checked_add(source.sector_count)
+                .ok_or("来源分区范围溢出")?;
+            if plan
+                .writes
+                .iter()
+                .any(|w| (source.start_lba..end).contains(&w.relative_lba))
+            {
+                return Err(format!("来源{}保留区与写集重叠", source.label));
+            }
+            result.source_retained.push(source.label.clone());
+        } else {
+            result.source_discarded.push(source.label.clone());
+        }
+        result.sources.push(SourcePartitionMapping {
+            source,
+            preserved_target,
+        });
+    }
+    // A target that claims preservation without a matching source identity
+    // is not a valid execution plan even if its LBA write-set is empty.
+    for (i, target) in targets.iter().enumerate() {
+        if target.role != Some(crate::provision::PartitionRole::CompatibilityReserve)
+            && !target.formatted
+            && !used.contains(&i)
+        {
+            return Err(format!(
+                "{}未格式化但无法映射到可信来源分区，停止写盘",
+                target.role.map_or("普通分区", |role| role.label())
+            ));
+        }
+    }
+    use crate::provision::{PartitionRole, PasswordDisposition};
+    for (index, target) in targets.iter().enumerate() {
+        let label = target.role.map_or_else(
+            || format!("普通分区P{}", index + 1),
+            |role| role.label().to_owned(),
+        );
+        if target.formatted {
+            result.target_formatted.push(label.clone());
+        }
+        if target.physically_encrypted && target.role != Some(PartitionRole::CompatibilityReserve) {
+            let action = match target.password_disposition {
+                Some(PasswordDisposition::Rewrap) => Some("仅改密"),
+                Some(PasswordDisposition::Rebuild) if target.formatted => Some("新 FileKey"),
+                Some(PasswordDisposition::Blocked) => {
+                    return Err(format!("{}密钥操作未收敛", label))
+                }
+                _ if target.formatted => Some("新 FileKey"),
+                _ => None,
+            };
+            if let Some(action) = action {
+                result
+                    .key_operations
+                    .push(format!("{}（{}）", label, action));
+            }
+        }
+    }
+    Ok(result)
 }
 
 /// Common prepared-intent commit, reused directly by CLI and TUI.
@@ -980,6 +1145,9 @@ pub fn commit_prepared_native_provision_observed(
         observer,
     )
 }
+
+#[cfg(test)]
+mod impact_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1179,6 +1347,127 @@ mod tests {
             source.filesystem = preview.filesystem;
         }
         (probe, parsed, prefix, did)
+    }
+
+    #[test]
+    fn real_native_planner_full_rebuild_matrix_16_pairs_512_and_4kn() {
+        use crate::provision::OfficialPartitionMode as Mode;
+        let modes = [
+            Mode::DefaultThreePartition,
+            Mode::BootShareCombined,
+            Mode::WholeDiskEncrypted,
+            Mode::IntranetExtranetDualPartition,
+        ];
+        for sector in [512u32, 4096] {
+            let total = 1_073_741_824 / u64::from(sector);
+            for from in modes {
+                let (probe, parsed, prefix, _) = test_native_source(sector, from);
+                for to in modes {
+                    let mut request = offline_request(to);
+                    request.preserve_unformatted = false;
+                    request.format.boot = matches!(
+                        to,
+                        Mode::DefaultThreePartition | Mode::IntranetExtranetDualPartition
+                    );
+                    request.format.share = to != Mode::WholeDiskEncrypted;
+                    request.format.encrypt = to != Mode::IntranetExtranetDualPartition;
+                    let (_, writes, targets, _, _) = generate_official_native_plan(
+                        total,
+                        sector,
+                        &probe,
+                        &request,
+                        None,
+                        parsed.pass_info_policy,
+                        NativePlanSource {
+                            parsed: Some(&parsed),
+                            prefix: &prefix,
+                        },
+                    )
+                    .unwrap();
+                    let impact = project_native_impact(
+                        parsed
+                            .profile
+                            .partitions
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, p)| {
+                                p.role != crate::provision::PartitionRole::CompatibilityReserve
+                            })
+                            .map(|(slot, p)| SourcePartition {
+                                id: SourcePartitionId::Edp { slot, role: p.role },
+                                label: p.role.label().into(),
+                                role: Some(p.role),
+                                start_lba: p.start_lba,
+                                sector_count: p.sector_count,
+                                sector_bytes: sector,
+                                filesystem: p.filesystem,
+                                physically_encrypted: p.physically_encrypted,
+                            })
+                            .collect(),
+                        &targets,
+                        &writes,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        impact.source_discarded.len(),
+                        parsed
+                            .profile
+                            .partitions
+                            .iter()
+                            .filter(
+                                |p| p.role != crate::provision::PartitionRole::CompatibilityReserve
+                            )
+                            .count()
+                    );
+                    assert!(impact.source_retained.is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn real_native_mode1_to_mode0_discards_combined_once_and_preserves_secret() {
+        use crate::provision::{OfficialPartitionMode as Mode, PartitionRole};
+        for sector in [512u32, 4096] {
+            let total = 1_073_741_824 / u64::from(sector);
+            let (probe, parsed, prefix, _) = test_native_source(sector, Mode::BootShareCombined);
+            let mut request = offline_request(Mode::DefaultThreePartition);
+            request.format.boot = true;
+            request.format.share = true;
+            let (_, writes, targets, _, _) = generate_official_native_plan(
+                total,
+                sector,
+                &probe,
+                &request,
+                None,
+                parsed.pass_info_policy,
+                NativePlanSource {
+                    parsed: Some(&parsed),
+                    prefix: &prefix,
+                },
+            )
+            .unwrap();
+            let sources = capture_source_partitions(
+                DiskProvisionKind::Mode1,
+                Some(&parsed),
+                &prefix,
+                sector,
+                total,
+            )
+            .unwrap();
+            let impact = project_native_impact(sources, &targets, &writes).unwrap();
+            assert_eq!(impact.source_discarded, ["二合一区"]);
+            assert_eq!(impact.source_retained, ["保密区"]);
+            assert_eq!(impact.target_formatted, ["启动区", "交换区"]);
+            assert_eq!(impact.key_operations, ["交换区（新 FileKey）"]);
+            let secret = parsed.profile.partition(PartitionRole::Encrypt).unwrap();
+            assert_eq!(impact.sources[1].preserved_target, Some(2));
+            assert!(writes
+                .writes
+                .iter()
+                .all(|w| w.relative_lba < secret.start_lba
+                    || w.relative_lba >= secret.start_lba + secret.sector_count));
+        }
     }
 
     #[test]

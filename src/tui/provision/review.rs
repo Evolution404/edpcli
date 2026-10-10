@@ -240,60 +240,6 @@ pub(crate) struct ProvisionConfirmationOverall {
     pub key_changed: Vec<String>,
 }
 
-/// Source data is counted against the source layout, never against the number
-/// of targets created by splitting or merging it.
-fn classify_source_partition_impact(
-    sources: &[(String, u64, u64)],
-    targets: &[crate::application::provision::native_flow::NativePreviewPartition],
-) -> (Vec<String>, Vec<String>) {
-    use crate::provision::RegionDisposition;
-    let mut discarded = Vec::new();
-    let mut retained = Vec::new();
-    for (label, start, sectors) in sources {
-        let unchanged = targets.iter().any(|target| {
-            !target.formatted
-                && target.start_lba == *start
-                && target.sector_count == *sectors
-                && target
-                    .role
-                    .is_some_and(|role| role.label() == label.as_str())
-                && matches!(
-                    target.disposition,
-                    Some(
-                        RegionDisposition::PreserveOpaque
-                            | RegionDisposition::PreserveVerified
-                            | RegionDisposition::RewrapVerified
-                    )
-                )
-        });
-        let names = if unchanged {
-            &mut retained
-        } else {
-            &mut discarded
-        };
-        if !names.contains(label) {
-            names.push(label.clone());
-        }
-    }
-    (discarded, retained)
-}
-
-fn old_mode_source_roles(kind: crate::provision::DiskProvisionKind) -> Vec<String> {
-    use crate::provision::{DiskProvisionKind, PartitionRole};
-    let roles: &[PartitionRole] = match kind {
-        DiskProvisionKind::Plain => &[],
-        DiskProvisionKind::Mode0 => &[
-            PartitionRole::Boot,
-            PartitionRole::Share,
-            PartitionRole::Encrypt,
-        ],
-        DiskProvisionKind::Mode1 => &[PartitionRole::BootShareCombined, PartitionRole::Encrypt],
-        DiskProvisionKind::Mode2 => &[PartitionRole::Encrypt],
-        DiskProvisionKind::Mode3 => &[PartitionRole::Boot, PartitionRole::Share],
-    };
-    roles.iter().map(|role| role.label().to_string()).collect()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProvisionConfirmationViewModel {
     pub target: ProvisionConfirmationTarget,
@@ -687,65 +633,17 @@ impl ProvisionConfirmationViewModel {
             }
         };
 
-        let (source_discarded, source_retained) = match prepared {
-            crate::application::provision::PreparedProvision::Native(native) => {
-                classify_source_partition_impact(
-                    &crate::application::provision::native_flow::source_partition_extents(native)?,
-                    &native.partitions,
-                )
-            }
-            crate::application::provision::PreparedProvision::Official(official) => {
-                let sources = old_mode_source_roles(official.source_kind);
-                let retained = official
-                    .target_plan
-                    .as_ref()
-                    .map(|plan| {
-                        plan.partitions
-                            .iter()
-                            .filter(|p| p.disposition.preserves_extent())
-                            .map(|p| p.geometry.role.label().to_string())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                let discarded = sources
-                    .iter()
-                    .filter(|name| !retained.contains(name))
-                    .cloned()
-                    .collect();
-                (discarded, retained)
-            }
-            crate::application::provision::PreparedProvision::Plain(plain) => {
-                // The legacy Plain path recreates filesystems; it cannot claim
-                // preservation without captured source extents.
-                (old_mode_source_roles(plain.source_kind), Vec::new())
-            }
+        // Consume the exact source/write-set projection frozen by Application.
+        // Legacy non-native plans lack a trustworthy source snapshot.
+        let native = match prepared {
+            crate::application::provision::PreparedProvision::Native(native) => native,
+            _ => return Err("旧式计划无统一来源映射，请使用原生制盘入口重新准备".into()),
         };
         let overall = ProvisionConfirmationOverall {
-            source_discarded,
-            source_retained,
-            target_formatted: regions
-                .iter()
-                .filter(|region| {
-                    matches!(
-                        region.filesystem_effect,
-                        ProvisionConfirmationFilesystemEffect::Format(_)
-                            | ProvisionConfirmationFilesystemEffect::Create(_)
-                    )
-                })
-                .map(|region| region.label.clone())
-                .collect(),
-            key_changed: regions
-                .iter()
-                .filter(|region| {
-                    matches!(
-                        region.password_effect,
-                        ProvisionConfirmationPasswordEffect::Rewrap
-                            | ProvisionConfirmationPasswordEffect::InitializeNew
-                            | ProvisionConfirmationPasswordEffect::Rebuild
-                    )
-                })
-                .map(|region| region.label.clone())
-                .collect(),
+            source_discarded: native.impact.source_discarded.clone(),
+            source_retained: native.impact.source_retained.clone(),
+            target_formatted: native.impact.target_formatted.clone(),
+            key_changed: native.impact.key_operations.clone(),
         };
         Ok(Self {
             target,
@@ -810,58 +708,6 @@ impl AppState {
 #[cfg(test)]
 mod native_preservation_projection_tests {
     use super::*;
-
-    #[test]
-    fn source_impact_reports_mode1_combined_once_when_split_into_two_mode0_targets() {
-        use crate::application::provision::native_flow::NativePreviewPartition;
-        use crate::provision::{PartitionRole, RegionDisposition};
-        let sources = vec![
-            ("二合一区".to_string(), 63, 13_627_329),
-            ("保密区".to_string(), 13_627_392, 2_097_152),
-        ];
-        let targets = vec![
-            NativePreviewPartition {
-                role: Some(PartitionRole::Boot),
-                start_lba: 63,
-                sector_count: 20_417,
-                filesystem: None,
-                formatted: true,
-                physically_encrypted: false,
-                disposition: Some(RegionDisposition::Rebuild),
-                password_disposition: None,
-            },
-            NativePreviewPartition {
-                role: Some(PartitionRole::Share),
-                start_lba: 20_480,
-                sector_count: 13_606_912,
-                filesystem: None,
-                formatted: true,
-                physically_encrypted: true,
-                disposition: Some(RegionDisposition::Rebuild),
-                password_disposition: None,
-            },
-            NativePreviewPartition {
-                role: Some(PartitionRole::Encrypt),
-                start_lba: 13_627_392,
-                sector_count: 2_097_152,
-                filesystem: None,
-                formatted: false,
-                physically_encrypted: true,
-                disposition: Some(RegionDisposition::PreserveVerified),
-                password_disposition: None,
-            },
-        ];
-        let (discarded, retained) = classify_source_partition_impact(&sources, &targets);
-        assert_eq!(discarded, ["二合一区"]);
-        assert_eq!(retained, ["保密区"]);
-
-        let mut resized = targets.clone();
-        resized[2].sector_count -= 1;
-        let (discarded, retained) = classify_source_partition_impact(&sources, &resized);
-        assert_eq!(discarded, ["二合一区", "保密区"]);
-        assert!(retained.is_empty());
-    }
-
     use crate::application::provision::native_flow::NativePreviewPartition;
     use crate::filesystem::FilesystemKind;
     use crate::provision::{

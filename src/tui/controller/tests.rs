@@ -497,6 +497,11 @@ fn virtual_4kn_disk_uses_native_prepared_review_and_write_eligibility() {
         },
         onlyid: None,
         lce_extent: None,
+        impact: crate::application::provision::native_flow::NativeProvisionImpact {
+            source_discarded: vec!["普通分区P3".into()],
+            target_formatted: vec!["普通分区P1".into()],
+            ..Default::default()
+        },
         partitions: vec![NativePreviewPartition {
             role: None,
             start_lba: 2048,
@@ -515,6 +520,9 @@ fn virtual_4kn_disk_uses_native_prepared_review_and_write_eligibility() {
     assert_eq!(state.provision().stage, ProvisionStage::Review);
     let preview = state.provision_confirmation_view_model().unwrap();
     assert_eq!(preview.target.disk, 6);
+    assert_eq!(preview.overall.source_discarded, ["普通分区P3"]);
+    assert_eq!(preview.overall.target_formatted, ["普通分区P1"]);
+    assert!(preview.overall.source_retained.is_empty());
     assert_eq!(preview.layout.logical_sector_bytes, 4096);
     assert_eq!(
         preview.layout.sector_byte_len(preview.target.total_sectors),

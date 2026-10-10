@@ -276,6 +276,17 @@ fn print_provision_summary(prepared: &crate::application::provision::PreparedPro
                 native.plan.sector_bytes,
                 native.plan.writes.len()
             );
+            let names = |items: &[String]| {
+                if items.is_empty() {
+                    "无".to_owned()
+                } else {
+                    items.join("、")
+                }
+            };
+            println!("来源数据丢弃：{}", names(&native.impact.source_discarded));
+            println!("来源数据保留：{}", names(&native.impact.source_retained));
+            println!("目标格式化：{}", names(&native.impact.target_formatted));
+            println!("密钥操作：{}", names(&native.impact.key_operations));
         }
     }
 }
