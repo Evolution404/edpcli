@@ -154,7 +154,10 @@ mod tests {
     use super::*;
     use crate::filesystem::NativeFilesystemWrite;
     use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static NEXT_JOURNAL_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
     struct Fake {
         sectors: BTreeMap<u64, Vec<u8>>,
@@ -189,14 +192,26 @@ mod tests {
         }
     }
     fn fixture() -> (Fake, NativeVirtualDiskPlan, std::path::PathBuf) {
-        let path = std::env::temp_dir().join(format!(
-            "edp-native-journal-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        // Reserve a dedicated fixture directory atomically. A timestamp on
+        // its own does not guarantee that parallel tests cannot reuse a WAL
+        // file, and the production writer correctly refuses existing files.
+        let directory = loop {
+            let candidate = std::env::temp_dir().join(format!(
+                "edp-native-journal-{}-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                NEXT_JOURNAL_FIXTURE.fetch_add(1, Ordering::Relaxed),
+            ));
+            match fs::create_dir(&candidate) {
+                Ok(()) => break candidate,
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("无法隔离WAL测试目录: {error}"),
+            }
+        };
+        let path = directory.join("snapshot.wal");
         (
             Fake {
                 sectors: BTreeMap::new(),
@@ -233,7 +248,8 @@ mod tests {
             execute_native_transaction_with_journal(&mut dev, &plan, &path, "usb:test:4096")
                 .is_err()
         );
-        fs::remove_file(path).unwrap();
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir(path.parent().unwrap()).unwrap();
     }
     #[test]
     fn injected_torn_write_retains_verified_wal_and_restores_blocks() {
@@ -246,7 +262,8 @@ mod tests {
         assert!(fs::read(&path).unwrap().ends_with(b"ROLLBACK_VERIFIED\n"));
         assert_eq!(dev.sectors[&0], vec![0x55; 4096]);
         assert_eq!(dev.sectors[&1], vec![0x55; 4096]);
-        fs::remove_file(path).unwrap();
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir(path.parent().unwrap()).unwrap();
     }
     #[test]
     fn incomplete_snapshot_prevents_any_write() {
@@ -258,5 +275,6 @@ mod tests {
         );
         assert!(dev.writes.is_empty());
         assert!(!path.exists());
+        fs::remove_dir(path.parent().unwrap()).unwrap();
     }
 }
