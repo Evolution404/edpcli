@@ -211,6 +211,14 @@ fn native_source_aware_targets(
     Ok((targets, dispositions))
 }
 
+/// Immutable source snapshot: protocol view and native block tails must
+/// always derive from the same captured media.
+#[derive(Clone, Copy)]
+struct NativePlanSource<'a> {
+    parsed: Option<&'a crate::provision::ParsedExistingProvision>,
+    prefix: &'a [Vec<u8>],
+}
+
 fn generate_official_native_plan(
     total: u64,
     sector: u32,
@@ -218,9 +226,10 @@ fn generate_official_native_plan(
     request: &OfficialProvisionRequest,
     inherited_onlyid: Option<&str>,
     inherited_pass_info: Option<PassInfoPolicy>,
-    source: Option<&crate::provision::ParsedExistingProvision>,
-    source_prefix: &[Vec<u8>],
+    source_context: NativePlanSource<'_>,
 ) -> Result<NativeOfficialPlanResult, String> {
+    let source = source_context.parsed;
+    let source_prefix = source_context.prefix;
     request.algorithm.validate_first_party_write()?;
     let mode = request.target.official_mode().ok_or("目标不是官方模式")?;
     let identity = TargetIdentity::from_probe(probe, total)?;
@@ -783,8 +792,10 @@ pub fn prepare_native_provision_on_disk(
                 request,
                 inherited_onlyid.as_deref(),
                 inherited_pass_info,
-                parsed_source.as_ref(),
-                &prefix,
+                NativePlanSource {
+                    parsed: parsed_source.as_ref(),
+                    prefix: &prefix,
+                },
             )?;
             (request.target, plan, partitions, Some(lce), Some(onlyid))
         }
@@ -996,10 +1007,19 @@ mod tests {
         let total = 1_073_741_824 / u64::from(sector);
         let blank = vec![vec![0u8; sector as usize]; 13];
         let (did, fresh, previews, _lce, onlyid) = generate_official_native_plan(
-            total, sector, &probe, &request, None, None, None, &blank,
+            total,
+            sector,
+            &probe,
+            &request,
+            None,
+            None,
+            NativePlanSource {
+                parsed: None,
+                prefix: &blank,
+            },
         )
         .unwrap();
-        assert!(onlyid.len() >= 8);
+        assert!(OnlyId::parse(&onlyid).is_ok());
         let prefix = (0..13)
             .map(|lba| {
                 fresh
@@ -1046,8 +1066,10 @@ mod tests {
                     &request,
                     None,
                     parsed.pass_info_policy,
-                    Some(&parsed),
-                    &prefix,
+                    NativePlanSource {
+                        parsed: Some(&parsed),
+                        prefix: &prefix,
+                    },
                 )
                 .unwrap();
                 let src = parsed.record(PartitionRole::Encrypt).unwrap();
@@ -1124,8 +1146,10 @@ mod tests {
                 &request,
                 None,
                 parsed.pass_info_policy,
-                Some(&parsed),
-                &prefix,
+                NativePlanSource {
+                    parsed: Some(&parsed),
+                    prefix: &prefix,
+                },
             )
             .unwrap();
             assert!(preview.iter().all(|p| !p.formatted));
@@ -1188,8 +1212,10 @@ mod tests {
                 &bad_password,
                 None,
                 parsed.pass_info_policy,
-                Some(&parsed),
-                &prefix,
+                NativePlanSource {
+                    parsed: Some(&parsed),
+                    prefix: &prefix,
+                },
             )
             .unwrap_err();
             assert!(
@@ -1208,8 +1234,10 @@ mod tests {
                     &bad_geometry,
                     None,
                     parsed.pass_info_policy,
-                    Some(&parsed),
-                    &prefix,
+                    NativePlanSource {
+                        parsed: Some(&parsed),
+                        prefix: &prefix
+                    },
                 )
                 .is_err(),
                 "{sector}: moved encrypted region must not be silently preserved"
@@ -1232,8 +1260,10 @@ mod tests {
                     &offline_request(Mode::BootShareCombined),
                     None,
                     bad_cipher.pass_info_policy,
-                    Some(&bad_cipher),
-                    &prefix,
+                    NativePlanSource {
+                        parsed: Some(&bad_cipher),
+                        prefix: &prefix
+                    },
                 )
                 .is_err(),
                 "{sector}: algorithm mismatch cannot preserve old ciphertext"
@@ -1299,8 +1329,10 @@ mod tests {
                             &request,
                             None,
                             source.as_ref().and_then(|parsed| parsed.pass_info_policy),
-                            source.as_ref(),
-                            &prefix,
+                            NativePlanSource {
+                                parsed: source.as_ref(),
+                                prefix: &prefix,
+                            },
                         )
                         .unwrap_or_else(|e| panic!("{sector}B {source_mode:?}->{mode:?}: {e}"));
                         let protocol = (0..13)

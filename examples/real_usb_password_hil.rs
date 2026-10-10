@@ -406,6 +406,7 @@ mod macos {
             ),
             volume_label: "HIL".into(),
             format: format_options(rebuild_filesystems),
+            preserve_unformatted: !rebuild_filesystems,
             force_change_password: Some(false),
             cancel_password_complexity_check: Some(false),
             max_share_password_errors: None,

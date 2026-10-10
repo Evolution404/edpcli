@@ -57,7 +57,7 @@ impl ProvisionResultSnapshot {
             return Err("制盘结果的原生逻辑扇区大小无效".into());
         }
         let block = u64::from(self.logical_sector_bytes);
-        if self.total_bytes % block != 0 {
+        if !self.total_bytes.is_multiple_of(block) {
             return Err("制盘结果总容量不对齐原生扇区".into());
         }
         let total_sectors = self.total_bytes / block;
@@ -65,7 +65,7 @@ impl ProvisionResultSnapshot {
             .partitions
             .iter()
             .map(|partition| {
-                if partition.size_bytes == 0 || partition.size_bytes % block != 0 {
+                if partition.size_bytes == 0 || !partition.size_bytes.is_multiple_of(block) {
                     return Err("制盘结果分区容量不对齐原生扇区".to_string());
                 }
                 let (label, kind) = match partition.role {
