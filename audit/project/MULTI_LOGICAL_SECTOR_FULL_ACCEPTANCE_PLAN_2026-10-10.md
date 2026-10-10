@@ -1,5 +1,12 @@
 # edpcli：全逻辑扇区规格、全模式和全工作流实施与验收计划（执行中）
 
+## 2026-10-11 01:00 CST A06 Plain→Plain 默认无损保留验收
+
+- **行为修复**：`src/application/provision/native_flow.rs` 的 Plain 来源→默认 Plain 目标，现在仅当已有单一 MBR P1（LBA2048 起、占满剩余原生盘）、当前 LBA0 与默认输出逐字节一致、来源原生文件系统确认为 exFAT，且没有显式自定义目标分区时，才将目标置为 `PreserveVerified`，原生事务写集仅保留未变化的 LBA0；否则保持原有重建/格式化路径。统一 `project_native_impact` 允许可信 PlainMbr 分区映射到同几何 Plain 目标，不再因目标没有 EDP 角色而强制报告数据丢弃。新增 4 规格定向单测检查同几何保留、错几何拒绝、写集覆盖拒绝、明确格式化即来源丢弃。
+- **真实 OS 验收**：在 `512/1024/2048/4096B` macOS 临时 Disk Image 上使用正式 CLI/WAL 连续执行 Plain→Plain，各规格第二次只写 1 块、规划显示“来源数据保留：普通分区P1”“目标格式化：无”；首次写入的 `edpcli-native-hil.txt` 在再次转换及卸载重挂后内容完全保留，**4/4 通过、退出码 0**。HIL 矩阵首次 Plain→Plain 目标回读时现在必须验证用户文件存在且内容一致，避免再把重新格式化后可挂载误判为无损。
+- **门禁**：`cargo fmt --all -- --check`、`git diff --check` 通过；`uv run --locked python scripts/test-full.py --profile full`：8 套、10 产物、0 失败；新增定向单测通过。GitHub 提交：`a2b6b58`、`e8f18fb`、`20882ac`，已写入目标开发分支。**Mac 本地 Git 当前因 GitHub SSH/HTTPS 连接失败仍停在 `60a4737b`，通过修订工作区镜像实测上述三个提交的代码；不能声称本地与远端已同步，禁用 reset/clean 并等待可正常 fetch 后对齐。**
+- **范围**：证明默认精确 Plain→Plain 对已有普通文件不破坏；没有证明自定义 FAT/exFAT 分区配置变更无损。EDPB v4 仍 evidence-only，正式恢复授权、失败注入、TUI 真交互仍属下阶段。
+
 ## 2026-10-10 22:47 CST P2 100/100 原生 OS 虚拟块设备模式转换验收
 
 - **四种原生逻辑扇区 × 五种来源 × 五种目标全部通过**：512B、1024B、2048B、4096B 各 25/25，共计 **100/100，失败 0**。四个独立 macOS 512MiB 临时 Disk Image 测试进程均返回退出码 0，所有目标组合通过正式 `edpcli provision write --include-virtual`、原生 TargetSession/WAL、弹出重挂、独立 LBA7/LBA12/LCE、密钥解封装与文件系统读取。每组先实际制备来源模式并验证，再执行目标转换和重新读回；同一规格的 25 组复用该规格专属临时 Disk Image。
