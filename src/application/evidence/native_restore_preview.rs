@@ -1,6 +1,5 @@
-//! Read-only same-geometry restore *preview* for validated native EDPB v4.
-//! Evidence-only remains evidence-only. This preview neither upgrades the
-//! manifest's restore rights nor yields a media write grant or writable plan.
+//! Read-only same-geometry preview for separately validated native EDPB
+//! v4 evidence and v5 metadata contracts. Neither preview is a write grant.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -33,18 +32,54 @@ pub fn plan_native_restore_readonly(
     expected_device_id: &str,
     target_geometry: NativeReadGeometry,
 ) -> Result<NativeRestoreReadOnlyPreview, String> {
+    plan_native_restore_for_schema_readonly(
+        backup_path,
+        expected_device_id,
+        target_geometry,
+        "edpb.manifest.v4",
+        RestorePolicy::EvidenceOnly,
+    )
+}
+
+/// Check a distinct v5 *restorable-metadata contract* without obtaining a
+/// TargetSession, issuing a write grant, or touching the target medium.
+/// The legacy v3 restore flow rejects this schema until an independently
+/// reviewed native grant + WAL authorization entrypoint is implemented.
+pub fn plan_native_restore_v5_readonly(
+    backup_path: &Path,
+    expected_device_id: &str,
+    target_geometry: NativeReadGeometry,
+) -> Result<NativeRestoreReadOnlyPreview, String> {
+    plan_native_restore_for_schema_readonly(
+        backup_path,
+        expected_device_id,
+        target_geometry,
+        "edpb.manifest.v5",
+        RestorePolicy::Restorable,
+    )
+}
+
+fn plan_native_restore_for_schema_readonly(
+    backup_path: &Path,
+    expected_device_id: &str,
+    target_geometry: NativeReadGeometry,
+    expected_schema: &str,
+    expected_policy: RestorePolicy,
+) -> Result<NativeRestoreReadOnlyPreview, String> {
     let reader = VerifiedBackupReader::open(backup_path)?;
     let verified = reader.verified();
     let manifest = &verified.manifest;
     let sector_bytes = manifest.geometry.logical_sector_size;
-    if manifest.schema != "edpb.manifest.v4"
+    if manifest.schema != expected_schema
         || !matches!(sector_bytes, 1024 | 2048 | 4096)
         || manifest.snapshot.device_state.eq_ignore_ascii_case("plain")
         || manifest.geometry.total_sectors != Some(target_geometry.native_sector_count)
         || manifest.geometry.capacity_bytes != Some(target_geometry.capacity_bytes)
         || target_geometry.logical_sector_bytes != sector_bytes
     {
-        return Err("EDPB v4来源与目标不是相同的标准原生几何，禁止恢复规划".into());
+        return Err(format!(
+            "EDPB {expected_schema}来源与目标原生几何不一致，禁止恢复规划"
+        ));
     }
     if expected_device_id.is_empty() || manifest.device.device_id != expected_device_id {
         return Err("EDPB原生恢复预览的来源设备身份与目标不一致".into());
@@ -57,7 +92,7 @@ pub fn plan_native_restore_readonly(
         .iter()
         .filter(|item| item.kind == "raw_sectors")
     {
-        if artifact.restore_policy != RestorePolicy::EvidenceOnly
+        if artifact.restore_policy != expected_policy
             || artifact.completeness != ArtifactCompleteness::Complete
         {
             return Err(format!("来源证据{}不完整或意外获得恢复权限", artifact.id));
