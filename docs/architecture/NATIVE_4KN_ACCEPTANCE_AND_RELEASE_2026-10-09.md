@@ -65,3 +65,12 @@ P1无法靠离线自行猜测补齐：必须取得独立生产者或来源证据
 - 新增只读命令：`edpcli provision verify-source --disk N --backup /path/to/source.edpb`。验证EDPB v4、设备标识、容量、4096B逻辑扇区及全部保存的完整原生块，包括LBA0..12、LCE和分区首块。任何漂移、缺块、截断、设备不符都拒绝。
 - 本地 U391 实测：备份EDPB v4 `62486528*4096=255944818688B`，**17个4096B完整块**逐字节读回一致，包括LCE LBA62476561。命令未卸载、未锁盘、未尝试写入。若将来进入实体事务，必须在独占锁盘后再次复核，不允许将此只读结果当成写入授权。
 - 剩余必要工作：512B专用 `SectorDev` 的实体事务必须扩展为经过授权和真实测试的 `NativeBlockDevice` 原生4Kn物理端口，保留强制备份、交换盘防护、回读与可恢复故障测试；随后独立目标端验收，不能以镜像或当前来源一致性替代实际写盘成功。
+
+## 2026-10-10 — Native recovery and Mode0→Mode1 offline stage
+
+- `native_journal_recovery`: bounded strict WAL decoder (v1/SHA-256/device identity/native geometry/LBA uniqueness/state), fail-closed on corrupted, missing, committed or previously recovered journals. An interrupted WAL may only be restored through a previously authorised `NativeWriteLocked` session. Recovery and in-process rollback both restore LBA0 last; physical power-loss atomicity remains **unproven**.
+- `native_transaction`: the journal's initial full-block snapshot is now the **single rollback baseline** for the write transaction, avoiding a second prewrite snapshot that could disagree with durable WAL evidence.
+- `native_image::plan_native_4kn_mode0_to_mode1`: pure, regular-file-oriented Mode0→Mode1 plan covering **full combined plaintext exFAT metadata**, not merely protocol LBA0–12; original type4 extent/key material and all unowned 4Kn protocol tails remain unchanged. MBR first 446 bytes remain source-owned and LBA0 commits last.
+- `plan_verified_native_4kn_mode0_to_mode1`: independently re-reads the 13 full source 4Kn protocol blocks plus LBA7-pointed LCE from one read-only `SectorReader`, rejects source drift and short blocks before planning.
+- Virtual tests cover successful conversion, new exFAT metadata, preserved type4 records/unknown tails/LCE, broken EDPF, missing forced combined format, invalid source LCE, interrupted WAL, wrong hardware pin/geometry, and corrupted log digest.
+- Scope limit: these pure builders **do not** activate the physical 4Kn CLI/TUI commit branch, provide a full device rescan after unplug/replug or authorise manual `dd`. Firmware interoperability and on-device HIL remain unverified. The existing 512B-only `prepare_provision_on_disk` gate is unchanged.

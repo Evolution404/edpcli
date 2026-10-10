@@ -441,6 +441,267 @@ pub fn export_native_edp_4kn_image(
     export_native_plain_image(path, &native)
 }
 
+/// Construct a **complete offline 4Kn Mode0 -> Mode1** write set. Unlike a
+/// protocol-only LBA0..12 overlay this rebuilds the combined plaintext ExFAT
+/// partition's filesystem metadata. The old type4 extent and both key records
+/// stay unchanged. Raw LCE bytes are supplied by the *same* authenticated
+/// source capture and carried verbatim; no other partition data are touched.
+///
+/// This pure model intentionally has no access to USB discovery, device write
+/// leases or physical commit. Its caller must authenticate the source LCE and
+/// all 13 native blocks together, and separately authorise every physical write.
+pub fn plan_native_4kn_mode0_to_mode1(
+    source: &crate::protocol::image::NativeProtocolImage,
+    source_lce: &[u8],
+    spec: &crate::provision::ProvisionSpec,
+    entropy: &crate::provision::ProvisionEntropy,
+    options: &super::FormatOptions,
+    combined_volume_serial: u32,
+) -> Result<NativeVirtualDiskPlan, String> {
+    use crate::provision::{
+        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, PartitionRole,
+        TargetPartitionGeometry,
+    };
+    const NATIVE: u32 = 4096;
+    let total = spec.target().total_sectors();
+    if source.logical_sector_bytes() != NATIVE || source_lce.len() != NATIVE as usize {
+        return Err("4Kn来源协议和LCE必须均为完整4096B原生块".into());
+    }
+    if options.boot
+        || !options.share
+        || options.encrypt
+        || options.share_fs != FilesystemKind::ExFat
+    {
+        return Err("Mode1来源转换必须重建明文ExFAT二合一区，不得格式化保留的保密区".into());
+    }
+    let existing = crate::provision::parse_existing_provision_native(
+        source,
+        spec.target().device_id(),
+        total,
+    )?
+    .ok_or("Mode1来源盘缺少成对EDPF注册协议")?;
+    if existing.profile.source_mode != OfficialPartitionMode::DefaultThreePartition
+        || existing.profile.partitions.len() != 3
+        || existing.records.len() != 3
+    {
+        return Err("Mode1原位转换仅接受已认证Mode0的三个分区".into());
+    }
+    if existing.pass_info_policy != Some(spec.profile().pass_info_policy()) {
+        return Err("目标PassInfo须继承已验证的Mode0来源策略".into());
+    }
+    let onlyid_marker = format!("$$${}$$$", spec.metadata().onlyid().text());
+    if !source
+        .block(4)
+        .ok_or("缺少原生LBA4")?
+        .starts_with(onlyid_marker.as_bytes())
+    {
+        return Err("目标OnlyId与已注册来源LBA4不一致".into());
+    }
+    let first = &existing.profile.partitions[0];
+    let share = &existing.profile.partitions[1];
+    let encrypt = &existing.profile.partitions[2];
+    if first.start_lba != 63
+        || first.partition_type != crate::protocol::edpf::EdpPartitionType::Boot
+        || share.partition_type != crate::protocol::edpf::EdpPartitionType::Share
+        || encrypt.partition_type != crate::protocol::edpf::EdpPartitionType::Encrypt
+        || share.start_lba != first.start_lba + first.sector_count
+        || encrypt.start_lba != share.start_lba + share.sector_count
+        || encrypt.sector_count == 0
+    {
+        return Err("来源Mode0布局存在间隙、重叠或类型不匹配".into());
+    }
+    let cylinders = total / (255 * 63);
+    let compat = crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry(
+        cylinders, 255, 63, NATIVE,
+    )
+    .ok_or("无法定位4Kn LCE")?;
+    if compat.size_sectors != 1
+        || existing.records[1].lba7.start_sector != compat.start_lba
+        || existing.records[2].lba7.start_sector != compat.start_lba
+    {
+        return Err("来源EDPF LCE指针不是完整匹配的4Kn原生位置".into());
+    }
+    let geometries = [
+        TargetPartitionGeometry {
+            role: PartitionRole::BootShareCombined,
+            partition_type: crate::protocol::edpf::EdpPartitionType::Share,
+            start_lba: 63,
+            sector_count: encrypt.start_lba - 63,
+            physically_encrypted: false,
+            filesystem: Some(FilesystemKind::ExFat),
+        },
+        TargetPartitionGeometry {
+            role: PartitionRole::Encrypt,
+            partition_type: crate::protocol::edpf::EdpPartitionType::Encrypt,
+            start_lba: encrypt.start_lba,
+            sector_count: encrypt.sector_count,
+            physically_encrypted: true,
+            filesystem: Some(options.encrypt_fs),
+        },
+    ];
+    let share_record = existing.records[1];
+    let encrypt_record = existing.records[2];
+    let official = OfficialProvisionPlan::new(
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionSizes::new(32, 64, 128),
+        compat,
+        share_record.lba7_key_material(),
+        share_record.lba12_key_material()?,
+    )?
+    .with_filesystems(options.filesystems())
+    .with_target_geometry(&geometries, NATIVE as u64)?
+    .with_partition_key_material(
+        0,
+        share_record.lba7_key_material(),
+        share_record.lba12_key_material()?,
+    )?
+    .with_partition_key_material(
+        1,
+        encrypt_record.lba7_key_material(),
+        encrypt_record.lba12_key_material()?,
+    )?;
+    let mut writes = plan_native_edp_4kn_image(
+        spec,
+        entropy,
+        &official,
+        options,
+        &[combined_volume_serial, 0],
+        &[[0u8; 16]; 2],
+    )?;
+    for write in &mut writes.writes {
+        if write.relative_lba < 13 {
+            let lba = write.relative_lba as usize;
+            let original = source.block(lba).ok_or("缺少来源原生协议块")?;
+            let mut preserved = original.to_vec();
+            if lba == 0 {
+                // Keep MBR boot code, disk signature and source-owned prefix.
+                preserved[446..512].copy_from_slice(&write.data[446..512]);
+            } else if matches!(lba, 7 | 12) {
+                preserved[..512].copy_from_slice(&write.data[..512]);
+            }
+            write.data = preserved;
+        } else if write.relative_lba == compat.start_lba {
+            write.data.copy_from_slice(source_lce);
+        }
+    }
+    let candidate = crate::protocol::image::NativeProtocolImage::from_native_bytes(
+        NATIVE,
+        (0..13)
+            .flat_map(|lba| {
+                writes
+                    .writes
+                    .iter()
+                    .find(|w| w.relative_lba == lba)
+                    .expect("native protocol block generated")
+                    .data
+                    .clone()
+            })
+            .collect(),
+    )
+    .map_err(|e| e.to_string())?;
+    let parsed = crate::provision::parse_existing_provision_native(
+        &candidate,
+        spec.target().device_id(),
+        total,
+    )?
+    .ok_or("新Mode1协议无法再次解析")?;
+    if parsed.profile.source_mode != OfficialPartitionMode::BootShareCombined
+        || parsed.profile.partitions.len() != 2
+        || parsed.profile.partitions[0].start_lba != 63
+        || parsed.profile.partitions[0].sector_count != encrypt.start_lba - 63
+        || parsed.profile.partitions[1].start_lba != encrypt.start_lba
+        || parsed.profile.partitions[1].sector_count != encrypt.sector_count
+        || parsed.records[1].lba7.user_key_crc != encrypt_record.lba7.user_key_crc
+        || parsed.records[1].lba7.file_key_crc != encrypt_record.lba7.file_key_crc
+        || parsed.records[1].lba7.encrypted_file_key != encrypt_record.lba7.encrypted_file_key
+        || parsed.records[1].lba12.user_key_crc != encrypt_record.lba12.user_key_crc
+        || parsed.records[1].lba12.file_key_crc != encrypt_record.lba12.file_key_crc
+        || parsed.records[1].lba12.encrypted_file_key != encrypt_record.lba12.encrypted_file_key
+        || parsed.records[1].lba12.encrypt_mode != encrypt_record.lba12.encrypt_mode
+    {
+        return Err("Mode1协议回解析或来源保密区密钥保留验证失败".into());
+    }
+    Ok(writes)
+}
+
+/// Stronger Mode1 offline planner: obtains all source protocol and LCE blocks
+/// from one read-only sector source. It verifies every LBA0..12 against the
+/// supplied immutable snapshot *before* accepting the LCE referenced by LBA7.
+/// Unlike a caller-supplied LCE, this prevents inadvertently mixing sources.
+/// This still does not authorise physical writes or certify LCE cryptography.
+pub fn plan_verified_native_4kn_mode0_to_mode1<
+    R: crate::application::evidence::SectorReader + ?Sized,
+>(
+    reader: &mut R,
+    source: &crate::protocol::image::NativeProtocolImage,
+    spec: &crate::provision::ProvisionSpec,
+    entropy: &crate::provision::ProvisionEntropy,
+    options: &super::FormatOptions,
+    combined_volume_serial: u32,
+) -> Result<NativeVirtualDiskPlan, String> {
+    use crate::provision::{NativeEdpLayoutPlan, OfficialPartitionMode};
+    let device_id = spec.target().device_id();
+    let total = spec.target().total_sectors();
+    let parsed = crate::provision::parse_existing_provision_native(source, device_id, total)?
+        .ok_or("4Kn同源转换未确认EDPF注册")?;
+    if parsed.profile.source_mode != OfficialPartitionMode::DefaultThreePartition {
+        return Err("4Kn同源转换仅支持来源Mode0".into());
+    }
+    let compat = crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry(
+        total / (255 * 63),
+        255,
+        63,
+        4096,
+    )
+    .ok_or("无法确定原生LCE位置")?;
+    let geometries = parsed
+        .profile
+        .partitions
+        .iter()
+        .copied()
+        .map(|p| {
+            let mut geometry = p.as_target();
+            // EDPF does not encode a trusted filesystem. The geometry
+            // validator needs a format-capable placeholder for each data
+            // role; source replay NEVER formats or interprets these bytes.
+            if geometry.filesystem.is_none()
+                && geometry.role != crate::provision::PartitionRole::CompatibilityReserve
+            {
+                geometry.filesystem =
+                    Some(if geometry.role == crate::provision::PartitionRole::Boot {
+                        FilesystemKind::Fat16
+                    } else {
+                        FilesystemKind::ExFat
+                    });
+            }
+            geometry
+        })
+        .collect::<Vec<_>>();
+    let layout = NativeEdpLayoutPlan::from_confirmed_geometry(
+        parsed.profile.source_mode,
+        total,
+        4096,
+        &geometries,
+        compat.start_lba,
+        compat.size_sectors,
+    )?;
+    let raw = crate::application::evidence::verified_native_source_replay(
+        reader, &layout, source, device_id, total,
+    )?;
+    let lce = raw
+        .iter()
+        .find(|write| write.relative_lba == compat.start_lba)
+        .ok_or("已认证来源缺少LCE原生块")?;
+    plan_native_4kn_mode0_to_mode1(
+        source,
+        &lce.data,
+        spec,
+        entropy,
+        options,
+        combined_volume_serial,
+    )
+}
+
 // Bridge a caller-owned read-only native-sector callback into the application's
 // EvidenceSource contract. An independent native protocol snapshot is required
 // at every public replay call, so the source cannot silently change between
@@ -900,4 +1161,306 @@ pub fn export_native_plain_image(path: &Path, plan: &NativeVirtualDiskPlan) -> R
         let _ = fs::remove_file(path);
     }
     result
+}
+
+#[cfg(test)]
+mod native_mode1_conversion_tests {
+    use super::*;
+    use crate::platform::{HardwareProbe, InquiryInfo, NativeTransport};
+    use crate::protocol::edpf::EdpPartitionType;
+    use crate::protocol::image::NativeProtocolImage;
+    use crate::provision::{
+        generate_official_native_image, wrap_file_key, wrap_legacy_lba7_file_key, FileKeyWrapMode,
+        OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, OnlyId,
+        PartitionRole, ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
+        TargetIdentity, TargetPartitionGeometry,
+    };
+
+    pub(super) fn source_mode0() -> (NativeProtocolImage, ProvisionSpec, Vec<u8>) {
+        const TOTAL: u64 = 262_144;
+        let probe = HardwareProbe {
+            vid: Some(0x3535),
+            pid: Some(0x0901),
+            transport: NativeTransport::Uas,
+            windows_pnp_instance_id: None,
+            inquiry: Some(InquiryInfo {
+                vendor: "aigo".into(),
+                product: "U391".into(),
+                revision: "1.00".into(),
+            }),
+        };
+        let target = TargetIdentity::from_probe(&probe, TOTAL).unwrap();
+        let metadata = ProvisionMetadata::new(
+            OnlyId::parse("1402259934").unwrap(),
+            "USER",
+            "DEPT",
+            "EDP TEST",
+        )
+        .unwrap();
+        let spec = ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1()).unwrap();
+        let compat = crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry(
+            TOTAL / (255 * 63),
+            255,
+            63,
+            4096,
+        )
+        .unwrap();
+        let geometries = [
+            TargetPartitionGeometry {
+                role: PartitionRole::Boot,
+                partition_type: EdpPartitionType::Boot,
+                start_lba: 63,
+                sector_count: 4096,
+                physically_encrypted: false,
+                filesystem: Some(FilesystemKind::Fat16),
+            },
+            TargetPartitionGeometry {
+                role: PartitionRole::Share,
+                partition_type: EdpPartitionType::Share,
+                start_lba: 4159,
+                sector_count: 195_841,
+                physically_encrypted: true,
+                filesystem: Some(FilesystemKind::ExFat),
+            },
+            TargetPartitionGeometry {
+                role: PartitionRole::Encrypt,
+                partition_type: EdpPartitionType::Encrypt,
+                start_lba: 200_000,
+                sector_count: 50_000,
+                physically_encrypted: true,
+                filesystem: Some(FilesystemKind::ExFat),
+            },
+        ];
+        let original_plan = OfficialProvisionPlan::new(
+            OfficialPartitionMode::DefaultThreePartition,
+            OfficialPartitionSizes::new(16, 64, 128),
+            compat,
+            wrap_legacy_lba7_file_key(crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD, [0; 8]),
+            wrap_file_key(
+                crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD,
+                [0x42; 16],
+                FileKeyWrapMode::Aes128Ecb,
+            ),
+        )
+        .unwrap()
+        .with_target_geometry(&geometries, 4096)
+        .unwrap();
+        let native = generate_official_native_image(
+            &spec,
+            &ProvisionEntropy::new([0x5a; 252]),
+            &original_plan,
+            4096,
+        )
+        .unwrap();
+        let mut with_opaque_tails = native.native_bytes().to_vec();
+        with_opaque_tails[11 * 4096 + 3500] = 0xa3;
+        with_opaque_tails[12 * 4096 + 3072] = 0xee;
+        with_opaque_tails[3 * 4096 + 200] = 0x65;
+        (
+            NativeProtocolImage::from_native_bytes(4096, with_opaque_tails).unwrap(),
+            spec,
+            vec![0xa7; 4096],
+        )
+    }
+    pub(super) fn conversion_options() -> super::super::FormatOptions {
+        super::super::FormatOptions {
+            share: true,
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn source_bound_mode1_rebuilds_plain_exfat_preserves_opaque_tails_and_type4_keys() {
+        let (source, spec, lce) = source_mode0();
+        let writes = plan_native_4kn_mode0_to_mode1(
+            &source,
+            &lce,
+            &spec,
+            &ProvisionEntropy::new([0x51; 252]),
+            &conversion_options(),
+            0x1234_5678,
+        )
+        .unwrap();
+        assert_eq!(writes.sector_bytes, 4096);
+        assert_eq!(writes.total_sectors, 262_144);
+        assert_eq!(writes.writes.last().unwrap().relative_lba, 0);
+        assert!(writes.writes.iter().all(|w| w.data.len() == 4096));
+        let block = |lba: u64| {
+            writes
+                .writes
+                .iter()
+                .find(|w| w.relative_lba == lba)
+                .unwrap()
+                .data
+                .as_slice()
+        };
+        let compat = crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry(
+            262_144 / (255 * 63),
+            255,
+            63,
+            4096,
+        )
+        .unwrap();
+        assert_eq!(block(compat.start_lba), lce);
+        assert_eq!(&block(63)[3..11], b"EXFAT   ");
+        let candidate = NativeProtocolImage::from_native_bytes(
+            4096,
+            (0..13).flat_map(|lba| block(lba).iter().copied()).collect(),
+        )
+        .unwrap();
+        let parsed = crate::provision::parse_existing_provision_native(
+            &candidate,
+            spec.target().device_id(),
+            262_144,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            parsed.profile.source_mode,
+            OfficialPartitionMode::BootShareCombined
+        );
+        assert_eq!(parsed.profile.partitions[0].start_lba, 63);
+        assert_eq!(parsed.profile.partitions[0].sector_count, 200_000 - 63);
+        assert_eq!(parsed.profile.partitions[1].start_lba, 200_000);
+        assert_eq!(parsed.profile.partitions[1].sector_count, 50_000);
+        for lba in 0..13 {
+            assert_eq!(
+                &candidate.block(lba).unwrap()[512..],
+                &source.block(lba).unwrap()[512..]
+            );
+            if !matches!(lba, 0 | 7 | 12) {
+                assert_eq!(candidate.block(lba), source.block(lba));
+            }
+        }
+        assert_eq!(&block(0)[..446], &source.block(0).unwrap()[..446]);
+        let source_profile = crate::provision::parse_existing_provision_native(
+            &source,
+            spec.target().device_id(),
+            262_144,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            parsed.records[1].lba12.encrypted_file_key,
+            source_profile.records[2].lba12.encrypted_file_key
+        );
+        assert_eq!(
+            parsed.records[1].lba12.encrypt_mode,
+            source_profile.records[2].lba12.encrypt_mode
+        );
+    }
+    #[test]
+    fn conversion_fail_closed_on_missing_format_wrong_lce_and_mutated_protocol() {
+        let (source, spec, lce) = source_mode0();
+        let mut opts = conversion_options();
+        opts.share = false;
+        assert!(plan_native_4kn_mode0_to_mode1(
+            &source,
+            &lce,
+            &spec,
+            &ProvisionEntropy::new([0; 252]),
+            &opts,
+            1
+        )
+        .is_err());
+        assert!(plan_native_4kn_mode0_to_mode1(
+            &source,
+            &lce[..4095],
+            &spec,
+            &ProvisionEntropy::new([0; 252]),
+            &conversion_options(),
+            1
+        )
+        .is_err());
+        let mut changed = source.native_bytes().to_vec();
+        changed[12 * 4096] ^= 0x55;
+        let changed = NativeProtocolImage::from_native_bytes(4096, changed).unwrap();
+        assert!(plan_native_4kn_mode0_to_mode1(
+            &changed,
+            &lce,
+            &spec,
+            &ProvisionEntropy::new([0; 252]),
+            &conversion_options(),
+            1
+        )
+        .is_err());
+    }
+}
+
+#[cfg(test)]
+mod native_mode1_same_source_tests {
+    use super::*;
+    use crate::application::evidence::SectorReader;
+    use std::collections::BTreeMap;
+
+    struct TestReader {
+        native: BTreeMap<u64, Vec<u8>>,
+    }
+    impl SectorReader for TestReader {
+        fn logical_sector_bytes(&self) -> u32 {
+            4096
+        }
+        fn read_native_sector(&mut self, lba: u64) -> std::io::Result<Vec<u8>> {
+            self.native
+                .get(&lba)
+                .cloned()
+                .ok_or_else(|| std::io::Error::other("missing native block"))
+        }
+        fn read_sector(&mut self, lba: u64) -> std::io::Result<Vec<u8>> {
+            self.read_native_sector(lba).map(|b| b[..512].to_vec())
+        }
+    }
+    #[test]
+    fn same_source_mode1_plan_detects_independent_protocol_drift_and_lce_truncation() {
+        let (source, spec, lce) = super::native_mode1_conversion_tests::source_mode0();
+        let compat = crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry(
+            spec.target().total_sectors() / (255 * 63),
+            255,
+            63,
+            4096,
+        )
+        .unwrap();
+        let mut blocks = (0..13)
+            .map(|lba| (lba, source.block(lba as usize).unwrap().to_vec()))
+            .collect::<BTreeMap<_, _>>();
+        blocks.insert(compat.start_lba, lce.clone());
+        let opts = super::native_mode1_conversion_tests::conversion_options();
+        let plan = plan_verified_native_4kn_mode0_to_mode1(
+            &mut TestReader {
+                native: blocks.clone(),
+            },
+            &source,
+            &spec,
+            &crate::provision::ProvisionEntropy::new([0; 252]),
+            &opts,
+            1234,
+        )
+        .unwrap();
+        assert!(plan.writes.iter().any(|w| w.relative_lba == 63));
+        assert!(plan
+            .writes
+            .iter()
+            .any(|w| w.relative_lba == compat.start_lba));
+        let mut drift = blocks.clone();
+        drift.get_mut(&12).unwrap()[4095] ^= 0x55;
+        assert!(plan_verified_native_4kn_mode0_to_mode1(
+            &mut TestReader { native: drift },
+            &source,
+            &spec,
+            &crate::provision::ProvisionEntropy::new([0; 252]),
+            &opts,
+            1234,
+        )
+        .is_err());
+        let mut short = blocks;
+        short.get_mut(&compat.start_lba).unwrap().pop();
+        assert!(plan_verified_native_4kn_mode0_to_mode1(
+            &mut TestReader { native: short },
+            &source,
+            &spec,
+            &crate::provision::ProvisionEntropy::new([0; 252]),
+            &opts,
+            1234,
+        )
+        .is_err());
+    }
 }

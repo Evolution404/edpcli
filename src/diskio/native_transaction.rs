@@ -49,9 +49,16 @@ fn fail(reason: impl Into<String>) -> NativeTransactionFailure {
 
 const MAX_MIRROR_BYTES: usize = 128 * 1024 * 1024;
 
-fn rollback(dev: &mut dyn NativeBlockDevice, originals: &[(u64, Vec<u8>)]) -> bool {
+pub(super) fn rollback(dev: &mut dyn NativeBlockDevice, originals: &[(u64, Vec<u8>)]) -> bool {
     let mut good = true;
-    for (lba, block) in originals.iter().rev() {
+    // The original MBR must be restored only after all other metadata, just
+    // as new MBR LBA0 is committed last on the success path.
+    for (lba, block) in originals
+        .iter()
+        .rev()
+        .filter(|(lba, _)| *lba != 0)
+        .chain(originals.iter().filter(|(lba, _)| *lba == 0))
+    {
         if dev.write_block(*lba, block).is_err() {
             good = false;
         }
@@ -115,6 +122,53 @@ pub fn execute_native_transaction(
         }
         originals.push((write.relative_lba, old));
     }
+    execute_native_transaction_with_snapshot(dev, plan, &originals)
+}
+
+/// Execute using the *same immutable original blocks* already sealed in a
+/// durable pre-write WAL, instead of sampling a second rollback baseline.
+/// This closes the gap in which external changes could otherwise make the
+/// journal disagree with the rollback performed by the transaction.
+pub(super) fn execute_native_transaction_with_snapshot(
+    dev: &mut dyn NativeBlockDevice,
+    plan: &NativeVirtualDiskPlan,
+    originals: &[(u64, Vec<u8>)],
+) -> Result<(), NativeTransactionFailure> {
+    if !matches!(plan.sector_bytes, 512 | 4096)
+        || plan.sector_bytes != dev.sector_bytes()
+        || plan.total_sectors != dev.total_sectors()
+        || plan
+            .writes
+            .last()
+            .is_none_or(|write| write.relative_lba != 0)
+        || plan.writes.is_empty()
+        || originals.len() != plan.writes.len()
+        || plan
+            .writes
+            .iter()
+            .zip(originals)
+            .any(|(write, (lba, old))| {
+                write.relative_lba != *lba
+                    || write.relative_lba >= plan.total_sectors
+                    || write.data.len() != plan.sector_bytes as usize
+                    || old.len() != plan.sector_bytes as usize
+            })
+        || plan
+            .writes
+            .len()
+            .checked_mul(plan.sector_bytes as usize)
+            .is_none_or(|size| size > MAX_MIRROR_BYTES)
+    {
+        return Err(fail("WAL原始块与目标写集或原生几何不一致"));
+    }
+    let mut seen = BTreeSet::new();
+    if plan
+        .writes
+        .iter()
+        .any(|write| !seen.insert(write.relative_lba))
+    {
+        return Err(fail("WAL执行计划存在重复LBA"));
+    }
     dev.sync_blocks()
         .map_err(|e| fail(format!("预检同步失败: {e}")))?;
     let result: Result<(), String> = (|| {
@@ -148,7 +202,7 @@ pub fn execute_native_transaction(
     if let Err(reason) = result {
         return Err(NativeTransactionFailure {
             reason,
-            rollback_verified: rollback(dev, &originals),
+            rollback_verified: rollback(dev, originals),
         });
     }
     Ok(())

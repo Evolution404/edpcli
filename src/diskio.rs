@@ -23,9 +23,13 @@ mod transaction;
 // Full native-block IO is independent from the 512B SectorDev projection.
 mod native_device;
 mod native_journal;
+pub(crate) mod native_journal_recovery;
 mod native_transaction;
 pub use native_device::{NativeRawBlockDevice, NativeVerificationView};
 pub use native_journal::execute_native_transaction_with_journal;
+pub use native_journal_recovery::{
+    inspect_native_journal, NativeJournalSnapshot, NativeJournalState,
+};
 pub use native_transaction::{
     execute_native_transaction, NativeBlockDevice, NativeTransactionFailure,
 };

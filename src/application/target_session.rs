@@ -323,6 +323,24 @@ impl TargetSession<'_, NativeWriteLocked<'_>> {
             device_identity,
         )
     }
+
+    /// Recovery requires the very same checked raw handle and write lease as
+    /// the native commit path. It cannot be invoked on an arbitrary device.
+    #[expect(
+        dead_code,
+        reason = "4Kn physical recovery capability is not yet exposed by a certified production entry"
+    )]
+    pub(crate) fn recover_native_journal(
+        &mut self,
+        path: &std::path::Path,
+        pinned_identity: &str,
+    ) -> Result<(), crate::diskio::NativeTransactionFailure> {
+        crate::diskio::native_journal_recovery::recover_native_journal_locked(
+            self.state.dev,
+            path,
+            pinned_identity,
+        )
+    }
 }
 
 impl TargetSession<'_, WriteLocked<'_>> {

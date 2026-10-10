@@ -3,7 +3,7 @@
 //! recoverable with separately authenticated device identity; it does NOT
 //! promise power-loss atomicity or authorize physical access.
 use super::native_transaction::{
-    execute_native_transaction, NativeBlockDevice, NativeTransactionFailure,
+    execute_native_transaction_with_snapshot, NativeBlockDevice, NativeTransactionFailure,
 };
 use crate::filesystem::NativeVirtualDiskPlan;
 use sha2::{Digest, Sha256};
@@ -129,10 +129,18 @@ pub fn execute_native_transaction_with_journal(
             )));
         }
     }
+    // Use the exact blocks sealed into this WAL as the one rollback baseline.
+    // Another snapshot between WAL persistence and transaction would be unsafe.
+    let originals = plan
+        .writes
+        .iter()
+        .zip(snapshots)
+        .map(|(write, old)| (write.relative_lba, old))
+        .collect::<Vec<_>>();
     // A separate journal state line marks that the last preflight succeeded.
     append_state(&mut journal, "WRITE_STARTED")
         .map_err(|e| failure(format!("WAL状态同步失败（未写盘）: {e}")))?;
-    match execute_native_transaction(dev, plan) {
+    match execute_native_transaction_with_snapshot(dev, plan, &originals) {
         Ok(()) => append_state(&mut journal, "COMMITTED_SYNC_AND_READBACK_OK")
             .map_err(|e| failure(format!("介质已提交但WAL无法确认完成，状态不确定: {e}"))),
         Err(mut error) => {
