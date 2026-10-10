@@ -173,8 +173,47 @@ pub fn materialize_native_restore_evidence_for_hil(
     expected_device_id: &str,
     target_geometry: NativeReadGeometry,
 ) -> Result<crate::filesystem::NativeVirtualDiskPlan, String> {
+    materialize_native_restore_for_hil(
+        backup_path,
+        expected_device_id,
+        target_geometry,
+        "edpb.manifest.v4",
+        RestorePolicy::EvidenceOnly,
+    )
+}
+
+/// HIL-only v5 restorable metadata materialization. Not compiled into normal
+/// builds and must be used only after the caller has independently verified a
+/// disposable OS Disk Image; it does not open media or grant restore access.
+#[cfg(feature = "ci-virtual-disk")]
+pub fn materialize_native_restore_v5_for_hil(
+    backup_path: &Path,
+    expected_device_id: &str,
+    target_geometry: NativeReadGeometry,
+) -> Result<crate::filesystem::NativeVirtualDiskPlan, String> {
+    materialize_native_restore_for_hil(
+        backup_path,
+        expected_device_id,
+        target_geometry,
+        "edpb.manifest.v5",
+        RestorePolicy::Restorable,
+    )
+}
+
+#[cfg(feature = "ci-virtual-disk")]
+fn materialize_native_restore_for_hil(
+    backup_path: &Path,
+    expected_device_id: &str,
+    target_geometry: NativeReadGeometry,
+    expected_schema: &str,
+    required_policy: RestorePolicy,
+) -> Result<crate::filesystem::NativeVirtualDiskPlan, String> {
     use crate::filesystem::NativeFilesystemWrite;
-    let preview = plan_native_restore_readonly(backup_path, expected_device_id, target_geometry)?;
+    let preview = if expected_schema == "edpb.manifest.v5" {
+        plan_native_restore_v5_readonly(backup_path, expected_device_id, target_geometry)?
+    } else {
+        plan_native_restore_readonly(backup_path, expected_device_id, target_geometry)?
+    };
     let reader = VerifiedBackupReader::open(backup_path)?;
     if reader.verified().file_sha256 != preview.backup_sha256 {
         return Err("EDPB取证文件在只读规划与重新打开之间改变".into());
@@ -186,10 +225,10 @@ pub fn materialize_native_restore_evidence_for_hil(
         .iter()
         .filter(|a| a.kind == "raw_sectors")
     {
-        if artifact.restore_policy != RestorePolicy::EvidenceOnly
+        if artifact.restore_policy != required_policy
             || artifact.completeness != ArtifactCompleteness::Complete
         {
-            return Err("HIL取证材料完整性或恢复权限状态异常".into());
+            return Err("HIL恢复材料与独立版本契约或完整性不一致".into());
         }
         let extent_id = artifact
             .source_extent_ids
