@@ -136,7 +136,7 @@ pub fn prepare_native_mode1_on_disk(
     disk: u32,
     source_backup: &Path,
 ) -> Result<PreparedNativeMode1, String> {
-    let checked = crate::application::evidence::verify_native_4kn_backup_against_disk_readonly(
+    let checked = crate::application::evidence::verify_native_backup_against_disk_readonly(
         runner,
         disk,
         source_backup,

@@ -419,14 +419,14 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                 let argv = SecretArgv(std::env::args().skip(1).collect());
                 return elevate::ensure_elevated(&argv);
             }
-            match crate::application::evidence::verify_native_4kn_backup_against_disk_readonly(
+            match crate::application::evidence::verify_native_backup_against_disk_readonly(
                 runner,
                 disk,
                 Path::new(&backup),
             ) {
                 Ok(matched) => {
                     println!(
-                        "4Kn只读写前来源比对通过: disk{}，{}个完整{}B原生块，设备总扇区={}；EDPB协议、LCE、分区首块与实盘一致。未卸载、未写盘、未解除实盘制盘门禁。",
+                        "原生只读来源比对通过: disk{}，{}个完整{}B原生块，设备总扇区={}；EDPB协议、LCE、分区首块与实盘一致。未卸载、未写盘、未解除实盘制盘门禁。",
                         matched.disk, matched.verified_native_blocks,
                         matched.logical_sector_bytes, matched.total_sectors,
                     );

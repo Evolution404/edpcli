@@ -95,7 +95,7 @@ pub(super) fn validate_native_evidence<'a>(
         .find(|e| e.id == lce.source_extent_ids[0])
         .ok_or("Native LCE extent missing")?;
     if extent.start_lba != pointer.start_lba || extent.sector_count != pointer.sector_count {
-        return Err("4Kn LCE physical extent differs from verified LBA7 pointer".into());
+        return Err("Native LCE physical extent differs from verified LBA7 pointer".into());
     }
     Ok(())
 }

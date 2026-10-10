@@ -35,6 +35,8 @@
 
 **2026-10-10 S3-a 原生取证备份阶段回执**：提交 `9fc54cc1` 已推送（P1/P2）。随后扩展 `src/application/write/backup.rs` 的 1024/2048/4096B 调度到 `native_backup::create_native_evidence_on_disk`，而不是错误地走 512B legacy 路径；`native_backup.rs` 使用观测的逻辑扇区大小解码原生分区、读取全 13 块、按 3072B LCE 的 3/2/1 原生块跨度捕获完整密文及物理尾部，并写入 EDPB v4 metadata-only/evidence-only。512B 与恢复逻辑未改，非标准 8192B 仍拒绝。`cargo check --all-targets` 通过、`backup_suite` 78/78 和 legacy guard 1/1 通过；已有 `tests/edpb.rs` 覆盖 1024/2048B v4 完整容器读回，4Kn 独立读取与禁止恢复合约验证。**尚未取得 1024/2048B 物理设备实际取证证据，也未实现 v4 同几何恢复。**
 
+**2026-10-10 专用 4Kn 预检去重审计（后续优先收口）**：官方 Mode0–3 的正式 `provision plan/write` 已采用统一的 `prepare_native_provision_on_disk`，原有 `provision plan --source-backup` 却会选用早期 `native_preflight.rs::prepare_native_mode1_on_disk`（强制 4096B、Mode0→Mode1、另行生成写集），其 TUI 旧异步任务 `request_native_mode1_readonly_plan` 亦沿用历史 `Native4knReadOnlyPreflight` 数据结构。**该额外业务路径没有当前架构必要性，必须后续迁入统一规划/预检并删除历史特殊写集，不能将其作为正式制盘的另一套实现，也不能因为改名就视为已清理。** 本次仅完成通用 EDPB v4 只读来源匹配的 1024/2048/4096B 共用验证器 `verify_native_backup_against_disk_readonly`，删除同义 4Kn 包装函数；历史 Mode1 路径在自身上层仍保持 4096B 门禁，防止在迁移完全验收前误扩大特殊写集的使用范围。3 规格字节尾部篡改/短块拒绝测试通过；Provision/CLI 全套目标测试和备份测试均通过。下一实施项：把旧 `--source-backup` 入口或 TUI 回调的用途收敛为通用“来源身份与快照只读比对”，涉及目标分区的 `plan` 一律复用 `NativeWritePlan`，删除 Mode1 专用逻辑前证明没有现存消费者依赖；仅离线镜像的兼容行为另行隔离，避免未经验证的写路径。
+
 **阶段停止条件**：不得将“不格式化但未证明保留”写到设备；待保留区任何原始块变化、FileKey 不可验证、大小/偏移/FS/加密状态变化或来源身份不可信时明确拒绝。任何测试专用虚拟盘均须核查 `diskutil` 的 `VirtualOrPhysical=Virtual`、`BusProtocol=Disk Image`、容量和原生块大小及镜像归属，未授权实体盘完全不写。其他 AI 未提交文件先审计，不 reset/clean。测试日志附项目进度记录。
 
 ## 一、最终交付定义
