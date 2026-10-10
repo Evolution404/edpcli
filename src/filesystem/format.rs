@@ -4,7 +4,8 @@ use super::{FilesystemKind, FilesystemMetadata};
 /// standard range. This is an FS capability predicate, NOT a native device
 /// geometry restriction: other 512*n values remain valid for raw/protocol I/O.
 pub(crate) fn native_fat_sector_bytes_supported(bytes: u32) -> bool {
-    (512..=4096).contains(&bytes) && bytes.is_power_of_two()
+    crate::domain::hardware::native_sector_capability(bytes)
+        .is_some_and(|capability| capability.fat_exfat_format)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

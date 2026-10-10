@@ -12,6 +12,32 @@ pub const fn valid_native_sector_bytes(bytes: u32) -> bool {
     bytes >= 512 && bytes.is_multiple_of(512)
 }
 
+/// Single native-sector capability registry. OS HIL certification is independent
+/// from raw I/O and FAT/exFAT formatting eligibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NativeSectorCapability {
+    pub logical_sector_bytes: u32,
+    pub native_io: bool,
+    pub protocol_512_projection: bool,
+    pub native_wal: bool,
+    pub fat_exfat_format: bool,
+    pub os_hil_certified: bool,
+}
+
+pub const fn native_sector_capability(bytes: u32) -> Option<NativeSectorCapability> {
+    if !valid_native_sector_bytes(bytes) {
+        return None;
+    }
+    Some(NativeSectorCapability {
+        logical_sector_bytes: bytes,
+        native_io: true,
+        protocol_512_projection: true,
+        native_wal: true,
+        fat_exfat_format: matches!(bytes, 512 | 1024 | 2048 | 4096),
+        os_hil_certified: matches!(bytes, 512 | 4096),
+    })
+}
+
 /// Observed device blocks, distinct from EDP's fixed 512-byte address unit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObservedDeviceGeometry {
@@ -36,6 +62,32 @@ impl NativeReadGeometry {
         }
         lba.checked_mul(u64::from(self.logical_sector_bytes))
             .ok_or("原生 LBA 字节偏移溢出")
+    }
+
+    /// Checked, end-exclusive native extent; zero-length end-of-disk is valid.
+    pub fn byte_range(self, start_lba: u64, count: u64) -> Result<(u64, u64), &'static str> {
+        let end = start_lba.checked_add(count).ok_or("原生 LBA 范围溢出")?;
+        if end > self.native_sector_count {
+            return Err("原生 LBA 范围超出设备容量");
+        }
+        let unit = u64::from(self.logical_sector_bytes);
+        let start = start_lba.checked_mul(unit).ok_or("原生起点字节溢出")?;
+        let length = count.checked_mul(unit).ok_or("原生长度字节溢出")?;
+        Ok((start, length))
+    }
+
+    pub fn exact_lba(self, byte_offset: u64) -> Result<u64, &'static str> {
+        if byte_offset > self.capacity_bytes
+            || !byte_offset.is_multiple_of(u64::from(self.logical_sector_bytes))
+        {
+            return Err("原生字节偏移未对齐或超出设备容量");
+        }
+        Ok(byte_offset / u64::from(self.logical_sector_bytes))
+    }
+
+    pub fn capability(self) -> NativeSectorCapability {
+        native_sector_capability(self.logical_sector_bytes)
+            .expect("validated native geometry always has a capability")
     }
 }
 
@@ -116,6 +168,35 @@ mod geometry_tests {
             physical_sector_bytes: Some(4096),
         };
         assert!(invalid_capacity.native_read_geometry().is_err());
+    }
+
+    #[test]
+    fn sector_registry_and_checked_byte_ranges_cover_supported_sizes() {
+        for bytes in [512, 1024, 2048, 4096, 1536, 8192] {
+            let caps = native_sector_capability(bytes).unwrap();
+            assert!(caps.native_io && caps.native_wal && caps.protocol_512_projection);
+            assert_eq!(
+                caps.fat_exfat_format,
+                matches!(bytes, 512 | 1024 | 2048 | 4096)
+            );
+            let g = ObservedDeviceGeometry {
+                capacity_bytes: 100 * u64::from(bytes),
+                logical_sector_bytes: Some(bytes),
+                physical_sector_bytes: Some(4096),
+            }
+            .native_read_geometry()
+            .unwrap();
+            assert_eq!(
+                g.byte_range(3, 4),
+                Ok((3 * u64::from(bytes), 4 * u64::from(bytes)))
+            );
+            assert_eq!(g.exact_lba(4 * u64::from(bytes)), Ok(4));
+            assert!(g.exact_lba(123).is_err());
+            assert!(g.byte_range(99, 2).is_err());
+            assert_eq!(g.byte_range(100, 0), Ok((100 * u64::from(bytes), 0)));
+        }
+        assert!(native_sector_capability(256).is_none());
+        assert!(native_sector_capability(513).is_none());
     }
 
     #[test]
