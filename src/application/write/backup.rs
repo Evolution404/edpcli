@@ -166,7 +166,7 @@ pub fn backup_create_on_disk(
 ) -> EdpCliResult<crate::application::post_restore::MetadataBackupReport> {
     if crate::platform::system::device_geometry(runner, disk)
         .and_then(|geometry| geometry.logical_sector_bytes)
-        == Some(4096)
+        .is_some_and(|sector| matches!(sector, 1024 | 2048 | 4096))
     {
         return super::native_backup::create_native_evidence_on_disk(
             runner,
@@ -201,7 +201,7 @@ pub fn backup_create_on_disk_with_pin(
 ) -> EdpCliResult<crate::application::post_restore::MetadataBackupReport> {
     if crate::platform::system::device_geometry(runner, disk)
         .and_then(|geometry| geometry.logical_sector_bytes)
-        == Some(4096)
+        .is_some_and(|sector| matches!(sector, 1024 | 2048 | 4096))
     {
         return super::native_backup::create_native_evidence_on_disk(
             runner,
