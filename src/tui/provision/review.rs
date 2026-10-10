@@ -254,7 +254,9 @@ fn classify_source_partition_impact(
             !target.formatted
                 && target.start_lba == *start
                 && target.sector_count == *sectors
-                && target.role.is_some_and(|role| role.label() == label.as_str())
+                && target
+                    .role
+                    .is_some_and(|role| role.label() == label.as_str())
                 && matches!(
                     target.disposition,
                     Some(
@@ -348,7 +350,11 @@ fn old_mode_source_roles(kind: crate::provision::DiskProvisionKind) -> Vec<Strin
     use crate::provision::{DiskProvisionKind, PartitionRole};
     let roles: &[PartitionRole] = match kind {
         DiskProvisionKind::Plain => &[],
-        DiskProvisionKind::Mode0 => &[PartitionRole::Boot, PartitionRole::Share, PartitionRole::Encrypt],
+        DiskProvisionKind::Mode0 => &[
+            PartitionRole::Boot,
+            PartitionRole::Share,
+            PartitionRole::Encrypt,
+        ],
         DiskProvisionKind::Mode1 => &[PartitionRole::BootShareCombined, PartitionRole::Encrypt],
         DiskProvisionKind::Mode2 => &[PartitionRole::Encrypt],
         DiskProvisionKind::Mode3 => &[PartitionRole::Boot, PartitionRole::Share],
