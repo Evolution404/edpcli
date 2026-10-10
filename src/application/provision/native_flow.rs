@@ -22,8 +22,15 @@ pub struct NativePreparedProvision {
     pub source: DiskProvisionKind,
     pub target: crate::provision::ProvisionTarget,
     pub device_id: String,
+    /// Actual immutable target encryption/key-wrapping selection, not TUI form state.
+    /// Plain has no encryption algorithm.
+    pub algorithm: Option<crate::provision::OfficialLabelAlgorithm>,
     pub plan: NativeVirtualDiskPlan,
     pub source_native_prefix: Vec<Vec<u8>>,
+    /// Source-only filesystem boot blocks and full legacy LCE extent at plan time.
+    /// A committed NativeWritePlan must refuse stale or substituted media.
+    pub source_pinned_blocks: Vec<(u64, Vec<u8>)>,
+    pub source_hardware_serial: Option<String>,
     pub source_protocol_projection: Vec<u8>,
     pub before_pin: crate::media_identity::MediaIdentityPin,
     pub probe: HardwareProbe,
@@ -920,6 +927,36 @@ pub fn prepare_native_provision_on_disk(
         geometry.logical_sector_bytes,
         geometry.native_sector_count,
     )?;
+    // Snapshot the original partition boot blocks (including Plain sources)
+    // and the original LCE, not the *target* LCE. Changing them after the user
+    // confirms must fail before any WAL or native write. Complete native blocks
+    // include 4Kn tails and 1024/2048B multi-block LCE ciphertext.
+    let mut pinned_lbas = std::collections::BTreeSet::new();
+    for part in &sources {
+        pinned_lbas.insert(part.start_lba);
+    }
+    if source != DiskProvisionKind::Plain {
+        let lce = crate::domain::geometry::parse_lba7_compatibility_geometry_with_sector_bytes(
+            &source_protocol_projection,
+            &device_id,
+            geometry.native_sector_count,
+            geometry.logical_sector_bytes,
+        )
+        .map_err(|error| format!("来源LCE地址无法冻结: {error}"))?;
+        for delta in 0..lce.sector_count {
+            pinned_lbas.insert(lce.start_lba + delta);
+        }
+    }
+    let source_pinned_blocks = pinned_lbas
+        .into_iter()
+        .filter(|lba| *lba >= 13)
+        .map(|lba| {
+            dev.read_block_fresh(lba)
+                .map(|bytes| (lba, bytes))
+                .map_err(|error| format!("冻结来源LBA{lba}失败: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let source_hardware_serial = runner.hardware_serial(disk);
     let impact = project_native_impact(sources, &partitions, &plan)?;
     Ok(NativePreparedProvision {
         impact,
@@ -927,8 +964,14 @@ pub fn prepare_native_provision_on_disk(
         source,
         target,
         device_id,
+        algorithm: match request {
+            ProvisionRequest::Official(official) => Some(official.algorithm),
+            ProvisionRequest::Plain(_) => None,
+        },
         plan,
         source_native_prefix: prefix,
+        source_pinned_blocks,
+        source_hardware_serial,
         source_protocol_projection,
         before_pin,
         probe,
@@ -1148,6 +1191,12 @@ pub fn commit_prepared_native_provision_observed(
         &prepared.plan,
         wal,
         Some(&prepared.source_native_prefix),
+        Some(super::native_commit::NativeSourceGuard {
+            device_id: &prepared.device_id,
+            hardware_probe: &prepared.probe,
+            hardware_serial: prepared.source_hardware_serial.as_deref(),
+            pinned_blocks: &prepared.source_pinned_blocks,
+        }),
         observer,
     )
 }

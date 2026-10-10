@@ -480,8 +480,11 @@ fn virtual_4kn_disk_uses_native_prepared_review_and_write_eligibility() {
         source: DiskProvisionKind::Plain,
         target: ProvisionTarget::Plain,
         device_id: "disk&ven_EDPTEST&prod_DiskImage".into(),
+        algorithm: None,
         plan,
         source_native_prefix: vec![vec![0; 4096]; 13],
+        source_pinned_blocks: vec![],
+        source_hardware_serial: None,
         source_protocol_projection: raw_source,
         before_pin: pin,
         probe: HardwareProbe {
@@ -513,6 +516,18 @@ fn virtual_4kn_disk_uses_native_prepared_review_and_write_eligibility() {
             password_disposition: None,
         }],
     };
+    // Confirmation projection reads the frozen Native plan rather than
+    // re-reading mutable form state. This also covers non-default algorithms.
+    let mut with_algorithm = native.clone();
+    with_algorithm.algorithm = Some(crate::provision::OfficialLabelAlgorithm::AesCross);
+    let projection = crate::tui::state::ProvisionConfirmationViewModel::from_prepared(
+        &crate::application::provision::PreparedProvision::Native(Box::new(with_algorithm)),
+    )
+    .unwrap();
+    assert_eq!(
+        projection.algorithm,
+        Some(crate::provision::OfficialLabelAlgorithm::AesCross)
+    );
     state.provision_set_planning();
     state.provision_finish_plan(Ok(
         crate::application::provision::PreparedProvision::Native(Box::new(native)),

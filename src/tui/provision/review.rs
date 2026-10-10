@@ -654,7 +654,9 @@ impl ProvisionConfirmationViewModel {
                     Some(official.algorithm)
                 }
                 crate::application::provision::PreparedProvision::Plain(_) => None,
-                crate::application::provision::PreparedProvision::Native(_) => None,
+                crate::application::provision::PreparedProvision::Native(native) => {
+                    native.algorithm
+                }
             },
             geometry_note,
             regions,
