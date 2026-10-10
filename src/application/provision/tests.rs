@@ -1914,3 +1914,446 @@ fn plain_native_quick_capacity_uses_absolute_bytes_and_ceil_lbas() {
     assert!(checked_size(PlainPartitionSize::MiB(1), 513).is_err());
     assert!(checked_size(PlainPartitionSize::GiB(u64::MAX), 512).is_err());
 }
+
+fn assert_virtual_disk_native_lce(path: &std::path::Path, sector_bytes: u32, start_lba: u64) {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut disk = std::fs::File::open(path).unwrap();
+    let blocks = 3072u64.div_ceil(u64::from(sector_bytes));
+    let offset = start_lba * u64::from(sector_bytes);
+    let mut encrypted = vec![0; (blocks * u64::from(sector_bytes)) as usize];
+    disk.seek(SeekFrom::Start(offset)).unwrap();
+    disk.read_exact(&mut encrypted).unwrap();
+    let plain = crate::protocol::crypto::a6b0_full(&encrypted, &[0u8; 8], offset);
+    assert_eq!(&plain[..3072], crate::provision::lce_plaintext());
+    assert!(plain[3072..].iter().all(|byte| *byte == 0));
+}
+
+/// Builds real sparse ordinary files for each of the 25 destructive
+/// source/target combinations. It checks mode recognition after an *independent*
+/// file reopen. No physical drives, OS mounts or user-data retention implied.
+#[test]
+fn virtual_native_destructive_mode_matrix_25_pairs_four_filesystem_geometries() {
+    use crate::application::provision::native_virtual_transition::simulate_destructive_native_virtual_transition;
+    let all = [
+        DiskProvisionKind::Plain,
+        DiskProvisionKind::Mode0,
+        DiskProvisionKind::Mode1,
+        DiskProvisionKind::Mode2,
+        DiskProvisionKind::Mode3,
+    ];
+    for sector_bytes in [512u32, 1024, 2048, 4096] {
+        let total = 1_000_000u64;
+        let lce_start = 900_000u64;
+        let probe = crate::platform::HardwareProbe {
+            vid: Some(0x0dd8),
+            pid: Some(0x2005),
+            transport: crate::platform::NativeTransport::Uas,
+            windows_pnp_instance_id: None,
+            inquiry: Some(crate::platform::InquiryInfo {
+                vendor: "Netac".into(),
+                product: "OnlyDisk".into(),
+                revision: "1.00".into(),
+            }),
+        };
+        let target = TargetIdentity::from_probe(&probe, total).unwrap();
+        let did = target.device_id().to_owned();
+        let spec = ProvisionSpec::new(
+            target,
+            ProvisionMetadata::new(
+                OnlyId::parse("1402259934").unwrap(),
+                "SIMULATION",
+                "TEST",
+                "NATIVE",
+            )
+            .unwrap(),
+            ProvisionProfile::canonical_v1(),
+        )
+        .unwrap();
+        let entropy = ProvisionEntropy::new([0x5a; 252]);
+        let key = [0x42u8; 16];
+        let native_lce_len = 3072u64.div_ceil(u64::from(sector_bytes));
+        let lce = crate::protocol::lba7_compat::Lba7CompatibilityExtentLayout {
+            chs_bytes: lce_start * u64::from(sector_bytes) + 0xe0000,
+            start_byte_offset: lce_start * u64::from(sector_bytes),
+            start_lba: lce_start,
+            size_bytes: native_lce_len * u64::from(sector_bytes),
+            size_sectors: native_lce_len,
+        };
+        let mut plans = Vec::new();
+        let mut expected_filesystems: Vec<Vec<(u64, u64, FilesystemKind, bool)>> = Vec::new();
+        for kind in all {
+            let plan = if let Some(mode) = kind.official_mode() {
+                let options = FormatOptions {
+                    boot: matches!(kind, DiskProvisionKind::Mode0 | DiskProvisionKind::Mode3),
+                    share: matches!(
+                        kind,
+                        DiskProvisionKind::Mode0
+                            | DiskProvisionKind::Mode1
+                            | DiskProvisionKind::Mode3
+                    ),
+                    encrypt: matches!(
+                        kind,
+                        DiskProvisionKind::Mode0
+                            | DiskProvisionKind::Mode1
+                            | DiskProvisionKind::Mode2
+                    ),
+                    ..FormatOptions::default()
+                };
+                let official = OfficialProvisionPlan::new(
+                    mode,
+                    OfficialPartitionSizes::new(32, 64, 128),
+                    lce,
+                    wrap_legacy_lba7_file_key(b"0000aaaa", [0; 8]),
+                    wrap_file_key(b"0000aaaa", key, FileKeyWrapMode::Sm4),
+                )
+                .unwrap()
+                .with_filesystems(options.filesystems());
+                let targets = official.format_targets_native(sector_bytes).unwrap();
+                let count = targets.len();
+                expected_filesystems.push(
+                    targets
+                        .iter()
+                        .filter(|part| options.choice(part.role).0)
+                        .map(|part| {
+                            (
+                                part.geometry.start_sector,
+                                part.geometry.sector_count(),
+                                part.filesystem.expect("formatted partition has filesystem"),
+                                part.physically_encrypted,
+                            )
+                        })
+                        .collect(),
+                );
+                native_image::plan_native_edp_image(
+                    &spec,
+                    &entropy,
+                    &official,
+                    &options,
+                    &vec![0xdeadbeef; count],
+                    &vec![key; count],
+                    sector_bytes,
+                )
+                .unwrap_or_else(|e| panic!("{sector_bytes} {kind:?}: {e}"))
+            } else {
+                expected_filesystems.push(vec![(2048, 100_000, FilesystemKind::ExFat, false)]);
+                native_image::plan_native_plain_image(
+                    total,
+                    sector_bytes,
+                    &[PlainPartitionRequest {
+                        start_lba: 2048,
+                        size: PlainPartitionSize::Sectors(100_000),
+                        filesystem: FilesystemKind::ExFat,
+                        volume_label: "PLAIN".into(),
+                    }],
+                )
+                .unwrap()
+            };
+            plans.push(plan);
+        }
+        let mut tested = 0usize;
+        for (source_index, source_kind) in all.iter().enumerate() {
+            let source_path = portable_test_temp_file("edpcli-native-sim-source", "img");
+            native_image::export_native_plain_image(&source_path, &plans[source_index]).unwrap();
+            // Place a source-only marker in a non-owned data block. This
+            // *must not* survive destructive fresh-image provisioning.
+            use std::io::{Seek, SeekFrom, Write};
+            let mut source_io = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&source_path)
+                .unwrap();
+            source_io
+                .seek(SeekFrom::Start(600_000 * u64::from(sector_bytes)))
+                .unwrap();
+            source_io
+                .write_all(&vec![0x9au8; sector_bytes as usize])
+                .unwrap();
+            source_io.sync_all().unwrap();
+            drop(source_io);
+
+            for (target_index, target_kind) in all.iter().enumerate() {
+                let dest = portable_test_temp_file("edpcli-native-sim-target", "img");
+                let evidence = simulate_destructive_native_virtual_transition(
+                    &source_path,
+                    &plans[source_index],
+                    *source_kind,
+                    &dest,
+                    &plans[target_index],
+                    *target_kind,
+                    &did,
+                )
+                .unwrap_or_else(|e| {
+                    panic!("{sector_bytes} source {source_kind:?} -> {target_kind:?}: {e}")
+                });
+                assert_eq!(evidence.logical_sector_bytes, sector_bytes);
+                assert_eq!(evidence.source_mode, *source_kind);
+                assert_eq!(evidence.target_mode, *target_kind);
+                assert!(evidence.destructive_rebuild);
+                assert_eq!(evidence.source_protocol_sha256.len(), 64);
+                assert_eq!(evidence.target_protocol_sha256.len(), 64);
+                assert_eq!(
+                    evidence.target_written_blocks,
+                    plans[target_index].writes.len()
+                );
+                assert_eq!(
+                    std::fs::metadata(&dest).unwrap().len(),
+                    total * u64::from(sector_bytes)
+                );
+                native_image::verify_native_virtual_image(&dest, &plans[target_index]).unwrap();
+                if *target_kind != DiskProvisionKind::Plain {
+                    assert_virtual_disk_native_lce(&dest, sector_bytes, lce_start);
+                }
+                // Confirm fresh destructive output, not source-file copying.
+                let mut data_check = std::fs::File::open(&dest).unwrap();
+                data_check
+                    .seek(SeekFrom::Start(600_000 * u64::from(sector_bytes)))
+                    .unwrap();
+                let mut unowned = vec![0u8; sector_bytes as usize];
+                data_check.read_exact(&mut unowned).unwrap();
+                assert!(unowned.iter().all(|byte| *byte == 0));
+                // Check *reopened on-disk* FS boot blocks, decrypting each
+                // physically encrypted EDP region using its correct native LBA.
+                use std::io::{Read, Seek, SeekFrom};
+                let mut disk = std::fs::File::open(&dest).unwrap();
+                for (start, count, fs, encrypted) in &expected_filesystems[target_index] {
+                    let mut raw = vec![0u8; sector_bytes as usize];
+                    disk.seek(SeekFrom::Start(start * u64::from(sector_bytes)))
+                        .unwrap();
+                    disk.read_exact(&mut raw).unwrap();
+                    let plain = if *encrypted {
+                        crate::partition_transform::transform_native_sector_offline(
+                            crate::partition_transform::NativePartitionDataCipher::
+                                from_encrypt_mode(FileKeyWrapMode::Sm4.raw()).unwrap(),
+                            crate::partition_transform::NativeCipherDirection::Decrypt,
+                            &raw,&key,*start,sector_bytes
+                        ).unwrap()
+                    } else {
+                        raw
+                    };
+                    assert_eq!(
+                        crate::filesystem::detect_native_boot_sector(&plain, *count, sector_bytes)
+                            .unwrap(),
+                        Some(*fs),
+                        "{sector_bytes} {source_kind:?}->{target_kind:?} LBA{start} FS"
+                    );
+                }
+                std::fs::remove_file(&dest).unwrap();
+                tested += 1;
+            }
+            native_image::verify_native_virtual_image(&source_path, &plans[source_index]).unwrap();
+            std::fs::remove_file(&source_path).unwrap();
+        }
+        assert_eq!(
+            tested, 25,
+            "all source/target pairs including Plain must execute"
+        );
+    }
+}
+
+#[test]
+fn virtual_native_rebuild_rejects_mismatch_corruption_and_overwrite() {
+    use crate::application::provision::native_virtual_transition::simulate_destructive_native_virtual_transition;
+    use std::io::{Seek, SeekFrom, Write};
+    let total = 150_000u64;
+    let p = native_image::plan_native_plain_image(
+        total,
+        1024,
+        &[PlainPartitionRequest {
+            start_lba: 2048,
+            size: PlainPartitionSize::Sectors(100_000),
+            filesystem: FilesystemKind::ExFat,
+            volume_label: "PLAIN".into(),
+        }],
+    )
+    .unwrap();
+    let src = portable_test_temp_file("edpcli-virtual-source-negative", "img");
+    let dst = portable_test_temp_file("edpcli-virtual-dest-negative", "img");
+    native_image::export_native_plain_image(&src, &p).unwrap();
+    let f = |mode, dest: &std::path::Path, plan: &crate::filesystem::NativeVirtualDiskPlan| {
+        simulate_destructive_native_virtual_transition(
+            &src,
+            &p,
+            mode,
+            dest,
+            plan,
+            DiskProvisionKind::Plain,
+            "disk&ven_netac&prod_onlydisk",
+        )
+    };
+    assert!(f(DiskProvisionKind::Mode2, &dst, &p).is_err());
+    assert!(
+        !dst.exists(),
+        "invalid source mode must not create a target"
+    );
+    assert!(
+        simulate_destructive_native_virtual_transition(
+            &src,
+            &p,
+            DiskProvisionKind::Plain,
+            &dst,
+            &p,
+            DiskProvisionKind::Mode3,
+            "disk&ven_netac&prod_onlydisk"
+        )
+        .is_err(),
+        "declared target mode must be rejected before output creation"
+    );
+    assert!(!dst.exists(), "invalid target mode cannot produce an image");
+    let mut bad = p.clone();
+    bad.sector_bytes = 4096;
+    assert!(f(DiskProvisionKind::Plain, &dst, &bad).is_err());
+    assert!(!dst.exists());
+    assert!(f(DiskProvisionKind::Plain, &src, &p).is_err());
+    assert!(f(DiskProvisionKind::Plain, &dst, &p).is_ok());
+    assert!(
+        f(DiskProvisionKind::Plain, &dst, &p).is_err(),
+        "no overwrite"
+    );
+    std::fs::remove_file(&dst).unwrap();
+    let mut file = std::fs::OpenOptions::new().write(true).open(&src).unwrap();
+    file.seek(SeekFrom::Start(510)).unwrap();
+    file.write_all(&[0]).unwrap();
+    drop(file);
+    assert!(f(DiskProvisionKind::Plain, &dst, &p).is_err());
+    assert!(!dst.exists());
+    std::fs::remove_file(&src).unwrap();
+}
+
+/// Non-power-of-two logical sector sizes are valid *native I/O* geometries,
+/// not automatically mountable FAT/exFAT geometries. These disk files carry
+/// verified protocol/LCE or an explicitly unformatted Plain partition table.
+#[test]
+fn virtual_native_destructive_mode_matrix_25_pairs_nonstandard_fs_geometries() {
+    use crate::application::provision::native_virtual_transition::simulate_destructive_native_virtual_transition;
+    use crate::filesystem::{NativeFilesystemWrite, NativeVirtualDiskPlan};
+    let all = [
+        DiskProvisionKind::Plain,
+        DiskProvisionKind::Mode0,
+        DiskProvisionKind::Mode1,
+        DiskProvisionKind::Mode2,
+        DiskProvisionKind::Mode3,
+    ];
+    for sector_bytes in [1536u32, 2560, 3072, 8192] {
+        let total = 1_000_000u64;
+        let lce_start = 900_000u64;
+        let probe = crate::platform::HardwareProbe {
+            vid: Some(0x0dd8),
+            pid: Some(0x2005),
+            transport: crate::platform::NativeTransport::Uas,
+            windows_pnp_instance_id: None,
+            inquiry: Some(crate::platform::InquiryInfo {
+                vendor: "Netac".into(),
+                product: "OnlyDisk".into(),
+                revision: "1.00".into(),
+            }),
+        };
+        let target = TargetIdentity::from_probe(&probe, total).unwrap();
+        let did = target.device_id().to_owned();
+        let spec = ProvisionSpec::new(
+            target,
+            ProvisionMetadata::new(
+                OnlyId::parse("1402259934").unwrap(),
+                "TEST",
+                "TEST",
+                "NATIVE",
+            )
+            .unwrap(),
+            ProvisionProfile::canonical_v1(),
+        )
+        .unwrap();
+        let entropy = ProvisionEntropy::new([0x5a; 252]);
+        let key = [0x42u8; 16];
+        let lce_blocks = 3072u64.div_ceil(u64::from(sector_bytes));
+        let lce = crate::protocol::lba7_compat::Lba7CompatibilityExtentLayout {
+            chs_bytes: lce_start * u64::from(sector_bytes) + 0xe0000,
+            start_byte_offset: lce_start * u64::from(sector_bytes),
+            start_lba: lce_start,
+            size_bytes: lce_blocks * u64::from(sector_bytes),
+            size_sectors: lce_blocks,
+        };
+        let mut plans = Vec::new();
+        for kind in all {
+            if let Some(mode) = kind.official_mode() {
+                let opts = FormatOptions::default(); // No filesystem writes for odd native sizes.
+                let official = OfficialProvisionPlan::new(
+                    mode,
+                    OfficialPartitionSizes::new(32, 64, 128),
+                    lce,
+                    wrap_legacy_lba7_file_key(b"0000aaaa", [0; 8]),
+                    wrap_file_key(b"0000aaaa", key, FileKeyWrapMode::Sm4),
+                )
+                .unwrap()
+                .with_filesystems(opts.filesystems());
+                let count = official.format_targets_native(sector_bytes).unwrap().len();
+                plans.push(
+                    native_image::plan_native_edp_image(
+                        &spec,
+                        &entropy,
+                        &official,
+                        &opts,
+                        &vec![0; count],
+                        &vec![key; count],
+                        sector_bytes,
+                    )
+                    .unwrap(),
+                );
+            } else {
+                // No fake FAT/exFAT boot sector: the MBR table is valid as
+                // a raw partition map, but this candidate is NOT mountable.
+                let mut mbr = vec![0u8; sector_bytes as usize];
+                mbr[446 + 4] = 0x07;
+                mbr[446 + 8..446 + 12].copy_from_slice(&2048u32.to_le_bytes());
+                mbr[446 + 12..446 + 16].copy_from_slice(&100_000u32.to_le_bytes());
+                mbr[510..512].copy_from_slice(&[0x55, 0xaa]);
+                plans.push(NativeVirtualDiskPlan {
+                    total_sectors: total,
+                    sector_bytes,
+                    writes: vec![NativeFilesystemWrite {
+                        relative_lba: 0,
+                        data: mbr,
+                    }],
+                });
+            }
+        }
+        let mut tested = 0;
+        for (src_index, src_kind) in all.iter().enumerate() {
+            let src = portable_test_temp_file("edpcli-odd-native-source", "img");
+            native_image::export_native_plain_image(&src, &plans[src_index]).unwrap();
+            for (dst_index, dst_kind) in all.iter().enumerate() {
+                let dst = portable_test_temp_file("edpcli-odd-native-target", "img");
+                let proof = simulate_destructive_native_virtual_transition(
+                    &src,
+                    &plans[src_index],
+                    *src_kind,
+                    &dst,
+                    &plans[dst_index],
+                    *dst_kind,
+                    &did,
+                )
+                .unwrap_or_else(|e| panic!("{sector_bytes}B {src_kind:?}->{dst_kind:?}: {e}"));
+                assert!(proof.destructive_rebuild);
+                assert_eq!(proof.logical_sector_bytes, sector_bytes);
+                assert_eq!(proof.target_mode, *dst_kind);
+                native_image::verify_native_virtual_image(&dst, &plans[dst_index]).unwrap();
+                if *dst_kind != DiskProvisionKind::Plain {
+                    assert_virtual_disk_native_lce(&dst, sector_bytes, lce_start);
+                }
+                std::fs::remove_file(dst).unwrap();
+                tested += 1;
+            }
+            std::fs::remove_file(src).unwrap();
+        }
+        assert_eq!(tested, 25);
+        // A filesystem-formatting request must still fail on this geometry.
+        assert!(native_image::plan_native_plain_image(
+            total,
+            sector_bytes,
+            &[PlainPartitionRequest {
+                start_lba: 2048,
+                size: PlainPartitionSize::Sectors(100_000),
+                filesystem: FilesystemKind::ExFat,
+                volume_label: "INVALID".into()
+            }]
+        )
+        .is_err());
+    }
+}

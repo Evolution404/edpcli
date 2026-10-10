@@ -41,8 +41,8 @@ pub fn plan_native_plain_image(
     sector_bytes: u32,
     partitions: &[PlainPartitionRequest],
 ) -> Result<NativeVirtualDiskPlan, String> {
-    // 512B and 4Kn are the currently independently verified filesystem sizes.
-    // Geometry on a given device is immutable for its entire transaction.
+    // Native IO supports 512*n. FAT/exFAT-specific byte-per-sector eligibility
+    // is validated by the individual formatter, never by this geometry gate.
     if !crate::domain::hardware::valid_native_sector_bytes(sector_bytes) || total_sectors <= 2048 {
         return Err("原生逻辑扇区大小必须为512B正整数倍且容量有效".into());
     }

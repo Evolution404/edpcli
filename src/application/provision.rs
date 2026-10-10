@@ -1046,3 +1046,4 @@ pub mod result_model;
 // Offline regular-file-only native block image production.
 pub mod native_image;
 pub mod native_preflight;
+pub mod native_virtual_transition;

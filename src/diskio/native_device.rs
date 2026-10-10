@@ -26,22 +26,28 @@ pub struct NativeRawBlockDevice {
 impl NativeRawBlockDevice {
     /// Starts read-only. Non-device fixtures must be proven ordinary files.
     pub fn open_readonly(path: &str, geometry: NativeReadGeometry) -> io::Result<Self> {
-        if geometry.logical_sector_bytes != 4096
+        if !crate::domain::hardware::valid_native_sector_bytes(geometry.logical_sector_bytes)
             || geometry.native_sector_count == 0
-            || geometry.native_sector_count.checked_mul(4096) != Some(geometry.capacity_bytes)
+            || geometry
+                .native_sector_count
+                .checked_mul(u64::from(geometry.logical_sector_bytes))
+                != Some(geometry.capacity_bytes)
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "不支持的原生4Kn几何",
+                "原生设备逻辑块大小必须为512B正整数倍且总容量与块数匹配",
             ));
         }
         let raw = crate::platform::is_raw_device_path(path);
         let file = File::open(path)?;
-        if !raw && !file.metadata()?.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "仅支持真实raw盘或普通文件模拟设备",
-            ));
+        if !raw {
+            let metadata = file.metadata()?;
+            if !metadata.is_file() || metadata.len() != geometry.capacity_bytes {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "普通文件模拟设备必须是精确匹配已验证几何的完整普通文件",
+                ));
+            }
         }
         Ok(Self {
             path: path.into(),
@@ -101,11 +107,14 @@ impl NativeRawBlockDevice {
                 "原生设备重新打开后句柄身份变化",
             ));
         }
-        if !self.raw && !next.metadata()?.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "普通文件模拟设备类型变化",
-            ));
+        if !self.raw {
+            let metadata = next.metadata()?;
+            if !metadata.is_file() || metadata.len() != self.geometry.capacity_bytes {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "普通文件模拟设备的类型或容量在重新打开后发生变化",
+                ));
+            }
         }
         self.file = next;
         self.reopened_after_lease = true;
@@ -203,7 +212,7 @@ impl NativeBlockDevice for NativeRawBlockDevice {
         if full_block.len() != self.geometry.logical_sector_bytes as usize {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "拒绝非完整4096B块写入",
+                "拒绝非完整原生逻辑块写入",
             ));
         }
         let offset = self.offset(lba)?;
@@ -278,6 +287,105 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 
+    #[test]
+    fn ordinary_file_native_port_wal_commit_and_recovery_all_512_multiples() {
+        use crate::diskio::native_journal::execute_native_transaction_with_journal;
+        use crate::diskio::native_journal_recovery::{
+            inspect_native_journal, recover_native_journal_locked, NativeJournalState,
+        };
+        use crate::filesystem::{NativeFilesystemWrite, NativeVirtualDiskPlan};
+        for bytes in [512u32, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
+            let path = std::env::temp_dir().join(format!(
+                "edp-native-regular-file-{}-{}-{}",
+                std::process::id(),
+                bytes,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let original = vec![0x5au8; bytes as usize * 16];
+            fs::write(&path, &original).unwrap();
+            let wal = path.with_extension("wal");
+            let geo = NativeReadGeometry {
+                capacity_bytes: original.len() as u64,
+                logical_sector_bytes: bytes,
+                native_sector_count: 16,
+            };
+            let mut dev = NativeRawBlockDevice::open_readonly(path.to_str().unwrap(), geo).unwrap();
+            assert_eq!(dev.read_block(7).unwrap(), vec![0x5a; bytes as usize]);
+            assert_eq!(
+                dev.write_block(7, &vec![0x44; bytes as usize])
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::PermissionDenied
+            );
+            dev.reopen_after_lease(Duration::ZERO).unwrap();
+            assert_eq!(
+                dev.verification_view().read_block_fresh(7).unwrap(),
+                vec![0x5a; bytes as usize]
+            );
+            assert!(!dev.is_writable());
+            dev.arm_verified_write().unwrap();
+            assert_eq!(
+                dev.write_block(7, &vec![0x44; bytes as usize - 1])
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidInput
+            );
+            let plan = NativeVirtualDiskPlan {
+                total_sectors: 16,
+                sector_bytes: bytes,
+                writes: vec![
+                    NativeFilesystemWrite {
+                        relative_lba: 7,
+                        data: vec![0x77; bytes as usize],
+                    },
+                    NativeFilesystemWrite {
+                        relative_lba: 0,
+                        data: vec![0x33; bytes as usize],
+                    },
+                ],
+            };
+            execute_native_transaction_with_journal(
+                &mut dev,
+                &plan,
+                &wal,
+                "virtual-file:authenticated-test",
+            )
+            .unwrap();
+            assert_eq!(
+                inspect_native_journal(&wal).unwrap().state,
+                NativeJournalState::Committed
+            );
+            assert_eq!(dev.read_block_fresh(7).unwrap(), vec![0x77; bytes as usize]);
+            assert_eq!(dev.read_block_fresh(0).unwrap(), vec![0x33; bytes as usize]);
+            // Simulate interruption after commit, before result marker persists.
+            let mut walbytes = fs::read(&wal).unwrap();
+            let marker = b"COMMITTED_SYNC_AND_READBACK_OK\n";
+            assert!(walbytes.ends_with(marker));
+            walbytes.truncate(walbytes.len() - marker.len());
+            fs::write(&wal, walbytes).unwrap();
+            recover_native_journal_locked(&mut dev, &wal, "virtual-file:authenticated-test")
+                .unwrap();
+            assert_eq!(
+                inspect_native_journal(&wal).unwrap().state,
+                NativeJournalState::RecoveryVerified
+            );
+            assert_eq!(dev.read_block_fresh(0).unwrap(), vec![0x5a; bytes as usize]);
+            assert_eq!(dev.read_block_fresh(7).unwrap(), vec![0x5a; bytes as usize]);
+            assert!(recover_native_journal_locked(
+                &mut dev,
+                &wal,
+                "virtual-file:authenticated-test"
+            )
+            .is_err());
+            drop(dev);
+            assert_eq!(fs::read(&path).unwrap(), original);
+            fs::remove_file(wal).unwrap();
+            fs::remove_file(path).unwrap();
+        }
+    }
     #[test]
     fn reopen_rejects_swapped_path_and_retains_readonly_handle() {
         let (path, geo) = fixture();
