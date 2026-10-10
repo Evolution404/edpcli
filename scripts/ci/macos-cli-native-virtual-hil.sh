@@ -57,8 +57,29 @@ assert v.get("TotalSize") == 536870912
     [[ "$inventory" == *"$img"* ]]
   }
   attach
-  for mode in ${EDPCLI_HIL_MODES:-plain mode0 mode1 mode2 mode3 plain}; do
+  # A pair consists of an independently written+reattached source followed by
+  # the target transition on that same disposable OS Disk Image. All 25 source
+  # x target combinations are selected by default; subsets aid triage.
+  mode_steps=()
+  if [[ "${EDPCLI_HIL_PAIR_MATRIX:-0}" == "1" ]]; then
+    for source in ${EDPCLI_HIL_MATRIX_SOURCES:-plain mode0 mode1 mode2 mode3}; do
+      for target in ${EDPCLI_HIL_MATRIX_TARGETS:-plain mode0 mode1 mode2 mode3}; do
+        case "$source" in plain|mode0|mode1|mode2|mode3) ;; *) echo "bad matrix source: $source" >&2; exit 2;; esac
+        case "$target" in plain|mode0|mode1|mode2|mode3) ;; *) echo "bad matrix target: $target" >&2; exit 2;; esac
+        mode_steps+=("$source" "$target")
+      done
+    done
+    echo "[matrix] sector=$sector combinations=$((${#mode_steps[@]} / 2)) source+target; each side verified after OS reattach"
+  else
+    read -r -a mode_steps <<< "${EDPCLI_HIL_MODES:-plain mode0 mode1 mode2 mode3 plain}"
+  fi
+  step=0
+  for mode in "${mode_steps[@]}"; do
     case "$mode" in plain|mode0|mode1|mode2|mode3) ;; *) echo "unsupported HIL mode: $mode" >&2; exit 2;; esac
+    if [[ "${EDPCLI_HIL_PAIR_MATRIX:-0}" == "1" && $((step % 2)) == 0 ]]; then
+      matrix_source="$mode"
+      echo "[matrix] preparing source=$matrix_source target=${mode_steps[step+1]} sector=$sector"
+    fi
     echo "=== CLI native $sector target=$mode disk=$device ==="
     if [[ -r "/dev/r$(basename "$device")" && -w "/dev/r$(basename "$device")" ]]; then
       "$bin" provision write --include-virtual --disk "$device" --target "$mode" --yes --backup-dir "$root"
@@ -123,7 +144,7 @@ assert v.get("TotalSize") == 536870912
     attach
     full_digest verify
   fi
-    if [[ "$mode" == "mode0" && "${EDPCLI_HIL_SKIP_CUSTOM_PW:-0}" != "1" ]]; then
+    if [[ "$mode" == "mode0" && "${EDPCLI_HIL_SKIP_CUSTOM_PW:-0}" != "1" && "${EDPCLI_HIL_PAIR_MATRIX:-0}" != "1" ]]; then
       # Prove explicit independent passwords, never the implicit default.
       # These are public test-only values, never credentials for real USBs.
       share_password="P1Share2026!"
@@ -162,8 +183,16 @@ assert v.get("TotalSize") == 536870912
       [[ "$(cat "$mountpoint/edpcli-native-hil.txt")" == "edpcli native $sector persisted" ]]
       diskutil unmount "$volume" >/dev/null
     fi
+    if [[ "${EDPCLI_HIL_PAIR_MATRIX:-0}" == "1" && $((step % 2)) == 1 ]]; then
+      echo "[matrix] PASS sector=$sector source=$matrix_source target=$mode after WAL, reattach and independent crypto/FS readback"
+    fi
+    step=$((step + 1))
   done
+  if [[ "${EDPCLI_HIL_PAIR_MATRIX:-0}" == "1" ]]; then
+    [[ $((step % 2)) == 0 ]] || { echo "incomplete pair matrix" >&2; exit 1; }
+    echo "[matrix] PASS sector=$sector combinations=$((step / 2))"
+  fi
   diskutil eject "$device" >/dev/null
   device=""
 done
-echo "PASS formal edpcli CLI native OS block HIL: sectors=${EDPCLI_HIL_SECTORS:-512 4096}, modes=${EDPCLI_HIL_MODES:-plain mode0 mode1 mode2 mode3 plain}, reattach, native crypto/LCE/FAT readback"
+echo "PASS formal edpcli CLI native OS block HIL: sectors=${EDPCLI_HIL_SECTORS:-512 4096}, modes=${EDPCLI_HIL_PAIR_MATRIX:+pair matrix} ${EDPCLI_HIL_MODES:-}, reattach, native crypto/LCE/FAT readback"
