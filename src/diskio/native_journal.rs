@@ -41,7 +41,7 @@ pub fn execute_native_transaction_with_journal(
     if device_identity.trim().is_empty() || device_identity.len() > 1024 {
         return Err(failure("写前快照必须绑定完整设备身份"));
     }
-    if !matches!(plan.sector_bytes, 512 | 4096)
+    if !crate::domain::hardware::valid_native_sector_bytes(plan.sector_bytes)
         || dev.sector_bytes() != plan.sector_bytes
         || dev.total_sectors() != plan.total_sectors
         || plan.writes.is_empty()

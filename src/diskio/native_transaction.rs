@@ -83,7 +83,7 @@ pub fn execute_native_transaction(
     dev: &mut dyn NativeBlockDevice,
     plan: &NativeVirtualDiskPlan,
 ) -> Result<(), NativeTransactionFailure> {
-    if !matches!(plan.sector_bytes, 512 | 4096)
+    if !crate::domain::hardware::valid_native_sector_bytes(plan.sector_bytes)
         || dev.sector_bytes() != plan.sector_bytes
         || dev.total_sectors() != plan.total_sectors
         || plan.writes.is_empty()
@@ -134,7 +134,7 @@ pub(super) fn execute_native_transaction_with_snapshot(
     plan: &NativeVirtualDiskPlan,
     originals: &[(u64, Vec<u8>)],
 ) -> Result<(), NativeTransactionFailure> {
-    if !matches!(plan.sector_bytes, 512 | 4096)
+    if !crate::domain::hardware::valid_native_sector_bytes(plan.sector_bytes)
         || plan.sector_bytes != dev.sector_bytes()
         || plan.total_sectors != dev.total_sectors()
         || plan
@@ -281,7 +281,7 @@ mod tests {
     }
     #[test]
     fn native_transaction_commits_mbr_last_on_512_and_4096_byte_devices() {
-        for bytes in [512, 4096] {
+        for bytes in [512, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
             let (mut dev, plan) = fixture(bytes);
             execute_native_transaction(&mut dev, &plan).unwrap();
             assert_eq!(dev.wrote_lbas, [16, 17, 0]);
@@ -292,7 +292,7 @@ mod tests {
     }
     #[test]
     fn native_transaction_rolls_back_when_final_mbr_commit_fails() {
-        for bytes in [512, 4096] {
+        for bytes in [512, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
             let (mut dev, plan) = fixture(bytes);
             dev.fail_write_once = Some(0);
             let failure = execute_native_transaction(&mut dev, &plan).unwrap_err();
@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn native_transaction_rolls_back_torn_write_and_rejects_cross_geometry() {
-        for bytes in [512, 4096] {
+        for bytes in [512, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
             let (mut dev, plan) = fixture(bytes);
             dev.fail_write_once = Some(17);
             let err = execute_native_transaction(&mut dev, &plan).unwrap_err();

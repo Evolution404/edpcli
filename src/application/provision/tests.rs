@@ -1897,3 +1897,20 @@ fn generic_native_edp_metadata_planner_rescans_every_mode_and_sector_size() {
         }
     }
 }
+
+#[test]
+fn plain_native_quick_capacity_uses_absolute_bytes_and_ceil_lbas() {
+    use crate::application::provision::native_image::checked_size;
+    for sector_bytes in [512u32, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
+        for (size, bytes) in [
+            (PlainPartitionSize::MiB(1), 1024u64 * 1024),
+            (PlainPartitionSize::GiB(1), 1024u64 * 1024 * 1024),
+        ] {
+            let blocks = checked_size(size, sector_bytes).unwrap().unwrap();
+            assert!(blocks * u64::from(sector_bytes) >= bytes);
+            assert!(blocks * u64::from(sector_bytes) - bytes < u64::from(sector_bytes));
+        }
+    }
+    assert!(checked_size(PlainPartitionSize::MiB(1), 513).is_err());
+    assert!(checked_size(PlainPartitionSize::GiB(u64::MAX), 512).is_err());
+}

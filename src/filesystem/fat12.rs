@@ -129,7 +129,9 @@ impl Fat12Driver {
                 "FAT12 虚拟格式化收到错误文件系统类型",
             ));
         }
-        if !matches!(geometry.sector_size, 512 | 4096) || geometry.sector_count == 0 {
+        if !super::format::native_fat_sector_bytes_supported(geometry.sector_size)
+            || geometry.sector_count == 0
+        {
             return Err(invalid_geometry(
                 "FAT12仅允许认证的512B/4096B原生虚拟格式化",
             ));

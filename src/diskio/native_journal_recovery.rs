@@ -68,7 +68,7 @@ fn parse_journal(data: &[u8]) -> Result<NativeJournalSnapshot, NativeTransaction
     let count = u64::from_le_bytes(number::<8>(data, &mut pos)?);
     let identity_len = u32::from_le_bytes(number::<4>(data, &mut pos)?) as usize;
     if version != 1
-        || !matches!(sector_bytes, 512 | 4096)
+        || !crate::domain::hardware::valid_native_sector_bytes(sector_bytes)
         || total_sectors == 0
         || count == 0
         || count > (MAX_SNAPSHOT / sector_bytes as usize) as u64
@@ -249,7 +249,9 @@ mod tests {
             Ok(())
         }
     }
-    fn fixture() -> (Memory, NativeVirtualDiskPlan, std::path::PathBuf) {
+    fn fixture_with_bytes(
+        native_bytes: u32,
+    ) -> (Memory, NativeVirtualDiskPlan, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!(
             "edp-wal-recovery-{}-{}",
             std::process::id(),
@@ -261,24 +263,27 @@ mod tests {
             Memory {
                 blocks: BTreeMap::new(),
                 writes: vec![],
-                block_bytes: 4096,
+                block_bytes: native_bytes,
             },
             NativeVirtualDiskPlan {
-                sector_bytes: 4096,
+                sector_bytes: native_bytes,
                 total_sectors: 16,
                 writes: vec![
                     NativeFilesystemWrite {
                         relative_lba: 1,
-                        data: vec![0x22; 4096],
+                        data: vec![0x22; native_bytes as usize],
                     },
                     NativeFilesystemWrite {
                         relative_lba: 0,
-                        data: vec![0x33; 4096],
+                        data: vec![0x33; native_bytes as usize],
                     },
                 ],
             },
             path,
         )
+    }
+    fn fixture() -> (Memory, NativeVirtualDiskPlan, std::path::PathBuf) {
+        fixture_with_bytes(4096)
     }
     fn cleanup(path: &Path) {
         fs::remove_file(path).unwrap();
@@ -289,6 +294,35 @@ mod tests {
         let marker = b"COMMITTED_SYNC_AND_READBACK_OK\n";
         assert!(bytes.ends_with(marker));
         fs::write(path, &bytes[..bytes.len() - marker.len()]).unwrap();
+    }
+
+    #[test]
+    fn native_wal_recovery_accepts_any_verified_512_multiple_and_restores_exact_blocks() {
+        for sector_bytes in [512u32, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
+            let (mut dev, plan, path) = fixture_with_bytes(sector_bytes);
+            execute_native_transaction_with_journal(
+                &mut dev,
+                &plan,
+                &path,
+                "generic:immutable-identity",
+            )
+            .unwrap();
+            let stored = inspect_native_journal(&path).unwrap();
+            assert_eq!(stored.sector_bytes, sector_bytes);
+            assert_eq!(stored.state, NativeJournalState::Committed);
+            assert_eq!(stored.blocks.len(), 2);
+            interrupted(&path);
+            dev.writes.clear();
+            recover_native_journal_locked(&mut dev, &path, "generic:immutable-identity").unwrap();
+            assert_eq!(dev.writes, [1, 0]);
+            assert_eq!(dev.blocks[&0], vec![0x55; sector_bytes as usize]);
+            assert_eq!(dev.blocks[&1], vec![0x55; sector_bytes as usize]);
+            assert_eq!(
+                inspect_native_journal(&path).unwrap().state,
+                NativeJournalState::RecoveryVerified
+            );
+            cleanup(&path);
+        }
     }
 
     #[test]

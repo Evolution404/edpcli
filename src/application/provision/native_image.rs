@@ -11,7 +11,13 @@ use crate::filesystem::{
     EXFAT_DRIVER, FAT12_DRIVER, FAT16_DRIVER, FAT32_DRIVER,
 };
 
-fn checked_size(size: PlainPartitionSize, sector_bytes: u32) -> Result<Option<u64>, String> {
+pub(super) fn checked_size(
+    size: PlainPartitionSize,
+    sector_bytes: u32,
+) -> Result<Option<u64>, String> {
+    if !crate::domain::hardware::valid_native_sector_bytes(sector_bytes) {
+        return Err("原生逻辑扇区大小必须是512B的正整数倍".into());
+    }
     let bytes = u64::from(sector_bytes);
     match size {
         PlainPartitionSize::Sectors(n) => Ok(Some(n)),
@@ -21,13 +27,10 @@ fn checked_size(size: PlainPartitionSize, sector_bytes: u32) -> Result<Option<u6
             } else {
                 1024u64 * 1024 * 1024
             };
-            n.checked_mul(unit)
-                .ok_or_else(|| "容量换算溢出".to_string())
-                .and_then(|v| {
-                    (v % bytes == 0)
-                        .then_some(Some(v / bytes))
-                        .ok_or_else(|| "容量不是完整原生逻辑扇区的整数倍".to_string())
-                })
+            let requested_bytes = n.checked_mul(unit).ok_or("容量换算溢出")?;
+            // Requested MiB/GiB is an absolute byte capacity, not an exact
+            // native-LBA count; ceil to a whole block without silent loss.
+            Ok(Some(requested_bytes.div_ceil(bytes)))
         }
         PlainPartitionSize::Fill => Ok(None),
     }
@@ -159,7 +162,7 @@ pub(crate) fn write_native_virtual_plan(
         .total_sectors
         .checked_mul(u64::from(plan.sector_bytes))
         .ok_or("虚拟整盘字节长度溢出")?;
-    if !matches!(plan.sector_bytes, 512 | 4096) || byte_len == 0 {
+    if !crate::domain::hardware::valid_native_sector_bytes(plan.sector_bytes) || byte_len == 0 {
         return Err("不支持的原生镜像逻辑扇区几何".into());
     }
     if !file.metadata().is_ok_and(|m| m.file_type().is_file()) {
@@ -806,7 +809,7 @@ where
         device_id,
         source_total_sectors,
     )?;
-    if !matches!(layout.logical_sector_bytes, 512 | 4096)
+    if !crate::domain::hardware::valid_native_sector_bytes(layout.logical_sector_bytes)
         || writes.last().is_none_or(|block| block.relative_lba != 0)
         || writes.len() != 13 + layout.lce.sector_count as usize
     {
@@ -1137,7 +1140,7 @@ fn validate_virtual_image_plan(plan: &NativeVirtualDiskPlan) -> Result<u64, Stri
         .total_sectors
         .checked_mul(u64::from(plan.sector_bytes))
         .ok_or("虚拟整盘字节长度溢出")?;
-    if !matches!(plan.sector_bytes, 512 | 4096) || byte_len == 0 {
+    if !crate::domain::hardware::valid_native_sector_bytes(plan.sector_bytes) || byte_len == 0 {
         return Err("不支持的原生镜像逻辑扇区几何".into());
     }
     if plan.writes.is_empty() || plan.writes.last().is_none_or(|w| w.relative_lba != 0) {

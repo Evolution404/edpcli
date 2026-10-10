@@ -1,5 +1,12 @@
 use super::{FilesystemKind, FilesystemMetadata};
 
+/// FAT/exFAT BPB bytes-per-sector must be a power of two in the 512..=4096
+/// standard range. This is an FS capability predicate, NOT a native device
+/// geometry restriction: other 512*n values remain valid for raw/protocol I/O.
+pub(crate) fn native_fat_sector_bytes_supported(bytes: u32) -> bool {
+    (512..=4096).contains(&bytes) && bytes.is_power_of_two()
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FilesystemGeometry {
     pub partition_offset: u64,
