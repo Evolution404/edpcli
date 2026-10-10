@@ -1,10 +1,19 @@
 # edpcli：全逻辑扇区规格、全模式和全工作流实施与验收计划（执行中）
 
+## 2026-10-10 22:47 CST P2 100/100 原生 OS 虚拟块设备模式转换验收
+
+- **四种原生逻辑扇区 × 五种来源 × 五种目标全部通过**：512B、1024B、2048B、4096B 各 25/25，共计 **100/100，失败 0**。四个独立 macOS 512MiB 临时 Disk Image 测试进程均返回退出码 0，所有目标组合通过正式 `edpcli provision write --include-virtual`、原生 TargetSession/WAL、弹出重挂、独立 LBA7/LBA12/LCE、密钥解封装与文件系统读取。每组先实际制备来源模式并验证，再执行目标转换和重新读回；同一规格的 25 组复用该规格专属临时 Disk Image。
+- **可复现自动化**：提交 `f255b845` 的 `scripts/ci/macos-cli-native-virtual-hil.sh` 新增 `EDPCLI_HIL_PAIR_MATRIX=1`，默认遍历来源/目标 `plain mode0 mode1 mode2 mode3`，可分别用 `EDPCLI_HIL_MATRIX_SOURCES`、`EDPCLI_HIL_MATRIX_TARGETS` 指定子集。每个规格单独运行 `EDPCLI_HIL_PAIR_MATRIX=1 EDPCLI_HIL_SECTORS=512|1024|2048|4096 scripts/ci/macos-cli-native-virtual-hil.sh`；矩阵模式自动禁止测试专用改密分支，避免密码状态泄漏。独立临时磁盘均由 `hdiutil` 创建并确认 BusProtocol 为 Disk Image，非实体 USB。
+- **严格区分分区无损承诺**：100/100 证明正式源/目标链路可提交和正确读取目标分区，**不能等同于全部100种情况的来源字节保留 SHA256**。既有 4 规格 Mode0→Mode1→Mode2 保密区完整范围+FileKey SHA256 和 Mode0→Mode0 自身全范围保留验证仍属独立证据。实体介质拔插、断电故障、TUI 交互、EDPB v4 正式恢复授权均未本轮验收。
+- **待跟进的 Plain 语义**：读源码 `src/application/provision/native_flow.rs` 中 `ProvisionRequest::Plain` 无条件调用 `plan_native_plain_image`，因此默认 Plain→Plain 即使参数未改变，也重新格式化普通分区；当前矩阵验证的是格式化之后可挂载、不是 Plain→Plain 无损。进入 A06 统一来源数据丢弃/保留与必需格式化策略审计，不擅自把有破坏性行为改成“保留”。
+
+
 ## 2026-10-10 21:38 CST P2 正式 CLI 虚拟盘跨模式验收增量
 
 - **正式 OS 模式链**：512B 和 1024B macOS 临时 Disk Image 完成 Plain→Mode0→Mode1→Mode2→Mode3→Plain，使用生产 CLI 写盘、同一 TargetSession/WAL 与每次卸载重挂的独立协议、LCE、加密卷与文件系统读回；所有节点成功。单项自动改密测试必须与连续模式链隔离：新增 HIL 环境参数 `EDPCLI_HIL_SKIP_CUSTOM_PW=1`，以免上次目标密码泄漏至下一来源。
 - **跨模式真正无损保存**：新增只读 HIL `native_os_cross_mode_encrypt_full_extent_sha256`，在 Mode0 来源保存 Encrypt 保密区全部原生字节 SHA256、起点、扇区数及独立解封装的 FileKey 指纹，再经过 Mode1 和 Mode2 两次正式原生 WAL 转换后复核。**512/1024/2048/4096B 四规格全部通过**；并非只比对首扇区、协议表或“数据保留”的 UI 文案。执行：`EDPCLI_HIL_SKIP_CUSTOM_PW=1 EDPCLI_HIL_VERIFY_CROSS_PRESERVE=1 EDPCLI_HIL_MODES='mode0 mode1 mode2' EDPCLI_HIL_SECTORS='512 1024 2048 4096' scripts/ci/macos-cli-native-virtual-hil.sh`（已逐规格分别执行）。
-- **严格范围**：这些测试证明了 Mode0→Mode1→Mode2 的保密区原样保留，但**不等于全部25种模式转换×四规格的分区级证据**；Mode2→Mode3、Mode3→Plain 明确丢弃来源保密区，需分别验收其格式化重建及风险提示。EDA/WAL 生产恢复权限仍处于 `EvidenceOnly` 未授权状态。全量模式转换自动化与 TUI PTY 仍属于后续 P2/P3。
+- **追加 P2 后半段**：2048B、4096B 临时 macOS Disk Image 从 Mode2→Mode3→Plain，采用正式 CLI/WAL，验证了保密区来源丢弃、启动区和交换区重建，以及 Plain exFAT 完整原生块读回和卸载重挂；全部通过。结合前述两规格完整链与四规格 Mode0→Mode1→Mode2 全范围 SHA 验收，**四规格均覆盖 Plain→Mode0→Mode1→Mode2→Mode3→Plain 的各相邻边**（2048/4096B 的前后边由独立会话/不同临时盘验证，不能虚称一次连续全链）。
+- **历史阶段范围（已由上方 22:47 的 100/100 验收更新）**：本节早期仅验证 Mode0→Mode1→Mode2 保密区原样保留，以及 Mode2→Mode3、Mode3→Plain 实盘形态虚拟块设备重建。现已补齐四规格全100组合的 OS 可读写验收；所有组合的全范围保留 SHA256、TUI 风险提示及格式变化故障注入仍待完成。EDPB v4 生产恢复权限仍处于 `EvidenceOnly` 未授权状态。
 
 
 ## 2026-10-10 21:16 CST P0 → P1 原生 EDPB 真正 OS 块设备实证回执
