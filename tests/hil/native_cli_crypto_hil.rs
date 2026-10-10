@@ -498,6 +498,76 @@ fn formal_cli_native_crypto_readback() {
         decrypted_partitions + plaintext_partitions > 0,
         "official target must have formatted data"
     );
+
+    // A03: capture an actual OS Disk Image through the same read-only native
+    // application backup service. Compare its verified v4 EDPB raw evidence to
+    // independently reopened native blocks and produce a same-geometry preview.
+    // No physical media write, restore grant or WAL replay is obtained here.
+    if expected == "mode0" && sector > 512 {
+        use edpcli::application::evidence::{EvidenceSource, SectorReader};
+        use edpcli::edpb::{RestorePolicy, VerifiedBackupReader};
+        use std::time::{SystemTime, UNIX_EPOCH};
+        struct NoWritePrompt;
+        impl edpcli::application::Prompter for NoWritePrompt {
+            fn prompt_line(&mut self, _: &str) -> String {
+                String::new()
+            }
+            fn prompt_secret(&mut self, _: &str) -> edpcli::provision::SecretBytes {
+                edpcli::provision::SecretBytes::from_owned(Vec::new())
+            }
+            fn confirm_yes(&mut self, _: &str) -> bool {
+                false
+            }
+        }
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "edpcli-native-edpb-diskimage-capture-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let report = edpcli::application::write::backup_create_on_disk(
+            &system::SysRunner,
+            disk,
+            directory.clone(),
+            &mut NoWritePrompt,
+            None,
+            Some(&device_id),
+        )
+        .expect("actual native Disk Image read-only EDPB v4 capture");
+        let verified = VerifiedBackupReader::open(&report.path).unwrap();
+        assert_eq!(verified.verified().manifest.schema, "edpb.manifest.v4");
+        assert!(verified
+            .verified()
+            .manifest
+            .artifacts
+            .iter()
+            .all(|a| a.restore_policy == RestorePolicy::EvidenceOnly));
+        let preview =
+            edpcli::application::evidence::native_restore_preview::plan_native_restore_readonly(
+                &report.path,
+                &device_id,
+                geometry,
+            )
+            .unwrap();
+        assert_eq!(preview.logical_sector_bytes, sector);
+        assert_eq!(preview.native_lce_start, lce_start);
+        assert_eq!(preview.native_lce_blocks, extent_count);
+        assert_eq!(preview.proposed_lbas_in_write_order.last(), Some(&0));
+        let mut source = EvidenceSource::open_backup(&report.path).unwrap();
+        for lba in preview.proposed_lbas_in_write_order {
+            assert_eq!(
+                source.read_native_sector(lba).unwrap(),
+                raw.read_block_fresh(lba).unwrap(),
+                "OS native LBA{lba} must agree with independently verified EDPB"
+            );
+        }
+        std::fs::remove_file(&report.path).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+        println!("[A03] PASS sector={sector} actual OS native EDPB capture, complete LCE and partition header comparison; preview only");
+    }
     println!(
         "[P1] PASS sector={sector} target={expected} native-OS registered LBA7/LBA12, LCE={} blocks, decrypted={} plaintext={}",
         extent_count, decrypted_partitions, plaintext_partitions

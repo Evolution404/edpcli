@@ -46,7 +46,16 @@ pub fn read_protocol_image_readonly(dev: &mut dyn SectorDev) -> EdpCliResult<Vec
 }
 
 fn merged_hardware_probe(runner: &dyn CmdRunner, disk: u32) -> Option<HardwareProbe> {
-    let native = runner.hardware_probe(disk);
+    // Native provision and read-only evidence must agree on device identity
+    // for caller-proven, explicitly opted-in macOS Disk Images. Physical USB
+    // identity stays exclusively hardware-probe based.
+    let native = if crate::platform::include_virtual()
+        && crate::platform::confirmed_virtual_disk_image(runner, disk)
+    {
+        crate::platform::system::native_provision_probe(runner, disk).ok()
+    } else {
+        runner.hardware_probe(disk)
+    };
     let fallback_needed = native.as_ref().is_none_or(|probe| {
         probe.vid.is_none()
             || probe.pid.is_none()
