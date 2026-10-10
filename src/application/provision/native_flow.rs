@@ -839,20 +839,19 @@ pub fn prepare_native_provision_on_disk(
                 )
                 && existing_plain[0].start_lba == 2048
                 && existing_plain[0].sector_count == geometry.native_sector_count - 2048
-                && plan.writes.last().is_some_and(|block| {
-                    block.relative_lba == 0 && block.data == prefix[0]
-                })
+                && plan
+                    .writes
+                    .last()
+                    .is_some_and(|block| block.relative_lba == 0 && block.data == prefix[0])
                 && matches!(
-                    dev.read_block_fresh(2048)
+                    dev.read_block_fresh(2048).ok().and_then(|boot| {
+                        crate::filesystem::detect_native_boot_sector(
+                            &boot,
+                            geometry.native_sector_count - 2048,
+                            geometry.logical_sector_bytes,
+                        )
                         .ok()
-                        .and_then(|boot| {
-                            crate::filesystem::detect_native_boot_sector(
-                                &boot,
-                                geometry.native_sector_count - 2048,
-                                geometry.logical_sector_bytes,
-                            )
-                            .ok()
-                        }),
+                    }),
                     Some(Some(crate::filesystem::FilesystemKind::ExFat))
                 );
             if plain_exact_preserve {
@@ -1135,8 +1134,7 @@ fn project_native_impact(
         let preserved_target = targets.iter().enumerate().find_map(|(i, t)| {
             (!t.formatted
                 && t.role == source.role
-                && (t.role.is_some()
-                    || matches!(source.id, SourcePartitionId::PlainMbr { .. }))
+                && (t.role.is_some() || matches!(source.id, SourcePartitionId::PlainMbr { .. }))
                 && t.start_lba == source.start_lba
                 && t.sector_count == source.sector_count
                 && source.sector_bytes == plan.sector_bytes
@@ -1905,12 +1903,9 @@ mod tests {
                     data: vec![0; sector as usize],
                 }],
             };
-            let impact = project_native_impact(
-                vec![source.clone()],
-                std::slice::from_ref(&target),
-                &plan,
-            )
-            .unwrap();
+            let impact =
+                project_native_impact(vec![source.clone()], std::slice::from_ref(&target), &plan)
+                    .unwrap();
             assert_eq!(impact.source_retained, ["普通分区P1"], "sector={sector}");
             assert!(impact.source_discarded.is_empty());
             assert!(impact.target_formatted.is_empty());
