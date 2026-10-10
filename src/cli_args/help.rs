@@ -50,6 +50,7 @@ fn print_topic_help(topic: &str) {
             println!("    Plain 未指定 --partition 时默认 P1 从 LBA2048 占满至盘尾。");
             println!("    离线原生镜像：provision image --target plain --total-sectors N --sector-bytes 512|4096 --out FILE [--partition ...]；仅创建新普通文件，不连接U盘。");
             println!("    4Kn EDP虚拟演示：provision image --target mode0|mode1|mode2|mode3 --synthetic-demo --sector-bytes 4096 --total-sectors 262144 --algorithm sms4|aes|aes-cross --out FILE；仅固定测试身份及测试密钥，绝不可存真实数据。");
+            println!("    4Kn 实盘只读备份比对：provision verify-source --disk N --backup FILE.edpb（完整原生协议、LCE和分区首块；不卸载、不写盘、不解禁）。");
 
             println!("    mode1 若识别到现有 mode0，将保留原 type4 位置/密钥并让 type2 扩满前部。");
             println!("    可选格式化: --format-boot --format-share --format-encrypt");

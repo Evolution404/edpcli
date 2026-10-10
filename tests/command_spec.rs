@@ -31,8 +31,14 @@ fn command_schema_is_the_public_surface_catalog() {
     );
 
     let provision = command_spec::command("provision").expect("provision spec");
-    assert_eq!(provision.action_names(), vec!["plan", "image", "write"]);
+    assert_eq!(
+        provision.action_names(),
+        vec!["verify-source", "plan", "image", "write"]
+    );
     assert!(!provision.action_names().contains(&"convert"));
+    assert!(provision
+        .option_names(Some("verify-source"))
+        .contains(&"--backup"));
 
     for action in ["plan", "image", "write"] {
         let options = provision.option_names(Some(action));

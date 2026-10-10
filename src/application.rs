@@ -269,11 +269,7 @@ fn workspace_from_selector(
                 display_time: crate::infrastructure::backup_store::catalog::backup_display_time(
                     entry,
                 ),
-                size_bytes: entry
-                    .meta
-                    .as_ref()
-                    .and_then(|meta| meta.secs)
-                    .and_then(|sectors| sectors.checked_mul(crate::common::SECTOR as u64)),
+                size_bytes: entry.meta.as_ref().and_then(|meta| meta.capacity_bytes()),
                 vid: entry.meta.as_ref().map(|meta| meta.vid.clone()),
                 pid: entry.meta.as_ref().map(|meta| meta.pid.clone()),
                 device_id: entry.meta.as_ref().map(|meta| meta.device_id.clone()),

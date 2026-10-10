@@ -189,6 +189,7 @@ fn v3_raw_serial_can_form_strong_group_without_persisted_serial_digest() {
         meta: Some(BackupMeta {
             disk: 5,
             secs: Some(245_760_000),
+            capacity_bytes: Some(245_760_000 * 512),
             vid: "2bdf".into(),
             pid: "0300".into(),
             device_id: "disk&ven_test&prod_plain".into(),

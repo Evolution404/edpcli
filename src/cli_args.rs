@@ -147,6 +147,11 @@ pub enum ProvisionAction {
         mode: crate::provision::OfficialPartitionMode,
         algorithm: crate::provision::FileKeyWrapMode,
     },
+    /// Strictly read-only comparison of the current 4Kn device and EDPB v4.
+    VerifySource {
+        disk: u32,
+        backup: String,
+    },
     Plan(Box<ProvisionNewOpts>),
     Image {
         opts: Box<ProvisionNewOpts>,

@@ -120,11 +120,28 @@ pub(crate) fn display_capture_time(created_epoch: Option<i64>, observed_mtime: i
 pub struct BackupMeta {
     pub disk: u32,
     pub secs: Option<u64>,
+    /// Verified EDPB v3/v4 manifest geometry, in BYTES (not 512B sectors).
+    pub capacity_bytes: Option<u64>,
     pub vid: String,
     pub pid: String,
     pub device_id: String,
     pub onlyid: Option<String>,
     pub identity: Option<crate::media_identity::MediaIdentitySnapshot>,
+}
+impl BackupMeta {
+    /// One capacity authority for CLI and TUI. Native 4Kn `secs` are
+    /// 4096B logical blocks, never legacy 512B protocol-sector units.
+    /// Preserve the historic 512B fallback for older metadata.
+    pub fn capacity_bytes(&self) -> Option<u64> {
+        self.capacity_bytes.or_else(|| {
+            let sector_bytes = self
+                .identity
+                .as_ref()
+                .and_then(|identity| identity.hardware.logical_sector_size)
+                .unwrap_or(crate::common::SECTOR as u32);
+            self.secs?.checked_mul(u64::from(sector_bytes))
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -321,6 +338,7 @@ pub(super) fn scan_backup_file_impl(
         Some(BackupMeta {
             disk: manifest.observation.disk_number.unwrap_or(0),
             secs: manifest.geometry.total_sectors,
+            capacity_bytes: manifest.geometry.capacity_bytes,
             vid: manifest.device.vid.clone(),
             pid: manifest.device.pid.clone(),
             device_id: manifest.device.device_id.clone(),
@@ -483,6 +501,59 @@ pub fn prune_candidates(entries: &[BackupEntry], keep: usize) -> Vec<PathBuf> {
         out.extend(deletable.into_iter().map(|entry| entry.path.clone()));
     }
     out
+}
+
+#[cfg(test)]
+mod backup_capacity_tests {
+    use super::BackupMeta;
+    use crate::media_identity::MediaIdentitySnapshot;
+
+    fn meta(sector_bytes: Option<u32>, sectors: Option<u64>, bytes: Option<u64>) -> BackupMeta {
+        let mut identity = MediaIdentitySnapshot::default();
+        identity.hardware.logical_sector_size = sector_bytes;
+        BackupMeta {
+            disk: 0,
+            secs: sectors,
+            capacity_bytes: bytes,
+            vid: "3535".into(),
+            pid: "0901".into(),
+            device_id: "synthetic-device".into(),
+            onlyid: None,
+            identity: Some(identity),
+        }
+    }
+
+    #[test]
+    fn native_edpb_v4_capacity_keeps_4096_byte_units_and_prefers_verified_bytes() {
+        let sectors = 62_486_528;
+        let actual_bytes = 255_944_818_688;
+        assert_eq!(
+            meta(Some(4096), Some(sectors), Some(actual_bytes)).capacity_bytes(),
+            Some(actual_bytes)
+        );
+        assert_eq!(
+            meta(Some(4096), Some(sectors), None).capacity_bytes(),
+            Some(actual_bytes)
+        );
+        assert_ne!(actual_bytes, sectors * 512);
+    }
+
+    #[test]
+    fn legacy_capacity_keeps_512_fallback_and_checks_overflow() {
+        assert_eq!(
+            meta(None, Some(12_345), None).capacity_bytes(),
+            Some(12_345 * 512)
+        );
+        assert_eq!(
+            meta(Some(512), Some(12_345), None).capacity_bytes(),
+            Some(12_345 * 512)
+        );
+        assert_eq!(
+            meta(Some(4096), Some(u64::MAX), None).capacity_bytes(),
+            None
+        );
+        assert_eq!(meta(None, None, None).capacity_bytes(), None);
+    }
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::backup_catalog;
 use crate::cli::Prompter;
-use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK, SECTOR};
+use crate::common::{EXIT_BACKUP, EXIT_CANCELLED, EXIT_OK};
 use crate::infrastructure::backup_store::catalog::{BackupEntry, BackupHealth, BackupMeta};
 use crate::metainfo;
 
@@ -38,8 +38,7 @@ fn backup_model_name(meta: &BackupMeta) -> String {
 }
 
 fn backup_capacity(meta: &BackupMeta) -> String {
-    meta.secs
-        .and_then(|s| s.checked_mul(SECTOR as u64))
+    meta.capacity_bytes()
         .map(crate::common::fmt_capacity)
         .unwrap_or_else(|| "容量未知".into())
 }

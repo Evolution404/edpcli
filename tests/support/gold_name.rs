@@ -75,6 +75,7 @@ pub fn parse_fixture_backup_name(name: &str) -> Option<BackupMeta> {
     Some(BackupMeta {
         disk,
         secs,
+        capacity_bytes: secs.and_then(|sectors| sectors.checked_mul(512)),
         vid: vid.to_string(),
         pid: pid.to_string(),
         device_id: device_id.to_string(),

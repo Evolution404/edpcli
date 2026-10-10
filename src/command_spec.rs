@@ -202,8 +202,14 @@ const PROVISION_IMAGE_OPTIONS: &[OptionSpec] = &[
     value("--algorithm"),
 ];
 const PROVISION_WRITE_OPTIONS: &[OptionSpec] = &[switch("--yes"), value("--backup-dir")];
+const PROVISION_VERIFY_SOURCE_OPTIONS: &[OptionSpec] = &[value("--backup")];
 
 const PROVISION_ACTIONS: &[ActionSpec] = &[
+    ActionSpec {
+        name: "verify-source",
+        summary: "只读核对4Kn原生EDPB与当前物理盘",
+        options: PROVISION_VERIFY_SOURCE_OPTIONS,
+    },
     ActionSpec {
         name: "plan",
         summary: "只读计算制盘计划",

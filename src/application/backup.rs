@@ -325,6 +325,7 @@ mod tests {
             meta: Some(BackupMeta {
                 disk: 6,
                 secs: Some(122880000),
+                capacity_bytes: Some(122880000 * 512),
                 vid: "0dd8".into(),
                 pid: "2005".into(),
                 device_id: "disk&ven_netac&prod_onlydisk".into(),

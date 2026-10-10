@@ -698,6 +698,127 @@ impl EvidenceSource {
     }
 }
 
+/// A read-only prewrite evidence result. This is deliberately NOT a disk
+/// write lease, backup restore capability, or authorization token.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeBackupDiskMatch {
+    pub disk: u32,
+    pub logical_sector_bytes: u32,
+    pub total_sectors: u64,
+    pub verified_native_blocks: usize,
+}
+
+fn compare_native_backup_blocks(
+    sectors: impl IntoIterator<Item = u64>,
+    native_sector_bytes: usize,
+    mut backup_read: impl FnMut(u64) -> io::Result<Vec<u8>>,
+    mut disk_read: impl FnMut(u64) -> io::Result<Vec<u8>>,
+) -> Result<usize, String> {
+    let mut count = 0usize;
+    for lba in sectors {
+        let backed =
+            backup_read(lba).map_err(|e| format!("EDPB LBA{lba} 原生证据读取失败: {e}"))?;
+        let live = disk_read(lba).map_err(|e| format!("目标介质 LBA{lba} 原生读取失败: {e}"))?;
+        if backed.len() != native_sector_bytes || live.len() != native_sector_bytes {
+            return Err(format!("LBA{lba} 备份或实盘不是完整原生4096B块"));
+        }
+        if backed != live {
+            return Err(format!("LBA{lba} 实盘已偏离原生EDPB备份，拒绝后续提交"));
+        }
+        count += 1;
+    }
+    Ok(count)
+}
+
+/// Before a future 4Kn physical provisioning transaction can be considered,
+/// verify that the user's independently verified EDPB v4 is FROM THIS EXACT
+/// CURRENT DISK. The full 13 native protocol blocks, LCE and each backed-up
+/// partition-header block are re-read and compared byte-for-byte. All access
+/// remains read-only, with no unmount, write lease, or device mutation.
+///
+/// This check must be repeated after obtaining an exclusive target lock,
+/// before any physical commit. A match does not establish crash recovery or
+/// grant 4Kn physical write permission.
+pub fn verify_native_4kn_backup_against_disk_readonly(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    backup_path: &Path,
+) -> Result<NativeBackupDiskMatch, String> {
+    use std::collections::BTreeSet;
+
+    let mut backup = EvidenceSource::open_backup(backup_path).map_err(|e| e.to_string())?;
+    let manifest = backup
+        .backup_manifest()
+        .ok_or("来源必须为完整可校验的EDPB备份")?
+        .clone();
+    if manifest.schema != "edpb.manifest.v4"
+        || manifest.geometry.logical_sector_size != 4096
+        || manifest.geometry.total_sectors.is_none()
+        || manifest.geometry.capacity_bytes
+            != manifest
+                .geometry
+                .total_sectors
+                .and_then(|n| n.checked_mul(4096))
+    {
+        return Err("4Kn写前校验要求完整原生几何的EDPB v4备份".into());
+    }
+    let mut live = EvidenceSource::open_disk(runner, disk).map_err(|e| e.to_string())?;
+    if backup.total_sectors() != live.total_sectors()
+        || live.logical_sector_bytes() != 4096
+        || backup.native_protocol_image().is_none()
+        || live.native_protocol_image().is_none()
+        || backup.identity() != live.identity()
+        || live.identity().size_bytes != manifest.geometry.capacity_bytes
+    {
+        return Err("实盘与EDPB设备身份、扇区规格或容量不一致".into());
+    }
+
+    // Enumerate only ranges already backed by verified *raw_sectors*
+    // artifacts. Never infer data from holes or unowned partition bytes.
+    let mut lbas = BTreeSet::new();
+    let mut lce_present = false;
+    for artifact in manifest
+        .artifacts
+        .iter()
+        .filter(|a| a.kind == "raw_sectors")
+    {
+        for id in &artifact.source_extent_ids {
+            let extent = manifest
+                .extents
+                .iter()
+                .find(|e| &e.id == id)
+                .ok_or("EDPB 原生原始范围引用不存在")?;
+            lce_present |= extent.id == "extent.lba7_compatibility";
+            for delta in 0..extent.sector_count {
+                if lbas.len() >= 512 {
+                    return Err("原生EDPB预检超过512块上限".into());
+                }
+                let lba = extent
+                    .start_lba
+                    .checked_add(delta)
+                    .filter(|lba| *lba < live.total_sectors())
+                    .ok_or("EDPB 原生证据范围超过实盘容量")?;
+                lbas.insert(lba);
+            }
+        }
+    }
+    if !lce_present || !(0..13).all(|lba| lbas.contains(&lba)) {
+        return Err("EDPB 缺少完整LBA0-12原生协议或完整LCE".into());
+    }
+    let count = compare_native_backup_blocks(
+        lbas,
+        4096,
+        |lba| SectorReader::read_native_sector(&mut backup, lba),
+        |lba| SectorReader::read_native_sector(&mut live, lba),
+    )?;
+    Ok(NativeBackupDiskMatch {
+        disk,
+        logical_sector_bytes: 4096,
+        total_sectors: live.total_sectors(),
+        verified_native_blocks: count,
+    })
+}
+
 /// Read a source's entire native EDP protocol and LCE through the same
 /// read-only sector abstraction, with an independently captured protocol
 /// snapshot as a second source-consistency check. This authenticates the
@@ -753,5 +874,31 @@ impl SectorReader for EvidenceSource {
             EvidenceReader::Disk(reader) => SectorReader::read_sector(reader, lba),
             EvidenceReader::Backup(reader) => reader.read_sector(lba),
         }
+    }
+}
+
+#[cfg(test)]
+mod native_backup_match_tests {
+    use super::*;
+
+    #[test]
+    fn independent_4096b_backup_vs_disk_rejects_tamper_and_truncated_blocks() {
+        let lbas = [0, 1, 12, 62_476_561];
+        let read = |lba: u64| -> io::Result<Vec<u8>> { Ok(vec![(lba & 0xff) as u8; 4096]) };
+        assert_eq!(compare_native_backup_blocks(lbas, 4096, read, read), Ok(4));
+        let corrupted = |lba: u64| -> io::Result<Vec<u8>> {
+            let mut block = vec![(lba & 0xff) as u8; 4096];
+            if lba == 62_476_561 {
+                block[4095] ^= 0x80;
+            }
+            Ok(block)
+        };
+        assert!(compare_native_backup_blocks(lbas, 4096, read, corrupted)
+            .unwrap_err()
+            .contains("LBA62476561"));
+        let short = |lba: u64| -> io::Result<Vec<u8>> { Ok(vec![(lba & 0xff) as u8; 512]) };
+        assert!(compare_native_backup_blocks(lbas, 4096, short, read)
+            .unwrap_err()
+            .contains("完整原生4096B"));
     }
 }

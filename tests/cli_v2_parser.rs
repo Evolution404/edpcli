@@ -5,6 +5,51 @@ fn args(values: &[&str]) -> Vec<String> {
 }
 
 #[test]
+fn provision_verify_source_accepts_only_explicit_disk_and_verified_backup_path() {
+    match parse_args(&args(&[
+        "provision",
+        "verify-source",
+        "--disk",
+        "4",
+        "--backup",
+        "/tmp/test.edpb",
+    ]))
+    .unwrap()
+    {
+        Parsed::Provision(ProvisionAction::VerifySource { disk, backup }) => {
+            assert_eq!(disk, 4);
+            assert_eq!(backup, "/tmp/test.edpb");
+        }
+        _ => panic!("must be read-only source verify"),
+    }
+    for bad in [
+        vec!["provision", "verify-source", "--disk", "4"],
+        vec!["provision", "verify-source", "--backup", "/tmp/test.edpb"],
+        vec![
+            "provision",
+            "verify-source",
+            "--disk",
+            "4",
+            "--backup",
+            "/tmp/test.edpb",
+            "--yes",
+        ],
+        vec![
+            "provision",
+            "verify-source",
+            "--disk",
+            "4",
+            "--backup",
+            "/tmp/test.edpb",
+            "--out",
+            "/dev/disk4",
+        ],
+    ] {
+        assert!(parse_args(&args(&bad)).is_err(), "{bad:?}");
+    }
+}
+
+#[test]
 fn demo_command_parses_default_scene_and_listing() {
     assert!(matches!(
         parse_args(&args(&["demo"])).unwrap(),

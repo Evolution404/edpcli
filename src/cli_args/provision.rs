@@ -641,6 +641,29 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
         return Err("错误: provision 需要动作 plan / image / write".into());
     };
     let tail = &rest[1..];
+    if action == "verify-source" {
+        let mut disk = None;
+        let mut backup = None;
+        let mut i = 0;
+        while i < tail.len() {
+            match flag_name(&tail[i]) {
+                "--disk" => {
+                    let arg = take_value(tail, &mut i, "--disk")?;
+                    set_once(&mut disk, parse_disk_spec(&arg)?, "--disk")?;
+                }
+                "--backup" => {
+                    let arg = take_value(tail, &mut i, "--backup")?;
+                    set_once(&mut backup, arg, "--backup")?;
+                }
+                other => return Err(format!("错误: verify-source 不认识选项 {other}")),
+            }
+            i += 1;
+        }
+        return Ok(Parsed::Provision(ProvisionAction::VerifySource {
+            disk: disk.ok_or("错误: verify-source 必须提供 --disk N")?,
+            backup: backup.ok_or("错误: verify-source 必须提供 --backup FILE")?,
+        }));
+    }
     // Explicit native geometry opts choose the isolated offline-only image
     // grammar; live USB plans and writes cannot consume these arguments.
     if action == "image"
