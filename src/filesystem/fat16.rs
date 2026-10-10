@@ -160,7 +160,7 @@ impl Fat16Driver {
             return Err(FilesystemError::for_filesystem(
                 self.kind(),
                 FilesystemErrorKind::InvalidGeometry,
-                "仅允许已认证的 512B/4096B FAT16 虚拟格式化几何",
+                "FAT16仅允许标准512B/1024B/2048B/4096B原生扇区格式化几何",
             ));
         }
         let sector_bytes = u64::from(geometry.sector_size);

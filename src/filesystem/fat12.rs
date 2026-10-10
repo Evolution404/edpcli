@@ -134,7 +134,7 @@ impl Fat12Driver {
             || geometry.sector_count == 0
         {
             return Err(invalid_geometry(
-                "FAT12仅允许认证的512B/4096B原生虚拟格式化",
+                "FAT12仅允许标准512B/1024B/2048B/4096B原生扇区格式化",
             ));
         }
         let sector_bytes = u64::from(geometry.sector_size);

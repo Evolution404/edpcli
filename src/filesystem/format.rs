@@ -76,3 +76,58 @@ pub struct NativeFormatPlan {
 pub struct FormatVerification {
     pub metadata: FilesystemMetadata,
 }
+
+// FAT/exFAT native formatters and their readback parser share the capability
+// registry; do not confuse a BPB-valid offline plan with OS HIL certification.
+#[cfg(test)]
+mod multi_native_format_tests {
+    use super::*;
+    use crate::filesystem::{
+        detect_native_boot_sector, EXFAT_DRIVER, FAT12_DRIVER, FAT16_DRIVER, FAT32_DRIVER,
+    };
+
+    #[test]
+    fn each_standard_logical_sector_formats_and_roundtrips_fat_and_exfat_boot() {
+        for sector in [512u32, 1024, 2048, 4096] {
+            for (fs, mib) in [
+                (FilesystemKind::Fat12, 4u64),
+                (FilesystemKind::Fat16, 64),
+                (FilesystemKind::Fat32, 512),
+                (FilesystemKind::ExFat, 128),
+            ] {
+                let sectors = mib * 1_048_576 / u64::from(sector);
+                let geometry = FilesystemGeometry::new(2048, sectors, sector);
+                let request = FormatRequest {
+                    filesystem: fs,
+                    volume_label: Some("NATIVE".into()),
+                    volume_serial: Some(0x1203_4567),
+                };
+                let plan = match fs {
+                    FilesystemKind::Fat12 => {
+                        FAT12_DRIVER.build_native_format_plan(geometry, &request)
+                    }
+                    FilesystemKind::Fat16 => {
+                        FAT16_DRIVER.build_native_format_plan(geometry, &request)
+                    }
+                    FilesystemKind::Fat32 => {
+                        FAT32_DRIVER.build_native_format_plan(geometry, &request)
+                    }
+                    FilesystemKind::ExFat => {
+                        EXFAT_DRIVER.build_native_format_plan(geometry, &request)
+                    }
+                    _ => unreachable!(),
+                }
+                .unwrap_or_else(|err| panic!("{sector}B {fs:?} format: {err}"));
+                assert!(!plan.writes.is_empty());
+                assert!(plan.writes.iter().all(|w| w.data.len() == sector as usize));
+                let boot = plan.writes.iter().find(|w| w.relative_lba == 0).unwrap();
+                let detected = detect_native_boot_sector(&boot.data, sectors, sector)
+                    .unwrap_or_else(|err| panic!("{sector}B {fs:?} detect: {err}"));
+                assert_eq!(detected, Some(fs), "{sector}B {fs:?} native boot");
+            }
+        }
+        for sector in [1536u32, 2560, 3072, 8192] {
+            assert!(!native_fat_sector_bytes_supported(sector));
+        }
+    }
+}

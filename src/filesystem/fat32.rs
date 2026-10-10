@@ -297,7 +297,7 @@ impl Fat32Driver {
             return Err(FilesystemError::for_filesystem(
                 self.kind(),
                 FilesystemErrorKind::InvalidGeometry,
-                "仅允许512B或4096B的已认证FAT32原生虚拟格式化几何",
+                "FAT32仅允许标准512B/1024B/2048B/4096B原生扇区格式化几何",
             ));
         }
         let sector_len = geometry.sector_size as usize;

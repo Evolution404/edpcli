@@ -47,19 +47,25 @@ impl ProvisionPrefill {
                     self.boot_start_lba.ok_or("missing boot start")?,
                     self.boot.ok_or("missing boot capacity")?,
                     false,
-                    Some(if matches!(self.logical_sector_bytes, 512 | 4096) {
-                        crate::filesystem::select_native_oem_boot_fat(
-                            crate::filesystem::FilesystemGeometry::new(
-                                self.boot_start_lba.ok_or("missing boot start")?,
-                                self.boot.ok_or("missing boot capacity")?.sectors(),
-                                self.logical_sector_bytes,
-                            ),
-                        )?
-                    } else {
-                        // Pure protocol geometry accepts positive 512B multiples.
-                        // Uncertified sectors must NOT enter native FAT writes.
-                        FilesystemKind::Fat16
-                    }),
+                    Some(
+                        if crate::domain::hardware::native_sector_capability(
+                            self.logical_sector_bytes,
+                        )
+                        .is_some_and(|capability| capability.fat_exfat_format)
+                        {
+                            crate::filesystem::select_native_oem_boot_fat(
+                                crate::filesystem::FilesystemGeometry::new(
+                                    self.boot_start_lba.ok_or("missing boot start")?,
+                                    self.boot.ok_or("missing boot capacity")?.sectors(),
+                                    self.logical_sector_bytes,
+                                ),
+                            )?
+                        } else {
+                            // Pure protocol geometry accepts positive 512B multiples.
+                            // Uncertified sectors must NOT enter native FAT writes.
+                            FilesystemKind::Fat16
+                        },
+                    ),
                 );
                 push(
                     PartitionRole::Share,
@@ -121,19 +127,25 @@ impl ProvisionPrefill {
                     self.boot_start_lba.ok_or("missing boot start")?,
                     self.boot.ok_or("missing boot capacity")?,
                     false,
-                    Some(if matches!(self.logical_sector_bytes, 512 | 4096) {
-                        crate::filesystem::select_native_oem_boot_fat(
-                            crate::filesystem::FilesystemGeometry::new(
-                                self.boot_start_lba.ok_or("missing boot start")?,
-                                self.boot.ok_or("missing boot capacity")?.sectors(),
-                                self.logical_sector_bytes,
-                            ),
-                        )?
-                    } else {
-                        // Pure protocol geometry accepts positive 512B multiples.
-                        // Uncertified sectors must NOT enter native FAT writes.
-                        FilesystemKind::Fat16
-                    }),
+                    Some(
+                        if crate::domain::hardware::native_sector_capability(
+                            self.logical_sector_bytes,
+                        )
+                        .is_some_and(|capability| capability.fat_exfat_format)
+                        {
+                            crate::filesystem::select_native_oem_boot_fat(
+                                crate::filesystem::FilesystemGeometry::new(
+                                    self.boot_start_lba.ok_or("missing boot start")?,
+                                    self.boot.ok_or("missing boot capacity")?.sectors(),
+                                    self.logical_sector_bytes,
+                                ),
+                            )?
+                        } else {
+                            // Pure protocol geometry accepts positive 512B multiples.
+                            // Uncertified sectors must NOT enter native FAT writes.
+                            FilesystemKind::Fat16
+                        },
+                    ),
                 );
                 push(
                     PartitionRole::Share,
