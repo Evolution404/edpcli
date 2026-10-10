@@ -30,6 +30,8 @@ pub use model::*;
 use model::{CHUNK_MAGIC, FILE_MAGIC, FOOTER_MAGIC};
 pub use read::{read_artifact, read_raw_protocol, verify_file, VerifiedBackupReader};
 use validate::validate_manifest_graph;
+#[cfg(feature = "ci-virtual-disk")]
+pub use write::write_native_restorable_metadata_for_hil;
 pub use write::{
     write_core_backup, write_core_backup_with_identity, write_metadata_backup,
     write_metadata_backup_with_identity,
