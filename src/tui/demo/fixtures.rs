@@ -283,9 +283,10 @@ pub(super) fn provision_review_projection(row: &Row) -> ProvisionConfirmationVie
         },
         layout,
         overall: ProvisionConfirmationOverall {
-            cleared_regions: 0,
-            reformatted_regions: 0,
-            password_changed_regions: 0,
+            source_discarded: vec![],
+            source_retained: vec![],
+            target_formatted: vec![],
+            key_changed: vec![],
         },
         algorithm: Some(crate::provision::OfficialLabelAlgorithm::Sms4),
         geometry_note: None,
