@@ -887,6 +887,75 @@ pub fn prepare_native_provision_on_disk(
     })
 }
 
+/// Snapshot original partition identities for UI and CLI impact reports.
+pub fn source_partition_extents(
+    native: &NativePreparedProvision,
+) -> Result<Vec<(String, u64, u64)>, String> {
+    use crate::provision::{DiskProvisionKind, PartitionRole};
+    if native.source != DiskProvisionKind::Plain {
+        let protocol = crate::protocol::image::NativeProtocolImage::from_native_bytes(
+            native.plan.sector_bytes,
+            native
+                .source_native_prefix
+                .iter()
+                .flat_map(|block| block.iter().copied())
+                .collect(),
+        )
+        .map_err(|e| format!("确认页来源协议解析失败: {e}"))?;
+        let original = crate::provision::parse_existing_provision_native(
+            &protocol,
+            &native.device_id,
+            native.plan.total_sectors,
+        )?
+        .ok_or("确认页无法确认来源 EDP 分区，禁止显示未经证实的数据保留状态")?;
+        return Ok(original
+            .profile
+            .partitions
+            .iter()
+            .filter(|p| p.role != PartitionRole::CompatibilityReserve)
+            .map(|p| (p.role.label().to_string(), p.start_lba, p.sector_count))
+            .collect());
+    }
+
+    // Plain MBR: derive source partition names from the captured original,
+    // not from a newly generated target. Blank/unpartitioned sources stay empty.
+    let mbr = native
+        .source_native_prefix
+        .first()
+        .ok_or("来源 MBR 快照缺失")?;
+    if mbr.len() < 512 || mbr[510..512] != [0x55, 0xaa] {
+        return Ok(Vec::new());
+    }
+    let mut parts = Vec::new();
+    for index in 0..4 {
+        let offset = 446 + index * 16;
+        if mbr[offset + 4] == 0 {
+            continue;
+        }
+        let start = u32::from_le_bytes(
+            mbr[offset + 8..offset + 12]
+                .try_into()
+                .map_err(|_| "来源 MBR 起点无效")?,
+        ) as u64;
+        let count = u32::from_le_bytes(
+            mbr[offset + 12..offset + 16]
+                .try_into()
+                .map_err(|_| "来源 MBR 容量无效")?,
+        ) as u64;
+        if count == 0 {
+            continue;
+        }
+        if start
+            .checked_add(count)
+            .is_none_or(|end| end > native.plan.total_sectors)
+        {
+            return Err("来源普通盘分区超出设备容量，不能报告数据影响".into());
+        }
+        parts.push((format!("普通分区P{}", index + 1), start, count));
+    }
+    Ok(parts)
+}
+
 /// Common prepared-intent commit, reused directly by CLI and TUI.
 pub fn commit_prepared_native_provision(
     runner: &dyn CmdRunner,
