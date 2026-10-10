@@ -127,3 +127,84 @@ pub fn plan_native_restore_readonly(
         native_lce_blocks,
     })
 }
+
+/// CI/HIL-only full native metadata evidence materialization. This is
+/// excluded from normal builds: EDPB v4 EvidenceOnly is NOT restorable in
+/// production. It can be exercised only on independently proven disposable
+/// virtual disks with the existing TargetSession + durable WAL writer.
+#[cfg(feature = "ci-virtual-disk")]
+pub fn materialize_native_restore_evidence_for_hil(
+    backup_path: &Path,
+    expected_device_id: &str,
+    target_geometry: NativeReadGeometry,
+) -> Result<crate::filesystem::NativeVirtualDiskPlan, String> {
+    use crate::filesystem::NativeFilesystemWrite;
+    let preview = plan_native_restore_readonly(backup_path, expected_device_id, target_geometry)?;
+    let reader = VerifiedBackupReader::open(backup_path)?;
+    if reader.verified().file_sha256 != preview.backup_sha256 {
+        return Err("EDPB取证文件在只读规划与重新打开之间改变".into());
+    }
+    let manifest = &reader.verified().manifest;
+    let mut blocks = BTreeMap::<u64, Vec<u8>>::new();
+    for artifact in manifest
+        .artifacts
+        .iter()
+        .filter(|a| a.kind == "raw_sectors")
+    {
+        if artifact.restore_policy != RestorePolicy::EvidenceOnly
+            || artifact.completeness != ArtifactCompleteness::Complete
+        {
+            return Err("HIL取证材料完整性或恢复权限状态异常".into());
+        }
+        let extent_id = artifact
+            .source_extent_ids
+            .first()
+            .ok_or("HIL证据缺少Extent")?;
+        let extent = manifest
+            .extents
+            .iter()
+            .find(|e| &e.id == extent_id)
+            .ok_or("HIL证据引用不存在的Extent")?;
+        for (index, block) in reader
+            .read_artifact(&artifact.id)?
+            .chunks_exact(preview.logical_sector_bytes as usize)
+            .enumerate()
+        {
+            let lba = extent.start_lba + index as u64;
+            if blocks.insert(lba, block.to_vec()).is_some() {
+                return Err("HIL证据中存在重复LBA".into());
+            }
+        }
+    }
+    let mut digest = Sha256::new();
+    let writes = preview
+        .proposed_lbas_in_write_order
+        .iter()
+        .map(|lba| {
+            let data = blocks.remove(lba).ok_or("HIL证据缺少规划LBA")?;
+            digest.update(lba.to_le_bytes());
+            digest.update(&data);
+            Ok(NativeFilesystemWrite {
+                relative_lba: *lba,
+                data,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    if !blocks.is_empty() {
+        return Err("HIL证据写集包含未规划的块".into());
+    }
+    let actual: String = digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    if actual != preview.proposed_write_sha256 || writes.last().is_none_or(|b| b.relative_lba != 0)
+    {
+        return Err("HIL证据重新物化后摘要或LBA0提交顺序不一致".into());
+    }
+    Ok(crate::filesystem::NativeVirtualDiskPlan {
+        sector_bytes: preview.logical_sector_bytes,
+        total_sectors: preview.total_sectors,
+        writes,
+    })
+}

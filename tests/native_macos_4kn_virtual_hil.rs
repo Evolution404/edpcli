@@ -6,6 +6,8 @@
 // Reuse established macOS HIL entrypoint for independent CLI crypto verification.
 #[path = "hil/native_cli_crypto_hil.rs"]
 mod native_cli_crypto_hil;
+#[path = "hil/native_edpb_wal_hil.rs"]
+mod native_edpb_wal_hil;
 
 use edpcli::application::filesystem::{FilesystemKind, NativeVirtualDiskPlan};
 use edpcli::application::provision::native_image::{

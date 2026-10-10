@@ -1,5 +1,13 @@
 # edpcli：全逻辑扇区规格、全模式和全工作流实施与验收计划（执行中）
 
+## 2026-10-10 21:16 CST P0 → P1 原生 EDPB 真正 OS 块设备实证回执
+
+- **P0 身份识别卡点已修复**：原先原生虚拟盘 Writer 使用 `native_provision_probe`，而取证 `media_identity_from_protocol_image → identify` 使用未归一化原始探针；在 1024B Disk Image 上实际制盘成功、备份 `device_id` 校验失败。调整 `identify::generate_candidates` 与 `media_identity_observer::merged_hardware_probe`，仅对明确启用并且系统确认 `Disk Image` 的虚拟设备使用与正式规划一致的协议身份，**绝不为普通 USB 生成合成身份**。真实 1024/2048/4096B macOS OS 虚拟盘均已通过正式备份调用、EDPB v4 verify、完整原生 LBA0–12/LCE/分区首块双句柄比对和重挂后读回。提交 `2ae71495` 已建立。
+- **P1 EDPB v4 原生恢复技术验证三规格通过（限 HIL）**：新增仅在 `ci-virtual-disk` 特性下编译的 `materialize_native_restore_evidence_for_hil`，从已验证 v4 证据生成全原生块写集并复核 SHA256、重复 LBA、LBA0 提交末位。新增 `tests/hil/native_edpb_wal_hil.rs`：限定独立 `diskutil` 核验的 512MiB 临时 Disk Image，用**正式** `TargetSession → native WAL` 修改 LBA8，回读确认变化；用备份的原生写集通过**同一** WAL 入口恢复，再独立打开原生块回读所有协议、LCE 及分区首块；卸载、重挂后调用官方模式/密码/FS 独立验证。**1024B、2048B、4096B 分别通过**；不是单纯内存模拟。
+- **不扩大证据范围**：v4 manifest 仍标记 `RestorePolicy::EvidenceOnly`，普通编译没有 HIL 恢复材料化入口，`restore_plan.rs` 仍拒绝 v4；此轮未完成正式 v4 可恢复版本契约、实体介质恢复授权、断电注入或所有模式转换。512B v3 恢复继续原有行为。
+- **本阶段下一步**：修订验证后的代码完成 Fast/Full Gate、提交并推送；随后建立可版本化的正式 v4/v5 恢复授权契约及真实断电故障模拟；继续 Plain/Mode0..3 × 四规格真实来源→目标模式保留/格式化矩阵和 TUI 交互验收。无实体盘写入，无 reset/clean，GitHub CI 仍延后 main 合并。
+
+
 ## 2026-10-10 20:50 CST 本轮实施与验收回执（优先于下方旧状态表）
 
 - **P0 A01/A05/A02 已完成代码和 Fast Gate**：由并行会话提交并推送 `bd6131e0`，四规格来源密码判断、Native 实际算法、来源硬件/序列号/完整协议及必要分区首块/LCE 写前复核。单元故障注入通过；**尚未进行真实换盘/拔插故障注入**。

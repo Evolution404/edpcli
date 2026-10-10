@@ -190,7 +190,7 @@ fn push_candidate_pair(
 
 pub fn generate_candidates(runner: &dyn CmdRunner, disk: u32) -> Vec<String> {
     let mut cs: Vec<String> = Vec::new();
-    // A diskutil-proven virtual Disk Image uses the same synthetic protocol
+    // A platform-verified virtual Disk Image uses the same synthetic protocol
     // identity as the native writer; raw macOS inquiry reports a different
     // host device name. This is opt-in and never applies to physical USB.
     let native = if crate::platform::include_virtual()

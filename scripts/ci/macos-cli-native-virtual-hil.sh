@@ -70,6 +70,22 @@ assert v.get("TotalSize") == 536870912
     attach
     # Reopened OS block device: parse/decrypt from real bytes, not authored writes.
     verify_crypto
+    # HIL-only v4 metadata damage/restore through the standard exclusive lease,
+    # durable WAL and fresh native readback. Never grants production v4 restore.
+    if [[ "${EDPCLI_HIL_EDPB_WAL:-0}" == "1" && "$mode" == "mode0" && "$sector" != "512" ]]; then
+      raw="/dev/r$(basename "$device")"
+      args=(EDPCLI_CRYPTO_HIL_RAW="$raw" EDPCLI_CRYPTO_HIL_SECTOR="$sector" EDPCLI_CRYPTO_HIL_BYTES=536870912)
+      if [[ -r "$raw" && -w "$raw" ]]; then
+        env "${args[@]}" "$verifier" --ignored --exact native_edpb_wal_hil::native_edpb_evidence_virtual_wal_restore_and_fresh_readback --nocapture
+      else
+        sudo -n env "${args[@]}" "$verifier" --ignored --exact native_edpb_wal_hil::native_edpb_evidence_virtual_wal_restore_and_fresh_readback --nocapture
+      fi
+      diskutil eject "$device" >/dev/null
+      device=""
+      attach
+      verify_crypto
+    fi
+
   if [[ "${EDPCLI_HIL_PRESERVE_FULL:-0}" == "1" && "$mode" == "mode0" ]]; then
     snapshot="$root/preserve-$sector.sha256"
     full_digest() {
