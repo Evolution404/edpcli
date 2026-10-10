@@ -893,12 +893,22 @@ pub fn commit_prepared_native_provision(
     prepared: &NativePreparedProvision,
     wal: &Path,
 ) -> Result<(), String> {
-    super::native_commit::commit_native_plan_on_disk_with_source(
+    commit_prepared_native_provision_observed(runner, prepared, wal, &mut |_| {})
+}
+
+pub fn commit_prepared_native_provision_observed(
+    runner: &dyn CmdRunner,
+    prepared: &NativePreparedProvision,
+    wal: &Path,
+    observer: &mut dyn FnMut(crate::diskio::TransactionActivity),
+) -> Result<(), String> {
+    super::native_commit::commit_native_plan_on_disk_with_source_observed(
         runner,
         prepared.disk,
         &prepared.plan,
         wal,
         Some(&prepared.source_native_prefix),
+        observer,
     )
 }
 

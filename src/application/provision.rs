@@ -947,8 +947,45 @@ pub fn commit_provision_with_backup_on_disk_with_progress(
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let wal = backup_dir.join(format!("native-provision-disk{}-{stamp}.wal", native.disk));
-        native_flow::commit_prepared_native_provision(runner, native, &wal)
-            .map_err(|message| err(EXIT_IO, message))?;
+        // Native transactions must publish the same authoritative progress
+        // contract used by the original 512B pipeline. Early event covers
+        // potentially long identity checks and OS volume lock acquisition.
+        emit_isolated(
+            sink,
+            ProgressEvent::started(
+                crate::application::progress::OperationKind::Provision,
+                Phase::Identity,
+                Step::LockAndReopen,
+                "核验介质、卸载并获得原生写租约",
+            ),
+        );
+        let mut high_water_mark = 0u16;
+        native_flow::commit_prepared_native_provision_observed(
+            runner,
+            native,
+            &wal,
+            &mut |activity| {
+                let mut event = progress_projection::commit_event(
+                    Phase::Transaction,
+                    Step::ProtocolWrite,
+                    2,
+                    4,
+                    Some(activity),
+                );
+                // WAL preparation and native write-session preflight may
+                // interleave; never reverse the overall progress indicator.
+                high_water_mark = high_water_mark.max(event.overall.basis_points());
+                event.overall = crate::application::progress::OverallProgress::from_basis_points(
+                    high_water_mark,
+                );
+                emit_isolated(sink, event);
+            },
+        )
+        .map_err(|message| err(EXIT_IO, message))?;
+        let mut complete = ProgressEvent::new(Phase::Complete, Step::Completed, 4, 4);
+        complete.log_policy = LogPolicy::Append;
+        complete.detail = Some("原生 WAL 持久化、事务写入及读回验证完成".into());
+        emit_isolated(sink, complete);
         // The original native write blocks are retained as a durable
         // rollback WAL, not as a portable EDPB backup. The result UI must
         // identify its actual file type instead of promising an EDPB export.

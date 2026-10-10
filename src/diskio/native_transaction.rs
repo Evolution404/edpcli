@@ -50,27 +50,43 @@ fn fail(reason: impl Into<String>) -> NativeTransactionFailure {
 const MAX_MIRROR_BYTES: usize = 128 * 1024 * 1024;
 
 pub(super) fn rollback(dev: &mut dyn NativeBlockDevice, originals: &[(u64, Vec<u8>)]) -> bool {
+    rollback_observed(dev, originals, &mut |_, _, _| {})
+}
+
+fn rollback_observed(
+    dev: &mut dyn NativeBlockDevice,
+    originals: &[(u64, Vec<u8>)],
+    notify: &mut dyn FnMut(crate::diskio::TransactionActivityPhase, u64, u64),
+) -> bool {
+    use crate::diskio::TransactionActivityPhase as Activity;
+    let count = originals.len() as u64;
+    notify(Activity::RollbackWrite, 0, count);
     let mut good = true;
     // The original MBR must be restored only after all other metadata, just
     // as new MBR LBA0 is committed last on the success path.
-    for (lba, block) in originals
+    for (index, (lba, block)) in originals
         .iter()
         .rev()
         .filter(|(lba, _)| *lba != 0)
         .chain(originals.iter().filter(|(lba, _)| *lba == 0))
+        .enumerate()
     {
         if dev.write_block(*lba, block).is_err() {
             good = false;
         }
+        notify(Activity::RollbackWrite, index as u64 + 1, count);
     }
+    notify(Activity::RollbackSync, 0, 0);
     if dev.sync_blocks().is_err() {
         good = false;
     }
-    for (lba, original) in originals {
+    notify(Activity::RollbackReadback, 0, count);
+    for (index, (lba, original)) in originals.iter().enumerate() {
         match dev.read_block_fresh(*lba) {
             Ok(actual) if actual == *original => {}
             _ => good = false,
         }
+        notify(Activity::RollbackReadback, index as u64 + 1, count);
     }
     good
 }
@@ -134,6 +150,15 @@ pub(super) fn execute_native_transaction_with_snapshot(
     plan: &NativeVirtualDiskPlan,
     originals: &[(u64, Vec<u8>)],
 ) -> Result<(), NativeTransactionFailure> {
+    execute_native_transaction_with_snapshot_observed(dev, plan, originals, &mut |_| {})
+}
+
+pub(super) fn execute_native_transaction_with_snapshot_observed(
+    dev: &mut dyn NativeBlockDevice,
+    plan: &NativeVirtualDiskPlan,
+    originals: &[(u64, Vec<u8>)],
+    observer: &mut dyn FnMut(crate::diskio::TransactionActivity),
+) -> Result<(), NativeTransactionFailure> {
     if !crate::domain::hardware::valid_native_sector_bytes(plan.sector_bytes)
         || plan.sector_bytes != dev.sector_bytes()
         || plan.total_sectors != dev.total_sectors()
@@ -169,8 +194,20 @@ pub(super) fn execute_native_transaction_with_snapshot(
     {
         return Err(fail("WAL执行计划存在重复LBA"));
     }
+    use crate::diskio::{TransactionActivity, TransactionActivityPhase as Activity};
+    let count = plan.writes.len() as u64;
+    let mut notify = |phase, current, total| {
+        let event = TransactionActivity {
+            phase,
+            current,
+            total,
+        };
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer(event)));
+    };
+    notify(Activity::SyncPreflight, 0, 0);
     dev.sync_blocks()
         .map_err(|e| fail(format!("预检同步失败: {e}")))?;
+    notify(Activity::Write, 0, count);
     let result: Result<(), String> = (|| {
         for (index, write) in plan.writes.iter().enumerate() {
             if index + 1 == plan.writes.len() {
@@ -185,24 +222,29 @@ pub(super) fn execute_native_transaction_with_snapshot(
             if actual != write.data {
                 return Err(format!("LBA{}写后回读不一致", write.relative_lba));
             }
+            notify(Activity::Write, index as u64 + 1, count);
         }
+        notify(Activity::Sync, 0, 0);
         dev.sync_blocks()
             .map_err(|e| format!("最终同步失败: {e}"))?;
         // A second full verification after sync catches deferred corruption.
-        for write in &plan.writes {
+        notify(Activity::Readback, 0, count);
+        for (index, write) in plan.writes.iter().enumerate() {
             let actual = dev
                 .read_block_fresh(write.relative_lba)
                 .map_err(|e| format!("LBA{}同步后独立读取失败: {e}", write.relative_lba))?;
             if actual != write.data {
                 return Err(format!("LBA{}同步后回读不一致", write.relative_lba));
             }
+            notify(Activity::Readback, index as u64 + 1, count);
         }
         Ok(())
     })();
     if let Err(reason) = result {
+        let verified = rollback_observed(dev, originals, &mut notify);
         return Err(NativeTransactionFailure {
             reason,
-            rollback_verified: rollback(dev, originals),
+            rollback_verified: verified,
         });
     }
     Ok(())

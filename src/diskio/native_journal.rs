@@ -3,7 +3,7 @@
 //! recoverable with separately authenticated device identity; it does NOT
 //! promise power-loss atomicity or authorize physical access.
 use super::native_transaction::{
-    execute_native_transaction_with_snapshot, NativeBlockDevice, NativeTransactionFailure,
+    execute_native_transaction_with_snapshot_observed, NativeBlockDevice, NativeTransactionFailure,
 };
 use crate::filesystem::NativeVirtualDiskPlan;
 use sha2::{Digest, Sha256};
@@ -38,6 +38,27 @@ pub fn execute_native_transaction_with_journal(
     path: &Path,
     device_identity: &str,
 ) -> Result<(), NativeTransactionFailure> {
+    execute_native_transaction_with_journal_observed(dev, plan, path, device_identity, &mut |_| {})
+}
+
+/// Use the existing transaction-activity contract to report real WAL and
+/// native-block work; legacy callers retain the no-observer entry above.
+pub fn execute_native_transaction_with_journal_observed(
+    dev: &mut dyn NativeBlockDevice,
+    plan: &NativeVirtualDiskPlan,
+    path: &Path,
+    device_identity: &str,
+    observer: &mut dyn FnMut(crate::diskio::TransactionActivity),
+) -> Result<(), NativeTransactionFailure> {
+    use crate::diskio::{TransactionActivity, TransactionActivityPhase as Activity};
+    let mut notify = |phase, current, total| {
+        let event = TransactionActivity {
+            phase,
+            current,
+            total,
+        };
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer(event)));
+    };
     if device_identity.trim().is_empty() || device_identity.len() > 1024 {
         return Err(failure("写前快照必须绑定完整设备身份"));
     }
@@ -69,8 +90,10 @@ pub fn execute_native_transaction_with_journal(
     if crate::platform::is_raw_device_path(&path.to_string_lossy()) {
         return Err(failure("拒绝把WAL写入raw设备"));
     }
+    let count = plan.writes.len() as u64;
+    notify(Activity::Mirror, 0, count);
     let mut snapshots = Vec::with_capacity(plan.writes.len());
-    for block in &plan.writes {
+    for (index, block) in plan.writes.iter().enumerate() {
         let old = dev
             .read_block_fresh(block.relative_lba)
             .map_err(|e| failure(format!("WAL快照LBA{}失败: {e}", block.relative_lba)))?;
@@ -78,7 +101,9 @@ pub fn execute_native_transaction_with_journal(
             return Err(failure("WAL写前块不完整"));
         }
         snapshots.push(old);
+        notify(Activity::Mirror, index as u64 + 1, count);
     }
+    notify(Activity::SyncPreflight, 0, 0);
     let mut journal = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -140,7 +165,9 @@ pub fn execute_native_transaction_with_journal(
     // A separate journal state line marks that the last preflight succeeded.
     append_state(&mut journal, "WRITE_STARTED")
         .map_err(|e| failure(format!("WAL状态同步失败（未写盘）: {e}")))?;
-    match execute_native_transaction_with_snapshot(dev, plan, &originals) {
+    match execute_native_transaction_with_snapshot_observed(dev, plan, &originals, &mut |event| {
+        notify(event.phase, event.current, event.total)
+    }) {
         Ok(()) => append_state(&mut journal, "COMMITTED_SYNC_AND_READBACK_OK")
             .map_err(|e| failure(format!("介质已提交但WAL无法确认完成，状态不确定: {e}"))),
         Err(mut error) => {
@@ -268,6 +295,75 @@ mod tests {
             assert_eq!(dev.sectors[&1], vec![0x55; block_bytes as usize]);
             let evidence = crate::diskio::inspect_native_journal(&path).unwrap();
             assert_eq!(evidence.sector_bytes, block_bytes);
+            fs::remove_file(&path).unwrap();
+            fs::remove_dir(path.parent().unwrap()).unwrap();
+        }
+    }
+
+    #[test]
+    fn native_wal_observer_reports_real_work_and_rollback_for_all_block_sizes() {
+        use crate::diskio::TransactionActivityPhase as Activity;
+        for bytes in [512u32, 1024, 2048, 4096] {
+            let (mut dev, plan, path) = fixture_with_bytes(bytes);
+            let mut activities = Vec::new();
+            execute_native_transaction_with_journal_observed(
+                &mut dev,
+                &plan,
+                &path,
+                "virtual:progress",
+                &mut |activity| activities.push(activity),
+            )
+            .unwrap();
+            for phase in [Activity::Mirror, Activity::Write, Activity::Readback] {
+                assert!(
+                    activities
+                        .iter()
+                        .any(|a| a.phase == phase && a.current == 0 && a.total == 2),
+                    "{bytes}B missing start {phase:?}"
+                );
+                assert!(
+                    activities
+                        .iter()
+                        .any(|a| a.phase == phase && a.current == 2 && a.total == 2),
+                    "{bytes}B missing finish {phase:?}"
+                );
+            }
+            assert!(activities.iter().any(|a| a.phase == Activity::Sync));
+            assert_eq!(dev.writes, vec![1, 0]); // Last block is the MBR.
+            fs::remove_file(&path).unwrap();
+            fs::remove_dir(path.parent().unwrap()).unwrap();
+
+            let (mut dev, plan, path) = fixture_with_bytes(bytes);
+            dev.fail_once = Some(0);
+            let mut failed_activities = Vec::new();
+            let error = execute_native_transaction_with_journal_observed(
+                &mut dev,
+                &plan,
+                &path,
+                "virtual:progress-rollback",
+                &mut |activity| failed_activities.push(activity),
+            )
+            .unwrap_err();
+            assert!(error.rollback_verified);
+            for phase in [Activity::RollbackWrite, Activity::RollbackReadback] {
+                assert!(
+                    failed_activities
+                        .iter()
+                        .any(|a| a.phase == phase && a.current == 0 && a.total == 2),
+                    "{bytes}B rollback start {phase:?}"
+                );
+                assert!(
+                    failed_activities
+                        .iter()
+                        .any(|a| a.phase == phase && a.current == 2 && a.total == 2),
+                    "{bytes}B rollback done {phase:?}"
+                );
+            }
+            assert!(failed_activities
+                .iter()
+                .any(|a| a.phase == Activity::RollbackSync));
+            assert_eq!(dev.sectors[&0], vec![0x55; bytes as usize]);
+            assert_eq!(dev.sectors[&1], vec![0x55; bytes as usize]);
             fs::remove_file(&path).unwrap();
             fs::remove_dir(path.parent().unwrap()).unwrap();
         }

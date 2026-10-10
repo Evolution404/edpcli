@@ -36,6 +36,24 @@ pub fn commit_native_plan_on_disk_with_source(
     wal_path: &std::path::Path,
     expected_prefix: Option<&[Vec<u8>]>,
 ) -> Result<(), String> {
+    commit_native_plan_on_disk_with_source_observed(
+        runner,
+        disk,
+        plan,
+        wal_path,
+        expected_prefix,
+        &mut |_| {},
+    )
+}
+
+pub fn commit_native_plan_on_disk_with_source_observed(
+    runner: &dyn CmdRunner,
+    disk: u32,
+    plan: &NativeVirtualDiskPlan,
+    wal_path: &std::path::Path,
+    expected_prefix: Option<&[Vec<u8>]>,
+    observer: &mut dyn FnMut(crate::diskio::TransactionActivity),
+) -> Result<(), String> {
     let session = TargetSession::<ReadOnly>::open_usb(runner, disk)
         .map_err(|e| format!("原生制盘目标校验失败: {}", e.msg))?;
     let geometry = session
@@ -87,7 +105,7 @@ pub fn commit_native_plan_on_disk_with_source(
             ReopenAndVerifyError::Geometry(e) => format!("原生设备几何或身份变化: {}", e.msg),
         })?;
     locked
-        .execute_native_transaction_with_journal(plan, wal_path, &identity)
+        .execute_native_transaction_with_journal_observed(plan, wal_path, &identity, observer)
         .map_err(|e| {
             format!(
                 "原生块制盘事务失败: {}; 回滚验证={}",

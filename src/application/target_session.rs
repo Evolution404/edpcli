@@ -297,6 +297,7 @@ impl<State> TargetSession<'_, State> {
 impl TargetSession<'_, NativeWriteLocked<'_>> {
     /// Every physical native block goes through the same durable WAL and
     /// double-readback transaction; the temporary WAL must be on host storage.
+    #[cfg(test)]
     pub(crate) fn execute_native_transaction_with_journal(
         &mut self,
         plan: &crate::filesystem::NativeVirtualDiskPlan,
@@ -308,6 +309,22 @@ impl TargetSession<'_, NativeWriteLocked<'_>> {
             plan,
             path,
             device_identity,
+        )
+    }
+
+    pub(crate) fn execute_native_transaction_with_journal_observed(
+        &mut self,
+        plan: &crate::filesystem::NativeVirtualDiskPlan,
+        path: &std::path::Path,
+        device_identity: &str,
+        observer: &mut dyn FnMut(crate::diskio::TransactionActivity),
+    ) -> Result<(), crate::diskio::NativeTransactionFailure> {
+        crate::diskio::execute_native_transaction_with_journal_observed(
+            self.state.dev,
+            plan,
+            path,
+            device_identity,
+            observer,
         )
     }
 
