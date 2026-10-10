@@ -193,7 +193,7 @@ const PROVISION_COMMON_OPTIONS: &[OptionSpec] = &[
     value("--encrypt-max-password-errors"),
     HELP,
 ];
-const PROVISION_PLAN_OPTIONS: &[OptionSpec] = &[];
+const PROVISION_PLAN_OPTIONS: &[OptionSpec] = &[value("--source-backup")];
 const PROVISION_IMAGE_OPTIONS: &[OptionSpec] = &[
     value("--out"),
     value("--source-backup"),

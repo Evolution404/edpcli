@@ -346,97 +346,47 @@ fn export_synthetic_4kn_edp_demo(
 /// Build a full sparse Mode1 image from a verified 4Kn EDPB without opening
 /// a USB device or producing a command capable of physical writes.
 fn export_native_mode1_from_backup(backup: &str, out: &str) -> Result<(), String> {
-    use crate::application::evidence::{EvidenceSource, SectorReader};
-    use crate::platform::{HardwareProbe, InquiryInfo, NativeTransport};
-    use crate::provision::{
-        OnlyId, ProvisionEntropy, ProvisionMetadata, ProvisionProfile, ProvisionSpec,
-        TargetIdentity,
-    };
-
-    let mut source = EvidenceSource::open_backup(Path::new(backup))
-        .map_err(|error| format!("4Kn EDPB备份校验失败: {error}"))?;
-    if source
-        .backup_manifest()
-        .is_none_or(|m| m.schema != "edpb.manifest.v4")
-        || source.logical_sector_bytes() != 4096
-        || source.native_protocol_image().is_none()
-    {
-        return Err("Mode1来源必须是完整的4Kn EDPB v4原生备份".into());
-    }
-    let identity = source.identity();
-    let did = identity.device_id.as_deref().ok_or("EDPB没有可信设备ID")?;
-    let device_parts = did
-        .strip_prefix("disk&ven_")
-        .and_then(|value| value.split_once("&prod_"))
-        .ok_or("EDPB来源ID不是已验证的Windows设备身份格式")?;
-    if device_parts.0.is_empty() || device_parts.1.is_empty() {
-        return Err("EDPB供应商或产品身份无效".into());
-    }
-    let vid = u16::from_str_radix(identity.vid.as_deref().ok_or("EDPB缺少VID")?, 16)
-        .map_err(|_| "EDPB VID不是十六进制")?;
-    let pid = u16::from_str_radix(identity.pid.as_deref().ok_or("EDPB缺少PID")?, 16)
-        .map_err(|_| "EDPB PID不是十六进制")?;
-    let onlyid = OnlyId::parse(identity.onlyid.as_deref().ok_or("EDPB缺少OnlyId")?)?;
-    let total = source.total_sectors();
-    if identity.size_bytes != total.checked_mul(4096) {
-        return Err("EDPB原生容量不完整或存在冲突".into());
-    }
-    let probe = HardwareProbe {
-        vid: Some(vid),
-        pid: Some(pid),
-        transport: NativeTransport::Uas,
-        windows_pnp_instance_id: None,
-        inquiry: Some(InquiryInfo {
-            vendor: device_parts.0.into(),
-            product: device_parts.1.into(),
-            revision: "1.00".into(),
-        }),
-    };
-    let target = TargetIdentity::from_probe(&probe, total)?;
-    if target.device_id() != did {
-        return Err("EDPB硬件身份无法由原始供应商和产品信息一致重建".into());
-    }
-    let snapshot = source
-        .native_protocol_image()
-        .ok_or("缺少原生EDPF快照")?
-        .clone();
-    let parsed = crate::provision::parse_existing_provision_native(&snapshot, did, total)?
-        .ok_or("EDPB来源未确认注册Mode0")?;
-    let pass_info = parsed.pass_info_policy.ok_or("EDPB来源PassInfo尚未确认")?;
-    let metadata = ProvisionMetadata::new(
-        onlyid,
-        "SOURCE PRESERVED",
-        "SOURCE PRESERVED",
-        crate::provision::DEFAULT_SAFE6_LABEL,
+    let plan = crate::application::provision::native_preflight::plan_native_mode1_from_backup(
+        Path::new(backup),
     )?;
-    let spec = ProvisionSpec::new(
-        target,
-        metadata,
-        ProvisionProfile::canonical_v1().with_pass_info_policy(pass_info),
-    )?;
-    let options = crate::application::provision::FormatOptions {
-        share: true,
-        share_label: "启动区".into(),
-        ..Default::default()
-    };
-    // Newly created plaintext ExFAT serial is not the encrypted volume key.
-    // The protocol and original type4 key material remain exactly source-owned.
-    let mut serial = [0u8; 4];
-    getrandom::fill(&mut serial).map_err(|error| format!("生成新卷序列号失败: {error}"))?;
-    let writes =
-        crate::application::provision::native_image::plan_verified_native_4kn_mode0_to_mode1(
-            &mut source,
-            &snapshot,
-            &spec,
-            &ProvisionEntropy::new([0x5a; 252]),
-            &options,
-            u32::from_le_bytes(serial),
-        )?;
-    crate::application::provision::native_image::export_native_plain_image(Path::new(out), &writes)
+    crate::application::provision::native_image::export_native_plain_image(Path::new(out), &plan)
 }
 
 pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
     match action {
+        ProvisionAction::NativeMode1Plan { disk, backup } => {
+            if let Err(error) = guard_usb_disk(runner, disk) {
+                return finish(Err(error));
+            }
+            if !elevate::is_root() {
+                let argv = SecretArgv(std::env::args().skip(1).collect());
+                return elevate::ensure_elevated(&argv);
+            }
+            match crate::application::provision::native_preflight::preflight_native_mode1_on_disk(
+                runner,
+                disk,
+                Path::new(&backup),
+            ) {
+                Ok(result) => {
+                    println!("4Kn Mode1完整只读预检通过：disk{}，设备{}；共{}个4096B写集块，其中{}个用于明文exFAT。", result.disk, result.device_identity, result.write_blocks, result.format_block_count);
+                    println!(
+                        "来源备份已核对{}个原生块，4Kn总扇区={}。",
+                        result.verified_original_blocks, result.total_sectors
+                    );
+                    println!(
+                        "二合一区：LBA{}，{}个原生扇区；保留保密区起点LBA{}。",
+                        result.first_partition_lba,
+                        result.first_partition_sectors,
+                        result.preserved_encrypted_partition_lba
+                    );
+                    println!("EDPB SHA-256：{}", result.source_backup_sha256);
+                    println!("原生写集 SHA-256：{}", result.planned_write_sha256);
+                    println!("只读预检不会卸载或写盘，仍未授权实盘提交。每次实际提交前必须重新验证当前设备与备份、保持同一份原生写集。");
+                    EXIT_OK
+                }
+                Err(message) => finish(Err(crate::common::EdpCliError::new(EXIT_TARGET, message))),
+            }
+        }
         ProvisionAction::VerifySource { disk, backup } => {
             if let Err(error) = guard_usb_disk(runner, disk) {
                 return finish(Err(error));

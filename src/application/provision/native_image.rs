@@ -1194,7 +1194,7 @@ mod native_mode1_conversion_tests {
         source_mode0_with_gap(0)
     }
 
-    fn source_mode0_with_gap(gap: u64) -> (NativeProtocolImage, ProvisionSpec, Vec<u8>) {
+    pub(super) fn source_mode0_with_gap(gap: u64) -> (NativeProtocolImage, ProvisionSpec, Vec<u8>) {
         assert!(gap <= 224);
         const TOTAL: u64 = 262_144;
         let probe = HardwareProbe {
@@ -1524,5 +1524,151 @@ mod native_mode1_same_source_tests {
             1234,
         )
         .is_err());
+    }
+}
+
+#[cfg(test)]
+mod native_mode1_wal_end_to_end_tests {
+    use super::*;
+    use crate::diskio::{
+        execute_native_transaction_with_journal, inspect_native_journal, NativeJournalState,
+    };
+    use crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn source_bound_mode1_full_4kn_sparse_disk_transaction_and_journal_recovery() {
+        let (source, spec, lce) = super::native_mode1_conversion_tests::source_mode0_with_gap(224);
+        let total = spec.target().total_sectors();
+        let compat =
+            locate_lba7_compatibility_extent_from_geometry(total / (255 * 63), 255, 63, 4096)
+                .unwrap();
+        let folder = std::env::temp_dir().join(format!(
+            "edp-mode1-full-wal-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&folder).unwrap();
+        let image = folder.join("source-sparse.img");
+        let wal = folder.join("mode1-before.wal");
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&image)
+            .unwrap();
+        file.set_len(total * 4096).unwrap();
+        // Seed the source media with every native source protocol block and the
+        // exact same LCE. Other areas are sparse, except two owner-bound sentinels.
+        for lba in 0..13usize {
+            file.seek(SeekFrom::Start(lba as u64 * 4096)).unwrap();
+            file.write_all(source.block(lba).unwrap()).unwrap();
+        }
+        file.seek(SeekFrom::Start(compat.start_lba * 4096)).unwrap();
+        file.write_all(&lce).unwrap();
+        file.seek(SeekFrom::Start(199_776 * 4096)).unwrap();
+        file.write_all(&[0x7e; 4096]).unwrap(); // unowned 224-block gap
+        file.seek(SeekFrom::Start(200_000 * 4096)).unwrap();
+        file.write_all(&[0x92; 4096]).unwrap(); // source type4 preserved
+        file.sync_all().unwrap();
+
+        let mut dev = NewImageBlockDevice {
+            file: &mut file,
+            total_sectors: total,
+            sector_bytes: 4096,
+        };
+        let mut reader = OfflineNativeSourceReader {
+            native_sector_bytes: 4096,
+            read_native: |lba| dev.read_block(lba).map_err(|e| e.to_string()),
+        };
+        let plan = plan_verified_native_4kn_mode0_to_mode1(
+            &mut reader,
+            &source,
+            &spec,
+            &crate::provision::ProvisionEntropy::new([0x11; 252]),
+            &super::native_mode1_conversion_tests::conversion_options(),
+            0x12345678,
+        )
+        .unwrap();
+        // The verifier's read-only borrow ends before the WAL transaction.
+        assert!(plan.writes.len() > 13);
+        assert!(plan.writes.iter().all(|w| w.data.len() == 4096));
+        assert!(!plan
+            .writes
+            .iter()
+            .any(|w| (199_776..200_000).contains(&w.relative_lba)));
+        assert!(!plan
+            .writes
+            .iter()
+            .any(|w| (200_000..compat.start_lba).contains(&w.relative_lba)));
+        execute_native_transaction_with_journal(&mut dev, &plan, &wal, "fixture:u391:mode0:4Kn")
+            .unwrap();
+        assert_eq!(
+            inspect_native_journal(&wal).unwrap().state,
+            NativeJournalState::Committed
+        );
+        assert_eq!(dev.read_block(0).unwrap(), plan.writes.last().unwrap().data);
+        assert_eq!(&dev.read_block(63).unwrap()[3..11], b"EXFAT   ");
+        assert_eq!(dev.read_block(199_776).unwrap(), vec![0x7e; 4096]);
+        assert_eq!(dev.read_block(200_000).unwrap(), vec![0x92; 4096]);
+        assert_eq!(dev.read_block(compat.start_lba).unwrap(), lce);
+
+        file.sync_all().unwrap();
+        verify_native_virtual_image(&image, &plan).unwrap();
+
+        // Simulate restart after a successful data write but before final WAL
+        // commit marker reaches disk. Recovery must honor WAL/source identity
+        // and restore the original MBR only after every other changed block.
+        let marker = b"COMMITTED_SYNC_AND_READBACK_OK\n";
+        let journal = fs::read(&wal).unwrap();
+        assert!(journal.ends_with(marker));
+        fs::write(&wal, &journal[..journal.len() - marker.len()]).unwrap();
+        let mut dev = NewImageBlockDevice {
+            file: &mut file,
+            total_sectors: total,
+            sector_bytes: 4096,
+        };
+        assert!(
+            crate::diskio::native_journal_recovery::recover_native_journal_locked(
+                &mut dev,
+                &wal,
+                "wrong-device-identity",
+            )
+            .is_err()
+        );
+        crate::diskio::native_journal_recovery::recover_native_journal_locked(
+            &mut dev,
+            &wal,
+            "fixture:u391:mode0:4Kn",
+        )
+        .unwrap();
+        assert_eq!(
+            inspect_native_journal(&wal).unwrap().state,
+            NativeJournalState::RecoveryVerified
+        );
+        for lba in 0..13 {
+            assert_eq!(
+                dev.read_block(lba).unwrap(),
+                source.block(lba as usize).unwrap()
+            );
+        }
+        assert_eq!(dev.read_block(63).unwrap(), vec![0; 4096]);
+        assert_eq!(dev.read_block(199_776).unwrap(), vec![0x7e; 4096]);
+        assert_eq!(dev.read_block(200_000).unwrap(), vec![0x92; 4096]);
+        assert_eq!(dev.read_block(compat.start_lba).unwrap(), lce);
+        assert!(
+            crate::diskio::native_journal_recovery::recover_native_journal_locked(
+                &mut dev,
+                &wal,
+                "fixture:u391:mode0:4Kn",
+            )
+            .is_err()
+        );
+
+        drop(file);
+        fs::remove_file(&image).unwrap();
+        fs::remove_file(&wal).unwrap();
+        fs::remove_dir(&folder).unwrap();
     }
 }

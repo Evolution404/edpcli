@@ -664,6 +664,44 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
             backup: backup.ok_or("错误: verify-source 必须提供 --backup FILE")?,
         }));
     }
+    // The existing plan command gets a dedicated native 4Kn source-backed
+    // path. Explicit EDPB is required so the legacy 512B live path stays
+    // untouched; this path has no write/elevation bypass or password input.
+    if action == "plan" && tail.iter().any(|a| flag_name(a) == "--source-backup") {
+        let mut disk = None;
+        let mut backup = None;
+        let mut target = None;
+        let mut i = 0;
+        while i < tail.len() {
+            match flag_name(&tail[i]) {
+                "--disk" => {
+                    let value = take_value(tail, &mut i, "--disk")?;
+                    set_once(&mut disk, parse_disk_spec(&value)?, "--disk")?;
+                }
+                "--source-backup" => {
+                    let value = take_value(tail, &mut i, "--source-backup")?;
+                    set_once(&mut backup, value, "--source-backup")?;
+                }
+                "--target" => {
+                    let value = take_value(tail, &mut i, "--target")?;
+                    set_once(&mut target, value, "--target")?;
+                }
+                other => {
+                    return Err(format!(
+                        "错误: 4Kn来源预检不接受{other}；不允许写入或格式化参数"
+                    ))
+                }
+            }
+            i += 1;
+        }
+        if target.as_deref() != Some("mode1") {
+            return Err("错误: 4Kn来源预检目前只接受--target mode1".into());
+        }
+        return Ok(Parsed::Provision(ProvisionAction::NativeMode1Plan {
+            disk: disk.ok_or("错误: 4Kn来源预检必须提供--disk N")?,
+            backup: backup.ok_or("错误: 4Kn来源预检必须提供--source-backup FILE.edpb")?,
+        }));
+    }
     if action == "image" && tail.iter().any(|a| flag_name(a) == "--source-backup") {
         let mut backup = None;
         let mut out = None;

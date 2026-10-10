@@ -1122,3 +1122,48 @@ fn source_bound_native_mode1_image_is_offline_only_and_forbids_any_disk_target()
         Ok(Parsed::Provision(ProvisionAction::Image { .. }))
     ));
 }
+
+#[test]
+fn native_mode1_plan_routes_through_readonly_source_bound_action_only() {
+    let good = [
+        "provision",
+        "plan",
+        "--target",
+        "mode1",
+        "--disk",
+        "4",
+        "--source-backup",
+        "snapshot.edpb",
+    ];
+    let Parsed::Provision(ProvisionAction::NativeMode1Plan { disk, backup }) =
+        parse_args(&args(&good)).unwrap()
+    else {
+        panic!("native source-backed plan must be its own read-only action")
+    };
+    assert_eq!(disk, 4);
+    assert_eq!(backup, "snapshot.edpb");
+    for extra in [
+        vec!["--yes"],
+        vec!["--out", "export.img"],
+        vec!["--format-share"],
+        vec!["--share-fs", "exfat"],
+        vec!["--encrypt-target-password", "SECRET"],
+        vec!["--backup-dir", "unsafe"],
+        vec!["--sector-bytes", "4096"],
+    ] {
+        let mut argv = good.to_vec();
+        argv.extend(extra);
+        assert!(parse_args(&args(&argv)).is_err(), "unsafe extras: {argv:?}");
+    }
+    for mode in ["plain", "mode0", "mode2", "mode3"] {
+        let mut args_other = good.to_vec();
+        args_other[3] = mode;
+        assert!(parse_args(&args(&args_other)).is_err());
+    }
+    let mut no_disk = good.to_vec();
+    no_disk.drain(4..6);
+    assert!(parse_args(&args(&no_disk)).is_err());
+    let mut duplicate = good.to_vec();
+    duplicate.extend(["--source-backup", "other.edpb"]);
+    assert!(parse_args(&args(&duplicate)).is_err());
+}
