@@ -86,7 +86,6 @@ impl AppState {
         self.provision_restore_form_snapshot();
         self.provision.review_view_snapshot = None;
         self.provision.prepared = None;
-        self.provision.native_readonly_review = None;
         self.provision.native_geometry_review = None;
         self.provision.review_region_selected = 0;
         self.provision.review_details_expanded = false;

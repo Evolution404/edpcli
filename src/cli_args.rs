@@ -156,10 +156,9 @@ pub enum ProvisionAction {
         backup: String,
         out: String,
     },
-    /// Full native Mode1 source-bound read-only plan for the current USB.
-    /// This action cannot commit or export raw device bytes.
-    NativeMode1Plan {
-        disk: u32,
+    /// Source EDPB is a read-only provenance gate for the ordinary native plan.
+    SourceBackedPlan {
+        opts: Box<ProvisionNewOpts>,
         backup: String,
     },
     /// Strictly read-only comparison of the current 4Kn device and EDPB v4.

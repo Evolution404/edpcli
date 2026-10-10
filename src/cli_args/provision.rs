@@ -677,42 +677,31 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
             backup: backup.ok_or("错误: verify-source 必须提供 --backup FILE")?,
         }));
     }
-    // The existing plan command gets a dedicated native 4Kn source-backed
-    // path. Explicit EDPB is required so the legacy 512B live path stays
-    // untouched; this path has no write/elevation bypass or password input.
+    // Source EDPB is read-only provenance input. Target geometry, passwords,
+    // and formatting intent go through exactly the ordinary native planner.
     if action == "plan" && tail.iter().any(|a| flag_name(a) == "--source-backup") {
-        let mut disk = None;
         let mut backup = None;
-        let mut target = None;
+        let mut ordinary = Vec::with_capacity(tail.len());
         let mut i = 0;
         while i < tail.len() {
-            match flag_name(&tail[i]) {
-                "--disk" => {
-                    let value = take_value(tail, &mut i, "--disk")?;
-                    set_once(&mut disk, parse_disk_spec(&value)?, "--disk")?;
-                }
-                "--source-backup" => {
-                    let value = take_value(tail, &mut i, "--source-backup")?;
-                    set_once(&mut backup, value, "--source-backup")?;
-                }
-                "--target" => {
-                    let value = take_value(tail, &mut i, "--target")?;
-                    set_once(&mut target, value, "--target")?;
-                }
-                other => {
-                    return Err(format!(
-                        "错误: 4Kn来源预检不接受{other}；不允许写入或格式化参数"
-                    ))
-                }
+            if flag_name(&tail[i]) == "--source-backup" {
+                let value = take_value(tail, &mut i, "--source-backup")?;
+                set_once(&mut backup, value, "--source-backup")?;
+            } else {
+                ordinary.push(tail[i].clone());
             }
             i += 1;
         }
-        if target.as_deref() != Some("mode1") {
-            return Err("错误: 4Kn来源预检目前只接受--target mode1".into());
+        let (opts, out, yes, backup_dir, _) = parse_provision_opts(&ordinary, "plan")?;
+        if out.is_some() || yes || backup_dir.is_some() {
+            return Err("错误: 来源认证计划不接受--out、--yes或--backup-dir".into());
         }
-        return Ok(Parsed::Provision(ProvisionAction::NativeMode1Plan {
-            disk: disk.ok_or("错误: 4Kn来源预检必须提供--disk N")?,
-            backup: backup.ok_or("错误: 4Kn来源预检必须提供--source-backup FILE.edpb")?,
+        if opts.disk.is_none() {
+            return Err("错误: --source-backup来源认证计划必须指定--disk N".into());
+        }
+        return Ok(Parsed::Provision(ProvisionAction::SourceBackedPlan {
+            opts: Box::new(opts),
+            backup: backup.ok_or("错误: 必须提供--source-backup FILE.edpb")?,
         }));
     }
     if action == "image" && tail.iter().any(|a| flag_name(a) == "--source-backup") {

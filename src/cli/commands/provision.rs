@@ -378,7 +378,10 @@ fn export_native_mode1_from_backup(backup: &str, out: &str) -> Result<(), String
 
 pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction) -> i32 {
     match action {
-        ProvisionAction::NativeMode1Plan { disk, backup } => {
+        ProvisionAction::SourceBackedPlan { opts, backup } => {
+            let disk = opts
+                .disk
+                .expect("source-backed plan parser requires a disk");
             if let Err(error) = guard_usb_disk(runner, disk) {
                 return finish(Err(error));
             }
@@ -386,30 +389,20 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                 let argv = SecretArgv(std::env::args().skip(1).collect());
                 return elevate::ensure_elevated(&argv);
             }
-            match crate::application::provision::native_preflight::preflight_native_mode1_on_disk(
-                runner,
-                disk,
-                Path::new(&backup),
-            ) {
-                Ok(result) => {
-                    println!("4Kn Mode1完整只读预检通过：disk{}，设备{}；共{}个4096B写集块，其中{}个用于明文exFAT。", result.disk, result.device_identity, result.write_blocks, result.format_block_count);
-                    println!(
-                        "来源备份已核对{}个原生块，4Kn总扇区={}。",
-                        result.verified_original_blocks, result.total_sectors
-                    );
-                    println!(
-                        "二合一区：LBA{}，{}个原生扇区；保留保密区起点LBA{}。",
-                        result.first_partition_lba,
-                        result.first_partition_sectors,
-                        result.preserved_encrypted_partition_lba
-                    );
-                    println!("EDPB SHA-256：{}", result.source_backup_sha256);
-                    println!("原生写集 SHA-256：{}", result.planned_write_sha256);
-                    println!("只读预检不会卸载或写盘，仍未授权实盘提交。每次实际提交前必须重新验证当前设备与备份、保持同一份原生写集。");
-                    EXIT_OK
-                }
-                Err(message) => finish(Err(crate::common::EdpCliError::new(EXIT_TARGET, message))),
-            }
+            let verified =
+                match crate::application::evidence::verify_native_backup_against_disk_readonly(
+                    runner,
+                    disk,
+                    Path::new(&backup),
+                ) {
+                    Ok(verified) => verified,
+                    Err(error) => return finish(Err(EdpCliError::new(EXIT_TARGET, error))),
+                };
+            println!(
+                "只读来源认证通过：disk{}，{}B逻辑扇区，已逐块核对{}个原生来源证据块；以下目标计划使用统一Native规划器，不单独生成Mode1写集。",
+                disk, verified.logical_sector_bytes, verified.verified_native_blocks
+            );
+            provision_flow(runner, ProvisionAction::Plan(opts))
         }
         ProvisionAction::VerifySource { disk, backup } => {
             if let Err(error) = guard_usb_disk(runner, disk) {
@@ -564,7 +557,7 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
             match crate::application::provision::export_provision_image(Path::new(&out), &prepared)
             {
                 Ok(()) => {
-                    println!("原生稀疏制盘镜像写入完成：{}；{}B逻辑扇区，目标为破坏性重建，未写入当前设备",
+                    println!("原生稀疏制盘镜像写入完成：{}；{}B逻辑扇区，按来源影响保留或重建目标区域；未写入当前设备",
                         out, sector_bytes);
                     EXIT_OK
                 }

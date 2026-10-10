@@ -28,9 +28,6 @@ pub(super) fn apply(
     if let Some(result) = updates.plan {
         state.provision_finish_plan(result.map_err(|error| error.to_string()));
     }
-    if let Some(result) = updates.native_readonly_plan {
-        state.provision_finish_native_readonly_plan(result);
-    }
     for (_operation_id, event) in updates.progress {
         state.provision_push_progress(event);
     }

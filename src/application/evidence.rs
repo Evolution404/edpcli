@@ -832,7 +832,8 @@ pub fn verified_native_source_replay<R: SectorReader + ?Sized>(
     device_id: &str,
     source_total_sectors: u64,
 ) -> Result<Vec<crate::filesystem::NativeFilesystemWrite>, String> {
-    if !matches!(reader.logical_sector_bytes(), 512 | 4096)
+    if !crate::domain::hardware::native_sector_capability(reader.logical_sector_bytes())
+        .is_some_and(|capability| capability.fat_exfat_format)
         || reader.logical_sector_bytes() != plan.logical_sector_bytes
         || source_protocol.logical_sector_bytes() != plan.logical_sector_bytes
         || source_total_sectors != plan.total_sectors

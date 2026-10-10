@@ -64,11 +64,6 @@ impl TaskHub {
                     updates.plan = Some(result.map_err(|error| error.in_phase("制盘")));
                 }
             }
-            ProvisionWorkerResult::NativeReadOnlyPlan { generation, result } => {
-                if self.provision.plan_slot.finish(generation) {
-                    updates.native_readonly_plan = Some(result);
-                }
-            }
             ProvisionWorkerResult::Progress {
                 operation_id,
                 event,

@@ -1202,7 +1202,7 @@ fn source_bound_native_mode1_image_is_offline_only_and_forbids_any_disk_target()
 }
 
 #[test]
-fn native_mode1_plan_routes_through_readonly_source_bound_action_only() {
+fn source_bound_plan_uses_the_same_native_target_and_format_grammar() {
     let good = [
         "provision",
         "plan",
@@ -1213,30 +1213,43 @@ fn native_mode1_plan_routes_through_readonly_source_bound_action_only() {
         "--source-backup",
         "snapshot.edpb",
     ];
-    let Parsed::Provision(ProvisionAction::NativeMode1Plan { disk, backup }) =
+    let Parsed::Provision(ProvisionAction::SourceBackedPlan { opts, backup }) =
         parse_args(&args(&good)).unwrap()
     else {
-        panic!("native source-backed plan must be its own read-only action")
+        panic!("source-backed plan must require read-only evidence and shared target intent")
     };
-    assert_eq!(disk, 4);
+    assert_eq!(opts.disk, Some(4));
+    assert_eq!(opts.target, edpcli::provision::ProvisionTarget::OFFICIAL[1]);
     assert_eq!(backup, "snapshot.edpb");
+
+    // Incompatible regions may require explicit formatting; these options
+    // are now interpreted by the same Application planner as ordinary plans.
+    let mut with_format = good.to_vec();
+    with_format.extend(["--format-share", "--share-fs", "exfat"]);
+    let Parsed::Provision(ProvisionAction::SourceBackedPlan { opts, .. }) =
+        parse_args(&args(&with_format)).unwrap()
+    else {
+        panic!("source-backed plan should accept native format intent");
+    };
+    assert!(opts.format_share);
+
+    for mode in ["plain", "mode0", "mode2", "mode3"] {
+        let mut other = good.to_vec();
+        other[3] = mode;
+        assert!(matches!(
+            parse_args(&args(&other)).unwrap(),
+            Parsed::Provision(ProvisionAction::SourceBackedPlan { .. })
+        ));
+    }
     for extra in [
         vec!["--yes"],
         vec!["--out", "export.img"],
-        vec!["--format-share"],
-        vec!["--share-fs", "exfat"],
-        vec!["--encrypt-target-password", "SECRET"],
         vec!["--backup-dir", "unsafe"],
         vec!["--sector-bytes", "4096"],
     ] {
         let mut argv = good.to_vec();
         argv.extend(extra);
         assert!(parse_args(&args(&argv)).is_err(), "unsafe extras: {argv:?}");
-    }
-    for mode in ["plain", "mode0", "mode2", "mode3"] {
-        let mut args_other = good.to_vec();
-        args_other[3] = mode;
-        assert!(parse_args(&args(&args_other)).is_err());
     }
     let mut no_disk = good.to_vec();
     no_disk.drain(4..6);

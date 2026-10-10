@@ -46,13 +46,6 @@ pub(super) enum ProvisionWorkerResult {
             crate::application::error::OperationError,
         >,
     },
-    NativeReadOnlyPlan {
-        generation: u64,
-        result: Result<
-            crate::application::provision::native_preflight::Native4knReadOnlyPreflight,
-            String,
-        >,
-    },
     Progress {
         operation_id: OperationId,
         event: crate::application::progress::ProgressEvent,
@@ -93,9 +86,6 @@ pub struct ProvisionUpdates {
             crate::application::error::OperationError,
         >,
     >,
-    pub native_readonly_plan: Option<
-        Result<crate::application::provision::native_preflight::Native4knReadOnlyPreflight, String>,
-    >,
     pub progress: Vec<(OperationId, crate::application::progress::ProgressEvent)>,
     pub write: Option<(
         OperationId,
@@ -111,7 +101,6 @@ impl ProvisionUpdates {
         self.key_probe.is_some()
             || !self.key_verify.is_empty()
             || self.plan.is_some()
-            || self.native_readonly_plan.is_some()
             || !self.progress.is_empty()
             || self.write.is_some()
             || self.export.is_some()

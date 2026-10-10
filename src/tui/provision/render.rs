@@ -120,59 +120,6 @@ fn draw_provision_planning_modal(frame: &mut Frame, state: &AppState) {
     });
 }
 
-/// TUI 4Kn审核与正式可写确认页面严格分离。摘要只读且不能被转换
-/// 为 `PreparedProvision`，Enter/导出键均不会进入物理写盘流程。
-fn draw_native_4kn_readonly_review(
-    frame: &mut Frame,
-    area: ratatui::layout::Rect,
-    review: &crate::application::provision::native_preflight::Native4knReadOnlyPreflight,
-) {
-    let lines = vec![
-        Line::from(Span::styled(
-            "4Kn Mode1 · 已认证来源 · 只读计划",
-            secondary(),
-        )),
-        Line::from(""),
-        Line::from(format!(
-            "目标：disk{} · {}",
-            review.disk, review.device_identity
-        )),
-        Line::from(format!(
-            "原生容量：{} 块 × {}B",
-            review.total_sectors, review.logical_sector_bytes
-        )),
-        Line::from(format!(
-            "已核对来源块：{}；计划写集：{} 个完整块",
-            review.verified_original_blocks, review.write_blocks
-        )),
-        Line::from(format!(
-            "二合一区：LBA{}，{} 块；exFAT 元数据：{} 块",
-            review.first_partition_lba, review.first_partition_sectors, review.format_block_count
-        )),
-        Line::from(format!(
-            "原保密区起点：LBA{}（保持保留）",
-            review.preserved_encrypted_partition_lba
-        )),
-        Line::from(""),
-        Line::from("EDPB SHA-256："),
-        Line::from(review.source_backup_sha256.clone()),
-        Line::from("写集 SHA-256："),
-        Line::from(review.planned_write_sha256.clone()),
-        Line::from(""),
-        Line::from(Span::styled(
-            "只读审核 · 未卸载、未写盘、未授权物理提交",
-            danger(),
-        )),
-        Line::from("Enter / 导出不可执行写盘 · Esc 返回配置"),
-    ];
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(crate::tui::ui::card("制盘计划 · 4Kn只读审核", true))
-            .wrap(Wrap { trim: true }),
-        area,
-    );
-}
-
 /// Source/target choice is independent from the limited, source-authenticated
 /// conversion producer. Geometry drafts are never allowed to reach commit.
 fn draw_native_geometry_readonly_review(
@@ -256,9 +203,7 @@ pub(super) fn draw_provision(frame: &mut Frame, area: ratatui::layout::Rect, sta
             draw_provision_planning_modal(frame, state);
         }
         ProvisionStage::Review => {
-            if let Some(readonly) = provision.native_readonly_review.as_ref() {
-                draw_native_4kn_readonly_review(frame, main_area, readonly);
-            } else if let Some(readonly) = provision.native_geometry_review.as_ref() {
+            if let Some(readonly) = provision.native_geometry_review.as_ref() {
                 draw_native_geometry_readonly_review(frame, main_area, readonly);
             } else {
                 draw_provision_review(frame, main_area, state);
