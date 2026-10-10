@@ -17,6 +17,31 @@ pub const OFFICIAL_PARTITION_START_SECTOR: u64 = 63;
 pub const WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES: u64 = 0x7e00;
 pub const DEFAULT_MODE0_BOOT_SECTORS: u64 = 20_417;
 const MIB: u64 = 1024 * 1024;
+/// Configured OEM label-tool value: `GLOBAL/bootSize=10` (MiB of the
+/// *end byte boundary*, not the FAT partition capacity).
+pub const DEFAULT_OEM_BOOT_END_MIB: u64 = 10;
+
+/// Official type1 first partition starts at native LBA63. The configured
+/// boot MiB is an absolute byte boundary (512B: LBA20480; 4Kn: LBA2560).
+/// This applies only to independent type1 FAT boot partitions, not the Mode2
+/// fixed-size compatibility entry or the Mode1 combined share partition.
+pub fn official_boot_sectors_from_end_mib(
+    end_mib: u64,
+    logical_sector_bytes: u64,
+) -> Result<u64, String> {
+    if logical_sector_bytes == 0 {
+        return Err("OEM启动区逻辑扇区大小必须为正数".into());
+    }
+    let end_bytes = end_mib.checked_mul(MIB).ok_or("OEM启动区MiB结束边界溢出")?;
+    // Non-power-of-two block sizes are only supported for protocol-only
+    // geometry planning; round the absolute end boundary up to a whole
+    // native block. OEM 512B and 4Kn remain exact with zero rounding.
+    end_bytes
+        .div_ceil(logical_sector_bytes)
+        .checked_sub(OFFICIAL_PARTITION_START_SECTOR)
+        .filter(|blocks| *blocks > 0)
+        .ok_or_else(|| "OEM启动区结束边界未超过LBA63".into())
+}
 
 /// MBR partition-type byte selected by the current first-party writer for the
 /// four official partition modes.  This is the direct result of the producer's
@@ -406,6 +431,16 @@ pub fn build_official_partition_layout(
         Some(sectors) => sectors
             .checked_mul(sector_size)
             .ok_or("boot partition sector count overflows bytes")?,
+        None if matches!(
+            mode,
+            OfficialPartitionMode::DefaultThreePartition
+                | OfficialPartitionMode::IntranetExtranetDualPartition
+        ) =>
+        {
+            official_boot_sectors_from_end_mib(sizes.boot_mib, sector_size)?
+                .checked_mul(sector_size)
+                .ok_or("OEM boot capacity byte multiplication overflow")?
+        }
         None => mib_bytes(sizes.boot_mib)?,
     };
     let share = match sizes.share_sectors {

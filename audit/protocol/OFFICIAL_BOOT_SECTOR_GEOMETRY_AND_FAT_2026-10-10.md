@@ -24,7 +24,7 @@
 
 ## FAT12/FAT16 的原厂行为证据
 
-- U391 官方 4Kn Mode0 原盘：LBA63、2497个4096B原生块，BPB `BytesPerSector=4096`、`SectorsPerCluster=1`、`Reserved=1`、`NumFATs=2`、`RootEntCnt=512`、`FATSz16=1`，数据簇 `(2497-1-2-4)/1=2490`，因此按 FAT 规范归类 FAT12。该数据来自已存档的 U391 *只读*盘面；**未据此声称原盘的 MBR type 字节已被独立确认**，而不是本项目新生成的虚拟盘。
+- U391 官方 4Kn Mode0 原盘：LBA63、2497个4096B原生块，BPB `BytesPerSector=4096`、`SectorsPerCluster=1`、`Reserved=1`、`NumFATs=2`、`RootEntCnt=512`、`FATSz16=1`，数据簇 `(2497-1-2-4)/1=2490`，因此按 FAT 规范归类 FAT12。这些数据取自已存档的 U391 **只读原盘**，不是本项目生成的虚拟盘；尚未据此声称原盘 MBR 类型字节有独立金标。
 - 原始512B盘样本：type1 从63起、长度20417，MBR type=0x0E、识别为FAT16；不可仅由容量推断簇规格，仍应检查 BPB。
 - 微软 FAT 规范 1.03 第15页规定实际类型依 data cluster count 决定：簇数 <4085 → FAT12；簇数在4085..65524 → FAT16；再以上是 FAT32。来源：`https://www.cs.fsu.edu/~cop4610t/assignments/project3/spec/fatspec.pdf`。格式化器如何选择每簇扇区数仍与其实现有关，不能光凭逻辑块宽度推断所有输出类型。
 - 证据边界：**已证实当前官方 DLL 调用的是通用 FAT；U391 真实4096B样本使用 FAT12**。尚未在 Windows 中使用该 DLL + 原生4Kn块设备执行 `FormatEx` 的端到端制盘，所以不声称所有发布版/OS版本都会选择完全相同的 BPB 字节序列，也不声称1024B/2048B默认最终为某一种 FAT 类型。
@@ -32,5 +32,14 @@
 ## 模式特例和 edpcli 正确实现建议
 
 - 官方 `part=0`（mode0）与`part=3`（mode3）含独立 type1 启动区；`part=1`（mode1）只有 type2 + type4，没有独立启动区，前部“二合一”卷走交换区分支；`part=2`（mode2）有 type1 兼容保留条目，当前 DLL 的 `sub_10046E80` 特殊写入 `0x7E00` 字节，不是标准 `bootSize=10` 的 FAT 启动区，禁止强行套统一公式。
-- 统一原生几何规划；起点63、目标结束边界在字节单位上计算后转换为原生 LBA，协议字段记录真实逻辑块尺寸；依分区 FAT metadata 规模、每簇扇区数和簇数量判断 FAT12/FAT16；文件系统格式化器分别生成完整原生逻辑块；对系统格式化能力不支持的几何或选项明确拒绝，而非扩大默认启动区或暗改设备几何。
+- 统一原生几何规划；起点63、目标结束边界在字节单位上计算后转换为原生 LBA，协议字段记录真实逻辑块尺寸；依分区 FAT 元数据规模、每簇扇区数和簇数量判断 FAT12/FAT16；文件系统格式化器分别生成完整原生逻辑块；对系统格式化能力不支持的几何或选项明确拒绝，而非扩大默认启动区或暗改设备几何。
 - 新功能须保留当前 512B 正向字节金标，建立 4Kn 原厂只读 BPB 几何回归；执行真实 Windows 官方 `FormatEx` 前，4Kn FAT12 的具体引导代码、卷标、FAT Reserved 内容等只可标为“兼容实现”，不写成逐字节复刻完成。
+
+## 2026-10-10 实现与独立验收
+
+- 分区领域 `official_boot_sectors_from_end_mib` 统一计算 MiB 结束边界与原生 LBA；Mode0/Mode3 默认 10MiB，Mode1 无独立 type1，Mode2 保留特殊兼容区域。用户明确输入的扇区数和已识别来源分区的容量不被默认值覆盖。
+- 原生 FAT12 与 FAT16 格式化器的簇数求解器统一参与 `select_native_oem_boot_fat`；设备无关的 CLI/TUI 共用同一原生制盘应用服务。改变启动区容量时按实际几何重新选择 FAT 类型；旧版 512B FAT12 写入口没有被绕过。未认证的 512B 倍数只做协议几何模拟，不宣称文件系统可写。
+- Fast 门禁：8套、0失败；Full 门禁：8套及文档测试、0失败；冗余审计：确认问题0。
+- `scripts/ci/macos-cli-native-virtual-hil.sh`：512B/4096B 两个**自行创建且确认身份**的 macOS Disk Image 通过正式 CLI 14/14 次写入、WAL、重新附接、原始扇区 LBA7/LBA12 和 LCE 回读、独立密码解包与解密、文件系统结构验证，以及普通盘文件写入与重挂持久化。
+- 新制盘 512B Mode0/Mode3 独立测得启动区 LBA63/20417、FAT16、MBR 类型 `0x0E`；4Kn Mode0/Mode3 LBA63/2497、FAT12、MBR 类型 `0x01`。这里的 MBR `0x01` 是 **edpcli 新制盘虚拟盘输出**，不可冒充 U391 原盘 MBR 已取得逐字节金标。
+- 尚需按主计划继续 TUI 完整结果页、WAL 故障恢复、实体 USB 等专项验收；不宣称 Windows 原厂 `FormatEx` 的所有 BPB 字节被完全复刻，也不把本轮功能实现等同于最终发布验收。

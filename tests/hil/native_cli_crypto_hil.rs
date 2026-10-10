@@ -68,9 +68,16 @@ fn check_fat_metadata(
         decoded_fat[0], 0xf8,
         "FAT reserved entry 0 media descriptor"
     );
-    assert_eq!(&decoded_fat[1..4], &[0xff, 0xff, 0xff]);
-    if fs == FilesystemKind::ExFat {
-        assert_eq!(&decoded_fat[4..8], &[0xff, 0xff, 0xff, 0xff]);
+    if fs == FilesystemKind::Fat12 {
+        // FAT12 first two 12-bit entries occupy precisely F8 FF FF.
+        // There is no fourth reserved byte; byte 3 is the start of FAT[2].
+        assert_eq!(&decoded_fat[..3], &[0xf8, 0xff, 0xff]);
+        assert_eq!(&decoded_fat[3..4], &[0x00]);
+    } else {
+        assert_eq!(&decoded_fat[1..4], &[0xff, 0xff, 0xff]);
+        if fs == FilesystemKind::ExFat {
+            assert_eq!(&decoded_fat[4..8], &[0xff, 0xff, 0xff, 0xff]);
+        }
     }
     let mut corrupted = boot.to_vec();
     corrupted[510] ^= 0xff;
@@ -284,6 +291,28 @@ fn formal_cli_native_crypto_readback() {
         let fs = detect_native_boot_sector(&boot, part.sector_count, sector)
             .unwrap()
             .expect("decrypted native filesystem boot must parse");
+        if part.role == edpcli::provision::PartitionRole::Boot {
+            let expected_blocks = if sector == 512 { 20_417 } else { 2_497 };
+            let expected_fs = if sector == 512 {
+                edpcli::application::filesystem::FilesystemKind::Fat16
+            } else {
+                edpcli::application::filesystem::FilesystemKind::Fat12
+            };
+            assert_eq!(part.start_lba, 63, "OEM independent boot start");
+            assert_eq!(part.sector_count, expected_blocks, "OEM 10MiB end boundary");
+            assert_eq!(fs, expected_fs, "OEM native FAT cluster-selected type");
+            assert_eq!(
+                u16::from_le_bytes(boot[11..13].try_into().unwrap()),
+                sector as u16
+            );
+            let mbr = raw.read_block_fresh(0).unwrap();
+            assert_eq!(mbr[446 + 4], if sector == 512 { 0x0e } else { 0x01 });
+            assert_eq!(u32::from_le_bytes(mbr[454..458].try_into().unwrap()), 63);
+            assert_eq!(
+                u32::from_le_bytes(mbr[458..462].try_into().unwrap()),
+                expected_blocks as u32
+            );
+        }
         let decoded_key = if part.physically_encrypted {
             let configured = if part.role == edpcli::provision::PartitionRole::Encrypt {
                 std::env::var("EDPCLI_CRYPTO_HIL_ENCRYPT_PASSWORD").ok()
@@ -313,7 +342,8 @@ fn formal_cli_native_crypto_readback() {
         assert!(
             matches!(
                 fs,
-                edpcli::application::filesystem::FilesystemKind::Fat16
+                edpcli::application::filesystem::FilesystemKind::Fat12
+                    | edpcli::application::filesystem::FilesystemKind::Fat16
                     | edpcli::application::filesystem::FilesystemKind::Fat32
                     | edpcli::application::filesystem::FilesystemKind::ExFat
             ),

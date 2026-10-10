@@ -28,6 +28,44 @@ pub fn verified_usb_compatibility_extent(
     })
 }
 
+/// Target LCE geometry for the same source-aware native CLI/TUI writer.
+/// A Plain source has no LCE record: never place a guessed tail at total-1.
+/// This mirrors the protocol producer's translated CHS geometry (255x63).
+pub fn native_compatibility_extent(
+    total_sectors: u64,
+    logical_sector_bytes: u32,
+) -> Result<ProvisionCompatibilityExtent, String> {
+    if !crate::domain::hardware::valid_native_sector_bytes(logical_sector_bytes) {
+        return Err("unsupported native logical sector bytes".into());
+    }
+    use crate::protocol::lba7_compat::{
+        locate_lba7_compatibility_extent_from_geometry, VERIFIED_USB_SECTORS_PER_TRACK,
+        VERIFIED_USB_TRACKS_PER_CYLINDER,
+    };
+    let per_cylinder =
+        u64::from(VERIFIED_USB_TRACKS_PER_CYLINDER) * u64::from(VERIFIED_USB_SECTORS_PER_TRACK);
+    let cylinders = total_sectors / per_cylinder;
+    let layout = locate_lba7_compatibility_extent_from_geometry(
+        cylinders,
+        VERIFIED_USB_TRACKS_PER_CYLINDER,
+        VERIFIED_USB_SECTORS_PER_TRACK,
+        logical_sector_bytes,
+    )
+    .ok_or("native compatibility LCE cannot fit verified CHS geometry")?;
+    if layout.start_lba < crate::provision::OFFICIAL_PARTITION_START_SECTOR
+        || layout
+            .start_lba
+            .checked_add(layout.size_sectors)
+            .is_none_or(|end| end > total_sectors)
+    {
+        return Err("native compatibility LCE lies outside verified disk geometry".into());
+    }
+    Ok(ProvisionCompatibilityExtent {
+        start_lba: layout.start_lba,
+        sector_count: layout.size_sectors,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

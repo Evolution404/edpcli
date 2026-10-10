@@ -267,9 +267,35 @@ pub fn plan_native_edp_image(
         .map_err(|error| error.to_string())?;
     for part in targets.iter().filter(|part| options.choice(part.role).0) {
         let filesystem = part.filesystem.ok_or("原生格式化分区缺少文件系统")?;
-        let estimated =
-            crate::filesystem::estimate_format_resources(filesystem, part.geometry.sector_count())
+        let estimated = if filesystem == FilesystemKind::Fat12
+            && part.role == crate::provision::PartitionRole::Boot
+        {
+            // FAT12 has a verified *native* FAT formatter, but the legacy
+            // 512B format registry intentionally has no FAT12 writer.
+            // Budget the actual native metadata blocks instead of invoking
+            // the legacy 512B-only resource estimator.
+            let geometry = FilesystemGeometry::new(
+                part.geometry.start_sector,
+                part.geometry.sector_count(),
+                logical_sector_bytes,
+            );
+            let request = FormatRequest {
+                filesystem,
+                volume_label: Some(options.choice(part.role).1.to_owned()),
+                volume_serial: Some(0),
+            };
+            let metadata = FAT12_DRIVER
+                .build_native_format_plan(geometry, &request)
                 .map_err(|error| error.to_string())?;
+            crate::filesystem::FormatResourceEstimate::from_native_sectors(
+                metadata.writes.len() as u64,
+                logical_sector_bytes,
+            )
+            .map_err(|error| error.to_string())?
+        } else {
+            crate::filesystem::estimate_format_resources(filesystem, part.geometry.sector_count())
+                .map_err(|error| error.to_string())?
+        };
         resources = resources
             .checked_add(estimated)
             .map_err(|error| error.to_string())?;
@@ -371,8 +397,16 @@ pub fn plan_native_edp_image(
             return Err("兼容预留区域禁止格式化".into());
         }
         let filesystem = target.filesystem.ok_or("格式化目标未指定文件系统")?;
-        crate::filesystem::validate_writable_filesystem(filesystem)
-            .map_err(|error| error.to_string())?;
+        // Preserve the legacy FAT16/FAT32/exFAT registry contract. Native
+        // FAT12 boot formatting is independently implemented and
+        // verified by FAT12_DRIVER below; it does not upgrade the legacy
+        // 512B FAT12 format capability.
+        let native_boot_fat12 = filesystem == FilesystemKind::Fat12
+            && target.role == crate::provision::PartitionRole::Boot;
+        if !native_boot_fat12 {
+            crate::filesystem::validate_writable_filesystem(filesystem)
+                .map_err(|error| error.to_string())?;
+        }
         let geometry = FilesystemGeometry::new(
             target.geometry.start_sector,
             target.geometry.sector_count(),

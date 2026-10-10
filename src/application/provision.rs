@@ -68,6 +68,10 @@ pub struct OfficialProvisionRequest {
     pub key_domains: KeyDomainSecrets,
     pub volume_label: String,
     pub format: FormatOptions,
+    /// True when the caller's unchecked format roles mean *preserve the
+    /// existing bytes and FileKey*, not "use the destructive CLI defaults".
+    /// The native writer must never reinterpret this as permission to format.
+    pub preserve_unformatted: bool,
     pub force_change_password: Option<bool>,
     pub cancel_password_complexity_check: Option<bool>,
     pub max_share_password_errors: Option<u8>,

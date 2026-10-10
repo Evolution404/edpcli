@@ -186,6 +186,8 @@ fn provision_result_snapshot_rebuilds_complete_official_disk_layout() {
         disk: 4,
         target: ProvisionTarget::Official(OfficialPartitionMode::BootShareCombined),
         total_bytes: total_sectors * 512,
+        logical_sector_bytes: 512,
+        lce_extent: None,
         partitions: vec![
             ProvisionResultPartition {
                 role: Some(PartitionRole::BootShareCombined),
@@ -225,6 +227,75 @@ fn provision_result_snapshot_rebuilds_complete_official_disk_layout() {
             "missing {kind:?}"
         );
     }
+}
+
+#[test]
+fn four_kn_provision_result_preserves_native_geometry_and_selection() {
+    use edpcli::{
+        application::filesystem::FilesystemKind,
+        provision::{OfficialPartitionMode, PartitionRole, ProvisionTarget},
+        tui::{
+            disk_layout::DiskRegionKind,
+            state::{ProvisionResultPartition, ProvisionResultSnapshot},
+        },
+    };
+    const BLOCK: u64 = 4096;
+    let snapshot = ProvisionResultSnapshot {
+        disk: 5,
+        target: ProvisionTarget::Official(OfficialPartitionMode::DefaultThreePartition),
+        total_bytes: 4_294_967_296,
+        logical_sector_bytes: BLOCK as u32,
+        lce_extent: Some((1_044_001, 1)),
+        partitions: vec![
+            ProvisionResultPartition {
+                role: Some(PartitionRole::Boot),
+                filesystem: Some(FilesystemKind::Fat12),
+                start_lba: 63,
+                size_bytes: 2497 * BLOCK,
+                selected_for_format: true,
+                disposition: None,
+            },
+            ProvisionResultPartition {
+                role: Some(PartitionRole::Share),
+                filesystem: Some(FilesystemKind::ExFat),
+                start_lba: 2560,
+                size_bytes: 778_240 * BLOCK,
+                selected_for_format: true,
+                disposition: None,
+            },
+            ProvisionResultPartition {
+                role: Some(PartitionRole::Encrypt),
+                filesystem: Some(FilesystemKind::ExFat),
+                start_lba: 780_800,
+                size_bytes: 262_144 * BLOCK,
+                selected_for_format: true,
+                disposition: None,
+            },
+        ],
+    };
+    let model = snapshot
+        .disk_layout_model()
+        .expect("4Kn real-sized result must have full layout");
+    assert_eq!(model.logical_sector_bytes, 4096);
+    assert_eq!(model.total_sectors, 1_048_576);
+    assert!(model
+        .segments
+        .iter()
+        .any(|seg| seg.kind == DiskRegionKind::Lce && seg.start_lba == 1_044_001));
+    assert!(model
+        .segments
+        .iter()
+        .any(|seg| seg.kind == DiskRegionKind::Boot
+            && seg.start_lba == 63
+            && seg.sector_count == 2497));
+    let selected = snapshot.partition_selection(0).unwrap();
+    assert_eq!(selected.end_exclusive, 2560);
+    assert_eq!(snapshot.partition_index_for_selection(&selected), Some(0));
+    assert_eq!(
+        snapshot.partition_index_for_selection(&snapshot.partition_selection(1).unwrap()),
+        Some(1)
+    );
+    assert_eq!(snapshot.total_bytes, 4_294_967_296);
 }
 
 #[test]

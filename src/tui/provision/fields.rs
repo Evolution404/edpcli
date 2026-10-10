@@ -336,7 +336,19 @@ impl AppState {
             crate::provision::OfficialPartitionSizes::new(32, 64, 128),
             512,
             crate::provision::OfficialPartitionFilesystems {
-                boot: self.provision.form.boot_fs,
+                boot: self
+                    .provision_resolved_prefill()
+                    .ok()
+                    .and_then(|(prefill, _)| {
+                        Some((prefill.boot_start_lba?, prefill.boot?.sectors()))
+                    })
+                    .and_then(|(start, sectors)| {
+                        self.provision
+                            .form
+                            .effective_boot_filesystem(start, sectors)
+                            .ok()
+                    })
+                    .unwrap_or(self.provision.form.boot_fs),
                 share: self.provision.form.share_fs,
                 encrypt: self.provision.form.encrypt_fs,
             },

@@ -39,11 +39,12 @@ pub use keys::{
     FileKeyWrapMode, LegacyLba7KeyMaterial, OfficialLabelAlgorithm, ProvisionKeyMaterial,
 };
 pub use layout::{
-    build_official_partition_layout, official_format_targets_with_filesystems,
-    official_mbr_partition_type, official_partition_role, physical_partition_encryption,
-    visible_mbr_partition_type, OfficialPartitionFilesystems, OfficialPartitionGeometry,
-    OfficialPartitionMode, OfficialPartitionSizes, OfficialProvisionPlan, PartitionFormatTarget,
-    PartitionRole, DEFAULT_MODE0_BOOT_SECTORS, OFFICIAL_PARTITION_START_SECTOR,
+    build_official_partition_layout, official_boot_sectors_from_end_mib,
+    official_format_targets_with_filesystems, official_mbr_partition_type, official_partition_role,
+    physical_partition_encryption, visible_mbr_partition_type, OfficialPartitionFilesystems,
+    OfficialPartitionGeometry, OfficialPartitionMode, OfficialPartitionSizes,
+    OfficialProvisionPlan, PartitionFormatTarget, PartitionRole, DEFAULT_MODE0_BOOT_SECTORS,
+    DEFAULT_OEM_BOOT_END_MIB, OFFICIAL_PARTITION_START_SECTOR,
     WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES,
 };
 pub use lce::{build_lce_ciphertext, build_native_lce_ciphertext, lce_plaintext};

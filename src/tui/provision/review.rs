@@ -226,7 +226,9 @@ impl ProvisionConfirmationViewModel {
                         partition_segments,
                     )
                 }
-                .map_err(|error| format!("原生制盘最终布局生成失败: {error}"))?;
+                .map_err(|error| format!("原生制盘最终布局生成失败: {error}"))?
+                .with_logical_sector_bytes(native.plan.sector_bytes)
+                .map_err(|error| format!("原生制盘逻辑块大小无效: {error}"))?;
                 layout
                     .validate_complete()
                     .map_err(|error| format!("原生制盘最终布局不完整: {error}"))?;

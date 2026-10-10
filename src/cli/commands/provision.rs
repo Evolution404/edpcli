@@ -53,6 +53,7 @@ fn provision_request(opts: &ProvisionNewOpts) -> crate::application::provision::
                         share_fs: opts.share_fs,
                         encrypt_fs: opts.encrypt_fs,
                     },
+                    preserve_unformatted: false,
                     force_change_password: opts.force_change_password,
                     cancel_password_complexity_check: opts.cancel_password_complexity_check,
                     max_share_password_errors: opts.max_share_password_errors,

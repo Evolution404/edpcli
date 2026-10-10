@@ -183,8 +183,13 @@ fn native_4kn_mode0_requests_readonly_key_probe_and_independent_password_verific
         state.provision().form.encrypt_source_knowledge,
         SourcePasswordKnowledge::UserVerified
     );
-    // Source authentication cannot make an unapproved 4Kn physical plan.
-    assert!(state.provision_request().unwrap_err().contains("4Kn"));
+    // Native geometry is not a separate TUI-only write permission: the
+    // shared native planner and transaction revalidate all physical facts.
+    assert!(state
+        .provision_request()
+        .as_ref()
+        .err()
+        .is_none_or(|e| !e.contains("4Kn")));
 
     // The 4Kn source-bound audit has an independent review state which cannot
     // be converted into PreparedProvision or accepted by Enter / Export.
@@ -404,7 +409,7 @@ fn plain_source_can_review_native_edp_geometry_without_source_lce_or_write_permi
     assert_eq!(draft.source_kind, DiskProvisionKind::Plain);
     assert_eq!(draft.target_kind, ProvisionKind::Mode1);
     assert!(!draft.lce_is_source_verified);
-    assert_eq!(draft.lce_lba, Some(draft.total_sectors - 1));
+    assert_eq!(draft.lce_lba, Some(62_476_561)); // Same translated-CHS target as native CLI
     assert!(!draft.partitions.is_empty());
     state.provision_set_planning();
     state.provision_finish_native_geometry_readonly_plan(Ok(draft));
@@ -508,6 +513,15 @@ fn virtual_4kn_disk_uses_native_prepared_review_and_write_eligibility() {
     assert_eq!(state.provision().stage, ProvisionStage::Review);
     let preview = state.provision_confirmation_view_model().unwrap();
     assert_eq!(preview.target.disk, 6);
+    assert_eq!(preview.layout.logical_sector_bytes, 4096);
+    assert_eq!(
+        preview.layout.sector_byte_len(preview.target.total_sectors),
+        Some(total * 4096)
+    );
+    assert_eq!(
+        preview.layout.sector_byte_len(total - 2048),
+        Some((total - 2048) * 4096)
+    );
     let primary = preview
         .regions
         .iter()

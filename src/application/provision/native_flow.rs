@@ -67,6 +67,48 @@ type NativeOfficialPlanResult = (
     String,
 );
 
+fn native_rebuild_format_policy(
+    mode: crate::provision::OfficialPartitionMode,
+    request: &OfficialProvisionRequest,
+) -> Result<FormatOptions, String> {
+    use crate::provision::OfficialPartitionMode as Mode;
+    let has_boot = matches!(
+        mode,
+        Mode::DefaultThreePartition | Mode::IntranetExtranetDualPartition
+    );
+    let has_share = mode != Mode::WholeDiskEncrypted;
+    let has_encrypt = mode != Mode::IntranetExtranetDualPartition;
+    let mut options = request.format.clone();
+    if !request.preserve_unformatted && !options.boot && !options.share && !options.encrypt {
+        // CLI's implicit full-rebuild default is explicitly destructive.
+        options.boot = has_boot;
+        options.share = has_share;
+        options.encrypt = has_encrypt;
+    }
+    let not_rebuilt = [
+        (has_boot && !options.boot, "启动区"),
+        (
+            has_share && !options.share,
+            if mode == Mode::BootShareCombined {
+                "二合一区"
+            } else {
+                "交换区"
+            },
+        ),
+        (has_encrypt && !options.encrypt, "保密区"),
+    ]
+    .into_iter()
+    .filter_map(|(missing, label)| missing.then_some(label))
+    .collect::<Vec<_>>();
+    if !not_rebuilt.is_empty() {
+        return Err(format!(
+            "{}已选择保留，但统一原生写盘路径尚未复用来源 FileKey 与分区元数据；禁止将‘保留’自动改为‘格式化’，也禁止生成新密钥后保留旧密文。本次计划已停止，不会写盘。需完成来源感知原生保留实现后才能无格式化继续。",
+            not_rebuilt.join("、")
+        ));
+    }
+    Ok(options)
+}
+
 fn generate_official_native_plan(
     total: u64,
     sector: u32,
@@ -129,7 +171,9 @@ fn generate_official_native_plan(
     )?;
     let compatibility = native_compatibility_extent(total, sector)?;
     let mut sizes = OfficialPartitionSizes::new(
-        request.boot_mib.unwrap_or(32),
+        request
+            .boot_mib
+            .unwrap_or(crate::provision::DEFAULT_OEM_BOOT_END_MIB),
         request.share_mib.unwrap_or(64),
         request.encrypt_mib.unwrap_or(128),
     );
@@ -143,19 +187,33 @@ fn generate_official_native_plan(
         sizes = sizes.with_encrypt_sectors(value);
     }
 
-    let mut options: FormatOptions = request.format.clone();
-    // Fresh destructive provisioning cannot leave unformatted ciphertext
-    // under a newly generated FileKey. When nothing is explicitly selected,
-    // initialize all present roles rather than producing unusable partitions.
-    if !options.boot && !options.share && !options.encrypt {
-        options.boot = matches!(
-            mode,
-            crate::provision::OfficialPartitionMode::DefaultThreePartition
-                | crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition
-        );
-        options.share = mode != crate::provision::OfficialPartitionMode::WholeDiskEncrypted;
-        options.encrypt =
-            mode != crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition;
+    // Rebuilding a protocol generates new partition FileKeys below. A
+    // preserved encrypted extent MUST carry over the original LBA7/LBA12
+    // wrapped key materials. Never turn TUI "保留" into "格式化" silently.
+    let mut options = native_rebuild_format_policy(mode, request)?;
+    // Current OEM writer passes `L"FAT"` to FormatEx: FAT12/FAT16 must
+    // come from the native volume's actual cluster count. The CLI/TUI share
+    // this application policy and never branch by USB vs Disk Image.
+    if matches!(
+        mode,
+        crate::provision::OfficialPartitionMode::DefaultThreePartition
+            | crate::provision::OfficialPartitionMode::IntranetExtranetDualPartition
+    ) && matches!(
+        options.boot_fs,
+        crate::filesystem::FilesystemKind::Fat12 | crate::filesystem::FilesystemKind::Fat16
+    ) {
+        let boot =
+            crate::provision::build_official_partition_layout(mode, sizes, u64::from(sector))?
+                .into_iter()
+                .next()
+                .ok_or("官方模式缺少独立启动区")?;
+        options.boot_fs = crate::filesystem::select_native_oem_boot_fat(
+            crate::filesystem::FilesystemGeometry::new(
+                request.boot_start_lba.unwrap_or(boot.start_sector),
+                boot.sector_count(),
+                sector,
+            ),
+        )?;
     }
     let key_mode = request.algorithm.file_key_wrap_mode();
     let mut first_key = [0u8; 16];
@@ -332,6 +390,13 @@ pub fn prepare_native_provision_on_disk(
     disk: u32,
     request: &ProvisionRequest,
 ) -> Result<NativePreparedProvision, String> {
+    // Validate intent before opening even a read-only device. TUI preview and
+    // password verification may still construct requests for preserved data;
+    // it is the *destructive native plan* which must reject unsafe key reuse.
+    if let ProvisionRequest::Official(official) = request {
+        let mode = official.target.official_mode().ok_or("目标不是官方模式")?;
+        native_rebuild_format_policy(mode, official)?;
+    }
     let session = crate::application::target_session::TargetSession::<
         crate::application::target_session::ReadOnly,
     >::open_usb(runner, disk)
@@ -489,6 +554,87 @@ pub fn commit_prepared_native_provision(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preserve_flags_never_get_rewritten_to_destructive_format_or_new_filekey() {
+        use crate::application::provision::{FormatOptions, OfficialProvisionRequest};
+        use crate::provision::{KeyDomainSecrets, OfficialPartitionMode as Mode, ProvisionTarget};
+        let mut request = OfficialProvisionRequest {
+            target: ProvisionTarget::Official(Mode::DefaultThreePartition),
+            algorithm: crate::provision::OfficialLabelAlgorithm::Sms4,
+            boot_start_lba: None,
+            share_start_lba: None,
+            encrypt_start_lba: None,
+            boot_mib: None,
+            boot_sectors: None,
+            share_mib: None,
+            share_sectors: None,
+            encrypt_mib: None,
+            encrypt_sectors: None,
+            label_id: String::new(),
+            user: String::new(),
+            dept: String::new(),
+            label: String::new(),
+            lba8_identity: crate::provision::Lba8Identity::default(),
+            key_domains: KeyDomainSecrets::default(),
+            volume_label: String::new(),
+            format: FormatOptions::default(),
+            preserve_unformatted: true,
+            force_change_password: None,
+            cancel_password_complexity_check: None,
+            max_share_password_errors: None,
+            max_encrypt_password_errors: None,
+        };
+        for (mode, roles) in [
+            (
+                Mode::DefaultThreePartition,
+                &["启动区", "交换区", "保密区"][..],
+            ),
+            (Mode::BootShareCombined, &["二合一区", "保密区"][..]),
+            (Mode::WholeDiskEncrypted, &["保密区"][..]),
+            (
+                Mode::IntranetExtranetDualPartition,
+                &["启动区", "交换区"][..],
+            ),
+        ] {
+            let error = native_rebuild_format_policy(mode, &request).unwrap_err();
+            assert!(error.contains("不会写盘"));
+            assert!(error.contains("FileKey"));
+            for role in roles {
+                assert!(error.contains(role), "{mode:?} {role}: {error}");
+            }
+        }
+        // CLI's unselected *default* means a deliberate destructive rebuild,
+        // not a promise to preserve existing ciphertext or key material.
+        request.preserve_unformatted = false;
+        for mode in [
+            Mode::DefaultThreePartition,
+            Mode::BootShareCombined,
+            Mode::WholeDiskEncrypted,
+            Mode::IntranetExtranetDualPartition,
+        ] {
+            let chosen = native_rebuild_format_policy(mode, &request).unwrap();
+            assert_eq!(
+                chosen.boot,
+                matches!(
+                    mode,
+                    Mode::DefaultThreePartition | Mode::IntranetExtranetDualPartition
+                )
+            );
+            assert_eq!(chosen.share, mode != Mode::WholeDiskEncrypted);
+            assert_eq!(chosen.encrypt, mode != Mode::IntranetExtranetDualPartition);
+        }
+        // An explicitly partial rebuild is unsafe on either frontend.
+        request.format.share = true;
+        let error =
+            native_rebuild_format_policy(Mode::DefaultThreePartition, &request).unwrap_err();
+        assert!(error.contains("启动区"));
+        assert!(error.contains("保密区"));
+        request.preserve_unformatted = true;
+        request.format.boot = true;
+        request.format.encrypt = true;
+        assert!(native_rebuild_format_policy(Mode::DefaultThreePartition, &request).is_ok());
+    }
+
     #[test]
     fn geometry_locator_matches_lce_512_and_4kn() {
         for sector in [512, 1024, 2048, 4096, 8192] {

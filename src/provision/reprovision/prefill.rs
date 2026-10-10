@@ -47,7 +47,19 @@ impl ProvisionPrefill {
                     self.boot_start_lba.ok_or("missing boot start")?,
                     self.boot.ok_or("missing boot capacity")?,
                     false,
-                    Some(FilesystemKind::Fat16),
+                    Some(if matches!(self.logical_sector_bytes, 512 | 4096) {
+                        crate::filesystem::select_native_oem_boot_fat(
+                            crate::filesystem::FilesystemGeometry::new(
+                                self.boot_start_lba.ok_or("missing boot start")?,
+                                self.boot.ok_or("missing boot capacity")?.sectors(),
+                                self.logical_sector_bytes,
+                            ),
+                        )?
+                    } else {
+                        // Pure protocol geometry accepts positive 512B multiples.
+                        // Uncertified sectors must NOT enter native FAT writes.
+                        FilesystemKind::Fat16
+                    }),
                 );
                 push(
                     PartitionRole::Share,
@@ -109,7 +121,19 @@ impl ProvisionPrefill {
                     self.boot_start_lba.ok_or("missing boot start")?,
                     self.boot.ok_or("missing boot capacity")?,
                     false,
-                    Some(FilesystemKind::Fat16),
+                    Some(if matches!(self.logical_sector_bytes, 512 | 4096) {
+                        crate::filesystem::select_native_oem_boot_fat(
+                            crate::filesystem::FilesystemGeometry::new(
+                                self.boot_start_lba.ok_or("missing boot start")?,
+                                self.boot.ok_or("missing boot capacity")?.sectors(),
+                                self.logical_sector_bytes,
+                            ),
+                        )?
+                    } else {
+                        // Pure protocol geometry accepts positive 512B multiples.
+                        // Uncertified sectors must NOT enter native FAT writes.
+                        FilesystemKind::Fat16
+                    }),
                 );
                 push(
                     PartitionRole::Share,
@@ -168,10 +192,7 @@ pub fn prefill_for_target_mode(
         OfficialPartitionMode::DefaultThreePartition
         | OfficialPartitionMode::IntranetExtranetDualPartition => {
             source_capacity(boot_old)?.or(Some(exact(
-                DEFAULT_MODE0_BOOT_SECTORS
-                    .checked_mul(512)
-                    .ok_or("default boot byte size overflows")?
-                    .div_ceil(sector_size),
+                official_boot_sectors_from_end_mib(DEFAULT_OEM_BOOT_END_MIB, sector_size)?,
                 CapacitySource::SystemDefault,
             )?))
         }

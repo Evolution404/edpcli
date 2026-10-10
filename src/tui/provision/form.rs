@@ -487,9 +487,45 @@ impl ProvisionForm {
         Self::parse_decimal_unit_to_sectors_rounded(quick, unit, label, logical_sector_bytes)
     }
 
+    /// OEM `FAT` selects its FAT width using native cluster geometry.
+    /// Non-FAT family choices (FAT32/exFAT) remain explicit user options.
+    pub(super) fn effective_boot_filesystem(
+        &self,
+        start_lba: u64,
+        sectors: u64,
+    ) -> Result<crate::filesystem::FilesystemKind, String> {
+        use crate::filesystem::FilesystemKind;
+        if matches!(self.boot_fs, FilesystemKind::Fat12 | FilesystemKind::Fat16) {
+            crate::filesystem::select_native_oem_boot_fat(
+                crate::filesystem::FilesystemGeometry::new(
+                    start_lba,
+                    sectors,
+                    self.logical_sector_bytes,
+                ),
+            )
+        } else {
+            Ok(self.boot_fs)
+        }
+    }
+
     pub(super) fn apply_prefill(&mut self, prefill: &crate::provision::ProvisionPrefill) {
         use crate::provision::CapacityInputMode;
         self.logical_sector_bytes = prefill.logical_sector_bytes;
+        // The OEM requests generic "FAT". Infer the actual FAT width from
+        // the native formatter's cluster solver, never from `sector_size==4096`.
+        self.boot_fs = prefill
+            .boot
+            .and_then(|boot| {
+                crate::filesystem::select_native_oem_boot_fat(
+                    crate::filesystem::FilesystemGeometry::new(
+                        prefill.boot_start_lba.unwrap_or(63),
+                        boot.sectors(),
+                        prefill.logical_sector_bytes,
+                    ),
+                )
+                .ok()
+            })
+            .unwrap_or(crate::filesystem::FilesystemKind::Fat16);
         self.boot_capacity_edited = false;
         self.share_capacity_edited = false;
         self.encrypt_capacity_edited = false;

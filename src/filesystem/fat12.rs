@@ -84,7 +84,7 @@ fn put32(dst: &mut [u8], offset: usize, value: u32) {
 
 /// Native FAT12 geometry solver. The on-disk FAT uses packed 12-bit entries,
 /// not FAT16's 16-bit indexing, and root directory entries are fixed at 32B.
-fn choose_native_fat12_geometry(total: u64, bps: u32) -> Option<(u8, u16, u64)> {
+pub(super) fn choose_native_fat12_geometry(total: u64, bps: u32) -> Option<(u8, u16, u64)> {
     let root_sectors = (u64::from(ROOT_ENTRIES) * 32).div_ceil(u64::from(bps));
     for spc in [1u64, 2, 4, 8, 16, 32, 64, 128] {
         if spc.checked_mul(u64::from(bps))? > 65_536 {
@@ -115,8 +115,9 @@ fn choose_native_fat12_geometry(total: u64, bps: u32) -> Option<(u8, u16, u64)> 
 }
 
 impl Fat12Driver {
-    /// Virtual-only native FAT12 metadata generator. Does not enable the
-    /// legacy 512B provision writer, whose FAT12 capability remains disabled.
+    /// Build full-native-block FAT12 metadata for the shared provisioning plan.
+    /// The native write lease/WAL separately controls device writes; this does
+    /// not enable the legacy 512B FAT12 formatting implementation.
     pub fn build_native_format_plan(
         &self,
         geometry: FilesystemGeometry,

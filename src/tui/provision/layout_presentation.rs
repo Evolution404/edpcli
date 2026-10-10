@@ -193,7 +193,7 @@ impl AppState {
         rows.push(Detail::muted(usable_summary));
         if model.logical_sector_bytes != crate::common::SECTOR as u32 {
             rows.push(Detail::warning(format!(
-                "{}B 原生布局 · 来源密码须独立验证 · 非512B实体制盘尚未获授权",
+                "{}B 原生布局 · 来源密码独立验证 · 正式写入将再次核验身份、几何及WAL",
                 model.logical_sector_bytes
             )));
         }

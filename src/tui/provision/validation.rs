@@ -13,44 +13,22 @@ impl AppState {
         self.provision.kind.target().official_mode()
     }
 
-    /// Read-only layout projection uses the observed device-native geometry.
-    /// Source LCE is observed for registered EDP media; a Plain source may
-    /// show a provisional LCE reservation at disk end *only as a draft*.
-    /// Neither variant authorizes native physical writing.
+    /// Target layout projection uses the same native translated-CHS LCE
+    /// locator as the official application plan. A source LCE is verified
+    /// separately during source classification, even for destructive rebuild.
+    /// Projection itself never grants a write lease or bypasses WAL/identity.
     pub(super) fn provision_preview_geometry(&self) -> Result<(u64, u32, u64), String> {
         let row = self.selected_device().ok_or("目标 USB 已不存在")?;
         let geometry = row.layout_geometry()?;
         let total = geometry.native_sector_count;
-        let lce_start = if geometry.logical_sector_bytes == 512 {
-            crate::application::provision_geometry::verified_usb_compatibility_extent(total)
-                .ok_or("目标不符合已验证的512B制盘几何")?
-                .start_lba
-        } else if crate::domain::hardware::valid_native_sector_bytes(geometry.logical_sector_bytes)
-        {
-            let required_lce_blocks = 3072u64.div_ceil(u64::from(geometry.logical_sector_bytes));
-            if let Some(lce) = row.lce.as_ref() {
-                if lce.sector_count < required_lce_blocks
-                    || lce
-                        .start_lba
-                        .checked_add(lce.sector_count)
-                        .is_none_or(|end| end > total)
-                {
-                    return Err("来源LCE指针、大小或完整原生块范围无效".into());
-                }
-                lce.start_lba
-            } else if row.provision_kind == crate::provision::DiskProvisionKind::Plain {
-                // A *proposal*, not an observed source LCE. Usable only for
-                // read-only layout drafts, never credentials or physical writes.
-                total
-                    .checked_sub(required_lce_blocks)
-                    .filter(|start| *start > crate::provision::OFFICIAL_PARTITION_START_SECTOR)
-                    .ok_or("普通盘空间不足以预留目标LCE")?
-            } else {
-                return Err("来源EDP盘未提供可信LCE；禁止推断现有保密区边界".into());
-            }
-        } else {
-            return Err("当前逻辑扇区大小无效；拒绝规划".into());
-        };
+        // Destructive target layout uses the *same* translated CHS LCE
+        // locator as the native application writer. Source LCE belongs to
+        // input classification, not to the target's writable capacity.
+        let lce_start = crate::application::provision_geometry::native_compatibility_extent(
+            total,
+            geometry.logical_sector_bytes,
+        )?
+        .start_lba;
         Ok((total, geometry.logical_sector_bytes, lce_start))
     }
 
@@ -329,15 +307,12 @@ impl AppState {
             .form
             .encryption_algorithm
             .validate_first_party_write()?;
-        if self
-            .selected_device()
-            .ok_or("目标 USB 已不存在")?
-            .layout_geometry()?
-            .logical_sector_bytes
-            != 512
-        {
-            return Err("4Kn 制盘尚未通过写入/挂载认证；当前只读预览禁止生成实体写盘计划".into());
-        }
+        // The native CLI and TUI share the exact same application prepare/
+        // commit service. Native block size is a validated geometry input,
+        // not a UI-only write permission switch.
+        self.selected_device()
+            .ok_or("目标设备已不存在")?
+            .layout_geometry()?;
         let mode = self
             .provision
             .kind
@@ -518,10 +493,17 @@ impl AppState {
                 boot_label: self.provision.form.volume_label.trim().to_string(),
                 share_label: self.provision.form.share_label.trim().to_string(),
                 encrypt_label: self.provision.form.encrypt_label.trim().to_string(),
-                boot_fs: self.provision.form.boot_fs,
+                boot_fs: if let (Some(boot_start), Some(boot)) =
+                    (resolved.boot_start_lba, resolved.boot)
+                {
+                    form.effective_boot_filesystem(boot_start, boot.sectors())?
+                } else {
+                    form.boot_fs
+                },
                 share_fs: self.provision.form.share_fs,
                 encrypt_fs: self.provision.form.encrypt_fs,
             },
+            preserve_unformatted: true,
             force_change_password: Some(self.provision.form.force_change_password),
             cancel_password_complexity_check: Some(
                 self.provision.form.cancel_password_complexity_check,

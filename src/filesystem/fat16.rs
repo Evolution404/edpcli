@@ -145,8 +145,9 @@ fn put_u32(dst: &mut [u8], offset: usize, value: u32) {
 }
 
 impl Fat16Driver {
-    /// Generate a full-native-block FAT16 metadata image for a virtual disk.
-    /// Does not enable 4Kn physical formatting or change the legacy 512B writer.
+    /// Build full-native-block FAT16 metadata for the shared provision plan.
+    /// This pure generator cannot grant disk write access or bypass the native
+    /// application's identity pin, write lease, WAL, or verification.
     pub fn build_native_format_plan(
         &self,
         geometry: FilesystemGeometry,
@@ -499,7 +500,7 @@ impl FilesystemDriver for Fat16Driver {
 }
 
 /// Shared FAT16 layout solver for 512B and 4Kn. Both paths use native LBAs.
-fn choose_format_geometry_for_sector_size(
+pub(super) fn choose_format_geometry_for_sector_size(
     volume_sectors: u64,
     sector_bytes: u32,
 ) -> Result<(u8, u16), FilesystemError> {

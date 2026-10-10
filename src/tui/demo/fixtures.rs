@@ -369,6 +369,8 @@ pub(super) fn provision_result_snapshot(row: &Row) -> ProvisionResultSnapshot {
         disk: row.disk,
         target,
         total_bytes: row.size,
+        logical_sector_bytes: 512,
+        lce_extent: None,
         partitions,
     }
 }

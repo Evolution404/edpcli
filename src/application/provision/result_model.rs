@@ -13,14 +13,26 @@ pub struct ProvisionResultSnapshot {
     pub disk: u32,
     pub target: crate::provision::ProvisionTarget,
     pub total_bytes: u64,
+    /// Native device logical block width, not EDP's fixed 512-byte field view.
+    pub logical_sector_bytes: u32,
+    /// Committed plan's LCE position in native LBAs; never reconstructed
+    /// from 512B capacity assumptions after the original plan is consumed.
+    pub lce_extent: Option<(u64, u64)>,
     pub partitions: Vec<ProvisionResultPartition>,
 }
 
 impl ProvisionResultSnapshot {
-    pub fn from_prepared(
-        prepared: &crate::application::provision::PreparedProvision,
-        total_bytes: u64,
-    ) -> Self {
+    pub fn from_prepared(prepared: &crate::application::provision::PreparedProvision) -> Self {
+        let logical_sector_bytes = match prepared {
+            crate::application::provision::PreparedProvision::Native(native) => {
+                native.plan.sector_bytes
+            }
+            _ => crate::common::SECTOR as u32,
+        };
+        let total_bytes = prepared
+            .total_sectors()
+            .saturating_mul(u64::from(logical_sector_bytes));
+        let lce_extent = prepared.lce_extent();
         let partitions = match prepared {
             crate::application::provision::PreparedProvision::Official(official) => official
                 .format_targets
@@ -64,6 +76,8 @@ impl ProvisionResultSnapshot {
             disk: prepared.disk(),
             target: prepared.target(),
             total_bytes,
+            logical_sector_bytes,
+            lce_extent,
             partitions,
         }
     }

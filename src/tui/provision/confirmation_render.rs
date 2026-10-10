@@ -12,11 +12,10 @@ fn provision_confirmation_target(
 ) -> String {
     let mut parts = vec![
         format!("disk{}", view.target.disk),
-        crate::common::fmt_capacity(
-            view.target
-                .total_sectors
-                .saturating_mul(crate::common::SECTOR as u64),
-        ),
+        view.layout
+            .sector_byte_len(view.target.total_sectors)
+            .map(crate::common::fmt_capacity)
+            .unwrap_or_else(|| "容量溢出".into()),
     ];
     if let (Some(vid), Some(pid)) = (view.target.vid, view.target.pid) {
         parts.push(format!("VID:PID {vid:04X}:{pid:04X}"));

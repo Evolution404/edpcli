@@ -25,11 +25,18 @@ impl PlanColumn {
         }
     }
 
-    fn value(self, region: &crate::tui::state::ProvisionConfirmationRegion) -> String {
+    fn value(
+        self,
+        region: &crate::tui::state::ProvisionConfirmationRegion,
+        model: &crate::tui::disk_layout::DiskLayoutModel,
+    ) -> String {
         match self {
             Self::Region => safe(&region.label),
             Self::LbaRange => lba_range(region),
-            Self::Capacity => AppState::format_sector_size(region.sector_count),
+            Self::Capacity => model
+                .sector_byte_len(region.sector_count)
+                .map(crate::common::fmt_capacity)
+                .unwrap_or_else(|| "容量溢出".into()),
             Self::Handling => region.action.label().to_string(),
             Self::Data => region.data_effect.label().to_string(),
             Self::Filesystem => region.filesystem_effect.label(),
@@ -108,7 +115,9 @@ pub(super) fn draw_partition_plan(
             TableRow::new(
                 columns
                     .iter()
-                    .map(|column| Cell::from(column.value(region)).style(column.style(region)))
+                    .map(|column| {
+                        Cell::from(column.value(region, &view.layout)).style(column.style(region))
+                    })
                     .collect::<Vec<_>>(),
             )
         })
@@ -140,7 +149,12 @@ fn project_rows(
 ) -> Vec<Vec<String>> {
     view.regions[start..end]
         .iter()
-        .map(|region| columns.iter().map(|column| column.value(region)).collect())
+        .map(|region| {
+            columns
+                .iter()
+                .map(|column| column.value(region, &view.layout))
+                .collect()
+        })
         .collect()
 }
 
