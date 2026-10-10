@@ -654,9 +654,10 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
         return Err("错误: provision 需要动作 plan / image / write".into());
     };
     let tail = &rest[1..];
-    if action == "verify-source" {
+    if matches!(action, "verify-source" | "restore-preview") {
         let mut disk = None;
         let mut backup = None;
+        let mut include_virtual = false;
         let mut i = 0;
         while i < tail.len() {
             match flag_name(&tail[i]) {
@@ -668,14 +669,21 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
                     let arg = take_value(tail, &mut i, "--backup")?;
                     set_once(&mut backup, arg, "--backup")?;
                 }
-                other => return Err(format!("错误: verify-source 不认识选项 {other}")),
+                "--include-virtual" => {
+                    set_switch(&mut include_virtual, &tail[i], "--include-virtual")?;
+                }
+                other => return Err(format!("错误: {action} 不认识选项 {other}")),
             }
             i += 1;
         }
-        return Ok(Parsed::Provision(ProvisionAction::VerifySource {
-            disk: disk.ok_or("错误: verify-source 必须提供 --disk N")?,
-            backup: backup.ok_or("错误: verify-source 必须提供 --backup FILE")?,
-        }));
+        let disk = disk.ok_or_else(|| format!("错误: {action} 必须提供 --disk N"))?;
+        let backup = backup.ok_or_else(|| format!("错误: {action} 必须提供 --backup FILE"))?;
+        let action = if action == "restore-preview" {
+            ProvisionAction::NativeRestorePreview { disk, backup }
+        } else {
+            ProvisionAction::VerifySource { disk, backup }
+        };
+        return Ok(Parsed::Provision(action));
     }
     // Source EDPB is read-only provenance input. Target geometry, passwords,
     // and formatting intent go through exactly the ordinary native planner.

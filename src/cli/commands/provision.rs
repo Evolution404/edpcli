@@ -428,6 +428,55 @@ pub(in crate::cli) fn provision_flow(runner: &SysRunner, action: ProvisionAction
                 Err(message) => finish(Err(crate::common::EdpCliError::new(EXIT_TARGET, message))),
             }
         }
+        ProvisionAction::NativeRestorePreview { disk, backup } => {
+            if let Err(error) = guard_usb_disk(runner, disk) {
+                return finish(Err(error));
+            }
+            if !elevate::is_root() {
+                let argv = SecretArgv(std::env::args().skip(1).collect());
+                return elevate::ensure_elevated(&argv);
+            }
+            let session = match crate::application::target_session::TargetSession::<
+                crate::application::target_session::ReadOnly,
+            >::open_usb(runner, disk)
+            {
+                Ok(session) => session,
+                Err(error) => return finish(Err(error)),
+            };
+            let geometry = match session.native_geometry() {
+                Ok(value) => value,
+                Err(error) => return finish(Err(error)),
+            };
+            let probe = match crate::platform::system::native_provision_probe(runner, disk) {
+                Ok(value) => value,
+                Err(message) => return finish(Err(EdpCliError::new(EXIT_TARGET, message))),
+            };
+            let identity = match crate::provision::TargetIdentity::from_probe(
+                &probe,
+                geometry.native_sector_count,
+            ) {
+                Ok(value) => value,
+                Err(message) => {
+                    return finish(Err(EdpCliError::new(EXIT_TARGET, message.to_string())))
+                }
+            };
+            match crate::application::evidence::native_restore_preview::plan_native_restore_readonly(
+                Path::new(&backup),
+                identity.device_id(),
+                geometry,
+            ) {
+                Ok(plan) => {
+                    println!("EDPB 同几何只读恢复预览：disk{}，{}B，{} 原生块；LCE={}+{}，预期元数据写集={}块，原生LBA0最后提交。",
+                        disk, plan.logical_sector_bytes, plan.total_sectors, plan.native_lce_start,
+                        plan.native_lce_blocks, plan.proposed_lbas_in_write_order.len());
+                    println!("EDPB SHA256：{}", plan.backup_sha256);
+                    println!("写集 SHA256：{}", plan.proposed_write_sha256);
+                    println!("仅证据规划：未卸载、未写盘、未生成恢复授权；v4 evidence-only 不能直接恢复。");
+                    EXIT_OK
+                }
+                Err(message) => finish(Err(EdpCliError::new(EXIT_BACKUP, message))),
+            }
+        }
         ProvisionAction::NativeEdpDemoImage {
             out,
             total_sectors,

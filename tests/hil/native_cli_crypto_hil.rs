@@ -16,6 +16,146 @@ use edpcli::provision::{
     DiskProvisionKind, FileKeyWrapMode, TargetIdentity, DEFAULT_KEY_DOMAIN_PASSWORD,
 };
 
+#[test]
+#[ignore = "requires caller-proven disposable OS Disk Image, read-only full native extent SHA256"]
+fn native_cli_full_extent_preservation_sha256() {
+    use sha2::{Digest, Sha256};
+    use std::fs::{self, File};
+    use std::io::{Read, Seek, SeekFrom};
+
+    let path = std::env::var("EDPCLI_CRYPTO_HIL_RAW").unwrap();
+    assert!(
+        path.starts_with("/dev/rdisk")
+            && path["/dev/rdisk".len()..]
+                .chars()
+                .all(|ch| ch.is_ascii_digit())
+    );
+    let sector: u32 = std::env::var("EDPCLI_CRYPTO_HIL_SECTOR")
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(matches!(sector, 512 | 1024 | 2048 | 4096));
+    let size: u64 = std::env::var("EDPCLI_CRYPTO_HIL_BYTES")
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(size, 536_870_912);
+    let snapshot = std::env::var("EDPCLI_PRESERVE_HIL_SNAPSHOT").unwrap();
+    let phase = std::env::var("EDPCLI_PRESERVE_HIL_PHASE").unwrap();
+    assert!(matches!(phase.as_str(), "capture" | "verify"));
+
+    platform::set_include_virtual(true);
+    let disk = platform::parse_disk_selector(&path).unwrap();
+    let probe = system::native_provision_probe(&system::SysRunner, disk).unwrap();
+    let device_id = TargetIdentity::from_probe(&probe, size / u64::from(sector))
+        .unwrap()
+        .device_id()
+        .to_owned();
+    let geometry = ObservedDeviceGeometry {
+        capacity_bytes: size,
+        logical_sector_bytes: Some(sector),
+        physical_sector_bytes: None,
+    }
+    .native_read_geometry()
+    .unwrap();
+    let mut dev = NativeRawBlockDevice::open_readonly(&path, geometry).unwrap();
+    let mut prefix = Vec::with_capacity(13 * sector as usize);
+    for lba in 0..13 {
+        prefix.extend_from_slice(&dev.read_block_fresh(lba).unwrap());
+    }
+    let native = NativeProtocolImage::from_native_bytes(sector, prefix).unwrap();
+    let parsed = parse_existing_provision_native(&native, &device_id, size / u64::from(sector))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        parsed.profile.source_mode,
+        edpcli::provision::OfficialPartitionMode::DefaultThreePartition
+    );
+
+    // Stream the *entire* source partition ranges. No reliance on an MBR
+    // projection that exposes only the OEM boot partition.
+    let mut raw = File::open(&path).unwrap();
+    let mut buffer = vec![0; 1024 * 1024];
+    let mut hash_extent = |start: u64, count: u64| -> String {
+        let start_bytes = start.checked_mul(u64::from(sector)).unwrap();
+        let mut remaining = count.checked_mul(u64::from(sector)).unwrap();
+        assert!(start_bytes.checked_add(remaining).unwrap() <= size);
+        raw.seek(SeekFrom::Start(start_bytes)).unwrap();
+        let mut digest = Sha256::new();
+        while remaining > 0 {
+            let chunk = remaining.min(buffer.len() as u64) as usize;
+            raw.read_exact(&mut buffer[..chunk]).unwrap();
+            digest.update(&buffer[..chunk]);
+            remaining -= chunk as u64;
+        }
+        digest
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    };
+    let mut summary = format!("identity={device_id} sector={sector} size={size}\n");
+    let lce_count = 3072u64.div_ceil(u64::from(sector));
+    let lce_start = parsed
+        .records
+        .iter()
+        .skip(1)
+        .find(|record| {
+            record.lba7.sector_size == u64::from(sector)
+                && record.lba7.partition_size == lce_count * u64::from(sector)
+        })
+        .expect("LCE source pointer")
+        .lba7
+        .start_sector;
+    for (part, record) in parsed.profile.partitions.iter().zip(&parsed.records) {
+        let extent_sha = hash_extent(part.start_lba, part.sector_count);
+        let password = if part.role == edpcli::provision::PartitionRole::Encrypt {
+            std::env::var("EDPCLI_CRYPTO_HIL_ENCRYPT_PASSWORD").unwrap()
+        } else {
+            std::env::var("EDPCLI_CRYPTO_HIL_SHARE_PASSWORD").unwrap()
+        };
+        let key_digest = if part.physically_encrypted {
+            // A batch HIL run may retain the previous sector's test-only
+            // password in its shell. Verify the default and the explicitly
+            // configured candidate; neither bypasses FileKey authentication.
+            let key = record
+                .verified_file_key(Some(password.as_bytes()))
+                .or_else(|_| record.verified_file_key(Some(DEFAULT_KEY_DOMAIN_PASSWORD)))
+                .expect("known test password must independently verify FileKey");
+            Sha256::digest(key)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        } else {
+            "not-encrypted".to_owned()
+        };
+        summary.push_str(&format!(
+            "{:?}:{}:{}:{}:{}\n",
+            part.role, part.start_lba, part.sector_count, extent_sha, key_digest
+        ));
+        println!(
+            "[preserve] {sector}B {:?} SHA256={} blocks={}",
+            part.role, extent_sha, part.sector_count
+        );
+    }
+    summary.push_str(&format!(
+        "lce:{}:{}:{}\n",
+        lce_start,
+        lce_count,
+        hash_extent(lce_start, lce_count)
+    ));
+    if phase == "capture" {
+        fs::write(&snapshot, summary).unwrap();
+        println!("[preserve] captured complete native extents");
+    } else {
+        let expected = fs::read_to_string(&snapshot).unwrap();
+        assert_eq!(
+            summary, expected,
+            "native source full extent, LCE or original FileKey changed"
+        );
+        println!("[preserve] PASS full native extents + LCE + FileKeys unchanged");
+    }
+}
 // Deliberately independent of the writer's NativeCipherDirection/transform helper.
 fn decode_native(raw: &[u8], key: &[u8; 16], mode: u8, lba: u64, sector: u32) -> Vec<u8> {
     assert_eq!(raw.len(), sector as usize);

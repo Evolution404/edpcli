@@ -44,16 +44,7 @@ impl ProvisionResultSnapshot {
             crate::application::provision::PreparedProvision::Native(native) => native
                 .partitions
                 .iter()
-                .map(|part| ProvisionResultPartition {
-                    role: part.role,
-                    filesystem: part.filesystem,
-                    start_lba: part.start_lba,
-                    size_bytes: part
-                        .sector_count
-                        .saturating_mul(u64::from(native.plan.sector_bytes)),
-                    selected_for_format: part.formatted,
-                    disposition: Some(crate::provision::RegionDisposition::Rebuild),
-                })
+                .map(|part| ProvisionResultPartition::from_native(part, native.plan.sector_bytes))
                 .collect(),
             crate::application::provision::PreparedProvision::Plain(plain) => plain
                 .plan
@@ -84,6 +75,22 @@ impl ProvisionResultSnapshot {
 }
 
 impl ProvisionResultPartition {
+    fn from_native(
+        part: &crate::application::provision::native_flow::NativePreviewPartition,
+        logical_sector_bytes: u32,
+    ) -> Self {
+        Self {
+            role: part.role,
+            filesystem: part.filesystem,
+            start_lba: part.start_lba,
+            size_bytes: part
+                .sector_count
+                .saturating_mul(u64::from(logical_sector_bytes)),
+            selected_for_format: part.formatted,
+            disposition: part.disposition,
+        }
+    }
+
     fn from_format(
         item: &crate::application::provision::PlannedPartitionFormat,
         target_plan: Option<&crate::provision::TargetProvisionPlan>,

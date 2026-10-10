@@ -1202,6 +1202,46 @@ fn source_bound_native_mode1_image_is_offline_only_and_forbids_any_disk_target()
 }
 
 #[test]
+fn native_edpb_restore_preview_is_readonly_and_requires_explicit_source_and_target() {
+    let good = [
+        "provision",
+        "restore-preview",
+        "--disk",
+        "4",
+        "--backup",
+        "source.edpb",
+        "--include-virtual",
+    ];
+    let Parsed::Provision(ProvisionAction::NativeRestorePreview { disk, backup }) =
+        parse_args(&args(&good)).unwrap()
+    else {
+        panic!("EDPB v4 preview must be read-only");
+    };
+    assert_eq!(disk, 4);
+    assert_eq!(backup, "source.edpb");
+    for extra in [
+        vec!["--yes"],
+        vec!["--format-share"],
+        vec!["--target", "mode0"],
+        vec!["--out", "output.img"],
+        vec!["--source-backup", "other.edpb"],
+    ] {
+        let mut argv = good.to_vec();
+        argv.extend(extra);
+        assert!(
+            parse_args(&args(&argv)).is_err(),
+            "unsafe options: {argv:?}"
+        );
+    }
+    for missing in [
+        vec!["provision", "restore-preview", "--disk", "4"],
+        vec!["provision", "restore-preview", "--backup", "source.edpb"],
+    ] {
+        assert!(parse_args(&args(&missing)).is_err());
+    }
+}
+
+#[test]
 fn source_bound_plan_uses_the_same_native_target_and_format_grammar() {
     let good = [
         "provision",

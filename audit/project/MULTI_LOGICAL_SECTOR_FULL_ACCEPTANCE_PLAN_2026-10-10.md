@@ -1,5 +1,17 @@
 # edpcli：全逻辑扇区规格、全模式和全工作流实施与验收计划（执行中）
 
+## 2026-10-10 20:50 CST 本轮实施与验收回执（优先于下方旧状态表）
+
+- **P0 A01/A05/A02 已完成代码和 Fast Gate**：由并行会话提交并推送 `bd6131e0`，四规格来源密码判断、Native 实际算法、来源硬件/序列号/完整协议及必要分区首块/LCE 写前复核。单元故障注入通过；**尚未进行真实换盘/拔插故障注入**。
+- **P1 A04/A08/A11 已交付正式路径迁移**：`4cd6782e` 已推送。CLI 来源认证计划先只读验证 EDPB，再进入同一 Native planner；移除无正式调用的 TUI 4Kn Mode1 专用任务/结果态，净删除约 264 行。历史 Mode1 离线镜像 API 仍有离线消费者，不按冗余代码直接删除。来源重放的标准逻辑扇区判断复用 Registry；修正文档及镜像文案。Fast Gate 8 套/10 产物/0 失败；CLI 112/112、TUI 461/461 通过。
+- **小容量原生几何修复**：`c95a321f` 本地提交。512MiB 目标上原来的默认 1024MiB 新保密区无法容纳；仅新建目标按可用空间选择默认容量，已有来源分区起点和容量绝不调整。四规格回归及原有 25 组合几何测试通过；真实 macOS Disk Image 上 512/1024/2048/4096B Mode0 制盘、重挂、密钥解封装和 LCE 独立检查通过。
+- **A07 四规格 Mode0 全范围无损保留 + 仅改密正式 HIL**：同规格 Mode0→Mode0 无改动、再用独立交换/保密密码 Rewrap；四种原生块大小在经 `diskutil` 验证的临时 512MiB Disk Image 上执行正式 CLI `write`/WAL，重挂后从原生完整分区范围流式 SHA256，比对启动区、交换区、保密区、完整 LCE 原生块及原 FileKey，全部一致。验收测试：`EDPCLI_HIL_PRESERVE_FULL=1 EDPCLI_HIL_MODES=mode0 scripts/ci/macos-cli-native-virtual-hil.sh`，已按规格独立执行。批量首次因上一规格测试密码泄漏误报 PasswordMismatch；未改生产代码，随后分别复核通过。**仅证明 Mode0 等几何保留与 Rewrap；不代替其他24种转换组合的全范围保留证据。**
+- **A03 EDPB**：已新增 1024/2048/4096B v4 同几何身份/容量/原生 LBA0–12/LCE 完整字节的**只读恢复预览**与校验摘要；CLI `provision restore-preview --disk N --backup FILE.edpb [--include-virtual]` 只输出计划并拒绝恢复授权。三规格一次验证容器和模拟 Native WAL 完整恢复、失败回滚测试通过，LBA0 最后提交且未知尾部保留；512B v3 原有恢复路径不改。**v4 仍是 evidence-only；尚未实现经授权的 macOS OS 虚拟块设备真实 EDPB WAL 恢复和独立重挂检查，不能标记 A03 完成。**
+- **A09 结果语义修正**：正式 Native 结果投影现在沿用 Application 规划的实际 `RegionDisposition`，不再无条件显示为 Rebuild；四规格 Preserve/Rewrite/Rebuild 定向单测通过。WAL 与 EDPB 的类型化结果拆分仍待收口。
+- **完整 Rust 回归**：`project_validate` unfiltered cargo tests 最终 885 通过/0 失败，覆盖 CLI/TUI/Backup/Provision 及文档测试；最初发现的 2 个 TUI 默认 Quick 模式回归已修复并定向复测。此结果与独立 OS HIL 分开记录；项目自有 `uv ... test-full.py --profile full` 和冗余审计尚未在本轮获得完成回执。
+- **继续工作顺序**：v4 有版本可恢复契约及同几何正式虚拟 WAL 恢复 → 各模式部分保留/变化强制格式化的真实 HIL → TUI PTY 全流程 → WAL 断电/失败注入、1024B 偶发中断归因 → `--include-virtual` 发现对象化与正式/离线旁路清理 → Full Gate、冗余审计、文档/合并 main。不得跳过未完成门禁或把内存模拟称为 OS 块设备恢复；CI 最终合并 main 再查。
+
+
 ## 2026-10-10 全局架构审计后执行队列（最新权威）
 
 **真相源与优先级**：本节结合 [`GLOBAL_ARCHITECTURE_AUDIT_2026-10-10.md`](GLOBAL_ARCHITECTURE_AUDIT_2026-10-10.md) 的 A01–A14 编制，覆盖下方旧 S0–S6 和“历史基线”的任何过时推断。审计提交 `85a023ea` 已推送至 `feat/native-4kn-wal-staging-20261010`；先前实现提交 `9fc54cc1`（默认保留）、`9440ce75`（三规格原生 EDPB 取证）和 `b57610ad`（统一 EDPB 只读核验）均已在此分支。审计时 `scripts/test-fast.sh`：8 suites/10 artifacts/0 failures，冗余扫描 851 文件、0 确认缺陷、216 **待裁决候选**，不要直接删除候选。

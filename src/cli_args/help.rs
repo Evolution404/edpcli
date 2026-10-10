@@ -57,6 +57,7 @@ fn print_topic_help(topic: &str) {
             println!("    通用来源认证计划：provision plan --target mode0|mode1|mode2|mode3|plain --disk N --source-backup FILE.edpb [普通plan参数]；先逐块核对来源EDPB v4，再走相同原生计划器，不写盘。");
             println!("    4Kn来源Mode1离线增量写集镜像：provision image --source-backup FILE.edpb --target mode1 --out FILE；重建明文二合一exFAT、保留原加密区元数据，不连接实体U盘；稀疏镜像不包含原保密区用户数据，不可整体dd写盘。");
             println!("    4Kn 实盘只读备份比对：provision verify-source --disk N --backup FILE.edpb（完整原生协议、LCE和分区首块；不卸载、不写盘、不解禁）。");
+            println!("    v4同几何恢复只读预览：provision restore-preview --disk N --backup FILE.edpb [--include-virtual]；只核对设备身份/原生几何与计划元数据写集，evidence-only未授权恢复。");
 
             println!("    正式 plan / image / write 默认保留兼容的原分区数据和 FileKey；仅对新建或几何/文件系统不兼容分区规划格式化重建。");
             println!("    使用 --format-boot / --format-share / --format-encrypt 可主动格式化指定分区。--preserve-unformatted 禁止隐式格式化任何未指定分区（不兼容则拒绝）。");

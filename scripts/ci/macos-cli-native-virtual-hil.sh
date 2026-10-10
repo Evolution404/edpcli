@@ -70,6 +70,29 @@ assert v.get("TotalSize") == 536870912
     attach
     # Reopened OS block device: parse/decrypt from real bytes, not authored writes.
     verify_crypto
+  if [[ "${EDPCLI_HIL_PRESERVE_FULL:-0}" == "1" && "$mode" == "mode0" ]]; then
+    snapshot="$root/preserve-$sector.sha256"
+    full_digest() {
+      local phase="$1" raw="/dev/r$(basename "$device")"
+      local args=(EDPCLI_CRYPTO_HIL_RAW="$raw" EDPCLI_CRYPTO_HIL_SECTOR="$sector" EDPCLI_CRYPTO_HIL_BYTES=536870912 EDPCLI_CRYPTO_HIL_SHARE_PASSWORD="${share_password:-0000aaaa}" EDPCLI_CRYPTO_HIL_ENCRYPT_PASSWORD="${encrypt_password:-0000aaaa}" EDPCLI_PRESERVE_HIL_SNAPSHOT="$snapshot" EDPCLI_PRESERVE_HIL_PHASE="$phase")
+      if [[ -r "$raw" ]]; then
+        env "${args[@]}" "$verifier" --ignored --exact native_cli_crypto_hil::native_cli_full_extent_preservation_sha256 --nocapture
+      else
+        sudo -n env "${args[@]}" "$verifier" --ignored --exact native_cli_crypto_hil::native_cli_full_extent_preservation_sha256 --nocapture
+      fi
+    }
+    full_digest capture
+    echo "[preserve] unchanged Mode0 -> Mode0, sector=$sector"
+    if [[ -r "/dev/r$(basename "$device")" && -w "/dev/r$(basename "$device")" ]]; then
+      "$bin" provision write --include-virtual --disk "$device" --target mode0 --yes --backup-dir "$root"
+    else
+      sudo -n "$bin" provision write --include-virtual --disk "$device" --target mode0 --yes --backup-dir "$root"
+    fi
+    diskutil eject "$device" >/dev/null
+    device=""
+    attach
+    full_digest verify
+  fi
     if [[ "$mode" == "mode0" ]]; then
       # Prove explicit independent passwords, never the implicit default.
       # These are public test-only values, never credentials for real USBs.
@@ -85,6 +108,9 @@ assert v.get("TotalSize") == 536870912
       device=""
       attach
       verify_crypto "$share_password" "$encrypt_password"
+      if [[ "${EDPCLI_HIL_PRESERVE_FULL:-0}" == "1" ]]; then
+        full_digest verify
+      fi
       echo "[P1] PASS custom target passwords with independent FileKey unwrap"
     fi
     if [[ "$mode" == "plain" ]]; then

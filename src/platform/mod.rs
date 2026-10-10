@@ -9,7 +9,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub use crate::domain::hardware::{
-    ExtDisk, HardwareProbe, InquiryInfo, NativeTransport, ObservedDeviceGeometry, PlatformKind,
+    ExtDisk, HardwareProbe, InquiryInfo, NativeReadGeometry, NativeTransport,
+    ObservedDeviceGeometry, PlatformKind,
 };
 
 /// 稳定平台门面下的设备标识推导。

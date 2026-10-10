@@ -659,6 +659,46 @@ fn native_1024_2048_edpb_v4_evidence_roundtrip_without_restore_authority() {
             .all(|a| a.restore_policy == RestorePolicy::EvidenceOnly));
         let readback = VerifiedBackupReader::open(&path).unwrap();
         assert_eq!(readback.read_raw_protocol().unwrap(), protocol);
+        let preview_geometry = edpcli::platform::NativeReadGeometry {
+            capacity_bytes: 12_000 * sector as u64,
+            logical_sector_bytes: sector,
+            native_sector_count: 12_000,
+        };
+        let preview =
+            edpcli::application::evidence::native_restore_preview::plan_native_restore_readonly(
+                &path,
+                "disk&ven_test&prod_native",
+                preview_geometry,
+            )
+            .expect("verified same-geometry native restore preview");
+        assert_eq!(preview.logical_sector_bytes, sector);
+        assert_eq!(preview.native_lce_blocks, lce_count);
+        assert_eq!(preview.proposed_lbas_in_write_order.last(), Some(&0));
+        assert_eq!(
+            preview.proposed_lbas_in_write_order.len(),
+            13 + lce_count as usize
+        );
+        assert_eq!(preview.proposed_write_sha256.len(), 64);
+        assert!(
+            edpcli::application::evidence::native_restore_preview::plan_native_restore_readonly(
+                &path,
+                "disk&ven_other&prod_native",
+                preview_geometry
+            )
+            .is_err()
+        );
+        let wrong_geometry = edpcli::platform::NativeReadGeometry {
+            logical_sector_bytes: 4096,
+            ..preview_geometry
+        };
+        assert!(
+            edpcli::application::evidence::native_restore_preview::plan_native_restore_readonly(
+                &path,
+                "disk&ven_test&prod_native",
+                wrong_geometry
+            )
+            .is_err()
+        );
         assert_eq!(
             readback.read_artifact("raw.lba7_compatibility").unwrap(),
             lce
@@ -678,6 +718,185 @@ fn native_1024_2048_edpb_v4_evidence_roundtrip_without_restore_authority() {
                 inspect.read_native_sector(10_000 + offset as u64).unwrap(),
                 chunk
             );
+        }
+    }
+}
+
+#[test]
+fn native_edpb_v4_restore_evidence_wal_on_disposable_memory_without_granting_restore_rights() {
+    use edpcli::application::filesystem::{NativeFilesystemWrite, NativeVirtualDiskPlan};
+    use edpcli::diskio::{execute_native_transaction_with_journal, NativeBlockDevice};
+    use edpcli::edpb::{
+        write_metadata_backup, ArtifactCompleteness, ArtifactInput, Extent, MetadataCapture,
+        Region, SemanticStatus, VerifiedBackupReader,
+    };
+    use std::collections::BTreeMap;
+
+    struct MemoryDisk {
+        sector: u32,
+        blocks: BTreeMap<u64, Vec<u8>>,
+        writes: usize,
+        inject_once_at: Option<usize>,
+    }
+    impl NativeBlockDevice for MemoryDisk {
+        fn sector_bytes(&self) -> u32 {
+            self.sector
+        }
+        fn total_sectors(&self) -> u64 {
+            12_000
+        }
+        fn read_block(&mut self, lba: u64) -> std::io::Result<Vec<u8>> {
+            Ok(self
+                .blocks
+                .get(&lba)
+                .cloned()
+                .unwrap_or(vec![0xa7; self.sector as usize]))
+        }
+        fn write_block(&mut self, lba: u64, block: &[u8]) -> std::io::Result<()> {
+            if self.inject_once_at == Some(self.writes) {
+                self.inject_once_at = None;
+                return Err(std::io::Error::other("injected once"));
+            }
+            self.writes += 1;
+            self.blocks.insert(lba, block.to_vec());
+            Ok(())
+        }
+        fn sync_blocks(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    for sector in [1024u32, 2048, 4096] {
+        let temp = TempDir::new(&format!("native-edpb-{sector}-wal"));
+        let file = temp.0.join("source.edpb");
+        let (prefix, lce, lce_count) = virtual_native_multisector_metadata(sector);
+        let capture = MetadataCapture {
+            core: CoreCapture {
+                snapshot_id: format!("restore-evidence-{sector}"),
+                created_epoch: 1_790_000_000,
+                disk_number: None,
+                vid: "3535".into(),
+                pid: "0901".into(),
+                device_id: "disk&ven_test&prod_native".into(),
+                onlyid: None,
+                total_sectors: Some(12_000),
+                logical_sector_size: sector,
+                edpcli_version: env!("CARGO_PKG_VERSION").into(),
+                device_state: "edp".into(),
+                lba0_12: &prefix,
+            },
+            partitions: vec![],
+            regions: vec![Region {
+                id: "region.lba7_compatibility_extent".into(),
+                role: "lba7_legacy_partition_compatibility_extent".into(),
+                start_lba: Some(10_000),
+                sector_count: Some(lce_count),
+                semantic_status: SemanticStatus::Identified,
+            }],
+            extents: vec![Extent {
+                id: "extent.lba7_compatibility".into(),
+                region_id: "region.lba7_compatibility_extent".into(),
+                start_lba: 10_000,
+                sector_count: lce_count,
+                purpose: "lba7_compatibility_extent_ciphertext".into(),
+            }],
+            artifacts: vec![ArtifactInput {
+                id: "raw.lba7_compatibility".into(),
+                kind: "raw_sectors".into(),
+                media_type: "application/octet-stream".into(),
+                source_extent_ids: vec!["extent.lba7_compatibility".into()],
+                derivation: None,
+                restore_policy: RestorePolicy::EvidenceOnly,
+                completeness: ArtifactCompleteness::Complete,
+                data: lce.clone(),
+            }],
+            notes: vec![],
+        };
+        let manifest = write_metadata_backup(&file, &capture).unwrap();
+        assert!(!manifest.restore_contract.restores_partition_structure);
+        assert!(manifest
+            .artifacts
+            .iter()
+            .all(|a| a.restore_policy == RestorePolicy::EvidenceOnly));
+        let geometry = edpcli::platform::NativeReadGeometry {
+            capacity_bytes: 12_000 * u64::from(sector),
+            logical_sector_bytes: sector,
+            native_sector_count: 12_000,
+        };
+        let preview =
+            edpcli::application::evidence::native_restore_preview::plan_native_restore_readonly(
+                &file,
+                "disk&ven_test&prod_native",
+                geometry,
+            )
+            .unwrap();
+        let reader = VerifiedBackupReader::open(&file).unwrap();
+        let blocks = (0..13u64)
+            .map(|lba| {
+                (
+                    lba,
+                    prefix[lba as usize * sector as usize..(lba as usize + 1) * sector as usize]
+                        .to_vec(),
+                )
+            })
+            .chain(
+                lce.chunks_exact(sector as usize)
+                    .enumerate()
+                    .map(|(idx, block)| (10_000 + idx as u64, block.to_vec())),
+            )
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(blocks.len(), preview.proposed_lbas_in_write_order.len());
+        assert_eq!(reader.read_artifact("raw.lba7_compatibility").unwrap(), lce);
+        let plan = NativeVirtualDiskPlan {
+            sector_bytes: sector,
+            total_sectors: 12_000,
+            writes: preview
+                .proposed_lbas_in_write_order
+                .iter()
+                .map(|lba| NativeFilesystemWrite {
+                    relative_lba: *lba,
+                    data: blocks.get(lba).unwrap().clone(),
+                })
+                .collect(),
+        };
+        // A test-owned model consumes verified bytes, not a physical grant.
+        // WAL must commit LBA0 last and preserve all LCE block tails.
+        for injected in [false, true] {
+            let mut device = MemoryDisk {
+                sector,
+                blocks: BTreeMap::new(),
+                writes: 0,
+                inject_once_at: injected.then_some(2),
+            };
+            let journal = temp.0.join(format!("{sector}-{injected}.wal"));
+            let result = execute_native_transaction_with_journal(
+                &mut device,
+                &plan,
+                &journal,
+                "virtual:edpb-fixture",
+            );
+            if injected {
+                assert!(result.unwrap_err().rollback_verified);
+                for lba in blocks.keys() {
+                    assert_eq!(
+                        device.read_block(*lba).unwrap(),
+                        vec![0xa7; sector as usize]
+                    );
+                }
+            } else {
+                result.unwrap();
+                for (lba, expected) in &blocks {
+                    assert_eq!(
+                        device.read_block(*lba).unwrap(),
+                        *expected,
+                        "{sector}B LBA{lba}"
+                    );
+                }
+                assert_eq!(
+                    device.read_block(10_000 + lce_count).unwrap(),
+                    vec![0xa7; sector as usize]
+                );
+            }
+            assert!(journal.exists());
         }
     }
 }
@@ -748,6 +967,21 @@ fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
         .iter()
         .all(|item| item.restore_policy != RestorePolicy::Restorable));
     let verified = VerifiedBackupReader::open(&path).expect("reopen and hash-verify v4");
+    let preview =
+        edpcli::application::evidence::native_restore_preview::plan_native_restore_readonly(
+            &path,
+            "disk&ven_test&prod_native",
+            edpcli::platform::NativeReadGeometry {
+                capacity_bytes: 12_000 * 4096,
+                logical_sector_bytes: 4096,
+                native_sector_count: 12_000,
+            },
+        )
+        .expect("4Kn restore preview is read-only");
+    assert_eq!(preview.native_lce_start, 10_000);
+    assert_eq!(preview.native_lce_blocks, 1);
+    assert_eq!(preview.proposed_lbas_in_write_order.len(), 14);
+    assert_eq!(preview.proposed_lbas_in_write_order.last(), Some(&0));
     assert_eq!(verified.read_raw_protocol().unwrap(), protocol);
     assert_eq!(
         verified.read_artifact("raw.lba7_compatibility").unwrap(),

@@ -4,6 +4,8 @@
 //! geometry and sector-reading interface regardless of where the evidence came
 //! from. This module never enters a write-capable state.
 
+pub mod native_restore_preview;
+
 use std::io;
 use std::path::{Path, PathBuf};
 

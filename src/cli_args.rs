@@ -166,6 +166,11 @@ pub enum ProvisionAction {
         disk: u32,
         backup: String,
     },
+    /// Verified EDPB v4 read-only same-geometry restore scope; never writes.
+    NativeRestorePreview {
+        disk: u32,
+        backup: String,
+    },
     Plan(Box<ProvisionNewOpts>),
     Image {
         opts: Box<ProvisionNewOpts>,
