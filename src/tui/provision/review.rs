@@ -254,7 +254,7 @@ fn classify_source_partition_impact(
             !target.formatted
                 && target.start_lba == *start
                 && target.sector_count == *sectors
-                && target.role.is_some_and(|role| role.label() == label)
+                && target.role.is_some_and(|role| role.label() == label.as_str())
                 && matches!(
                     target.disposition,
                     Some(
@@ -264,7 +264,11 @@ fn classify_source_partition_impact(
                     )
                 )
         });
-        let names = if unchanged { &mut retained } else { &mut discarded };
+        let names = if unchanged {
+            &mut retained
+        } else {
+            &mut discarded
+        };
         if !names.contains(label) {
             names.push(label.clone());
         }
@@ -279,12 +283,23 @@ fn native_source_partitions(
     if native.source != DiskProvisionKind::Plain {
         let protocol = crate::protocol::image::NativeProtocolImage::from_native_bytes(
             native.plan.sector_bytes,
-            native.source_native_prefix.iter().flat_map(|block| block.iter().copied()).collect(),
-        ).map_err(|e| format!("确认页来源协议解析失败: {e}"))?;
+            native
+                .source_native_prefix
+                .iter()
+                .flat_map(|block| block.iter().copied())
+                .collect(),
+        )
+        .map_err(|e| format!("确认页来源协议解析失败: {e}"))?;
         let original = crate::provision::parse_existing_provision_native(
-            &protocol, &native.device_id, native.plan.total_sectors,
-        )?.ok_or("确认页无法确认来源 EDP 分区，禁止显示未经证实的数据保留状态")?;
-        return Ok(original.profile.partitions.iter()
+            &protocol,
+            &native.device_id,
+            native.plan.total_sectors,
+        )?
+        .ok_or("确认页无法确认来源 EDP 分区，禁止显示未经证实的数据保留状态")?;
+        return Ok(original
+            .profile
+            .partitions
+            .iter()
             .filter(|p| p.role != PartitionRole::CompatibilityReserve)
             .map(|p| (p.role.label().to_string(), p.start_lba, p.sector_count))
             .collect());
@@ -292,7 +307,10 @@ fn native_source_partitions(
 
     // Plain MBR: derive source partition names from the captured original,
     // not from a newly generated target. Blank/unpartitioned sources stay empty.
-    let mbr = native.source_native_prefix.first().ok_or("来源 MBR 快照缺失")?;
+    let mbr = native
+        .source_native_prefix
+        .first()
+        .ok_or("来源 MBR 快照缺失")?;
     if mbr.len() < 512 || mbr[510..512] != [0x55, 0xaa] {
         return Ok(Vec::new());
     }
@@ -303,15 +321,22 @@ fn native_source_partitions(
             continue;
         }
         let start = u32::from_le_bytes(
-            mbr[offset + 8..offset + 12].try_into().map_err(|_| "来源 MBR 起点无效")?,
+            mbr[offset + 8..offset + 12]
+                .try_into()
+                .map_err(|_| "来源 MBR 起点无效")?,
         ) as u64;
         let count = u32::from_le_bytes(
-            mbr[offset + 12..offset + 16].try_into().map_err(|_| "来源 MBR 容量无效")?,
+            mbr[offset + 12..offset + 16]
+                .try_into()
+                .map_err(|_| "来源 MBR 容量无效")?,
         ) as u64;
         if count == 0 {
             continue;
         }
-        if start.checked_add(count).is_none_or(|end| end > native.plan.total_sectors) {
+        if start
+            .checked_add(count)
+            .is_none_or(|end| end > native.plan.total_sectors)
+        {
             return Err("来源普通盘分区超出设备容量，不能报告数据影响".into());
         }
         parts.push((format!("普通分区P{}", index + 1), start, count));
@@ -320,14 +345,15 @@ fn native_source_partitions(
 }
 
 fn old_mode_source_roles(kind: crate::provision::DiskProvisionKind) -> Vec<String> {
-    let Some(mode) = kind.official_mode() else {
-        return Vec::new();
+    use crate::provision::{DiskProvisionKind, PartitionRole};
+    let roles: &[PartitionRole] = match kind {
+        DiskProvisionKind::Plain => &[],
+        DiskProvisionKind::Mode0 => &[PartitionRole::Boot, PartitionRole::Share, PartitionRole::Encrypt],
+        DiskProvisionKind::Mode1 => &[PartitionRole::BootShareCombined, PartitionRole::Encrypt],
+        DiskProvisionKind::Mode2 => &[PartitionRole::Encrypt],
+        DiskProvisionKind::Mode3 => &[PartitionRole::Boot, PartitionRole::Share],
     };
-    mode.partition_types().iter().enumerate()
-        .map(|(index, ty)| crate::provision::official_partition_role_semantics(mode, index, *ty))
-        .filter(|role| *role != crate::provision::PartitionRole::CompatibilityReserve)
-        .map(|role| role.label().to_string())
-        .collect()
+    roles.iter().map(|role| role.label().to_string()).collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -725,17 +751,29 @@ impl ProvisionConfirmationViewModel {
 
         let (source_discarded, source_retained) = match prepared {
             crate::application::provision::PreparedProvision::Native(native) => {
-                classify_source_partition_impact(&native_source_partitions(native)?, &native.partitions)
+                classify_source_partition_impact(
+                    &native_source_partitions(native)?,
+                    &native.partitions,
+                )
             }
             crate::application::provision::PreparedProvision::Official(official) => {
                 let sources = old_mode_source_roles(official.source_kind);
-                let retained = official.target_plan.as_ref().map(|plan| {
-                    plan.partitions.iter()
-                        .filter(|p| p.disposition.preserves_extent())
-                        .map(|p| p.geometry.role.label().to_string())
-                        .collect::<Vec<_>>()
-                }).unwrap_or_default();
-                let discarded = sources.iter().filter(|name| !retained.contains(name)).cloned().collect();
+                let retained = official
+                    .target_plan
+                    .as_ref()
+                    .map(|plan| {
+                        plan.partitions
+                            .iter()
+                            .filter(|p| p.disposition.preserves_extent())
+                            .map(|p| p.geometry.role.label().to_string())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let discarded = sources
+                    .iter()
+                    .filter(|name| !retained.contains(name))
+                    .cloned()
+                    .collect();
                 (discarded, retained)
             }
             crate::application::provision::PreparedProvision::Plain(plain) => {
@@ -747,21 +785,29 @@ impl ProvisionConfirmationViewModel {
         let overall = ProvisionConfirmationOverall {
             source_discarded,
             source_retained,
-            target_formatted: regions.iter()
-                .filter(|region| matches!(
-                    region.filesystem_effect,
-                    ProvisionConfirmationFilesystemEffect::Format(_)
-                        | ProvisionConfirmationFilesystemEffect::Create(_)
-                ))
-                .map(|region| region.label.clone()).collect(),
-            key_changed: regions.iter()
-                .filter(|region| matches!(
-                    region.password_effect,
-                    ProvisionConfirmationPasswordEffect::Rewrap
-                        | ProvisionConfirmationPasswordEffect::InitializeNew
-                        | ProvisionConfirmationPasswordEffect::Rebuild
-                ))
-                .map(|region| region.label.clone()).collect(),
+            target_formatted: regions
+                .iter()
+                .filter(|region| {
+                    matches!(
+                        region.filesystem_effect,
+                        ProvisionConfirmationFilesystemEffect::Format(_)
+                            | ProvisionConfirmationFilesystemEffect::Create(_)
+                    )
+                })
+                .map(|region| region.label.clone())
+                .collect(),
+            key_changed: regions
+                .iter()
+                .filter(|region| {
+                    matches!(
+                        region.password_effect,
+                        ProvisionConfirmationPasswordEffect::Rewrap
+                            | ProvisionConfirmationPasswordEffect::InitializeNew
+                            | ProvisionConfirmationPasswordEffect::Rebuild
+                    )
+                })
+                .map(|region| region.label.clone())
+                .collect(),
         };
         Ok(Self {
             target,
@@ -829,27 +875,42 @@ mod native_preservation_projection_tests {
 
     #[test]
     fn source_impact_reports_mode1_combined_once_when_split_into_two_mode0_targets() {
-        use crate::provision::{PartitionRole, RegionDisposition};
         use crate::application::provision::native_flow::NativePreviewPartition;
+        use crate::provision::{PartitionRole, RegionDisposition};
         let sources = vec![
             ("二合一区".to_string(), 63, 13_627_329),
             ("保密区".to_string(), 13_627_392, 2_097_152),
         ];
         let targets = vec![
             NativePreviewPartition {
-                role: Some(PartitionRole::Boot), start_lba: 63, sector_count: 20_417,
-                filesystem: None, formatted: true, physically_encrypted: false,
-                disposition: Some(RegionDisposition::Rebuild), password_disposition: None,
+                role: Some(PartitionRole::Boot),
+                start_lba: 63,
+                sector_count: 20_417,
+                filesystem: None,
+                formatted: true,
+                physically_encrypted: false,
+                disposition: Some(RegionDisposition::Rebuild),
+                password_disposition: None,
             },
             NativePreviewPartition {
-                role: Some(PartitionRole::Share), start_lba: 20_480, sector_count: 13_606_912,
-                filesystem: None, formatted: true, physically_encrypted: true,
-                disposition: Some(RegionDisposition::Rebuild), password_disposition: None,
+                role: Some(PartitionRole::Share),
+                start_lba: 20_480,
+                sector_count: 13_606_912,
+                filesystem: None,
+                formatted: true,
+                physically_encrypted: true,
+                disposition: Some(RegionDisposition::Rebuild),
+                password_disposition: None,
             },
             NativePreviewPartition {
-                role: Some(PartitionRole::Encrypt), start_lba: 13_627_392, sector_count: 2_097_152,
-                filesystem: None, formatted: false, physically_encrypted: true,
-                disposition: Some(RegionDisposition::PreserveVerified), password_disposition: None,
+                role: Some(PartitionRole::Encrypt),
+                start_lba: 13_627_392,
+                sector_count: 2_097_152,
+                filesystem: None,
+                formatted: false,
+                physically_encrypted: true,
+                disposition: Some(RegionDisposition::PreserveVerified),
+                password_disposition: None,
             },
         ];
         let (discarded, retained) = classify_source_partition_impact(&sources, &targets);
