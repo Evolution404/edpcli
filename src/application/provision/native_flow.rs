@@ -1242,6 +1242,109 @@ mod tests {
     }
 
     #[test]
+    fn native_four_sector_sizes_cover_100_destructive_source_target_plans_offline() {
+        // Planning-level matrix, not OS HIL: no physical or virtual block device
+        // was opened. Each target is an explicit rebuild, not a Preserve claim.
+        use crate::provision::{DiskProvisionKind, OfficialPartitionMode as Mode};
+        let modes = [
+            None,
+            Some(Mode::DefaultThreePartition),
+            Some(Mode::BootShareCombined),
+            Some(Mode::WholeDiskEncrypted),
+            Some(Mode::IntranetExtranetDualPartition),
+        ];
+        let mut checked = 0;
+        for sector in [512u32, 1024, 2048, 4096] {
+            let total = 1_073_741_824 / u64::from(sector);
+            for source_mode in modes {
+                let (probe, source, prefix, did) = if let Some(source_mode) = source_mode {
+                    let (probe, parsed, prefix, did) = test_native_source(sector, source_mode);
+                    (probe, Some(parsed), prefix, did)
+                } else {
+                    use crate::platform::{InquiryInfo, NativeTransport};
+                    let probe = HardwareProbe {
+                        vid: Some(0x0dd8),
+                        pid: Some(0x2005),
+                        transport: NativeTransport::Uas,
+                        windows_pnp_instance_id: None,
+                        inquiry: Some(InquiryInfo {
+                            vendor: "Netac".into(),
+                            product: "OnlyDisk".into(),
+                            revision: "1.00".into(),
+                        }),
+                    };
+                    let did = TargetIdentity::from_probe(&probe, total)
+                        .unwrap()
+                        .device_id()
+                        .to_owned();
+                    (probe, None, vec![vec![0u8; sector as usize]; 13], did)
+                };
+                let source_kind = source_mode
+                    .map(DiskProvisionKind::from_mode)
+                    .unwrap_or(DiskProvisionKind::Plain);
+                for target_mode in modes {
+                    let plan = if let Some(mode) = target_mode {
+                        let mut request = offline_request(mode);
+                        request.preserve_unformatted = false;
+                        request.format.boot = matches!(
+                            mode,
+                            Mode::DefaultThreePartition | Mode::IntranetExtranetDualPartition
+                        );
+                        request.format.share = mode != Mode::WholeDiskEncrypted;
+                        request.format.encrypt = mode != Mode::IntranetExtranetDualPartition;
+                        let (_, plan, _, _, _) = generate_official_native_plan(
+                            total,
+                            sector,
+                            &probe,
+                            &request,
+                            None,
+                            source.as_ref().and_then(|parsed| parsed.pass_info_policy),
+                            source.as_ref(),
+                            &prefix,
+                        )
+                        .unwrap_or_else(|e| panic!("{sector}B {source_mode:?}->{mode:?}: {e}"));
+                        let protocol = (0..13)
+                            .flat_map(|lba| {
+                                plan.writes
+                                    .iter()
+                                    .find(|w| w.relative_lba == lba)
+                                    .unwrap()
+                                    .data
+                                    .iter()
+                                    .copied()
+                            })
+                            .collect();
+                        let image = crate::protocol::image::NativeProtocolImage::from_native_bytes(
+                            sector, protocol,
+                        )
+                        .unwrap();
+                        let parsed =
+                            crate::provision::parse_existing_provision_native(&image, &did, total)
+                                .unwrap()
+                                .unwrap();
+                        assert_eq!(parsed.profile.source_mode, mode);
+                        plan
+                    } else {
+                        let mut plan =
+                            super::super::native_image::plan_native_plain_image(total, sector, &[])
+                                .unwrap_or_else(|e| {
+                                    panic!("{sector}B {source_mode:?}->Plain: {e}")
+                                });
+                        retire_edp_metadata_for_plain(&mut plan, source_kind, &prefix, &did)
+                            .unwrap_or_else(|e| panic!("{sector}B {source_mode:?}->Plain: {e}"));
+                        plan
+                    };
+                    assert_eq!(plan.sector_bytes, sector);
+                    assert_eq!(plan.writes.last().unwrap().relative_lba, 0);
+                    assert!(plan.writes.iter().all(|w| w.data.len() == sector as usize));
+                    checked += 1;
+                }
+            }
+        }
+        assert_eq!(checked, 4 * 5 * 5);
+    }
+
+    #[test]
     fn geometry_locator_matches_lce_512_and_4kn() {
         for sector in [512, 1024, 2048, 4096, 8192] {
             let total = 262_144;
