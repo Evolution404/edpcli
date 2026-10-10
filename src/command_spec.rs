@@ -230,7 +230,7 @@ const PROVISION_ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "write",
-        summary: "写入物理盘",
+        summary: "向选定USB或虚拟磁盘写入原生制盘计划",
         options: PROVISION_WRITE_OPTIONS,
     },
 ];

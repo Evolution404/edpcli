@@ -149,3 +149,13 @@ OS 真实虚拟盘 HIL（仅使用脚本新建并核实的虚拟盘，需受控 
 8. 缺少实体 USB 而仍待 HIL 的测试项目，不得冒充通过。
 
 **每阶段均以实际终态日志和可复现测试为准，代码存在、测试写成或运行中不代表通过。**
+
+## 十一、2026-10-10 P0 实际收口记录
+
+- 基线：分支 `feat/native-4kn-wal-staging-20261010`，起始提交 `b797286f`；接手时保留并审阅四项既有未提交更改（继承 `OnlyID`、可靠 `PassInfo`、帮助文本及 `WAL` 结果展示）。
+- 首次常规 `Fast`：全部 8 套件实际执行，文档治理有 3 项断言失败；耗时 63.81 秒，退出码 1。将日期化流程计划从 `docs/architecture/` 迁入 `audit/project/`，并同步修订架构说明，没有删除历史证据。
+- 并行度实测：在原 60 秒限制不变的情况下，3 个工作进程使 `Fast` 达到 51.99 秒，8 套件和 10 个产物全通过，退出码 0；据此把工作进程默认值从 2 改为 3，而非放宽时间上限。
+- 直接执行 `scripts/test-fast.sh`：54.40 秒，8 套件、10 个产物，失败 0，退出码 0；格式、差异、`Clippy` 和表格滚动检查均通过；证据为 `target/p0-fast-default-20261010.log`。
+- 直接执行 `uv run --locked python scripts/test-full.py --profile full`：56.28 秒，8 套件、10 个产物及 `doctest` 均通过，退出码 0；证据为 `target/p0-full-20261010.log`。
+- `uv run --locked python scripts/audit-redundancy.py --check`：检查 845 个文件，确认问题 0、待核查候选 212，退出码 0；证据为 `target/p0-redundancy-20261010.log`。
+- 当前记录仅对应 P0：密码独立解锁、TUI 真实按键、最终 OS 模式矩阵、WAL 故障恢复与物理盘尚未由本次会话重新验收。

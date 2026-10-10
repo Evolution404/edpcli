@@ -73,6 +73,7 @@ fn generate_official_native_plan(
     probe: &HardwareProbe,
     request: &OfficialProvisionRequest,
     inherited_onlyid: Option<&str>,
+    inherited_pass_info: Option<PassInfoPolicy>,
 ) -> Result<NativeOfficialPlanResult, String> {
     request.algorithm.validate_first_party_write()?;
     let mode = request.target.official_mode().ok_or("目标不是官方模式")?;
@@ -106,11 +107,20 @@ fn generate_official_native_plan(
         },
     )?
     .with_lba8_identity(request.lba8_identity.clone())?;
+    let inherited = inherited_pass_info.unwrap_or_default();
     let policy = PassInfoPolicy {
-        force_change_password: request.force_change_password.unwrap_or(false),
-        cancel_password_complexity_check: request.cancel_password_complexity_check.unwrap_or(false),
-        max_share_password_errors: request.max_share_password_errors.unwrap_or(u8::MAX),
-        max_encrypt_password_errors: request.max_encrypt_password_errors.unwrap_or(u8::MAX),
+        force_change_password: request
+            .force_change_password
+            .unwrap_or(inherited.force_change_password),
+        cancel_password_complexity_check: request
+            .cancel_password_complexity_check
+            .unwrap_or(inherited.cancel_password_complexity_check),
+        max_share_password_errors: request
+            .max_share_password_errors
+            .unwrap_or(inherited.max_share_password_errors),
+        max_encrypt_password_errors: request
+            .max_encrypt_password_errors
+            .unwrap_or(inherited.max_encrypt_password_errors),
     };
     let spec = ProvisionSpec::new(
         identity,
@@ -348,6 +358,24 @@ pub fn prepare_native_provision_on_disk(
     } else {
         None
     };
+    let inherited_pass_info = if source != DiskProvisionKind::Plain {
+        let native = crate::protocol::image::NativeProtocolImage::from_native_bytes(
+            geometry.logical_sector_bytes,
+            prefix
+                .iter()
+                .flat_map(|block| block.iter().copied())
+                .collect(),
+        )
+        .map_err(|error| format!("注册盘原生协议构造失败: {error}"))?;
+        crate::provision::parse_existing_provision_native(
+            &native,
+            &device_id,
+            geometry.native_sector_count,
+        )?
+        .and_then(|parsed| parsed.pass_info_policy)
+    } else {
+        None
+    };
     let (target, mut plan, partitions, lce_extent, onlyid) = match request {
         ProvisionRequest::Plain(request) => {
             let mut plan = super::native_image::plan_native_plain_image(
@@ -408,6 +436,7 @@ pub fn prepare_native_provision_on_disk(
                 &probe,
                 request,
                 inherited_onlyid.as_deref(),
+                inherited_pass_info,
             )?;
             (request.target, plan, partitions, Some(lce), Some(onlyid))
         }

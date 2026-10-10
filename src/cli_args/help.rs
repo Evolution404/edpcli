@@ -47,6 +47,7 @@ fn print_topic_help(topic: &str) {
             println!("create 创建元数据备份。backup 无动作时等价于 list。");
         }
         "provision" => {
+            println!("正式设备规划/镜像/写入命令：--include-virtual 将已确认的虚拟Disk Image纳入可选设备；选中后使用相同原生块WAL事务链。");
             println!("目标: --target mode0|mode1|mode2|mode3|plain");
             println!("    Plain 不是 mode4；它是独立的普通盘目标。");
             println!("    Plain 分区: 可重复 --partition START:SIZE:fat16|fat32|exfat[:LABEL]；SIZE 支持 sectors/MiB/GiB/fill。");
@@ -57,8 +58,8 @@ fn print_topic_help(topic: &str) {
             println!("    4Kn来源Mode1离线增量写集镜像：provision image --source-backup FILE.edpb --target mode1 --out FILE；重建明文二合一exFAT、保留原加密区元数据，不连接实体U盘；稀疏镜像不包含原保密区用户数据，不可整体dd写盘。");
             println!("    4Kn 实盘只读备份比对：provision verify-source --disk N --backup FILE.edpb（完整原生协议、LCE和分区首块；不卸载、不写盘、不解禁）。");
 
-            println!("    mode1 若识别到现有 mode0，将保留原 type4 位置/密钥并让 type2 扩满前部。");
-            println!("    可选格式化: --format-boot --format-share --format-encrypt");
+            println!("    正式 plan / image / write 对当前任意受支持来源模式进行目标破坏性重建；不会保留旧分区文件或原FileKey。");
+            println!("    目标新建文件系统：默认格式化所有目标存在的可格式化分区；可指定 --format-boot --format-share --format-encrypt。");
             println!("    文件系统: --boot-fs fat16|fat32|exfat --share-fs fat16|fat32|exfat --encrypt-fs fat16|fat32|exfat");
             println!("    各区卷标: --boot-label LABEL --share-label LABEL --encrypt-label LABEL");
             println!("新盘身份参数: [--label-id ID] --user USER --dept DEPT [--label LABEL]");
@@ -77,7 +78,7 @@ fn print_topic_help(topic: &str) {
                 "来源密码未指定表示 Unknown；存在的目标密码域默认 {}；卷标默认值: 启动区。",
                 crate::provision::DEFAULT_KEY_DOMAIN_PASSWORD_TEXT
             );
-            println!("标签标识未指定时自动生成一个合法 onlyid 候选；可通过 --label-id 手动覆盖。");
+            println!("标签标识未指定时继承已确认来源OnlyID，普通盘随机生成合法候选；可通过 --label-id 手动覆盖。");
             println!("密码策略: 未指定时继承注册盘可靠 PassInfo；普通盘默认 强制改密=否、取消复杂性验证=否、两区最大错误次数=255。");
             println!("    --force-change-password / --no-force-change-password");
             println!(
