@@ -171,25 +171,31 @@ mod tests {
         sectors: BTreeMap<u64, Vec<u8>>,
         fail_once: Option<u64>,
         writes: Vec<u64>,
+        block_bytes: u32,
     }
     impl NativeBlockDevice for Fake {
         fn total_sectors(&self) -> u64 {
             16
         }
         fn sector_bytes(&self) -> u32 {
-            4096
+            self.block_bytes
         }
         fn read_block(&mut self, lba: u64) -> io::Result<Vec<u8>> {
             if lba >= 16 {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, "overflow"));
             }
-            Ok(self.sectors.get(&lba).cloned().unwrap_or(vec![0x55; 4096]))
+            Ok(self
+                .sectors
+                .get(&lba)
+                .cloned()
+                .unwrap_or(vec![0x55; self.block_bytes as usize]))
         }
         fn write_block(&mut self, lba: u64, block: &[u8]) -> io::Result<()> {
             self.writes.push(lba);
             if self.fail_once == Some(lba) {
                 self.fail_once = None;
-                self.sectors.insert(lba, vec![0x22; 4096]);
+                self.sectors
+                    .insert(lba, vec![0x22; self.block_bytes as usize]);
                 return Err(io::Error::other("injected torn native write"));
             }
             self.sectors.insert(lba, block.to_vec());
@@ -199,7 +205,7 @@ mod tests {
             Ok(())
         }
     }
-    fn fixture() -> (Fake, NativeVirtualDiskPlan, std::path::PathBuf) {
+    fn fixture_with_bytes(block_bytes: u32) -> (Fake, NativeVirtualDiskPlan, std::path::PathBuf) {
         // Reserve a dedicated fixture directory atomically. A timestamp on
         // its own does not guarantee that parallel tests cannot reuse a WAL
         // file, and the production writer correctly refuses existing files.
@@ -225,24 +231,48 @@ mod tests {
                 sectors: BTreeMap::new(),
                 fail_once: None,
                 writes: vec![],
+                block_bytes,
             },
             NativeVirtualDiskPlan {
-                sector_bytes: 4096,
+                sector_bytes: block_bytes,
                 total_sectors: 16,
                 writes: vec![
                     NativeFilesystemWrite {
                         relative_lba: 1,
-                        data: vec![9; 4096],
+                        data: vec![9; block_bytes as usize],
                     },
                     NativeFilesystemWrite {
                         relative_lba: 0,
-                        data: vec![7; 4096],
+                        data: vec![7; block_bytes as usize],
                     },
                 ],
             },
             path,
         )
     }
+    fn fixture() -> (Fake, NativeVirtualDiskPlan, std::path::PathBuf) {
+        fixture_with_bytes(4096)
+    }
+
+    #[test]
+    fn torn_wal_write_rolls_back_exact_full_blocks_for_all_standard_native_sectors() {
+        for block_bytes in [512u32, 1024, 2048, 4096] {
+            let (mut dev, plan, path) = fixture_with_bytes(block_bytes);
+            let id = format!("virtual:rollback:{block_bytes}");
+            dev.fail_once = Some(0);
+            let error =
+                execute_native_transaction_with_journal(&mut dev, &plan, &path, &id).unwrap_err();
+            assert!(error.rollback_verified, "{block_bytes}B: {error}");
+            assert!(fs::read(&path).unwrap().ends_with(b"ROLLBACK_VERIFIED\n"));
+            assert_eq!(dev.sectors[&0], vec![0x55; block_bytes as usize]);
+            assert_eq!(dev.sectors[&1], vec![0x55; block_bytes as usize]);
+            let evidence = crate::diskio::inspect_native_journal(&path).unwrap();
+            assert_eq!(evidence.sector_bytes, block_bytes);
+            fs::remove_file(&path).unwrap();
+            fs::remove_dir(path.parent().unwrap()).unwrap();
+        }
+    }
+
     #[test]
     fn journal_is_durable_before_first_write_and_survives_success() {
         let (mut dev, plan, path) = fixture();
