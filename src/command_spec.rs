@@ -196,6 +196,7 @@ const PROVISION_COMMON_OPTIONS: &[OptionSpec] = &[
 const PROVISION_PLAN_OPTIONS: &[OptionSpec] = &[];
 const PROVISION_IMAGE_OPTIONS: &[OptionSpec] = &[
     value("--out"),
+    value("--source-backup"),
     value("--total-sectors"),
     value("--sector-bytes"),
     switch("--synthetic-demo"),

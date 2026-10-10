@@ -1068,3 +1068,57 @@ fn provision_4kn_edp_virtual_demo_requires_explicit_opt_in_and_rejects_live_flag
     bad_size.push("--synthetic-demo");
     assert!(parse_args(&args(&bad_size)).is_err());
 }
+
+#[test]
+fn source_bound_native_mode1_image_is_offline_only_and_forbids_any_disk_target() {
+    let args_good = [
+        "provision",
+        "image",
+        "--source-backup",
+        "original-native.edpb",
+        "--target",
+        "mode1",
+        "--out",
+        "mode1-virtual.img",
+    ];
+    let Parsed::Provision(ProvisionAction::NativeMode1BackupImage { backup, out }) =
+        parse_args(&args(&args_good)).unwrap()
+    else {
+        panic!("native Mode1 source conversion must have a dedicated offline CLI action");
+    };
+    assert_eq!(backup, "original-native.edpb");
+    assert_eq!(out, "mode1-virtual.img");
+    for forbidden in [
+        vec!["--disk", "4"],
+        vec!["--yes"],
+        vec!["--sector-bytes", "4096"],
+        vec!["--total-sectors", "262144"],
+        vec!["--encrypt-target-password", "SECRET"],
+        vec!["--format-encrypt"],
+        vec!["--partition", "63:100MiB:exfat"],
+        vec!["--synthetic-demo"],
+    ] {
+        let mut argv = args_good.to_vec();
+        argv.extend(forbidden);
+        assert!(
+            parse_args(&args(&argv)).is_err(),
+            "forbidden flags: {argv:?}"
+        );
+    }
+    for mode in ["plain", "mode0", "mode2", "mode3", "mode4"] {
+        let mut argv = args_good.to_vec();
+        argv[5] = mode;
+        assert!(parse_args(&args(&argv)).is_err(), "unexpected mode: {mode}");
+    }
+    let mut duplicate = args_good.to_vec();
+    duplicate.extend(["--source-backup", "another.edpb"]);
+    assert!(parse_args(&args(&duplicate)).is_err());
+    let mut no_backup = args_good.to_vec();
+    no_backup.drain(2..4);
+    // Legacy image has its own parser; omitting the backup never turns it
+    // into this isolated, source-authenticated native conversion action.
+    assert!(matches!(
+        parse_args(&args(&no_backup)),
+        Ok(Parsed::Provision(ProvisionAction::Image { .. }))
+    ));
+}

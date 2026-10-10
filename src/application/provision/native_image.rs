@@ -505,11 +505,25 @@ pub fn plan_native_4kn_mode0_to_mode1(
         || share.partition_type != crate::protocol::edpf::EdpPartitionType::Share
         || encrypt.partition_type != crate::protocol::edpf::EdpPartitionType::Encrypt
         || share.start_lba != first.start_lba + first.sector_count
-        || encrypt.start_lba != share.start_lba + share.sector_count
+        || share
+            .start_lba
+            .checked_add(share.sector_count)
+            .is_none_or(|end| end > encrypt.start_lba)
         || encrypt.sector_count == 0
     {
         return Err("来源Mode0布局存在间隙、重叠或类型不匹配".into());
     }
+    // Do not annex a source gap between Share and Encrypt. On the real
+    // U391 there are 224 4Kn sectors of unowned space before the original
+    // type4 extent; a new combined filesystem must leave that gap untouched.
+    let combined_end = share
+        .start_lba
+        .checked_add(share.sector_count)
+        .ok_or("Mode0原交换区终点溢出")?;
+    let combined_count = combined_end
+        .checked_sub(63)
+        .filter(|count| *count > 0)
+        .ok_or("Mode1二合一区没有可用空间")?;
     let cylinders = total / (255 * 63);
     let compat = crate::protocol::lba7_compat::locate_lba7_compatibility_extent_from_geometry(
         cylinders, 255, 63, NATIVE,
@@ -526,7 +540,7 @@ pub fn plan_native_4kn_mode0_to_mode1(
             role: PartitionRole::BootShareCombined,
             partition_type: crate::protocol::edpf::EdpPartitionType::Share,
             start_lba: 63,
-            sector_count: encrypt.start_lba - 63,
+            sector_count: combined_count,
             physically_encrypted: false,
             filesystem: Some(FilesystemKind::ExFat),
         },
@@ -608,7 +622,7 @@ pub fn plan_native_4kn_mode0_to_mode1(
     if parsed.profile.source_mode != OfficialPartitionMode::BootShareCombined
         || parsed.profile.partitions.len() != 2
         || parsed.profile.partitions[0].start_lba != 63
-        || parsed.profile.partitions[0].sector_count != encrypt.start_lba - 63
+        || parsed.profile.partitions[0].sector_count != combined_count
         || parsed.profile.partitions[1].start_lba != encrypt.start_lba
         || parsed.profile.partitions[1].sector_count != encrypt.sector_count
         || parsed.records[1].lba7.user_key_crc != encrypt_record.lba7.user_key_crc
@@ -1177,6 +1191,11 @@ mod native_mode1_conversion_tests {
     };
 
     pub(super) fn source_mode0() -> (NativeProtocolImage, ProvisionSpec, Vec<u8>) {
+        source_mode0_with_gap(0)
+    }
+
+    fn source_mode0_with_gap(gap: u64) -> (NativeProtocolImage, ProvisionSpec, Vec<u8>) {
+        assert!(gap <= 224);
         const TOTAL: u64 = 262_144;
         let probe = HardwareProbe {
             vid: Some(0x3535),
@@ -1218,7 +1237,7 @@ mod native_mode1_conversion_tests {
                 role: PartitionRole::Share,
                 partition_type: EdpPartitionType::Share,
                 start_lba: 4159,
-                sector_count: 195_841,
+                sector_count: 195_841 - gap,
                 physically_encrypted: true,
                 filesystem: Some(FilesystemKind::ExFat),
             },
@@ -1348,6 +1367,49 @@ mod native_mode1_conversion_tests {
             source_profile.records[2].lba12.encrypt_mode
         );
     }
+    #[test]
+    fn mode1_respects_224_block_unowned_gap_before_preserved_type4() {
+        let (source, spec, lce) = source_mode0_with_gap(224);
+        let plan = plan_native_4kn_mode0_to_mode1(
+            &source,
+            &lce,
+            &spec,
+            &ProvisionEntropy::new([0x51; 252]),
+            &conversion_options(),
+            0x1234_5678,
+        )
+        .unwrap();
+        // The old Share ends at LBA199776; the original type4 begins at
+        // LBA200000. Not even ExFAT end-of-volume metadata may touch the gap.
+        assert!(!plan
+            .writes
+            .iter()
+            .any(|write| (199_776..200_000).contains(&write.relative_lba)));
+        let native = NativeProtocolImage::from_native_bytes(
+            4096,
+            (0..13)
+                .flat_map(|lba| {
+                    plan.writes
+                        .iter()
+                        .find(|write| write.relative_lba == lba)
+                        .unwrap()
+                        .data
+                        .clone()
+                })
+                .collect(),
+        )
+        .unwrap();
+        let parsed = crate::provision::parse_existing_provision_native(
+            &native,
+            spec.target().device_id(),
+            262_144,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(parsed.profile.partitions[0].sector_count, 199_776 - 63);
+        assert_eq!(parsed.profile.partitions[1].start_lba, 200_000);
+    }
+
     #[test]
     fn conversion_fail_closed_on_missing_format_wrong_lce_and_mutated_protocol() {
         let (source, spec, lce) = source_mode0();

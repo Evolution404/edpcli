@@ -66,11 +66,13 @@ P1无法靠离线自行猜测补齐：必须取得独立生产者或来源证据
 - 本地 U391 实测：备份EDPB v4 `62486528*4096=255944818688B`，**17个4096B完整块**逐字节读回一致，包括LCE LBA62476561。命令未卸载、未锁盘、未尝试写入。若将来进入实体事务，必须在独占锁盘后再次复核，不允许将此只读结果当成写入授权。
 - 剩余必要工作：512B专用 `SectorDev` 的实体事务必须扩展为经过授权和真实测试的 `NativeBlockDevice` 原生4Kn物理端口，保留强制备份、交换盘防护、回读与可恢复故障测试；随后独立目标端验收，不能以镜像或当前来源一致性替代实际写盘成功。
 
-## 2026-10-10 — Native recovery and Mode0→Mode1 offline stage
+## 2026-10-10：原生恢复与来源盘制盘进展
 
-- `native_journal_recovery`: bounded strict WAL decoder (v1/SHA-256/device identity/native geometry/LBA uniqueness/state), fail-closed on corrupted, missing, committed or previously recovered journals. An interrupted WAL may only be restored through a previously authorised `NativeWriteLocked` session. Recovery and in-process rollback both restore LBA0 last; physical power-loss atomicity remains **unproven**.
-- `native_transaction`: the journal's initial full-block snapshot is now the **single rollback baseline** for the write transaction, avoiding a second prewrite snapshot that could disagree with durable WAL evidence.
-- `native_image::plan_native_4kn_mode0_to_mode1`: pure, regular-file-oriented Mode0→Mode1 plan covering **full combined plaintext exFAT metadata**, not merely protocol LBA0–12; original type4 extent/key material and all unowned 4Kn protocol tails remain unchanged. MBR first 446 bytes remain source-owned and LBA0 commits last.
-- `plan_verified_native_4kn_mode0_to_mode1`: independently re-reads the 13 full source 4Kn protocol blocks plus LBA7-pointed LCE from one read-only `SectorReader`, rejects source drift and short blocks before planning.
-- Virtual tests cover successful conversion, new exFAT metadata, preserved type4 records/unknown tails/LCE, broken EDPF, missing forced combined format, invalid source LCE, interrupted WAL, wrong hardware pin/geometry, and corrupted log digest.
-- Scope limit: these pure builders **do not** activate the physical 4Kn CLI/TUI commit branch, provide a full device rescan after unplug/replug or authorise manual `dd`. Firmware interoperability and on-device HIL remain unverified. The existing 512B-only `prepare_provision_on_disk` gate is unchanged.
+- 新增 `native_journal_recovery`：按版本、哈希、设备身份、原生几何、扇区唯一性和事务状态严格解析持久化日志。损坏、缺失、已提交或者已恢复的日志均拒绝再次执行恢复；只有经过验证的 `NativeWriteLocked` 会话具备调用条件。恢复原始数据时，始终最后恢复 `LBA0`。不承诺断电期间的原子性。
+- 改进 `native_transaction`：日志与写入事务复用同一份写前快照，避免不同时间重复采样造成回滚来源不一致。
+- 新增 `plan_native_4kn_mode0_to_mode1`：生成包含明文二合一区 `exFAT` 元数据的完整离线写集，不再局限于协议扇区。原保密区几何与密钥记录保持一致；原生协议尾部未知字节逐字节保留；原主引导记录前446字节保持原样，最后提交 `LBA0`。
+- 新增 `plan_verified_native_4kn_mode0_to_mode1`：通过单一只读扇区来源复核全部13个原生协议块及由 `LBA7` 指向的兼容区。字节漂移、扇区截断与错误协议均阻止规划。
+- 新增专属离线命令 `provision image --source-backup FILE.edpb --target mode1 --out FILE`。仅接受经过验证的原生 `EDPB v4` 证据，不访问实体写盘路径；明确拒绝混入 `--disk`、密码或写盘选项。输出为独立的稀疏虚拟写集镜像，不包含原保密区用户文件，**严禁作为全盘镜像整体复制到物理设备**。
+- U391 原生来源实际验证：总容量 `255944818688B`，原逻辑扇区 `4096B`。来源交换区末尾至保密区起点存在 **224个未确认所有权的原生扇区**，新二合一区保持其空隙，不扩展覆盖。已使用现存备份成功构造稀疏离线 `Mode1` 镜像，逻辑容量与原盘相同，实际占用约 `3.8MiB`。独立读取确认主分区类型 `0x07`、起点 `LBA63`、长度 `49979361` 原生扇区，且起始扇区含 `EXFAT` 签名。
+- 已有自动化测试覆盖成功转换、格式化元数据、保密区密钥与协议尾部保留、224扇区空隙、异常回滚、日志损坏、不同硬件身份、协议来源漂移和兼容区截断等情况。
+- **尚未完成**：正式 CLI/TUI 实体 4Kn 写入闭环、物理介质重插拔后的文件系统验收、其他模式实体测试和安装发版。原有512B写入口仍保持独立，不绕过实盘保护门禁。

@@ -664,6 +664,41 @@ pub(super) fn parse_provision(rest: &[String]) -> Result<Parsed, String> {
             backup: backup.ok_or("错误: verify-source 必须提供 --backup FILE")?,
         }));
     }
+    if action == "image" && tail.iter().any(|a| flag_name(a) == "--source-backup") {
+        let mut backup = None;
+        let mut out = None;
+        let mut target = None;
+        let mut i = 0;
+        while i < tail.len() {
+            match flag_name(&tail[i]) {
+                "--source-backup" => {
+                    let value = take_value(tail, &mut i, "--source-backup")?;
+                    set_once(&mut backup, value, "--source-backup")?;
+                }
+                "--out" => {
+                    let value = take_value(tail, &mut i, "--out")?;
+                    set_once(&mut out, value, "--out")?;
+                }
+                "--target" => {
+                    let value = take_value(tail, &mut i, "--target")?;
+                    set_once(&mut target, value, "--target")?;
+                }
+                other => {
+                    return Err(format!(
+                        "错误: 4Kn离线来源转换不接受 {other}；禁止--disk、密码或实体写入参数"
+                    ))
+                }
+            }
+            i += 1;
+        }
+        if target.as_deref() != Some("mode1") {
+            return Err("错误: 来源备份离线转换只接受 --target mode1".into());
+        }
+        return Ok(Parsed::Provision(ProvisionAction::NativeMode1BackupImage {
+            backup: backup.ok_or("错误: 缺少 --source-backup EDPB")?,
+            out: out.ok_or("错误: 缺少 --out FILE")?,
+        }));
+    }
     // Explicit native geometry opts choose the isolated offline-only image
     // grammar; live USB plans and writes cannot consume these arguments.
     if action == "image"

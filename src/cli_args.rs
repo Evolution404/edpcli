@@ -147,6 +147,11 @@ pub enum ProvisionAction {
         mode: crate::provision::OfficialPartitionMode,
         algorithm: crate::provision::FileKeyWrapMode,
     },
+    /// Create-only, offline Mode1 ExFAT image from a verified native EDPB v4.
+    NativeMode1BackupImage {
+        backup: String,
+        out: String,
+    },
     /// Strictly read-only comparison of the current 4Kn device and EDPB v4.
     VerifySource {
         disk: u32,
