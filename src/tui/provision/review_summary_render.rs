@@ -85,16 +85,24 @@ fn overall_lines(view: &ProvisionConfirmationViewModel) -> Vec<Line<'static>> {
     // Names are source-owned; creating multiple target partitions must never
     // multiply the number of source partitions reported as discarded.
     lines.push(source_effect_line(
-        "来源数据丢弃", &view.overall.source_discarded, true,
+        "来源数据丢弃",
+        &view.overall.source_discarded,
+        true,
     ));
     lines.push(source_effect_line(
-        "来源数据保留", &view.overall.source_retained, false,
+        "来源数据保留",
+        &view.overall.source_retained,
+        false,
     ));
     lines.push(source_effect_line(
-        "目标格式化", &view.overall.target_formatted, true,
+        "目标格式化",
+        &view.overall.target_formatted,
+        true,
     ));
     lines.push(source_effect_line(
-        "密钥操作", &view.overall.key_changed, false,
+        "密钥操作",
+        &view.overall.key_changed,
+        false,
     ));
     if let Some(note) = view.geometry_note.as_deref() {
         lines.push(Line::from(""));
