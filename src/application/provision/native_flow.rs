@@ -816,16 +816,63 @@ pub fn prepare_native_provision_on_disk(
                 geometry.logical_sector_bytes,
                 &request.partitions,
             )?;
-            retire_edp_metadata_for_plain(&mut plan, source, &prefix, &device_id)?;
+            // Preserve a default Plain volume only when the complete on-disk
+            // MBR geometry and actual native filesystem exactly match our
+            // default output. An explicit partition request still formats:
+            // its filesystem/label intent cannot be silently discarded.
+            let existing_plain = if source == DiskProvisionKind::Plain {
+                capture_source_partitions(
+                    source,
+                    None,
+                    &prefix,
+                    geometry.logical_sector_bytes,
+                    geometry.native_sector_count,
+                )?
+            } else {
+                Vec::new()
+            };
+            let plain_exact_preserve = request.partitions.is_empty()
+                && existing_plain.len() == 1
+                && matches!(
+                    existing_plain[0].id,
+                    SourcePartitionId::PlainMbr { slot: 0 }
+                )
+                && existing_plain[0].start_lba == 2048
+                && existing_plain[0].sector_count == geometry.native_sector_count - 2048
+                && plan.writes.last().is_some_and(|block| {
+                    block.relative_lba == 0 && block.data == prefix[0]
+                })
+                && matches!(
+                    dev.read_block_fresh(2048)
+                        .ok()
+                        .and_then(|boot| {
+                            crate::filesystem::detect_native_boot_sector(
+                                &boot,
+                                geometry.native_sector_count - 2048,
+                                geometry.logical_sector_bytes,
+                            )
+                            .ok()
+                        }),
+                    Some(Some(crate::filesystem::FilesystemKind::ExFat))
+                );
+            if plain_exact_preserve {
+                // The original MBR is identical to the requested target.
+                // Commit only that unchanged block; do not touch the volume
+                // boot sector, allocation metadata or user data.
+                plan.writes.retain(|block| block.relative_lba == 0);
+            } else {
+                retire_edp_metadata_for_plain(&mut plan, source, &prefix, &device_id)?;
+            }
             let partitions = if request.partitions.is_empty() {
                 vec![NativePreviewPartition {
                     role: None,
                     start_lba: 2048,
                     sector_count: geometry.native_sector_count - 2048,
                     filesystem: Some(crate::filesystem::FilesystemKind::ExFat),
-                    formatted: true,
+                    formatted: !plain_exact_preserve,
                     physically_encrypted: false,
-                    disposition: None,
+                    disposition: plain_exact_preserve
+                        .then_some(crate::provision::RegionDisposition::PreserveVerified),
                     password_disposition: None,
                 }]
             } else {
@@ -1087,8 +1134,9 @@ fn project_native_impact(
         }
         let preserved_target = targets.iter().enumerate().find_map(|(i, t)| {
             (!t.formatted
-                && t.role.is_some()
                 && t.role == source.role
+                && (t.role.is_some()
+                    || matches!(source.id, SourcePartitionId::PlainMbr { .. }))
                 && t.start_lba == source.start_lba
                 && t.sector_count == source.sector_count
                 && source.sector_bytes == plan.sector_bytes
