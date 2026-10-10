@@ -668,6 +668,80 @@ fn format_executor_uses_the_same_matrix_and_preserves_protocol_sectors() {
     }
 }
 
+/// Inject deferred corruption on the *third* read of one authored LBA:
+/// snapshot=1, transaction synchronized verification=2, independent
+/// post-transaction physical metadata verification=3.
+struct CorruptThirdRead {
+    backing: MemoryDev,
+    victim: u32,
+    reads: usize,
+}
+
+impl SectorDev for CorruptThirdRead {
+    fn read_sector(&mut self, lba: u32) -> io::Result<Vec<u8>> {
+        let mut result = self.backing.read_sector(lba)?;
+        if lba == self.victim {
+            self.reads += 1;
+            if self.reads == 3 {
+                result[SECTOR - 1] ^= 0x40;
+            }
+        }
+        Ok(result)
+    }
+    fn write_sector(&mut self, lba: u32, data: &[u8]) -> io::Result<()> {
+        self.backing.write_sector(lba, data)
+    }
+    fn sync(&mut self) -> io::Result<()> {
+        self.backing.sync()
+    }
+    fn reopen_rdwr(&mut self, wait: std::time::Duration) -> io::Result<()> {
+        self.backing.reopen_rdwr(wait)
+    }
+}
+
+#[test]
+fn format_second_physical_readback_detects_deferred_plain_and_ciphertext_corruption() {
+    let key = [0x42; 16];
+    let plan = format_test_plan(OfficialPartitionMode::DefaultThreePartition, &key);
+    let choices = plan_format_targets_typed(
+        &plan,
+        &FormatOptions {
+            boot: true,
+            share: true,
+            encrypt: true,
+            ..FormatOptions::default()
+        },
+        &[1, 2, 3],
+        &key,
+    )
+    .unwrap();
+    for choice in choices.iter().filter(|choice| choice.selected) {
+        // Choose authored FAT/exFAT metadata beyond the boot sector to rule
+        // out first-sector-only verification and to include encrypted modes.
+        let (&relative_lba, _) = choice
+            .prepared_image
+            .as_ref()
+            .unwrap()
+            .image
+            .sectors()
+            .iter()
+            .find(|(lba, _)| **lba != 0)
+            .expect("format image includes nonboot metadata");
+        let victim = (choice.target.geometry.start_sector + relative_lba) as u32;
+        let mut dev = CorruptThirdRead {
+            backing: MemoryDev::default(),
+            victim,
+            reads: 0,
+        };
+        let error = execute_partition_format(&mut dev, choice).unwrap_err();
+        assert!(error.msg.contains("二次回读LBA"), "{}", error.msg);
+        assert_eq!(dev.reads, 3);
+        // The corruption was only in the read channel; prior transaction
+        // succeeded. Format must nevertheless refuse to report success.
+        assert!(dev.backing.sectors.contains_key(&victim));
+    }
+}
+
 #[test]
 fn format_failure_keeps_the_protocol_and_prior_successful_partition() {
     let key = [0x42; 16];
@@ -1022,6 +1096,9 @@ fn native_4kn_new_edp_all_modes_algorithms_export_and_verify_virtual_disk() {
                 )
                 .unwrap();
                 assert_eq!(std::fs::metadata(&path).unwrap().len(), total * 4096);
+                // Post-close/reopen verification must cover EVERY authored block,
+                // not only the first FS sector, protocol header and LCE.
+                native_image::verify_native_virtual_image(&path, &candidate).unwrap();
                 let mut disk = std::fs::File::open(&path).unwrap();
                 let mut observed = vec![0u8; 4096];
                 disk.read_exact(&mut observed).unwrap();
@@ -1042,6 +1119,16 @@ fn native_4kn_new_edp_all_modes_algorithms_export_and_verify_virtual_disk() {
                         .unwrap()
                         .data
                 );
+                // Check the LCE opaque 1024B ciphertext suffix through a
+                // separate reopened file path. This does not confer OEM trust.
+                use std::io::Write as _;
+                drop(disk);
+                let mut tamper = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+                tamper.seek(SeekFrom::Start(lce_lba * 4096 + 4095)).unwrap();
+                tamper.write_all(&[compat.data[4095] ^ 0x40]).unwrap();
+                tamper.sync_all().unwrap();
+                drop(tamper);
+                assert!(native_image::verify_native_virtual_image(&path, &candidate).is_err());
                 std::fs::remove_file(&path).unwrap();
             }
         }

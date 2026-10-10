@@ -25,6 +25,15 @@ fn export_native_virtual_image(
         .map_err(|e| err(EXIT_IO, format!("错误: 无法创建镜像候选文件: {e}")))?;
     super::native_image::write_native_virtual_plan(&mut candidate.file, &plan)
         .map_err(|e| err(EXIT_IO, format!("错误: {label}镜像写入或回读失败: {e}")))?;
+    // Verify a fresh independent descriptor against the entire 512B/4Kn
+    // authored write-set BEFORE replacing a previously exported image.
+    // Atomic rename alone cannot repair an already published corrupt file.
+    candidate
+        .file
+        .sync_all()
+        .map_err(|e| err(EXIT_IO, format!("错误: {label}候选镜像落盘失败: {e}")))?;
+    super::native_image::verify_native_virtual_image(candidate.candidate_path(), &plan)
+        .map_err(|e| err(EXIT_IO, format!("错误: {label}镜像独立重开校验失败: {e}")))?;
     candidate
         .publish(true)
         .map_err(|e| err(EXIT_IO, format!("错误: {label}镜像发布失败: {e}")))?;

@@ -1,6 +1,47 @@
 //! Empty filesystem write, readback and deep verification.
 use super::*;
 
+/// The plain verification image may only be used after every *authored*
+/// ciphertext/plain metadata sector has been verified directly from the
+/// device. Byte identity then proves the planned plaintext represents those
+/// physical sectors, without copying FileKeys into the format report.
+/// Sparse, unauthored/free-space sectors remain outside this proof.
+fn verify_authored_metadata_readback(
+    dev: &mut dyn SectorDev,
+    start_lba: u64,
+    raw_image: &SparseFilesystemImage,
+    plain_image: &SparseFilesystemImage,
+) -> EdpCliResult<()> {
+    if raw_image.volume_sectors() != plain_image.volume_sectors()
+        || raw_image.sectors().keys().ne(plain_image.sectors().keys())
+        || !raw_image.sectors().contains_key(&0)
+    {
+        return Err(err(EXIT_TARGET, "错误: 格式化写入与明文验证扇区清单不一致"));
+    }
+    dev.sync()
+        .map_err(|error| err(EXIT_IO, format!("错误: 格式化二次回读前同步失败: {error}")))?;
+    for (&relative_lba, expected_raw) in raw_image.sectors() {
+        let absolute_lba = start_lba
+            .checked_add(relative_lba)
+            .filter(|_| relative_lba < raw_image.volume_sectors())
+            .and_then(|lba| u32::try_from(lba).ok())
+            .ok_or_else(|| err(EXIT_TARGET, "错误: 格式化二次回读LBA越界"))?;
+        let observed = dev.read_sector(absolute_lba).map_err(|error| {
+            err(
+                EXIT_IO,
+                format!("错误: 格式化二次回读LBA{absolute_lba}失败: {error}"),
+            )
+        })?;
+        if observed.len() != SECTOR || observed.as_slice() != expected_raw {
+            return Err(err(
+                EXIT_IO,
+                format!("错误: 格式化二次回读LBA{absolute_lba}完整物理扇区不一致"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 struct PreparedImageReader<'a> {
     image: &'a SparseFilesystemImage,
 }
@@ -118,6 +159,15 @@ fn execute_partition_format_observed(
         crate::diskio::BorrowedFormatLayout::Edp,
         observer,
     )?;
+    // The transaction itself checks the first synchronized readback. Check
+    // every authored sector again from the device before interpreting the
+    // planned plaintext as the disk's filesystem metadata.
+    verify_authored_metadata_readback(
+        dev,
+        choice.target.geometry.start_sector,
+        &built.image,
+        verification_image,
+    )?;
     let raw_boot = dev
         .read_sector(
             u32::try_from(choice.target.geometry.start_sector)
@@ -189,6 +239,8 @@ fn execute_partition_format_observed(
         choice.target.geometry.sector_count(),
         SECTOR as u32,
     );
+    // This reader projects only metadata authenticated against device bytes
+    // above. Never mistake its sparse zero fallback for wiped free space.
     let mut reader = PreparedImageReader {
         image: verification_image,
     };

@@ -85,6 +85,11 @@ impl AtomicFile {
         crate::platform::own_invoking_user_file(&result.file)?;
         Ok(result)
     }
+    /// Read-only access to the private temporary candidate for independently
+    /// reopened verification before atomic publish. Never grants device I/O.
+    pub(crate) fn candidate_path(&self) -> &Path {
+        &self.candidate
+    }
     pub(crate) fn publish(self, replace: bool) -> io::Result<()> {
         self.file.sync_all()?;
         #[cfg(unix)]

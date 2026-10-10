@@ -778,7 +778,55 @@ where
     Ok(base)
 }
 
-pub fn export_native_plain_image(path: &Path, plan: &NativeVirtualDiskPlan) -> Result<(), String> {
+/// Independently reopen and verify every authored native block from the
+/// *published* disposable virtual image. No physical I/O or device handles:
+/// the output must be a regular file, not a symlink or raw disk. We do not
+/// claim that sparse, unowned user-data blocks have been initialized.
+pub fn verify_native_virtual_image(
+    path: &Path,
+    plan: &NativeVirtualDiskPlan,
+) -> Result<(), String> {
+    if path.starts_with("/dev") || crate::platform::is_raw_device_path(&path.to_string_lossy()) {
+        return Err("禁止从物理设备路径执行虚拟镜像回读认证".into());
+    }
+    let byte_len = validate_virtual_image_plan(plan)?;
+    if !fs::symlink_metadata(path)
+        .map_err(|e| format!("镜像路径元数据读取失败: {e}"))?
+        .file_type()
+        .is_file()
+    {
+        return Err("虚拟镜像回读只接受普通文件，拒绝符号链接或设备".into());
+    }
+    let mut fresh = fs::File::open(path).map_err(|e| format!("无法独立重新打开虚拟镜像: {e}"))?;
+    if !fresh
+        .metadata()
+        .is_ok_and(|meta| meta.file_type().is_file() && meta.len() == byte_len)
+    {
+        return Err("重新打开后的虚拟镜像不是完整预期容量的普通文件".into());
+    }
+    let mut block = vec![0u8; plan.sector_bytes as usize];
+    for write in &plan.writes {
+        let offset = write
+            .relative_lba
+            .checked_mul(u64::from(plan.sector_bytes))
+            .ok_or("虚拟镜像回读LBA偏移溢出")?;
+        fresh
+            .seek(SeekFrom::Start(offset))
+            .map_err(|e| format!("回读LBA{}定位失败: {e}", write.relative_lba))?;
+        fresh
+            .read_exact(&mut block)
+            .map_err(|e| format!("重新打开后回读LBA{}失败: {e}", write.relative_lba))?;
+        if block != write.data {
+            return Err(format!(
+                "重新打开后LBA{}完整原生块验证失败",
+                write.relative_lba
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_virtual_image_plan(plan: &NativeVirtualDiskPlan) -> Result<u64, String> {
     let byte_len = plan
         .total_sectors
         .checked_mul(u64::from(plan.sector_bytes))
@@ -786,14 +834,9 @@ pub fn export_native_plain_image(path: &Path, plan: &NativeVirtualDiskPlan) -> R
     if !matches!(plan.sector_bytes, 512 | 4096) || byte_len == 0 {
         return Err("不支持的原生镜像逻辑扇区几何".into());
     }
-    if path.starts_with("/dev") || crate::platform::is_raw_device_path(&path.to_string_lossy()) {
-        return Err("拒绝将虚拟镜像输出到设备路径".into());
-    }
     if plan.writes.is_empty() || plan.writes.last().is_none_or(|w| w.relative_lba != 0) {
         return Err("原生镜像缺少最后提交的MBR".into());
     }
-    // The plan is a public value; revalidate every write even if its creator
-    // already checked geometry. This matters for callers that mutate writes.
     let mut seen = std::collections::BTreeSet::new();
     for write in &plan.writes {
         if write.relative_lba >= plan.total_sectors
@@ -803,16 +846,57 @@ pub fn export_native_plain_image(path: &Path, plan: &NativeVirtualDiskPlan) -> R
             return Err("原生镜像写计划含越界、截断或重复的LBA".into());
         }
     }
+    Ok(byte_len)
+}
+
+/// Only unlink a file still referring to our exact create_new() inode.
+/// An attacker or another process could replace the destination during the
+/// transaction; never unlink that unrelated file on our failure path.
+#[cfg(unix)]
+fn is_same_created_file(path: &Path, original: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    fs::symlink_metadata(path).is_ok_and(|current| {
+        current.file_type().is_file()
+            && current.dev() == original.dev()
+            && current.ino() == original.ino()
+    })
+}
+#[cfg(not(unix))]
+fn is_same_created_file(_path: &Path, _original: &fs::Metadata) -> bool {
+    // No portable stable file-ID check: preserve an ambiguous path.
+    false
+}
+
+pub fn export_native_plain_image(path: &Path, plan: &NativeVirtualDiskPlan) -> Result<(), String> {
+    validate_virtual_image_plan(plan)?;
+    if path.starts_with("/dev") || crate::platform::is_raw_device_path(&path.to_string_lossy()) {
+        return Err("拒绝将虚拟镜像输出到设备路径".into());
+    }
     let mut file = OpenOptions::new()
         .write(true)
         .read(true)
         .create_new(true)
         .open(path)
         .map_err(|error| format!("无法排他创建新的普通文件镜像: {error}"))?;
-    let result = write_native_virtual_plan(&mut file, plan);
+    let original = file
+        .metadata()
+        .map_err(|e| format!("新建镜像身份获取失败: {e}"))?;
+    let result = write_native_virtual_plan(&mut file, plan).and_then(|()| {
+        file.sync_all()
+            .map_err(|e| format!("重新打开前强制落盘失败: {e}"))?;
+        let current =
+            fs::symlink_metadata(path).map_err(|e| format!("复核镜像路径身份失败: {e}"))?;
+        #[cfg(unix)]
+        if !is_same_created_file(path, &original) {
+            return Err("虚拟镜像文件身份发生替换，禁止信任回读".into());
+        }
+        if !current.file_type().is_file() {
+            return Err("虚拟镜像路径在写入期间成为特殊文件".into());
+        }
+        verify_native_virtual_image(path, plan)
+    });
     drop(file);
-    if result.is_err() {
-        // Only a freshly create_new-owned path is ever removed.
+    if result.is_err() && is_same_created_file(path, &original) {
         let _ = fs::remove_file(path);
     }
     result

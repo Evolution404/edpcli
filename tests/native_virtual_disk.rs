@@ -1121,3 +1121,90 @@ fn offline_native_plain_image_rejects_unknown_geometry_overlap_and_existing_file
     assert!(export_native_plain_image(&path, &bad).is_err());
     assert!(!path.exists());
 }
+
+#[test]
+fn native_virtual_reopen_verifier_rejects_post_sync_corruption_truncation_and_symlinks() {
+    use edpcli::application::provision::native_image::{
+        export_native_plain_image, plan_native_plain_image, verify_native_virtual_image,
+    };
+    use edpcli::application::provision::{PlainPartitionRequest, PlainPartitionSize};
+
+    for sector_bytes in [512u32, 4096] {
+        let plan = plan_native_plain_image(
+            100_000,
+            sector_bytes,
+            &[PlainPartitionRequest {
+                start_lba: 2048,
+                size: PlainPartitionSize::MiB(16),
+                filesystem: FilesystemKind::Fat16,
+                volume_label: "VERIFIED".into(),
+            }],
+        )
+        .unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "edpcli-reopen-native-{}-{}-{}.img",
+            std::process::id(),
+            sector_bytes,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        export_native_plain_image(&path, &plan).unwrap();
+        verify_native_virtual_image(&path, &plan).unwrap();
+        let authored = plan
+            .writes
+            .iter()
+            .find(|block| block.relative_lba > 0)
+            .unwrap();
+        let offset = authored.relative_lba * u64::from(sector_bytes);
+        let mut file = OpenOptions::new().write(true).open(&path).unwrap();
+        file.seek(SeekFrom::Start(offset + u64::from(sector_bytes) - 1))
+            .unwrap();
+        file.write_all(&[authored.data[sector_bytes as usize - 1] ^ 0x80])
+            .unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+        assert!(verify_native_virtual_image(&path, &plan)
+            .unwrap_err()
+            .contains(&format!("LBA{}", authored.relative_lba)));
+        let mut file = OpenOptions::new().write(true).open(&path).unwrap();
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        file.write_all(&authored.data).unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+        verify_native_virtual_image(&path, &plan).unwrap();
+
+        let len = plan.total_sectors * u64::from(sector_bytes);
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(len - 1)
+            .unwrap();
+        assert!(verify_native_virtual_image(&path, &plan).is_err());
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(len)
+            .unwrap();
+        verify_native_virtual_image(&path, &plan).unwrap();
+
+        let mut altered = plan.clone();
+        altered.writes.last_mut().unwrap().data[510] ^= 0x55;
+        assert!(verify_native_virtual_image(&path, &altered).is_err());
+        altered.writes.push(altered.writes[0].clone());
+        assert!(verify_native_virtual_image(&path, &altered).is_err());
+
+        #[cfg(unix)]
+        {
+            let symlink = path.with_extension("symlink");
+            std::os::unix::fs::symlink(&path, &symlink).unwrap();
+            assert!(verify_native_virtual_image(&symlink, &plan).is_err());
+            std::fs::remove_file(symlink).unwrap();
+        }
+        assert!(verify_native_virtual_image(std::path::Path::new("/dev/disk99"), &plan).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+}
