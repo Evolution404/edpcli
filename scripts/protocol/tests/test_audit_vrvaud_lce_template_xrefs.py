@@ -49,6 +49,14 @@ class StaticXrefAuditTests(unittest.TestCase):
                 self.assertEqual(len(result['code_3072_immediates']), 2)
                 self.assertEqual(len(result['direct_kernel32_writefile_calls']), {'legacy_2022': 12, 'current_2026': 13}[version])
                 self.assertTrue(all(mnemonic == 'or' for _, mnemonic, _ in result['code_3072_immediates']))
+                # Literal .text xrefs also do not target the whole FAT image,
+                # its following zero spacer or adjacent RTTI descriptors.
+                self.assertTrue(result['neighbor_template_plus_rtti_unreferenced'])
+                self.assertEqual(result['neighbor_first_address_ref_below_template'],
+                                 {'legacy_2022': -1056, 'current_2026': -1288}[version])
+                self.assertEqual(result['neighbor_first_address_ref_above_template'],
+                                 {'legacy_2022': 4520, 'current_2026': 4516}[version])
+                self.assertEqual(result['neighbor_window_relative_bytes'],[-6144,8960])
 
 
 if __name__ == '__main__':

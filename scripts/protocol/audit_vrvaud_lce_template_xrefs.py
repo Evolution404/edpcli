@@ -74,6 +74,12 @@ def audit_original_dll(path: Path, template: bytes, version: str):
     all_writefile_calls = []
     all_refs = []
     all_c00 = []
+    # Include the surrounding .data island. A missing direct reference to just
+    # the 3072B payload could hide an address to an adjacent array header or
+    # alignment region followed by an indexed read. This broad sweep identifies
+    # the closest *observed* statically encoded .text references on either side.
+    nearby_low, nearby_high = 0x1800, 0x2300
+    nearby = []
     for section in pe.sections:
         if section.Name.rstrip(b'\0') != b'.text':
             continue
@@ -83,6 +89,11 @@ def audit_original_dll(path: Path, template: bytes, version: str):
         )
         all_refs.extend(refs)
         all_c00.extend(c00)
+        neighbor_refs, _ = x86_find_static_refs(
+            section.get_data(), pe.OPTIONAL_HEADER.ImageBase + section.VirtualAddress,
+            template_va - nearby_low, nearby_low + nearby_high,
+        )
+        nearby.extend(neighbor_refs)
         decoder = Cs(CS_ARCH_X86, CS_MODE_32)
         decoder.detail = True
         for instruction in decoder.disasm(section.get_data(), pe.OPTIONAL_HEADER.ImageBase + section.VirtualAddress):
@@ -114,6 +125,24 @@ def audit_original_dll(path: Path, template: bytes, version: str):
         'template_static_text_ref_count': len(all_refs),
         'template_relocated_pointer_count': len(relocated),
         'template_data_export_count': len(export_template_pointers),
+        'neighbor_window_relative_bytes': [-nearby_low, nearby_high],
+        'neighbor_first_address_ref_below_template': (
+            max((x[3] - template_va for x in nearby if x[3] < template_va), default=None)
+        ),
+        'neighbor_first_address_ref_above_template': (
+            min((x[3] - template_va for x in nearby if x[3] >= template_va), default=None)
+        ),
+        'neighbor_distinct_va_count': len({x[3] for x in nearby}),
+        'neighbor_text_ref_count': len(nearby),
+        'neighbor_template_plus_rtti_unreferenced': not any(
+            0 <= x[3] - template_va < 0x1174 for x in nearby
+        ),
+        'neighbor_target_refs': [
+            {'target_delta': x[3]-template_va, 'instruction_va': hex(x[0]),
+             'instruction': x[1] + ' ' + x[2]}
+            for x in sorted(nearby, key=lambda x:(x[3],x[0]))
+            if (-0x1400 < x[3]-template_va < 0x1450)
+        ],
         'direct_kernel32_writefile_calls': all_writefile_calls,
         'code_3072_immediates': all_c00,
         'export_names': [name for name, _ in names],

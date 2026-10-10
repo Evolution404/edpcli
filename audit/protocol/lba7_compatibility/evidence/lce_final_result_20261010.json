@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "subject": "LCE (LBA7 compatibility extent)",
+  "status_date": "2026-10-10",
+  "verification": "33 SHA-bound offline OEM/negative tests with local original Windows/Linux binaries: 33 passed, 0 skipped",
+  "verified": {
+    "legacy_payload_bytes": 3072,
+    "legacy_512b_sector_count": 6,
+    "lba7_writer": "OEM 2026 CUsbRegsiter::CreatePartitions serializes legacy entry table",
+    "legacy_plaintext": "FAT16 compatibility image with outdated-client warning",
+    "legacy_cipher": "zero8 EDPSECDISK ciphertext roundtrip against Lexar/SanDisk samples",
+    "modes": {
+      "0": [
+        1,
+        2,
+        4
+      ],
+      "1": [
+        2,
+        4
+      ],
+      "2": [
+        1,
+        4
+      ],
+      "3": [
+        1,
+        2
+      ]
+    },
+    "historical_consumer": "LBA7 fallback -> EdpMountFile -> virtual backing offsets",
+    "win_2022_2026": "embedded mount ABI and physical block write plumbing verified",
+    "win_lba0_native_rmw": "original vrvaud_c.dll patches only MBR offsets 462:510 of one native sector; NOT LCE",
+    "linux_native_geometry": "libedpedisk.so queries BLKSSZGET; auxiliary cipher paths still use 512B units",
+    "linux_aes_cross": "original Linux partition-header consumer does not handle cipher mode 3"
+  },
+  "unverified": [
+    "which OEM event first writes the 3072B warning image onto a disk",
+    "native 4Kn LCE trailing 1024 bytes: owned encrypted data versus padding versus other data",
+    "4Kn OEM full-block LCE producer and independent consumer roundtrip",
+    "OEM 4Kn real USB successful mount/write or U391 exact Linux failure cause",
+    "offline U391 SM4 metadata prototype equivalence to real OEM 4Kn provision"
+  ],
+  "restrictions": {
+    "LCE_not_IIR": true,
+    "historical_LCE_not_current_LBA12_type4": true,
+    "read_only_vendor_samples": true,
+    "physical_USB_IO_in_this_audit": false,
+    "guessing_native_4Kn_tail_for_write": false
+  },
+  "raw_audit_script_root": "scripts/protocol/",
+  "raw_audit_test_pattern": "scripts/protocol/tests/test_audit_*.py",
+  "intermediate_snapshot_sha256": {
+    "embedded_edpediskex_2022_2026_mount_abi_20261010.json": "1c6c1dc07190c9ea2897cf2a6840ae4f32e0c7402fcc0022e1392d92db8bfe6a",
+    "lce_warning_image_and_mount_ini_20261010.json": "501bdae417fd828986b3f3ea39d1e99bc6553185ca63a57285fbf9465d02a1b2",
+    "linux_oem_4kn_mount_sector_boundary_20261010.json": "7e821bc4f747e475bd49915cd3d788915e1816936f86a2f842755cc6f7a31dee",
+    "oem_embedded_kernel_mapping_2022_2026_20261010.json": "3ec9c80043c6bc617e93417b8a58e5a4c2c25eeef746f6d0d4208de864c59a50",
+    "oem_format_lce_producer_boundary_20261010.json": "bd63fac83d5266867dba42815fc2985a16083b177515ebea3e1b6e9f0674d18d",
+    "vrvaud_external_update_launch_boundary_20261010.json": "cb9273c508c87ba1f171a118a71173a3572c3558a326c586b255b42353d809b6",
+    "vrvaud_fat_notice_neighbor_xrefs_20261010.json": "9aa505a37e4576b27346abd0c9e340daeaac454a24cc0326077887c14e8d3a37",
+    "vrvaud_mbr_three_entries_rmw_20261010.json": "c7384f6b85ab1c4b664d178900ffd1004886d20475277bbab6ef14b56a746c0a",
+    "vrvaud_indirect_writer_provenance_20261009.json": "9d874c775281d18f78782639a2df2085dfea243aeafbb45afb29a185a69f1b1f"
+  },
+  "snapshot_policy": "Intermediate raw snapshots replaced by final status; recreate verifiable raw machine findings from retained SHA-bound audit scripts using manufacturer binaries."
+}
