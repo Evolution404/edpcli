@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Production CLI 5x5 destructive source -> target on the same disposable 4Kn OS block device.
+# Production CLI 5x5 destructive source -> target on a disposable OS block device.
+# EDPCLI_HIL_SECTOR_BYTES defaults to the historical 4Kn case; supported
+# formal matrix runs may request 512, 1024, 2048, or 4096B.
 set -euo pipefail
+sector="${EDPCLI_HIL_SECTOR_BYTES:-4096}"
+case "$sector" in 512|1024|2048|4096) ;; *) echo "unsupported test sector size: $sector" >&2; exit 2;; esac
 root="$(mktemp -d /tmp/edpcli-native-mode-matrix.XXXXXX)"
 img="$root/matrix.img"
 disk=""
@@ -16,8 +20,9 @@ bin="$(pwd)/target/debug/edpcli"
 
 attach() {
   local attached inventory
-  attached="$(hdiutil attach -nomount -noverify -blocksize 4096 "$img")"
-  disk="$(printf '%s\n' "$attached" | awk 'NR==1{print $1}')"
+  attached="$(hdiutil attach -nomount -noverify -blocksize "$sector" "$img" 2>&1)"
+  # Recent macOS prints a deprecation warning before the actual device path.
+  disk="$(printf '%s\n' "$attached" | awk '$1 ~ /^\/dev\/disk[0-9]+$/ {print $1; exit}')"
   [[ "$disk" =~ ^/dev/disk[0-9]+$ ]] || exit 1
   diskutil info -plist "$disk" | plutil -convert json -o - - | python3 -c '
 import json,sys
@@ -26,9 +31,9 @@ assert p.get("WholeDisk") is True
 assert p.get("Internal") is False
 assert p.get("VirtualOrPhysical") == "Virtual"
 assert p.get("BusProtocol") == "Disk Image"
-assert p.get("DeviceBlockSize") == 4096
+assert p.get("DeviceBlockSize") == int(sys.argv[1])
 assert p.get("TotalSize") == 536870912
-'
+' "$sector"
   inventory="$(hdiutil info)"
   [[ "$inventory" == *"$img"* ]] || exit 1
 }
@@ -39,8 +44,12 @@ reattach() {
 }
 write_mode() {
   local mode="$1"
-  sudo -n "$bin" provision write --disk "$disk" --target "$mode" \
-    --include-virtual --yes --backup-dir "$root" >/dev/null
+  if ! sudo -n "$bin" provision write --disk "$disk" --target "$mode" \
+    --include-virtual --yes --backup-dir "$root" > "$root/cli-write.log" 2>&1; then
+    echo "formal CLI native write failed: sector=${sector} target=$mode device=$disk" >&2
+    tail -35 "$root/cli-write.log" >&2
+    return 1
+  fi
 }
 assert_mode() {
   local mode="$1" label
@@ -53,25 +62,37 @@ assert_mode() {
   esac
   local table
   table="$(sudo -n "$bin" list --include-virtual)"
-  [[ "$table" == *"$label"* ]] || {
+  local row
+  row="$(printf '%s\n' "$table" | grep -E "^[[:space:]]*$(basename "$disk")[[:space:]]" || true)"
+  [[ "$row" == *"$label"* ]] || {
     echo "source-mode readback mismatch expected $mode" >&2
     echo "$table" >&2
     exit 1
   }
 }
+# Eulerian walk over every directed pair, including 5 same-mode pairs:
+# exactly 25 distinct source->target edges with only 26 production writes.
+# The source for every edge is the freshly reopened, verified prior target.
+case "${EDPCLI_HIL_SEGMENT:-full}" in
+  full) sequence=(plain plain mode0 plain mode1 plain mode2 plain mode3 mode0 mode0 mode1 mode0 mode2 mode0 mode3 mode1 mode1 mode2 mode1 mode3 mode2 mode2 mode3 mode3 plain) ;;
+  tail) sequence=(mode2 mode3 mode3 plain) ;;
+  *) echo "unsupported HIL segment: ${EDPCLI_HIL_SEGMENT}" >&2; exit 2 ;;
+esac
+expected=$(( ${#sequence[@]} - 1 ))
 attach
+write_mode "${sequence[0]}"
+reattach
+assert_mode "${sequence[0]}"
 count=0
-for source in plain mode0 mode1 mode2 mode3; do
-  for target in plain mode0 mode1 mode2 mode3; do
-    echo "[mode-matrix] $source -> $target"
-    write_mode "$source"
-    reattach
-    assert_mode "$source"
-    write_mode "$target"
-    reattach
-    assert_mode "$target"
-    count=$((count+1))
-    echo "[PASS] $count/25 $source -> $target"
-  done
+for ((i=1; i<${#sequence[@]}; i++)); do
+  source="${sequence[i-1]}"
+  target="${sequence[i]}"
+  echo "[mode-matrix] ${sector}B $source -> $target"
+  write_mode "$target"
+  reattach
+  assert_mode "$target"
+  count=$((count+1))
+  echo "[PASS] $count/$expected $source -> $target"
 done
-echo "PASS CLI 4Kn all 25 source->target destructive transitions; 50 OS raw writes"
+[[ "$count" -eq "$expected" ]]
+echo "PASS CLI ${sector}B ${EDPCLI_HIL_SEGMENT:-full} $count source->target destructive transitions; $((count + 1)) OS raw writes"

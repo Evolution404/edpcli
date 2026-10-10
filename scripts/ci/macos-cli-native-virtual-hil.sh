@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Formal CLI provisioning 512B and 4096B on disposable OS disk images only.
+# Formal CLI provisioning and independent crypto/FS readback on disposable OS disk images.
+# EDPCLI_HIL_SECTORS optionally selects any subset of 512 1024 2048 4096.
 set -euo pipefail
 root="$(mktemp -d /tmp/edpcli-cli-hil.XXXXXX)"
 device=""
@@ -32,13 +33,14 @@ verify_crypto() {
     sudo -n env "${args[@]}" "$verifier" --ignored --exact native_cli_crypto_hil::formal_cli_native_crypto_readback --nocapture
   fi
 }
-for sector in 512 4096; do
+for sector in ${EDPCLI_HIL_SECTORS:-512 4096}; do
+  case "$sector" in 512|1024|2048|4096) ;; *) echo "unsupported HIL sector: $sector" >&2; exit 2;; esac
   img="$root/n$sector.img"
   mkfile -n 512m "$img"
   attach() {
     local attach_result
-    attach_result="$(hdiutil attach -nomount -noverify -blocksize "$sector" "$img")"
-    device="$(printf '%s\n' "$attach_result" | awk 'NR==1{print $1}')"
+    attach_result="$(hdiutil attach -nomount -noverify -blocksize "$sector" "$img" 2>&1)"
+    device="$(printf '%s\n' "$attach_result" | awk '$1 ~ /^\/dev\/disk[0-9]+$/ {print $1; exit}')"
     [[ "$device" =~ ^/dev/disk[0-9]+$ ]] || exit 1
     diskutil info -plist "$device" | plutil -convert json -o - - | python3 -c '
 import json,sys
@@ -55,7 +57,8 @@ assert v.get("TotalSize") == 536870912
     [[ "$inventory" == *"$img"* ]]
   }
   attach
-  for mode in plain mode0 mode1 mode2 mode3 plain; do
+  for mode in ${EDPCLI_HIL_MODES:-plain mode0 mode1 mode2 mode3 plain}; do
+    case "$mode" in plain|mode0|mode1|mode2|mode3) ;; *) echo "unsupported HIL mode: $mode" >&2; exit 2;; esac
     echo "=== CLI native $sector target=$mode disk=$device ==="
     if [[ -r "/dev/r$(basename "$device")" && -w "/dev/r$(basename "$device")" ]]; then
       "$bin" provision write --include-virtual --disk "$device" --target "$mode" --yes --backup-dir "$root"
@@ -85,7 +88,7 @@ assert v.get("TotalSize") == 536870912
       echo "[P1] PASS custom target passwords with independent FileKey unwrap"
     fi
     if [[ "$mode" == "plain" ]]; then
-      # Formal CLI formatter must produce an actually mountable 512/4096B
+      # Formal CLI formatter must produce an actually mountable native-sector
       # ExFAT volume. Verify a file survives detach and reattach.
       volume="$(printf '%ss1' "$device")"
       diskutil mount "$volume" >/dev/null
@@ -107,4 +110,4 @@ assert v.get("TotalSize") == 536870912
   diskutil eject "$device" >/dev/null
   device=""
 done
-echo 'PASS formal edpcli CLI native OS block HIL: 14 destructive writes (12 standard + 2 custom password), reattach, native crypto/LCE/FAT metadata readback'
+echo "PASS formal edpcli CLI native OS block HIL: sectors=${EDPCLI_HIL_SECTORS:-512 4096}, modes=${EDPCLI_HIL_MODES:-plain mode0 mode1 mode2 mode3 plain}, reattach, native crypto/LCE/FAT readback"

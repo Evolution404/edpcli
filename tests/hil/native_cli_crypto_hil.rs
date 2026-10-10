@@ -90,7 +90,7 @@ fn check_fat_metadata(
 }
 
 #[test]
-#[ignore = "requires independently verified, caller-owned 512B/4Kn macOS Disk Image"]
+#[ignore = "requires independently verified, caller-owned 512/1024/2048/4096B macOS Disk Image"]
 fn formal_cli_native_crypto_readback() {
     let path = std::env::var("EDPCLI_CRYPTO_HIL_RAW").expect("owned raw disk path");
     assert!(
@@ -104,7 +104,7 @@ fn formal_cli_native_crypto_readback() {
         .expect("native sector")
         .parse()
         .unwrap();
-    assert!(matches!(sector, 512 | 4096));
+    assert!(matches!(sector, 512 | 1024 | 2048 | 4096));
     let expected = std::env::var("EDPCLI_CRYPTO_HIL_MODE").expect("mode");
     assert!(matches!(
         expected.as_str(),
@@ -191,7 +191,7 @@ fn formal_cli_native_crypto_readback() {
     assert!(lce_start > 12 && lce_start + extent_count <= total);
     assert_eq!(
         extent_count * u64::from(sector),
-        if sector == 512 { 3072 } else { 4096 }
+        3072u64.div_ceil(u64::from(sector)) * u64::from(sector)
     );
     let mut ciphertext = Vec::with_capacity(extent_count as usize * sector as usize);
     for lba in lce_start..lce_start + extent_count {
@@ -292,8 +292,8 @@ fn formal_cli_native_crypto_readback() {
             .unwrap()
             .expect("decrypted native filesystem boot must parse");
         if part.role == edpcli::provision::PartitionRole::Boot {
-            let expected_blocks = if sector == 512 { 20_417 } else { 2_497 };
-            let expected_fs = if sector == 512 {
+            let expected_blocks = 10 * 1024 * 1024 / u64::from(sector) - 63;
+            let expected_fs = if sector <= 2048 {
                 edpcli::application::filesystem::FilesystemKind::Fat16
             } else {
                 edpcli::application::filesystem::FilesystemKind::Fat12
@@ -306,7 +306,7 @@ fn formal_cli_native_crypto_readback() {
                 sector as u16
             );
             let mbr = raw.read_block_fresh(0).unwrap();
-            assert_eq!(mbr[446 + 4], if sector == 512 { 0x0e } else { 0x01 });
+            assert_eq!(mbr[446 + 4], if sector <= 2048 { 0x0e } else { 0x01 });
             assert_eq!(u32::from_le_bytes(mbr[454..458].try_into().unwrap()), 63);
             assert_eq!(
                 u32::from_le_bytes(mbr[458..462].try_into().unwrap()),
