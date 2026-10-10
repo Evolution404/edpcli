@@ -4,7 +4,8 @@
 #![cfg(all(feature = "ci-virtual-disk", target_os = "macos"))]
 
 use edpcli::application::evidence::native_restore_preview::{
-    materialize_native_restore_evidence_for_hil, plan_native_restore_readonly,
+    materialize_native_restore_evidence_for_hil, materialize_native_restore_v5_for_hil,
+    plan_native_restore_readonly,
 };
 use edpcli::application::filesystem::{NativeFilesystemWrite, NativeVirtualDiskPlan};
 use edpcli::application::provision::native_commit::commit_native_plan_on_disk;
@@ -195,6 +196,9 @@ fn native_edpb_evidence_virtual_wal_restore_and_fresh_readback() {
     let preview = plan_native_restore_readonly(&report.path, &identity, geometry).unwrap();
     let restore = materialize_native_restore_evidence_for_hil(&report.path, &identity, geometry)
         .expect("verified raw native evidence only");
+    let v5_restore = materialize_native_restore_v5_for_hil(&v5_path, &identity, geometry)
+        .expect("separately verified v5 native metadata under HIL only");
+    assert_eq!(restore, v5_restore, "v4 and v5 native bytes and order");
     assert_eq!(
         restore.writes.len(),
         preview.proposed_lbas_in_write_order.len()
@@ -267,6 +271,38 @@ fn native_edpb_evidence_virtual_wal_restore_and_fresh_readback() {
     assert_eq!(fresh.read_block_fresh(8).unwrap(), original_lba8);
     assert_eq!(fresh.read_block_fresh(0).unwrap(), unchanged_lba0);
     drop(fresh);
+
+    // A separate native WAL transaction proves the independently verified
+    // v5 HIL bytes can recover the same deliberately damaged metadata on an
+    // actual disposable macOS block device. This is not production restore.
+    let v5_mutation_wal = scratch.join("v5-mutate.wal");
+    commit_native_plan_on_disk(&system::SysRunner, disk, &mutation, &v5_mutation_wal)
+        .expect("HIL v5 re-damage via TargetSession WAL");
+    assert_eq!(
+        inspect_native_journal(&v5_mutation_wal).unwrap().state,
+        NativeJournalState::Committed
+    );
+    let v5_restore_wal = scratch.join("v5-restore.wal");
+    commit_native_plan_on_disk(&system::SysRunner, disk, &v5_restore, &v5_restore_wal)
+        .expect("HIL-only v5 metadata replay via TargetSession WAL");
+    assert_eq!(
+        inspect_native_journal(&v5_restore_wal).unwrap().state,
+        NativeJournalState::Committed
+    );
+    let mut reread = NativeRawBlockDevice::open_readonly(&raw, geometry).unwrap();
+    for block in &v5_restore.writes {
+        assert_eq!(
+            reread.read_block_fresh(block.relative_lba).unwrap(),
+            block.data,
+            "v5 native OS readback LBA{}",
+            block.relative_lba
+        );
+    }
+    assert_eq!(reread.read_block_fresh(8).unwrap(), original_lba8);
+    drop(reread);
+    println!("[A03] PASS {sector}B v5 HIL-only OS WAL damage/restore/native readback");
+    std::fs::remove_file(&v5_mutation_wal).unwrap();
+    std::fs::remove_file(&v5_restore_wal).unwrap();
     std::fs::remove_file(&report.path).unwrap();
     std::fs::remove_file(&v5_path).unwrap();
     std::fs::remove_file(&mutate_wal).unwrap();
