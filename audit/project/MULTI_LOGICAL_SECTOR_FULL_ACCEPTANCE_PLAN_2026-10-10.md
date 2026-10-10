@@ -6,7 +6,8 @@
 - **白名单和结构硬门禁**：v5 必须具备完整原生 LBA0–12、完整 LCE、每个分区恰好一个原生首块 `raw.partition_header.N`，首块 LBA 必须等于备份分区表起点，不得夹带未知 `raw_sectors` 扇区、重叠范围、错误块大小、缺失/不完整 artifact 或 `restores_user_data`/`restores_filesystem`。旧的可恢复 Extent 白名单已严格扩充为“仅 v5 对应分区首块”的例外；v4 对同类输入仍拒绝。
 - **真实 macOS HIL**：1024B、2048B、4096B 临时 512MiB Disk Image 的正式原生 Mode0 CLI/WAL、备份及独立重挂读取通过；将实际经核验的 v4 原生 LBA0–12、LCE、分区首块逐字节生成新的测试 v5 文件，`VerifiedBackupReader` 校验成功且与 v4 每个 artifact 字节完全一致，**3/3 通过**。1024B 进一步通过 v4/v5 只读预览的完整 LBA 顺序和写集 SHA256 一致性，交叉版本调用均被拒绝。原有 v4 测试专用元数据破坏→TargetSession/WAL 恢复→独立原生读取也继续通过。
 - **单测和异常**：1024/2048/4096B 的 v4 伪造恢复权限、v5 缺失 LCE、分区首块、错误位置、不允许的数据 extent、不完整协议、错误扇区、Plain 伪装和用户数据/FS 恢复声明均必须被拒绝。第一次实际 v5 测试中旧白名单拒绝分区首块，已收敛成上述精确映射后复测通过。
-- **仍未完成**：v5 正式备份发行策略、实体盘写前身份及同几何复核、显式独立恢复授权、断电/中断/错误回滚的真实 OS HIL、TUI PTY 和生产恢复入口均未开放。**v5 “可恢复契约能校验”不等于“已允许实体盘恢复”**；现有生产 restore 继续仅支持 512B v3。
+- **追加 A03 v5 测试专用真实 WAL 恢复**：`ci-virtual-disk` 新增独立 `materialize_native_restore_v5_for_hil`，先确认 v5 schema、File SHA、单一原生 extent、完整块、写集 SHA 和最后 LBA0，再仅在系统确认的临时 macOS Disk Image 上经已有 TargetSession/WAL 发起测试。每规格分别执行原生 LBA8 修改、v4 WAL 恢复，再次修改、v5 WAL 恢复，最终独立重开设备逐块比对全部元数据；**1024/2048/4096B 全部通过（3/3，退出码 0）**，同时证实 v4/v5 物化写集完全一致。**HIL 的受限恢复不能当作生产恢复授权，也不是断电故障模拟**。
+- **仍未完成**：v5 正式备份发行策略、实体盘写前身份及同几何复核、显式独立恢复授权、真实 OS 写中断/断电注入与失败回滚、TUI PTY 和生产恢复入口均未开放。**v5 HIL WAL 恢复成功不等于已允许实体盘恢复**；现有生产 restore 继续仅支持 512B v3。
 
 
 ## 2026-10-11 01:00 CST A06 Plain→Plain 默认无损保留验收
