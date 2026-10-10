@@ -327,9 +327,7 @@ pub struct NativeProtocolImage {
 
 impl NativeProtocolImage {
     pub fn from_native_bytes(logical_sector_bytes: u32, native_bytes: Vec<u8>) -> Result<Self> {
-        if !(512..=65_536).contains(&logical_sector_bytes)
-            || !logical_sector_bytes.is_power_of_two()
-        {
+        if !crate::domain::hardware::valid_native_sector_bytes(logical_sector_bytes) {
             return Err(ProtocolError::UnsupportedProfile {
                 axis: "native_sector_size",
             });
@@ -356,9 +354,7 @@ impl NativeProtocolImage {
                 actual: protocol.len(),
             });
         }
-        if !(512..=65_536).contains(&logical_sector_bytes)
-            || !logical_sector_bytes.is_power_of_two()
-        {
+        if !crate::domain::hardware::valid_native_sector_bytes(logical_sector_bytes) {
             return Err(ProtocolError::UnsupportedProfile {
                 axis: "native_sector_size",
             });

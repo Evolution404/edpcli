@@ -7,7 +7,7 @@ impl AppState {
     ) -> Option<&crate::partition_table::PhysicalPartition> {
         let (resolved, _) = self.provision_resolved_prefill().ok()?;
         let target = resolved
-            .draft_partitions(crate::common::SECTOR as u64)
+            .draft_partitions(u64::from(resolved.logical_sector_bytes))
             .ok()?
             .into_iter()
             .find(|partition| partition.role == role)?;

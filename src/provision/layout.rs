@@ -218,8 +218,8 @@ impl OfficialProvisionPlan {
         self,
         sector_bytes: u32,
     ) -> Result<Vec<PartitionFormatTarget>, String> {
-        if !matches!(sector_bytes, 512 | 4096) {
-            return Err("unsupported native target sector size".into());
+        if !crate::domain::hardware::valid_native_sector_bytes(sector_bytes) {
+            return Err("native logical block size must be a positive multiple of 512".into());
         }
         format_targets_for_geometry(
             self.mode,
@@ -432,8 +432,8 @@ pub fn build_official_partition_layout(
         ],
         OfficialPartitionMode::WholeDiskEncrypted => {
             // 0x7E00 is an exact 63-sector 512B compatibility reservation.
-            // Native 4Kn geometry must reserve eight WHOLE blocks (0x8000)
-            // rather than emit an unaligned or partially owned 4Kn sector.
+            // Any native geometry rounds this byte reservation up to whole
+            // logical blocks; never emit a partial native block.
             let compat = WHOLE_DISK_ENCRYPTED_COMPAT_BOOT_BYTES
                 .checked_add(sector_size - 1)
                 .and_then(|bytes| bytes.checked_div(sector_size))
@@ -467,13 +467,12 @@ pub fn build_official_partition_layout(
                 partition_type.role()
             ));
         }
-        if size_bytes % sector_size != 0 {
-            return Err(format!(
-                "{} partition size {size_bytes} is not aligned to sector size {sector_size}",
-                partition_type.role()
-            ));
-        }
-        let sectors = size_bytes / sector_size;
+        // MiB-based policy is a byte request. Round its allocation up to
+        // whole device-native LBAs; an exact-LBA request was aligned already.
+        let sectors = size_bytes.div_ceil(sector_size);
+        let size_bytes = sectors
+            .checked_mul(sector_size)
+            .ok_or("native partition byte capacity overflow")?;
         let geometry = OfficialPartitionGeometry {
             partition_type,
             start_sector: start,

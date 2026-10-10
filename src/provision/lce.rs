@@ -47,8 +47,8 @@ pub fn build_native_lce_ciphertext(
     layout: Lba7CompatibilityExtentLayout,
     logical_sector_bytes: u32,
 ) -> Result<Vec<u8>, String> {
-    if !matches!(logical_sector_bytes, 512 | 4096) {
-        return Err("unsupported native LCE logical sector size".into());
+    if !crate::domain::hardware::valid_native_sector_bytes(logical_sector_bytes) {
+        return Err("native LCE sector size must be a positive multiple of 512B".into());
     }
     let logical = u64::from(logical_sector_bytes);
     let expected_sectors = (LBA7_COMPAT_EXTENT_TOTAL_SIZE as u64).div_ceil(logical);
@@ -65,9 +65,6 @@ pub fn build_native_lce_ciphertext(
             .is_none()
     {
         return Err("native LCE start address or byte range is invalid".into());
-    }
-    if logical_sector_bytes == 512 {
-        return build_lce_ciphertext(layout).map(Vec::from);
     }
     let mut plaintext = vec![0u8; expected_bytes as usize];
     plaintext[..LBA7_COMPAT_EXTENT_TOTAL_SIZE].copy_from_slice(LCE_PLAINTEXT);

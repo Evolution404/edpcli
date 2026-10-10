@@ -130,9 +130,10 @@ pub fn transform_native_sector_offline(
     absolute_lba: u64,
     logical_sector_bytes: u32,
 ) -> Result<Vec<u8>, String> {
-    if !matches!(logical_sector_bytes, 512 | 4096) || source.len() != logical_sector_bytes as usize
+    if !crate::domain::hardware::valid_native_sector_bytes(logical_sector_bytes)
+        || source.len() != logical_sector_bytes as usize
     {
-        return Err("仅接受完整512B或4096B原生逻辑扇区数据".into());
+        return Err("加密输入必须是完整的512B正整数倍原生逻辑扇区".into());
     }
     let initial_byte_offset = absolute_lba
         .checked_mul(u64::from(logical_sector_bytes))
@@ -183,8 +184,11 @@ pub fn transform_native_sector_offline(
 /// official Windows driver mode3 (AES-128-ECB). No physical disk I/O here.
 /// Accept exactly one full 512B or 4096B native logical sector.
 pub fn decrypt_mode3_native(data: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, String> {
-    if !matches!(data.len(), 512 | 4096) {
-        return Err("AES_CROSS 只读解密要求完整512B或4096B原生逻辑扇区".into());
+    if u32::try_from(data.len())
+        .ok()
+        .is_none_or(|n| !crate::domain::hardware::valid_native_sector_bytes(n))
+    {
+        return Err("AES_CROSS 只读解密要求完整512B正整数倍原生逻辑扇区".into());
     }
     transform_native_sector_offline(
         NativePartitionDataCipher::AesCrossEcb,
@@ -402,7 +406,7 @@ mod tests {
         for raw in [0, 4, 255] {
             assert!(Algorithm::from_encrypt_mode(raw).is_err());
         }
-        for size in [0, 16, 511, 513, 1024, 2048, 4095, 8192] {
+        for size in [0, 16, 511, 513, 1023, 1537, 4095, 8193] {
             assert!(transform(
                 Algorithm::AesCrossEcb,
                 Direction::Encrypt,
@@ -458,8 +462,45 @@ mod tests {
             super::decrypt_mode3_native(&encrypted[..512], &key).unwrap(),
             source[..512]
         );
-        for len in [0, 1, 16, 511, 513, 1024, 4095, 4097] {
+        for len in [0, 1, 16, 511, 513, 1023, 4095, 4097] {
             assert!(super::decrypt_mode3_native(&vec![0; len], &key).is_err());
+        }
+    }
+
+    #[test]
+    fn all_native_512_multiple_sizes_roundtrip_all_three_ciphers() {
+        use super::{NativeCipherDirection as Direction, NativePartitionDataCipher as Algorithm};
+        let key = [0x42; 16];
+        for size in [512u32, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
+            let source = (0..size as usize)
+                .map(|index| (index.wrapping_mul(31).wrapping_add(13)) as u8)
+                .collect::<Vec<_>>();
+            for cipher in [
+                Algorithm::AesOffset,
+                Algorithm::Sm4Ecb,
+                Algorithm::AesCrossEcb,
+            ] {
+                let encrypted = super::transform_native_sector_offline(
+                    cipher,
+                    Direction::Encrypt,
+                    &source,
+                    &key,
+                    331,
+                    size,
+                )
+                .unwrap();
+                assert_eq!(encrypted.len(), size as usize);
+                let decrypted = super::transform_native_sector_offline(
+                    cipher,
+                    Direction::Decrypt,
+                    &encrypted,
+                    &key,
+                    331,
+                    size,
+                )
+                .unwrap();
+                assert_eq!(decrypted, source);
+            }
         }
     }
 

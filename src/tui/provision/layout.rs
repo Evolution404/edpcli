@@ -47,7 +47,7 @@ impl AppState {
         let Ok((resolved, _)) = self.provision_resolved_prefill() else {
             return DiskLayoutModel::new(0, Vec::new());
         };
-        let Ok(parts) = resolved.draft_partitions(crate::common::SECTOR as u64) else {
+        let Ok(parts) = resolved.draft_partitions(u64::from(logical_bytes)) else {
             return DiskLayoutModel::new(0, Vec::new());
         };
         let partitions = parts
@@ -60,7 +60,7 @@ impl AppState {
             })
             .collect();
 
-        if logical_bytes == 4096 {
+        if logical_bytes != crate::common::SECTOR as u32 {
             let Some(source_lce) = self.selected_device().and_then(|row| row.lce.as_ref()) else {
                 return DiskLayoutModel::new(0, Vec::new());
             };

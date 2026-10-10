@@ -1782,3 +1782,118 @@ fn application_size_errors_use_the_current_partition_name() {
         assert!(sizes(&request, mode).unwrap_err().msg.contains(region));
     }
 }
+
+#[test]
+fn generic_native_edp_metadata_planner_rescans_every_mode_and_sector_size() {
+    use crate::protocol::image::NativeProtocolImage;
+    let total = 1_000_000u64;
+    let lce_lba = 900_000u64;
+    let probe = crate::platform::HardwareProbe {
+        vid: Some(0x0dd8),
+        pid: Some(0x2005),
+        transport: crate::platform::NativeTransport::Uas,
+        windows_pnp_instance_id: None,
+        inquiry: Some(crate::platform::InquiryInfo {
+            vendor: "Netac".into(),
+            product: "OnlyDisk".into(),
+            revision: "1.00".into(),
+        }),
+    };
+    let target = TargetIdentity::from_probe(&probe, total).unwrap();
+    let did = target.device_id().to_owned();
+    let metadata = ProvisionMetadata::new(
+        OnlyId::parse("1402259934").unwrap(),
+        "TEST",
+        "TEST",
+        "NATIVE VIRTUAL",
+    )
+    .unwrap();
+    let spec = ProvisionSpec::new(target, metadata, ProvisionProfile::canonical_v1()).unwrap();
+    let entropy = ProvisionEntropy::new([0x5a; 252]);
+    let file_key = [0x42u8; 16];
+    for sector_bytes in [512u32, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
+        let length = 3072u64.div_ceil(u64::from(sector_bytes));
+        let offset = lce_lba * u64::from(sector_bytes);
+        let lce = crate::protocol::lba7_compat::Lba7CompatibilityExtentLayout {
+            chs_bytes: offset + 0xe0000,
+            start_byte_offset: offset,
+            start_lba: lce_lba,
+            size_bytes: length * u64::from(sector_bytes),
+            size_sectors: length,
+        };
+        for mode in [
+            OfficialPartitionMode::DefaultThreePartition,
+            OfficialPartitionMode::BootShareCombined,
+            OfficialPartitionMode::WholeDiskEncrypted,
+            OfficialPartitionMode::IntranetExtranetDualPartition,
+        ] {
+            let options = FormatOptions::default(); // protocol-only, no unverified FS writes
+            let plan = OfficialProvisionPlan::new(
+                mode,
+                OfficialPartitionSizes::new(32, 64, 128),
+                lce,
+                wrap_legacy_lba7_file_key(b"0000aaaa", [0; 8]),
+                wrap_file_key(b"0000aaaa", file_key, FileKeyWrapMode::Sm4),
+            )
+            .unwrap()
+            .with_filesystems(options.filesystems());
+            let count = plan.format_targets_native(sector_bytes).unwrap().len();
+            let writes = native_image::plan_native_edp_image(
+                &spec,
+                &entropy,
+                &plan,
+                &options,
+                &vec![0; count],
+                &vec![file_key; count],
+                sector_bytes,
+            )
+            .unwrap_or_else(|error| panic!("{sector_bytes} {mode:?} {error}"));
+            assert_eq!(writes.sector_bytes, sector_bytes);
+            assert_eq!(writes.writes.last().unwrap().relative_lba, 0);
+            assert_eq!(writes.writes.len(), 13 + length as usize);
+            assert!(writes
+                .writes
+                .iter()
+                .all(|w| w.data.len() == sector_bytes as usize));
+            let native = NativeProtocolImage::from_native_bytes(
+                sector_bytes,
+                (0..13)
+                    .flat_map(|lba| {
+                        writes
+                            .writes
+                            .iter()
+                            .find(|w| w.relative_lba == lba)
+                            .unwrap()
+                            .data
+                            .clone()
+                    })
+                    .collect(),
+            )
+            .unwrap();
+            let parsed = crate::provision::parse_existing_provision_native(&native, &did, total)
+                .unwrap()
+                .unwrap();
+            assert_eq!(parsed.profile.source_mode, mode);
+            assert_eq!(parsed.profile.partitions.len(), count);
+            let lce_blocks = (0..length)
+                .map(|offset| {
+                    writes
+                        .writes
+                        .iter()
+                        .find(|w| w.relative_lba == lce_lba + offset)
+                        .unwrap()
+                        .data
+                        .clone()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(lce_blocks.len(), length as usize);
+            let mut encrypted_lce = Vec::new();
+            for block in &lce_blocks {
+                encrypted_lce.extend_from_slice(block);
+            }
+            let decoded = crate::protocol::crypto::a6b0_full(&encrypted_lce, &[0; 8], offset);
+            assert_eq!(&decoded[..3072], crate::provision::lce_plaintext());
+            assert!(decoded[3072..].iter().all(|b| *b == 0));
+        }
+    }
+}

@@ -34,13 +34,29 @@ impl CapacityInput {
         unit: QuickCapacityUnit,
         source: CapacitySource,
     ) -> Result<Self, String> {
-        let sectors_per_unit = match unit {
-            QuickCapacityUnit::MiB => 2048,
-            QuickCapacityUnit::GiB => 2_097_152,
+        Self::from_quick_native(value, unit, source, 512)
+    }
+
+    /// Convert absolute MiB/GiB to native LBAs (ceil); 512B results do not change.
+    pub fn from_quick_native(
+        value: u64,
+        unit: QuickCapacityUnit,
+        source: CapacitySource,
+        sector_bytes: u32,
+    ) -> Result<Self, String> {
+        if !crate::domain::hardware::valid_native_sector_bytes(sector_bytes) {
+            return Err("logical sector bytes must be a positive multiple of 512".into());
+        }
+        let unit_bytes: u64 = match unit {
+            QuickCapacityUnit::MiB => 1024 * 1024,
+            QuickCapacityUnit::GiB => 1024 * 1024 * 1024,
         };
-        let sectors = value
-            .checked_mul(sectors_per_unit)
-            .ok_or("capacity exceeds sector address range")?;
+        let requested_bytes = value
+            .checked_mul(unit_bytes)
+            .ok_or("capacity exceeds byte address range")?;
+        let sector_bytes = u64::from(sector_bytes);
+        let sectors =
+            requested_bytes / sector_bytes + u64::from(requested_bytes % sector_bytes != 0);
         if sectors == 0 {
             return Err("partition capacity must be non-zero".into());
         }
@@ -331,7 +347,7 @@ impl DiskProvisionKind {
         device_id: &str,
         logical_sector_bytes: u32,
     ) -> Option<Self> {
-        if logical_sector_bytes < 512 || !logical_sector_bytes.is_power_of_two() {
+        if !crate::domain::hardware::valid_native_sector_bytes(logical_sector_bytes) {
             return None;
         }
         if lba7.len() != SECTOR || lba12.len() != SECTOR || device_id.is_empty() {

@@ -49,16 +49,11 @@ impl AppState {
         let row = self.selected_device()?;
         let source = row.existing_profile_for_prefill();
         let (_, logical_bytes, lce_start) = self.provision_preview_geometry().ok()?;
-        if logical_bytes != 512
-            && source.as_ref().map(|existing| existing.source_mode) != Some(target_mode)
-        {
-            return None;
-        }
         crate::provision::prefill_for_target_mode(
             source.as_ref(),
             target_mode,
             lce_start,
-            crate::common::SECTOR as u64,
+            u64::from(logical_bytes),
         )
         .ok()
     }
@@ -85,18 +80,13 @@ impl AppState {
             .ok_or_else(|| "离线快照工具不使用物理制盘表单".to_string())?;
         let (_, logical_bytes, lce_start) = self.provision_preview_geometry()?;
         let source = row.existing_profile_for_prefill();
-        // There is no certified native 4Kn writer. Only an exact-source-mode
-        // preview is permissible until cross-mode native geometry is proven.
-        if logical_bytes != 512
-            && source.as_ref().map(|existing| existing.source_mode) != Some(target_mode)
-        {
-            return Err("4Kn 目前仅支持已确认盘型的只读布局预览；跨模式制盘尚未认证".into());
-        }
+        // All target modes may be evaluated in memory. A valid draft is NOT
+        // physical write authorization, which stays behind the commit gate.
         let base = crate::provision::prefill_for_target_mode(
             source.as_ref(),
             target_mode,
             lce_start,
-            crate::common::SECTOR as u64,
+            u64::from(logical_bytes),
         )?;
         let form = &self.provision.form;
         let capacity = |mode: CapacityInputMode,
@@ -244,7 +234,7 @@ impl AppState {
             return Ok(None);
         };
         let (resolved, source) = self.provision_resolved_prefill()?;
-        let mut parts = resolved.target_partitions(crate::common::SECTOR as u64)?;
+        let mut parts = resolved.target_partitions(u64::from(resolved.logical_sector_bytes))?;
         parts.sort_by_key(|part| part.start_lba);
         let Some((index, current)) = parts.iter().enumerate().find(|(_, part)| part.role == role)
         else {
@@ -255,7 +245,7 @@ impl AppState {
                 source.as_ref(),
                 mode,
                 resolved.usable_end_lba,
-                crate::common::SECTOR as u64,
+                u64::from(resolved.logical_sector_bytes),
             )
             .ok()
         });
@@ -424,7 +414,7 @@ impl AppState {
         let share_mib = None;
         let encrypt_mib = None;
         let (resolved, _) = self.provision_resolved_prefill()?;
-        resolved.target_partitions(crate::common::SECTOR as u64)?;
+        resolved.target_partitions(u64::from(resolved.logical_sector_bytes))?;
         if self.provision.form.label_id.trim().is_empty()
             || self.provision.form.user.trim().is_empty()
             || self.provision.form.dept.trim().is_empty()

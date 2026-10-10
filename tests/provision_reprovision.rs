@@ -2909,3 +2909,118 @@ fn native_4kn_aes3_edpf_source_record_matches_real_u391_wrap_profile() {
     let corrupted = NativeProtocolImage::from_protocol_zero_tailed(&corrupted, 4096).unwrap();
     assert!(parse_existing_provision_native(&corrupted, &did, 16_777_216).is_err());
 }
+
+/// Domain planning permits all five source kinds to request all five targets.
+/// These are *geometry* plans, not credential/format/physical-write grants.
+#[test]
+fn all_25_source_target_geometry_pairs_for_native_512_multiples() {
+    const MODES: [OfficialPartitionMode; 4] = [
+        OfficialPartitionMode::DefaultThreePartition,
+        OfficialPartitionMode::BootShareCombined,
+        OfficialPartitionMode::WholeDiskEncrypted,
+        OfficialPartitionMode::IntranetExtranetDualPartition,
+    ];
+    const SIZES: [u32; 9] = [512, 1024, 1536, 2048, 2560, 3072, 4096, 8192, 65536];
+    for sector_bytes in SIZES {
+        let total = 20_000_000;
+        let mut sources = vec![None];
+        for source_mode in MODES {
+            let baseline =
+                prefill_for_target_mode(None, source_mode, total, u64::from(sector_bytes))
+                    .unwrap_or_else(|e| panic!("{sector_bytes}B {source_mode:?} source: {e}"));
+            let partitions = baseline.target_partitions(u64::from(sector_bytes)).unwrap();
+            sources.push(Some(ExistingProvisionProfile {
+                source_mode,
+                partitions: partitions
+                    .into_iter()
+                    .map(|p| ExistingPartition {
+                        role: p.role,
+                        partition_type: p.partition_type,
+                        start_lba: p.start_lba,
+                        sector_count: p.sector_count,
+                        physically_encrypted: p.physically_encrypted,
+                        filesystem: p.filesystem,
+                    })
+                    .collect(),
+            }));
+        }
+        let mut pairs = 0;
+        for source in &sources {
+            for target_mode in MODES {
+                let prefill = prefill_for_target_mode(
+                    source.as_ref(),
+                    target_mode,
+                    total,
+                    u64::from(sector_bytes),
+                )
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "{sector_bytes}B {:?}->{target_mode:?}: {e}",
+                        source.as_ref().map(|s| s.source_mode)
+                    )
+                });
+                assert_eq!(prefill.logical_sector_bytes, sector_bytes);
+                assert_eq!(
+                    prefill
+                        .target_partitions(u64::from(sector_bytes))
+                        .unwrap()
+                        .len(),
+                    target_mode.partition_types().len()
+                );
+                if sector_bytes != 512 {
+                    assert!(
+                        prefill.target_partitions(512).is_err(),
+                        "cannot mix logical block sizes"
+                    );
+                }
+                pairs += 1;
+            }
+            // Plain target has its own native planner: no EDP partition structure.
+            assert_eq!(sector_bytes % 512, 0);
+            pairs += 1;
+        }
+        assert_eq!(pairs, 25);
+    }
+}
+
+#[test]
+fn quick_native_capacity_preserves_bytes_and_rounds_up() {
+    for sector_bytes in [512, 1024, 1536, 2560, 3072, 4096, 8192, 65536] {
+        let cap = CapacityInput::from_quick_native(
+            1,
+            QuickCapacityUnit::MiB,
+            CapacitySource::UserEdited,
+            sector_bytes,
+        )
+        .unwrap();
+        let actual = cap.sectors() * u64::from(sector_bytes);
+        assert!(actual >= 1024 * 1024);
+        assert!(actual - 1024 * 1024 < u64::from(sector_bytes));
+    }
+    assert_eq!(
+        CapacityInput::from_quick(1, QuickCapacityUnit::GiB, CapacitySource::UserEdited).unwrap(),
+        CapacityInput::from_quick_native(
+            1,
+            QuickCapacityUnit::GiB,
+            CapacitySource::UserEdited,
+            512
+        )
+        .unwrap()
+    );
+    for size in [0, 511, 513, 4097] {
+        assert!(CapacityInput::from_quick_native(
+            1,
+            QuickCapacityUnit::MiB,
+            CapacitySource::UserEdited,
+            size
+        )
+        .is_err());
+    }
+    assert!(CapacityInput::from_quick_native(
+        u64::MAX,
+        QuickCapacityUnit::GiB,
+        CapacitySource::UserEdited,
+        512
+    )
+    .is_err());
+}

@@ -74,7 +74,7 @@ impl NativeEdpLayoutPlan {
         lce_start_lba: u64,
         lce_sector_count: u64,
     ) -> Result<Self, String> {
-        if !matches!(logical_sector_bytes, 512 | 4096)
+        if !crate::domain::hardware::valid_native_sector_bytes(logical_sector_bytes)
             || total_sectors <= OFFICIAL_PARTITION_START_SECTOR
             || total_sectors > u32::MAX as u64
             || total_sectors

@@ -84,7 +84,7 @@ pub fn parse_partition_geometry_with_sector_bytes(
     total_sectors: u64,
     logical_sector_bytes: u32,
 ) -> Result<Vec<PartitionGeometry>, String> {
-    if !(512..=65_536).contains(&logical_sector_bytes) || !logical_sector_bytes.is_power_of_two() {
+    if !crate::domain::hardware::valid_native_sector_bytes(logical_sector_bytes) {
         return Err(format!("设备逻辑扇区大小 {logical_sector_bytes}B 无效"));
     }
     if lba0_12.len() != 13 * SECTOR {
@@ -214,7 +214,7 @@ pub fn parse_lba7_compatibility_geometry_with_sector_bytes(
     total_sectors: u64,
     logical_sector_bytes: u32,
 ) -> Result<Lba7CompatibilityGeometry, String> {
-    if !(512..=65_536).contains(&logical_sector_bytes) || !logical_sector_bytes.is_power_of_two() {
+    if !crate::domain::hardware::valid_native_sector_bytes(logical_sector_bytes) {
         return Err(format!("LCE 原生扇区大小 {logical_sector_bytes}B 非法"));
     }
     let native_bytes = u64::from(logical_sector_bytes);

@@ -18,7 +18,7 @@ impl AppState {
                     return true;
                 }
             };
-            let parts = match resolved.draft_partitions(crate::common::SECTOR as u64) {
+            let parts = match resolved.draft_partitions(u64::from(resolved.logical_sector_bytes)) {
                 Ok(parts) => parts,
                 Err(message) => {
                     self.provision.message = Some(crate::tui::ui::UiMessage::error(message));
@@ -163,7 +163,7 @@ impl AppState {
                 return true;
             }
         };
-        let parts = match resolved.draft_partitions(crate::common::SECTOR as u64) {
+        let parts = match resolved.draft_partitions(u64::from(resolved.logical_sector_bytes)) {
             Ok(parts) => parts,
             Err(message) => {
                 self.provision.message = Some(crate::tui::ui::UiMessage::error(message));

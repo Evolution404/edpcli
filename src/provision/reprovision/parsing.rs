@@ -144,8 +144,8 @@ pub fn parse_existing_provision_native(
     total_native_sectors: u64,
 ) -> Result<Option<ParsedExistingProvision>, String> {
     let sector_bytes = native.logical_sector_bytes();
-    if !matches!(sector_bytes, 512 | 4096) {
-        return Err("unsupported native source sector size for EDPF password verification".into());
+    if !crate::domain::hardware::valid_native_sector_bytes(sector_bytes) {
+        return Err("native EDPF sector size must be a positive multiple of 512B".into());
     }
     let image = super::super::ProvisionImage::from_bytes(native.protocol_projection().to_vec())?;
     let parsed = parse_existing_provision_with_native_sector_bytes(
@@ -158,7 +158,7 @@ pub fn parse_existing_provision_native(
     // identity: for native 4Kn also require the physical MBR first partition
     // to match the independent EDPF geometry exactly. Reject stale or mixed
     // protocol/MBR captures instead of reporting a password as verified.
-    if sector_bytes == 4096 {
+    if sector_bytes != SECTOR as u32 {
         if let Some(source) = &parsed {
             let first = source
                 .profile

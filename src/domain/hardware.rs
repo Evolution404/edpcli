@@ -6,6 +6,12 @@ pub enum PlatformKind {
     Windows,
 }
 
+/// Native logical block size belongs to the device, not the 512B wire protocol.
+/// Filesystem constraints and physical write eligibility are independent.
+pub const fn valid_native_sector_bytes(bytes: u32) -> bool {
+    bytes >= 512 && bytes.is_multiple_of(512)
+}
+
 /// Observed device blocks, distinct from EDP's fixed 512-byte address unit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObservedDeviceGeometry {
@@ -37,7 +43,7 @@ impl ObservedDeviceGeometry {
     /// Accept block geometries for READ ONLY use. Writes are independently gated.
     pub fn native_read_geometry(self) -> Result<NativeReadGeometry, &'static str> {
         let logical = self.logical_sector_bytes.ok_or("设备逻辑扇区大小未知")?;
-        if !(512..=65_536).contains(&logical) || !logical.is_power_of_two() {
+        if !valid_native_sector_bytes(logical) {
             return Err("设备逻辑扇区大小无效或不受支持");
         }
         if self.capacity_bytes == 0 || !self.capacity_bytes.is_multiple_of(u64::from(logical)) {
@@ -82,14 +88,14 @@ mod geometry_tests {
     use super::*;
     #[test]
     fn native_read_geometry_preserves_block_units_and_rejects_invalid_values() {
-        for (logical, blocks) in [(512, 500_000), (1024, 250_000), (4096, 62_500)] {
+        for logical in [512u32, 1024, 1536, 2048, 2560, 3072, 4096, 8192] {
             let geometry = ObservedDeviceGeometry {
-                capacity_bytes: 256_000_000,
+                capacity_bytes: 10_000 * u64::from(logical),
                 logical_sector_bytes: Some(logical),
                 physical_sector_bytes: Some(4096),
             };
             let native = geometry.native_read_geometry().unwrap();
-            assert_eq!(native.native_sector_count, blocks);
+            assert_eq!(native.native_sector_count, 10_000);
             assert_eq!(native.byte_offset(11).unwrap(), 11 * u64::from(logical));
             assert!(native.byte_offset(native.native_sector_count).is_err());
             // Preserve 512-only write gate during read-path migration.

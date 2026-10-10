@@ -454,8 +454,8 @@ pub fn generate_official_native_image(
     plan: &OfficialProvisionPlan,
     sector_bytes: u32,
 ) -> Result<crate::protocol::image::NativeProtocolImage, String> {
-    if !matches!(sector_bytes, 512 | 4096) {
-        return Err("new EDP native protocol supports only 512B and 4096B".into());
+    if !crate::domain::hardware::valid_native_sector_bytes(sector_bytes) {
+        return Err("native protocol needs a positive multiple of 512B".into());
     }
     if sector_bytes == 512 {
         let legacy = generate_official_image(spec, entropy, plan)?;

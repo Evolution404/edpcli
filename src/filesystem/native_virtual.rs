@@ -32,7 +32,7 @@ impl NativeVirtualDiskPlan {
         sector_bytes: u32,
         partitions: &[NativeFormatPlan],
     ) -> Result<Self, FilesystemError> {
-        if !matches!(sector_bytes, 512 | 4096)
+        if !crate::domain::hardware::valid_native_sector_bytes(sector_bytes)
             || total_sectors < 2
             || total_sectors > u32::MAX as u64
             || !(1..=4).contains(&partitions.len())
