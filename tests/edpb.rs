@@ -538,6 +538,150 @@ fn virtual_native_4kn_metadata() -> (Vec<u8>, Vec<u8>) {
     (native.native_bytes().to_vec(), vec![0xe7; 4096])
 }
 
+fn virtual_native_multisector_metadata(sector: u32) -> (Vec<u8>, Vec<u8>, u64) {
+    use edpcli::protocol::crypto::{a7f0_full, crc32_bare, xor_rolling};
+    let did = "disk&ven_test&prod_native";
+    let mut projection = vec![0u8; 13 * 512];
+    projection[446 + 4] = 0x0e;
+    projection[454..458].copy_from_slice(&63u32.to_le_bytes());
+    projection[458..462].copy_from_slice(&400u32.to_le_bytes());
+    projection[510..512].copy_from_slice(&[0x55, 0xaa]);
+    let crc = crc32_bare(did.as_bytes());
+    let mut lba7 = [0u8; 512];
+    let mut lba12 = [0u8; 512];
+    let lce_sectors = 3072u64.div_ceil(u64::from(sector));
+    let lce_bytes = lce_sectors * u64::from(sector);
+    for (index, (kind, start, blocks)) in [(1u32, 63u64, 400u64), (2, 512, 1500), (4, 2012, 1000)]
+        .into_iter()
+        .enumerate()
+    {
+        let p = index * 0x60;
+        lba12[p..p + 4].copy_from_slice(b"EDPF");
+        lba12[p + 8..p + 12].copy_from_slice(&3u32.to_le_bytes());
+        lba12[p + 12..p + 16].copy_from_slice(&kind.to_le_bytes());
+        lba12[p + 20..p + 24].copy_from_slice(&u32::from(kind != 1).to_le_bytes());
+        lba12[p + 24..p + 32].copy_from_slice(&start.to_le_bytes());
+        lba12[p + 32..p + 40].copy_from_slice(&u64::from(sector).to_le_bytes());
+        lba12[p + 40..p + 48].copy_from_slice(&(blocks * u64::from(sector)).to_le_bytes());
+        let q = index * 0x40;
+        lba7[q..q + 4].copy_from_slice(b"EDPF");
+        lba7[q + 8..q + 12].copy_from_slice(&3u32.to_le_bytes());
+        lba7[q + 12..q + 16].copy_from_slice(&kind.to_le_bytes());
+        lba7[q + 20..q + 24].copy_from_slice(&u32::from(kind != 1).to_le_bytes());
+        lba7[q + 24..q + 32]
+            .copy_from_slice(&(if index == 0 { 63u64 } else { 10_000u64 }).to_le_bytes());
+        lba7[q + 32..q + 40].copy_from_slice(&u64::from(sector).to_le_bytes());
+        lba7[q + 40..q + 48].copy_from_slice(
+            &(if index == 0 {
+                400u64 * u64::from(sector)
+            } else {
+                lce_bytes
+            })
+            .to_le_bytes(),
+        );
+    }
+    projection[7 * 512..8 * 512].copy_from_slice(&xor_rolling(&lba7, (crc & 0xffff) ^ (crc >> 16)));
+    projection[12 * 512..13 * 512].copy_from_slice(&a7f0_full(&lba12, &crc.to_le_bytes(), 0));
+    let native = edpcli::protocol::image::NativeProtocolImage::from_protocol_zero_tailed(
+        &projection,
+        sector,
+    )
+    .unwrap();
+    let mut raw = native.native_bytes().to_vec();
+    raw[11 * sector as usize + 512..12 * sector as usize].fill(0x5d);
+    (raw, vec![0xe7; lce_bytes as usize], lce_sectors)
+}
+
+#[test]
+fn native_1024_2048_edpb_v4_evidence_roundtrip_without_restore_authority() {
+    use edpcli::application::evidence::{EvidenceSource, SectorReader};
+    use edpcli::edpb::{
+        write_metadata_backup, ArtifactCompleteness, ArtifactInput, Extent, MetadataCapture,
+        Region, RestorePolicy, SemanticStatus, VerifiedBackupReader,
+    };
+    for sector in [1024u32, 2048] {
+        let tmp = TempDir::new(&format!("native_{sector}_edpb_v4"));
+        let path = tmp.0.join("native.edpb");
+        let (protocol, lce, lce_count) = virtual_native_multisector_metadata(sector);
+        let core = CoreCapture {
+            snapshot_id: format!("virtual-native-{sector}"),
+            created_epoch: 1_790_000_000,
+            disk_number: None,
+            vid: "3535".into(),
+            pid: "0901".into(),
+            device_id: "disk&ven_test&prod_native".into(),
+            onlyid: None,
+            total_sectors: Some(12_000),
+            logical_sector_size: sector,
+            edpcli_version: env!("CARGO_PKG_VERSION").into(),
+            device_state: "edp".into(),
+            lba0_12: &protocol,
+        };
+        let region = Region {
+            id: "region.lba7_compatibility_extent".into(),
+            role: "lba7_legacy_partition_compatibility_extent".into(),
+            start_lba: Some(10_000),
+            sector_count: Some(lce_count),
+            semantic_status: SemanticStatus::Identified,
+        };
+        let extent = Extent {
+            id: "extent.lba7_compatibility".into(),
+            region_id: region.id.clone(),
+            start_lba: 10_000,
+            sector_count: lce_count,
+            purpose: "lba7_compatibility_extent_ciphertext".into(),
+        };
+        let artifact = ArtifactInput {
+            id: "raw.lba7_compatibility".into(),
+            kind: "raw_sectors".into(),
+            media_type: "application/octet-stream".into(),
+            source_extent_ids: vec![extent.id.clone()],
+            derivation: None,
+            restore_policy: RestorePolicy::EvidenceOnly,
+            completeness: ArtifactCompleteness::Complete,
+            data: lce.clone(),
+        };
+        let input = MetadataCapture {
+            core,
+            partitions: vec![],
+            regions: vec![region],
+            extents: vec![extent],
+            artifacts: vec![artifact],
+            notes: vec![],
+        };
+        let manifest =
+            write_metadata_backup(&path, &input).unwrap_or_else(|e| panic!("{sector}: {e}"));
+        assert_eq!(manifest.schema, "edpb.manifest.v4");
+        assert!(!manifest.restore_contract.restores_edp_protocol);
+        assert!(manifest
+            .artifacts
+            .iter()
+            .all(|a| a.restore_policy == RestorePolicy::EvidenceOnly));
+        let readback = VerifiedBackupReader::open(&path).unwrap();
+        assert_eq!(readback.read_raw_protocol().unwrap(), protocol);
+        assert_eq!(
+            readback.read_artifact("raw.lba7_compatibility").unwrap(),
+            lce
+        );
+        let mut inspect = EvidenceSource::open_backup(&path).unwrap();
+        assert_eq!(inspect.logical_sector_bytes(), sector);
+        assert_eq!(
+            inspect.read_native_sector(11).unwrap(),
+            protocol[11 * sector as usize..12 * sector as usize]
+        );
+        assert_eq!(
+            inspect.read_sector(11).unwrap(),
+            protocol[11 * sector as usize..11 * sector as usize + 512]
+        );
+        for (offset, chunk) in lce.chunks_exact(sector as usize).enumerate() {
+            assert_eq!(
+                inspect.read_native_sector(10_000 + offset as u64).unwrap(),
+                chunk
+            );
+        }
+    }
+}
+
 #[test]
 fn native_4kn_edpb_v4_evidence_roundtrip_and_restore_guard() {
     use edpcli::edpb::{
