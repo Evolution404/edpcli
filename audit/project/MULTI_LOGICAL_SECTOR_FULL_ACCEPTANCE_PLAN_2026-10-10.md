@@ -1,5 +1,33 @@
 # edpcli：全逻辑扇区规格、全模式和全工作流实施与验收计划（执行中）
 
+## 2026-10-10 全局架构审计后执行队列（最新权威）
+
+**真相源与优先级**：本节结合 [`GLOBAL_ARCHITECTURE_AUDIT_2026-10-10.md`](GLOBAL_ARCHITECTURE_AUDIT_2026-10-10.md) 的 A01–A14 编制，覆盖下方旧 S0–S6 和“历史基线”的任何过时推断。审计提交 `85a023ea` 已推送至 `feat/native-4kn-wal-staging-20261010`；先前实现提交 `9fc54cc1`（默认保留）、`9440ce75`（三规格原生 EDPB 取证）和 `b57610ad`（统一 EDPB 只读核验）均已在此分支。审计时 `scripts/test-fast.sh`：8 suites/10 artifacts/0 failures，冗余扫描 851 文件、0 确认缺陷、216 **待裁决候选**，不要直接删除候选。
+
+**并行工作保护（2026-10-10 20:05 CST 核对）**：工作区有**另一 AI 尚未提交**的 `src/application/provision/native_flow.rs`、`src/tui/controller/tests.rs`、`src/tui/native_source_password_policy.rs`、`src/tui/provision/review.rs` 改动，正在执行 A01/A05 相关测试。下一 AI **首先重新执行** `git status --short --branch`、`git log -5 --oneline`、`git diff --stat` 和进程/任务核对，阅读这些 diff、确认是否已有提交；**保留这些改动，不要 reset/clean/stash/覆盖，也不要重复抢改**。该阶段当前记为 **进行中／未验收**，不能把测试启动当成功。
+
+| 顺序 | 审计项 | 应完成的代码改造 | 必须通过的门槛 | 现况 |
+| --- | --- | --- | --- | --- |
+| **P0-1** | **A01 + A05** | 将 TUI 来源密码验证白名单由 512/4096B 扩为与 Application 一致的 512/1024/2048/4096B；Native 计划带出**真实算法**供 TUI 确认页显示，而不是 `None`。明确区分 FileKey 封装算法与分区加密算法。 | 四规格密码正确/错误、Unknown→opaque、来源未变、算法确认页相符；8192B 非法 FS 不意外放行；相关 TUI/CLI 回归通过。 | **其他 AI 正在改，未验收/未提交** |
+| **P0-2** | **A02** | 将规划时硬件识别 `MediaIdentityPin`、设备身份/VID/PID/序列号、逻辑几何、完整 LBA0–12 及必要 LCE/来源分区首块摘要绑定为不可变 `SourceSnapshot`；通过同一 `TargetSession` 在取得写租约、重开后**重新比对**，保持原 WAL 路径。 | 模拟同容量换盘、device number 复用、LBA7/LBA12/FS 首块篡改、拔插，全部写前拒绝；不突破已存在几何/协议块复核。注意当前属于待证风险，**不能先宣称已存在误写**。 | 未开始 |
+| **P1-1** | **A04 + A06 + A08** | 将 `provision plan --source-backup`、旧 `native_preflight`/Mode1 专用写集与 TUI `NativeReadOnlyPlan` 迁入通用 `prepare_native_provision_on_disk → NativeWritePlan`；来源证据只作为校验输入，不能另造业务规划。把 CLI/TUI 必要格式化/保留、来源影响、能力矩阵下沉到 Application 统一事实，移除各处旧 512/4096 业务白名单。 | Plain/Mode0/1/2/3 × 四标准规格的计划事实/写集合合同源，保留区 SHA256/原 FileKey 不变；旧 CLI/TUI 功能/离线证据不回退，已无正式代码消费者后再删旧 API。 | 未开始；统一正式入口已具备 |
+| **P1-2** | **A03** | v3 512B 元数据恢复保持可用；对 v4 1024/2048/4096B 先完成**只读恢复计划**、同身份同几何验证、备份完整性/源 extent、LCE 原生块尾及 WAL 写集合合同。独立验证通过再新建有版本的 restorable 契约与写入执行器；跨逻辑扇区大小原样恢复拒绝。 | 512/1024/2048/4096B：备份→校验→只读计划→仅在批准的虚拟块设备 WAL 恢复→独立重挂识别、哈希匹配及失败回滚；未达到不得改变 v4 **evidence-only** 标识。 | v4 取证和只读核验已完成；恢复未实现 |
+| **P1-3** | **A07** | 补无损/部分保留/仅改密/格式化边界的真实 OS 虚拟块设备验收；对来源保留的每个实际分区**全范围**和 LCE 完整 native extent 比较 SHA256，不只读 MBR 可枚举启动区。 | 四规格按 OS 实际支持级别分别标记认证状态；变更分区起点或容量时**强制格式化重建或拒绝**；错误密码不可被解释为用户允许数据丢弃；对 1024B 首轮中断保留未明原因。 | 破坏性 100/100 有历史证据，无损真实写入未闭合 |
+| **P2-1** | **A09 + A10** | WAL 使用独立 `TransactionJournalReport`、可恢复 EDPB 使用 `MetadataBackupReport`、格式化状态独立；确认 UI 结果不把 WAL 称为用户数据备份。盘点旧 `PreparedProvision::Official/Plain`、`prepare_provision_on_disk` 消费者后逐步移除正式产品旁路。 | CLI/TUI 结果对应真实 WAL/EDPB 事务语义、恢复按钮能力正确；静态编译和应用行为回归通过。 | 待办 |
+| **P2-2** | **A11 + A12 + A13 + A14** | 修正文档旧的“所有转换默认破坏性重制”和 CLI 镜像文案；`--include-virtual` 全局 AtomicBool 长期改为设备发现策略对象；原厂 FileKey 生成/复用依据实盘记录做金标，不以推测重设密钥；216 冗余候选逐项鉴别，不删除历史协议证据。 | `scripts/audit-redundancy.py --check` 0 确认缺陷；不改变既有用户数据、默认密码/加密语义；文档、帮助、CLI/TUI 真实行为一致。 | 待办 |
+
+**开发约束／停止条件**：
+
+1. 任何来源 `start_lba`、容量、加密/文件系统不兼容，均须**格式化重建并在用户确认中明确显示来源分区名**；未获丢弃授权就拒绝。**禁止**引入数据搬移、缩放、重新分区后的无损复制或 `DataMigration`。同构保留、已验证 FileKey 仅 rewrap 不得修改原密文、LCE 或未归属原生块尾部；所有写集合合同源确认摘要。
+2. CLI/TUI、USB/Disk Image、512B/1024B/2048B/4096B 仅有一条 `SourceSnapshot → TargetProvisionPlan → NativeWritePlan → TargetSession → WAL → Readback` 业务路径；禁止独立 Mode1/4Kn 制盘写入器。`--include-virtual` 只控制发现，不授予额外写权限。
+3. **实体 USB 未有本轮单独明确授权时禁止写盘**；只用已确认归属且 `VirtualOrPhysical=Virtual`、`BusProtocol=Disk Image`、原生块/容量均经核验的临时虚拟设备做写入测试；不绕过执行环境拦截。严禁 `git reset/clean`，禁止覆盖他人工作；依赖核对后小步提交并 `push`。
+4. 按阶段先针对性单测 + `cargo fmt --all`/`git diff --check`，跨模块收口用 `scripts/test-fast.sh`；重大改造最后运行 `uv run --locked python scripts/test-full.py --profile full` 与冗余审计。**GitHub CI 仅在最终合并 main 阶段核查**；不要每次修改就重复 100 次破坏性矩阵。
+5. **验收必须可复核**：记录来源/目标模式与几何、分区唯一 ID、计划影响、实际 WAL 写集、受影响完整 LBA 范围/哈希、独立重挂识别及结果；备份取证、只读规划、正式 WAL 写入、实体盘验收四个证据层级不能混称。
+
+**下一 AI 接手起点**：先核对并收口其他 AI 的 A01/A05 未提交代码（有用就留、测试后分别提交推送），然后处理 P0-2 来源身份绑定；完成后按 P1-1→P1-2→P1-3→P2 执行。每阶段把准确证据追加至本计划，杜绝只汇报规划不改代码。
+
+---
+
 日期：2026-10-10。基线：`feat/native-4kn-wal-staging-20261010` / `eb1b9077`。本文件是下一迭代的**执行与验收计划**，不是已完成报告；历史实验与阶段证据见 [原生制盘现有验收计划](NATIVE_PROVISION_FINAL_ACCEPTANCE_PLAN_2026-10-10.md)、[多逻辑扇区架构](../../docs/architecture/MULTI_LOGICAL_SECTOR_SUPPORT_2026-10-09.md)、[官方启动区金标](../protocol/OFFICIAL_BOOT_SECTOR_GEOMETRY_AND_FAT_2026-10-10.md)。本计划在来源保留、备份恢复、全工作流方面扩展此前“允许丢弃数据”的破坏性验收目标；不得将较早的破坏性验收成果当作无损保留证据。
 
 ## 2026-10-10 最新需求修订（对下列旧表述具有优先级）
