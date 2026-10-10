@@ -3,6 +3,10 @@
 //! No USB media ever qualifies for ci_prepare_virtual_write.
 #![cfg(all(feature = "ci-virtual-disk", target_os = "macos"))]
 
+// Reuse established macOS HIL entrypoint for independent CLI crypto verification.
+#[path = "hil/native_cli_crypto_hil.rs"]
+mod native_cli_crypto_hil;
+
 use edpcli::application::filesystem::{FilesystemKind, NativeVirtualDiskPlan};
 use edpcli::application::provision::native_image::{
     plan_native_edp_image, plan_native_plain_image,

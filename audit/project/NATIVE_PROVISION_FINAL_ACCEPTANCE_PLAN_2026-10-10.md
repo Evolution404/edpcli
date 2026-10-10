@@ -159,3 +159,12 @@ OS 真实虚拟盘 HIL（仅使用脚本新建并核实的虚拟盘，需受控 
 - 直接执行 `uv run --locked python scripts/test-full.py --profile full`：56.28 秒，8 套件、10 个产物及 `doctest` 均通过，退出码 0；证据为 `target/p0-full-20261010.log`。
 - `uv run --locked python scripts/audit-redundancy.py --check`：检查 845 个文件，确认问题 0、待核查候选 212，退出码 0；证据为 `target/p0-redundancy-20261010.log`。
 - 当前记录仅对应 P0：密码独立解锁、TUI 真实按键、最终 OS 模式矩阵、WAL 故障恢复与物理盘尚未由本次会话重新验收。
+
+## 十二、2026-10-10 P1 原生块密码/FileKey/LCE 实验记录
+
+- 只读独立验收模块 `tests/hil/native_cli_crypto_hil.rs`（纳入既有 `native_macos_4kn_virtual_hil`）（显式 `ci-virtual-disk`、`#[ignore]`，须校验所属 macOS Disk Image 的原生整盘设备）；并入既有 `scripts/ci/macos-cli-native-virtual-hil.sh`，由正式 CLI 唯一写入，脚本只创建和校验自身临时 `WholeDisk/Virtual/Disk Image`。
+- 正式 macOS 原生块设备 512B/4096B 各经 `Plain → Mode0 → Mode1 → Mode2 → Mode3 → Plain` 六次连续提交及重挂，另外各插入一次不同交换/保密目标密码的 `Mode0 → Mode0`，总计 14 次实际制盘、14 次只读重新打开独立检查；最终退出码 0。证据 `target/p1-native-final-20261010.log`，并有历史中间复测 `target/p1-native-os-crypto-custom-metadata-20261010.log`。
+- 每次重新从原始 LBA0–12 解析 `LBA7/LBA12` 和目标类型；检查加密分区的正确默认/自定义密码解包、`FileKeyCRC`、旧式 LBA7 密钥记录、错误密码、改变 CRC、错误封装算法及未知算法负例。独立用协议原语而非写入器的扇区变换对 FAT16/exFAT 启动扇区和 FAT 保留项进行解密/解析；并对损坏启动扇区及不应为明文的加密区做拒绝断言。
+- 独立从 LBA7 指针确定 LCE 位置：512B 为 6 个原生扇区，4096B 为 1 个原生扇区。以原生物理字节地址解密：前 3072B 为既有标准明文，4Kn 额外 1024B 是明文零经加密后的密文字节；错误偏移地址解密不得等于预期。二合一区 `BootShareCombined` 的原始启动扇区始终等于解码明文，但其密码域 FileKey/LBA7 记录仍须正确验证。
+- `Mode0 → Mode0` 两区显式密码不同（仅临时虚拟盘测试值 `P1Share2026!`/`P1Encrypt2026!`），已证实默认密码不能解包新 FileKey，不会静默回退。Plain exFAT 还执行 macOS 挂载、写入文件、同步、卸载、重挂与内容持久化。
+- P1 涉及的当前可写底层加密算法是 SMS4；其它 FileKey 封装算法已有原语及回归金样，但尚不对未认证的 AES/AES_CROSS 写入作实体兼容承诺。仅证明已支持的原生写盘功能及独立解锁/解密，不等价于 USB 硬件认证。P2 的 TUI 真实按键及后续 P3/P4/P5 还未形成终态证据。

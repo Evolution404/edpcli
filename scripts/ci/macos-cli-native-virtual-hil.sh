@@ -11,6 +11,27 @@ cleanup() {
 trap cleanup EXIT
 cargo build --quiet --locked
 bin="$(pwd)/target/debug/edpcli"
+# Build the read-only independent verifier once; the formal CLI is the ONLY writer.
+verifier="$(cargo test --locked --features ci-virtual-disk --test native_macos_4kn_virtual_hil --no-run --message-format=json | python3 -c '
+import json,sys
+for line in sys.stdin:
+    record=json.loads(line)
+    if record.get("reason")=="compiler-artifact" and record.get("target",{}).get("name")=="native_macos_4kn_virtual_hil":
+        path=record.get("executable")
+        if path: print(path)
+')"
+[[ -x "$verifier" ]] || { echo "independent verifier build failed" >&2; exit 1; }
+verify_crypto() {
+  local raw="/dev/r$(basename "$device")"
+  local share_password="${1:-0000aaaa}" encrypt_password="${2:-0000aaaa}"
+  local args=(EDPCLI_CRYPTO_HIL_RAW="$raw" EDPCLI_CRYPTO_HIL_SECTOR="$sector" EDPCLI_CRYPTO_HIL_MODE="$mode" EDPCLI_CRYPTO_HIL_BYTES=536870912 EDPCLI_CRYPTO_HIL_SHARE_PASSWORD="$share_password" EDPCLI_CRYPTO_HIL_ENCRYPT_PASSWORD="$encrypt_password")
+  # Read-only access; escalation is only for opening the guarded disk node.
+  if [[ -r "$raw" ]]; then
+    env "${args[@]}" "$verifier" --ignored --exact native_cli_crypto_hil::formal_cli_native_crypto_readback --nocapture
+  else
+    sudo -n env "${args[@]}" "$verifier" --ignored --exact native_cli_crypto_hil::formal_cli_native_crypto_readback --nocapture
+  fi
+}
 for sector in 512 4096; do
   img="$root/n$sector.img"
   mkfile -n 512m "$img"
@@ -44,6 +65,25 @@ assert v.get("TotalSize") == 536870912
     diskutil eject "$device" >/dev/null
     device=""
     attach
+    # Reopened OS block device: parse/decrypt from real bytes, not authored writes.
+    verify_crypto
+    if [[ "$mode" == "mode0" ]]; then
+      # Prove explicit independent passwords, never the implicit default.
+      # These are public test-only values, never credentials for real USBs.
+      share_password="P1Share2026!"
+      encrypt_password="P1Encrypt2026!"
+      echo "[P1] custom target passwords mode0, sector=$sector, disposable Disk Image"
+      if [[ -r "/dev/r$(basename "$device")" && -w "/dev/r$(basename "$device")" ]]; then
+        "$bin" provision write --include-virtual --disk "$device" --target mode0 --yes --backup-dir "$root" --share-target-password "$share_password" --encrypt-target-password "$encrypt_password"
+      else
+        sudo -n "$bin" provision write --include-virtual --disk "$device" --target mode0 --yes --backup-dir "$root" --share-target-password "$share_password" --encrypt-target-password "$encrypt_password"
+      fi
+      diskutil eject "$device" >/dev/null
+      device=""
+      attach
+      verify_crypto "$share_password" "$encrypt_password"
+      echo "[P1] PASS custom target passwords with independent FileKey unwrap"
+    fi
     if [[ "$mode" == "plain" ]]; then
       # Formal CLI formatter must produce an actually mountable 512/4096B
       # ExFAT volume. Verify a file survives detach and reattach.
@@ -67,4 +107,4 @@ assert v.get("TotalSize") == 536870912
   diskutil eject "$device" >/dev/null
   device=""
 done
-echo 'PASS formal edpcli CLI native OS block HIL: 12 destructive writes + reattach'
+echo 'PASS formal edpcli CLI native OS block HIL: 14 destructive writes (12 standard + 2 custom password), reattach, native crypto/LCE/FAT metadata readback'
