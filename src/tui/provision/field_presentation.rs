@@ -240,7 +240,7 @@ impl AppState {
                 crate::provision::PartitionRole::CompatibilityReserve => unreachable!(),
             };
             let format_status = match disposition {
-                preflight::ProvisionFormatDisposition::Preserve => "☐ 保留·待支持",
+                preflight::ProvisionFormatDisposition::Preserve => "☐ 保留",
                 preflight::ProvisionFormatDisposition::RequiredRebuild => "☑ 必须",
                 preflight::ProvisionFormatDisposition::UserRequestedRebuild => "☑ 格式化",
                 preflight::ProvisionFormatDisposition::NotApplicable => "固定，不格式化",

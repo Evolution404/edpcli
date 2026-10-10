@@ -259,9 +259,9 @@ fn preservable_source_boot_is_not_silently_reformatted_at_the_next_step() {
     let visible = state.provision_visible_fields();
     assert!(visible
         .iter()
-        .any(|(label, value, _)| label == "启动区格式化" && value.contains("保留·待支持")));
-    // The UI may construct a read-only draft, but must carry preserve intent
-    // unchanged to the application. Native commit preparation rejects it.
+        .any(|(label, value, _)| label == "启动区格式化" && *value == "☐ 保留"));
+    // The TUI preserve decision is passed unchanged into the shared native
+    // source-aware planner; a compatible source preserves the partition.
     let request = state.provision_request().unwrap();
     assert!(request.preserve_unformatted);
     assert!(!request.format.boot);

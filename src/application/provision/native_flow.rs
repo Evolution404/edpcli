@@ -40,6 +40,32 @@ pub struct NativePreviewPartition {
     pub filesystem: Option<crate::filesystem::FilesystemKind>,
     pub formatted: bool,
     pub physically_encrypted: bool,
+    /// Exact application planner decision, NOT a TUI reconstruction.
+    pub disposition: Option<crate::provision::RegionDisposition>,
+    pub password_disposition: Option<crate::provision::PasswordDisposition>,
+}
+impl NativePreviewPartition {
+    pub fn validate_preservation(&self) -> Result<(), String> {
+        if self.formatted {
+            return Ok(());
+        }
+        use crate::provision::{PartitionRole, RegionDisposition};
+        match (self.role, self.disposition) {
+            (Some(PartitionRole::CompatibilityReserve), _) => Ok(()),
+            (
+                _,
+                Some(
+                    RegionDisposition::PreserveOpaque
+                    | RegionDisposition::PreserveVerified
+                    | RegionDisposition::RewrapVerified,
+                ),
+            ) => Ok(()),
+            _ => Err(format!(
+                "{}未格式化但也无已验证的保留/改密决策，拒绝确认写盘",
+                self.role.map_or("普通分区", |r| r.label())
+            )),
+        }
+    }
 }
 
 fn native_compatibility_extent(
@@ -502,7 +528,8 @@ fn generate_official_native_plan(
     getrandom::fill(&mut entropy).map_err(|e| format!("协议随机字段生成失败: {e}"))?;
     let partitions = targets
         .iter()
-        .map(|p| {
+        .enumerate()
+        .map(|(i, p)| {
             let formatted = match p.role {
                 crate::provision::PartitionRole::Boot => options.boot,
                 crate::provision::PartitionRole::Share
@@ -517,6 +544,8 @@ fn generate_official_native_plan(
                 filesystem: p.filesystem,
                 formatted,
                 physically_encrypted: p.physically_encrypted,
+                disposition: Some(dispositions.partitions[i].disposition),
+                password_disposition: dispositions.partitions[i].password_disposition,
             }
         })
         .collect::<Vec<_>>();
@@ -747,6 +776,8 @@ pub fn prepare_native_provision_on_disk(
                     filesystem: Some(crate::filesystem::FilesystemKind::ExFat),
                     formatted: true,
                     physically_encrypted: false,
+                    disposition: None,
+                    password_disposition: None,
                 }]
             } else {
                 request
@@ -772,6 +803,8 @@ pub fn prepare_native_provision_on_disk(
                             filesystem: Some(part.filesystem),
                             formatted: true,
                             physically_encrypted: false,
+                            disposition: None,
+                            password_disposition: None,
                         })
                     })
                     .collect::<Result<Vec<_>, String>>()?
@@ -803,6 +836,30 @@ pub fn prepare_native_provision_on_disk(
     if target != crate::provision::ProvisionTarget::Plain {
         if let Some(lba3) = plan.writes.iter_mut().find(|block| block.relative_lba == 3) {
             lba3.data.clone_from(&prefix[3]);
+        }
+    }
+    // Independently verify that no native write touches an unformatted
+    // retained filesystem. The confirmation page must not assert preservation
+    // unless the exact commit plan's write-set proves it.
+    for part in &partitions {
+        part.validate_preservation()?;
+        if !part.formatted
+            && part.role != Some(crate::provision::PartitionRole::CompatibilityReserve)
+        {
+            let end = part
+                .start_lba
+                .checked_add(part.sector_count)
+                .ok_or("原生保留分区范围溢出")?;
+            if plan
+                .writes
+                .iter()
+                .any(|write| (part.start_lba..end).contains(&write.relative_lba))
+            {
+                return Err(format!(
+                    "{}保留区与实际原生写集合重叠，拒绝写盘",
+                    part.role.map_or("普通分区", |role| role.label())
+                ));
+            }
         }
     }
     let mut snapshot = crate::media_identity::MediaIdentitySnapshot::default();

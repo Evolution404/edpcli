@@ -89,6 +89,81 @@ impl ProvisionConfirmationFilesystemEffect {
     }
 }
 
+/// Project the native write planner's decision; never infer data loss
+/// from the presence of native protocol writes.
+fn native_partition_review(
+    part: &crate::application::provision::native_flow::NativePreviewPartition,
+) -> Result<
+    (
+        ProvisionConfirmationAction,
+        ProvisionConfirmationDataEffect,
+        ProvisionConfirmationPasswordEffect,
+        ProvisionConfirmationFilesystemEffect,
+        String,
+    ),
+    String,
+> {
+    use crate::provision::{PartitionRole, PasswordDisposition, RegionDisposition};
+    if part.formatted {
+        if part.role.is_some() && part.disposition != Some(RegionDisposition::Rebuild) {
+            return Err("原生格式化勾选状态与底层分区处理计划不一致".into());
+        }
+        return Ok((
+            ProvisionConfirmationAction::FormatRebuild,
+            ProvisionConfirmationDataEffect::Clear,
+            if part.physically_encrypted {
+                ProvisionConfirmationPasswordEffect::Rebuild
+            } else {
+                ProvisionConfirmationPasswordEffect::None
+            },
+            part.filesystem
+                .map(ProvisionConfirmationFilesystemEffect::Format)
+                .unwrap_or(ProvisionConfirmationFilesystemEffect::None),
+            "已明确选择格式化：重新创建文件系统，原分区数据将清空。".into(),
+        ));
+    }
+    if part.role == Some(PartitionRole::CompatibilityReserve) {
+        return Ok((
+            ProvisionConfirmationAction::Preserve,
+            ProvisionConfirmationDataEffect::None,
+            ProvisionConfirmationPasswordEffect::None,
+            ProvisionConfirmationFilesystemEffect::None,
+            "官方兼容保留范围，不格式化。".into(),
+        ));
+    }
+    part.validate_preservation()?;
+    let (action, reason) = match part.disposition {
+        Some(RegionDisposition::PreserveOpaque | RegionDisposition::PreserveVerified) => (
+            if part.physically_encrypted {
+                ProvisionConfirmationAction::Passthrough
+            } else {
+                ProvisionConfirmationAction::Preserve
+            },
+            "来源分区原样保留；原始数据、文件系统和 FileKey 不变。",
+        ),
+        Some(RegionDisposition::RewrapVerified) => (
+            ProvisionConfirmationAction::Rewrap,
+            "仅修改密码封装；原 FileKey、文件系统与密文数据保持不变。",
+        ),
+        _ => return Err("原生非格式化区域没有有效的保留/改密处置".into()),
+    };
+    let password_effect = match part.password_disposition {
+        Some(PasswordDisposition::Passthrough(_)) => ProvisionConfirmationPasswordEffect::Preserve,
+        Some(PasswordDisposition::Rewrap) => ProvisionConfirmationPasswordEffect::Rewrap,
+        Some(PasswordDisposition::Rebuild | PasswordDisposition::Blocked) => {
+            return Err("未格式化区域不能重建密码域或处于密码不可执行状态".into());
+        }
+        None => ProvisionConfirmationPasswordEffect::None,
+    };
+    Ok((
+        action,
+        ProvisionConfirmationDataEffect::Preserve,
+        password_effect,
+        ProvisionConfirmationFilesystemEffect::Keep,
+        reason.into(),
+    ))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProvisionConfirmationTarget {
     pub disk: u32,
@@ -247,6 +322,8 @@ impl ProvisionConfirmationViewModel {
                         end_exclusive,
                         kind,
                     };
+                    let (action, data_effect, password_effect, filesystem_effect, reason_summary) =
+                        native_partition_review(part)?;
                     regions.push(ProvisionConfirmationRegion {
                         label: part
                             .role
@@ -255,27 +332,17 @@ impl ProvisionConfirmationViewModel {
                         role: part.role,
                         selection,
                         sector_count: part.sector_count,
-                        action: ProvisionConfirmationAction::FormatRebuild,
-                        data_effect: ProvisionConfirmationDataEffect::Clear,
-                        password_effect: if part.physically_encrypted {
-                            ProvisionConfirmationPasswordEffect::Rebuild
-                        } else {
-                            ProvisionConfirmationPasswordEffect::None
-                        },
-                        filesystem_effect: if part.formatted {
-                            part.filesystem
-                                .map(ProvisionConfirmationFilesystemEffect::Create)
-                                .unwrap_or(ProvisionConfirmationFilesystemEffect::None)
-                        } else {
-                            ProvisionConfirmationFilesystemEffect::None
-                        },
-                        reason_summary:
-                            "统一原生块破坏性制盘：重建目标协议和目标分区，原用户文件不会保留。"
-                                .into(),
+                        action,
+                        data_effect,
+                        password_effect,
+                        filesystem_effect,
+                        reason_summary,
                         technical_basis: vec![
                             format!("逻辑块大小  {}B", native.plan.sector_bytes),
                             format!("LBA 范围    {}–{}", part.start_lba, end_exclusive - 1),
                             format!("来源模式    {}", native.source.short_name()),
+                            format!("分区处理    {:?}", part.disposition),
+                            format!("是否格式化  {}", part.formatted),
                             format!("事务写集    {} 块（WAL保存原块）", native.plan.writes.len()),
                         ],
                     });
@@ -647,5 +714,64 @@ impl AppState {
 
     pub fn provision_review_toggle_details(&mut self) {
         self.provision.review_details_expanded = !self.provision.review_details_expanded;
+    }
+}
+
+#[cfg(test)]
+mod native_preservation_projection_tests {
+    use super::*;
+    use crate::application::provision::native_flow::NativePreviewPartition;
+    use crate::filesystem::FilesystemKind;
+    use crate::provision::{
+        PartitionRole, PassthroughBasis, PasswordDisposition, RegionDisposition,
+    };
+
+    #[test]
+    fn passthrough_rewrap_and_rebuild_render_from_actual_native_plan_for_all_sector_sizes() {
+        for sector in [512u32, 1024, 2048, 4096] {
+            let mut part = NativePreviewPartition {
+                role: Some(PartitionRole::Encrypt),
+                start_lba: 13627392 / (u64::from(sector) / 512),
+                sector_count: 2097152,
+                filesystem: Some(FilesystemKind::ExFat),
+                physically_encrypted: true,
+                formatted: false,
+                disposition: Some(RegionDisposition::PreserveVerified),
+                password_disposition: Some(PasswordDisposition::Passthrough(
+                    PassthroughBasis::Verified,
+                )),
+            };
+            let (action, data, password, fs, reason) = native_partition_review(&part).unwrap();
+            assert_eq!(action, ProvisionConfirmationAction::Passthrough, "{sector}");
+            assert_eq!(data, ProvisionConfirmationDataEffect::Preserve);
+            assert_eq!(password, ProvisionConfirmationPasswordEffect::Preserve);
+            assert_eq!(fs, ProvisionConfirmationFilesystemEffect::Keep);
+            assert!(!reason.contains("清空"));
+
+            part.disposition = Some(RegionDisposition::RewrapVerified);
+            part.password_disposition = Some(PasswordDisposition::Rewrap);
+            let (action, data, password, fs, _) = native_partition_review(&part).unwrap();
+            assert_eq!(action, ProvisionConfirmationAction::Rewrap);
+            assert_eq!(data, ProvisionConfirmationDataEffect::Preserve);
+            assert_eq!(password, ProvisionConfirmationPasswordEffect::Rewrap);
+            assert_eq!(fs, ProvisionConfirmationFilesystemEffect::Keep);
+
+            part.formatted = true;
+            part.disposition = Some(RegionDisposition::Rebuild);
+            part.password_disposition = Some(PasswordDisposition::Rebuild);
+            let (action, data, _, fs, _) = native_partition_review(&part).unwrap();
+            assert_eq!(action, ProvisionConfirmationAction::FormatRebuild);
+            assert_eq!(data, ProvisionConfirmationDataEffect::Clear);
+            assert_eq!(
+                fs,
+                ProvisionConfirmationFilesystemEffect::Format(FilesystemKind::ExFat)
+            );
+
+            part.formatted = false;
+            assert!(native_partition_review(&part).is_err());
+            part.disposition = None;
+            part.password_disposition = None;
+            assert!(native_partition_review(&part).is_err());
+        }
     }
 }

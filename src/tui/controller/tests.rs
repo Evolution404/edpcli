@@ -504,6 +504,8 @@ fn virtual_4kn_disk_uses_native_prepared_review_and_write_eligibility() {
             filesystem: Some(FilesystemKind::ExFat),
             formatted: true,
             physically_encrypted: false,
+            disposition: None,
+            password_disposition: None,
         }],
     };
     state.provision_set_planning();
