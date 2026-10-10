@@ -147,3 +147,122 @@ fn swapped_geometry_and_failed_identity_release_lease_without_authorizing_write(
         assert!(!leases.0.get());
     }
 }
+
+#[test]
+fn native_4kn_typestate_commits_only_after_identity_pin_with_durable_journal() {
+    use crate::diskio::{NativeBlockDevice, NativeRawBlockDevice};
+    use crate::filesystem::{NativeFilesystemWrite, NativeVirtualDiskPlan};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let facts = facts();
+    facts.geometry.set(Some(ObservedDeviceGeometry {
+        capacity_bytes: 16 * 4096,
+        logical_sector_bytes: Some(4096),
+        physical_sector_bytes: Some(4096),
+    }));
+    let leases = Leases(Rc::new(Cell::new(false)));
+    let geo = facts
+        .geometry
+        .get()
+        .unwrap()
+        .writable_native_4kn_geometry()
+        .unwrap();
+    let file = std::env::temp_dir().join(format!(
+        "edp-typed-native-{}_{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+    ));
+    let journal = file.with_extension("wal");
+    fs::write(&file, vec![0xa5; 16 * 4096]).unwrap();
+    let mut dev = NativeRawBlockDevice::open_readonly(file.to_str().unwrap(), geo).unwrap();
+    assert!(dev.write_block(0, &[7; 4096]).is_err());
+    let session = TargetSession::open_with_ports(&facts, &leases, 6)
+        .unwrap()
+        .prepare_native_4kn_write()
+        .unwrap();
+    assert!(leases.0.get());
+    let mut verified = false;
+    let mut locked = session
+        .reopen_native_and_verify(&mut dev, Duration::ZERO, |reader| {
+            assert_eq!(reader.geometry(), geo);
+            assert_eq!(reader.read_block_fresh(0).unwrap(), vec![0xa5; 4096]);
+            verified = true;
+            Ok::<(), ()>(())
+        })
+        .unwrap();
+    assert!(verified);
+    let plan = NativeVirtualDiskPlan {
+        sector_bytes: 4096,
+        total_sectors: 16,
+        writes: vec![
+            NativeFilesystemWrite {
+                relative_lba: 1,
+                data: vec![3; 4096],
+            },
+            NativeFilesystemWrite {
+                relative_lba: 0,
+                data: vec![8; 4096],
+            },
+        ],
+    };
+    locked
+        .execute_native_transaction_with_journal(&plan, &journal, "fixture:disk6:4Kn")
+        .unwrap();
+    assert!(leases.0.get());
+    drop(locked);
+    assert!(!leases.0.get());
+    assert_eq!(&fs::read(&file).unwrap()[..4096], &[8; 4096]);
+    assert!(fs::read(&journal).unwrap().ends_with(
+        b"COMMITTED_SYNC_AND_READBACK_OK
+"
+    ));
+    fs::remove_file(file).unwrap();
+    fs::remove_file(journal).unwrap();
+}
+
+#[test]
+fn native_4kn_reopen_pin_failure_leaves_device_unarmed_and_releases_lease() {
+    use crate::diskio::{NativeBlockDevice, NativeRawBlockDevice};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let facts = facts();
+    facts.geometry.set(Some(ObservedDeviceGeometry {
+        capacity_bytes: 16 * 4096,
+        logical_sector_bytes: Some(4096),
+        physical_sector_bytes: Some(4096),
+    }));
+    let leases = Leases(Rc::new(Cell::new(false)));
+    let geo = facts
+        .geometry
+        .get()
+        .unwrap()
+        .writable_native_4kn_geometry()
+        .unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "edp-typed-pin-{}_{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(&path, vec![0x5a; 16 * 4096]).unwrap();
+    let mut dev = NativeRawBlockDevice::open_readonly(path.to_str().unwrap(), geo).unwrap();
+    let session = TargetSession::open_with_ports(&facts, &leases, 6)
+        .unwrap()
+        .prepare_native_4kn_write()
+        .unwrap();
+    let result =
+        session.reopen_native_and_verify(&mut dev, Duration::ZERO, |_| Err::<(), _>("pin changed"));
+    assert!(matches!(result, Err(ReopenAndVerifyError::Verify(_))));
+    drop(result);
+    assert!(!leases.0.get());
+    assert!(!dev.is_writable());
+    assert!(dev.write_block(0, &[1; 4096]).is_err());
+    fs::remove_file(path).unwrap();
+}

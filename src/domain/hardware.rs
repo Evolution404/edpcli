@@ -50,6 +50,18 @@ impl ObservedDeviceGeometry {
         })
     }
 
+    /// Native 4Kn write eligibility is separate from legacy 512B protocol
+    /// projection, and is not itself authorization to touch a physical disk.
+    /// A TargetSession lease, fresh device pin, and write-ahead snapshot are
+    /// still mandatory before committing a plan.
+    pub fn writable_native_4kn_geometry(self) -> Result<NativeReadGeometry, &'static str> {
+        let geometry = self.native_read_geometry()?;
+        if geometry.logical_sector_bytes != 4096 || geometry.native_sector_count > u32::MAX as u64 {
+            return Err("原生写入仅支持经过验证的4096B逻辑块及u32兼容LBA范围");
+        }
+        Ok(geometry)
+    }
+
     pub fn writable_protocol_sectors(self) -> Result<u64, &'static str> {
         if self.logical_sector_bytes != Some(512) {
             return Err("设备逻辑扇区大小未知或不是 512B，禁止写入");

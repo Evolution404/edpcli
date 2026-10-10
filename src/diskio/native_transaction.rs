@@ -14,6 +14,10 @@ pub trait NativeBlockDevice {
     fn total_sectors(&self) -> u64;
     fn sector_bytes(&self) -> u32;
     fn read_block(&mut self, lba: u64) -> io::Result<Vec<u8>>;
+    /// Fresh independent physical read after sync when the device supports it.
+    fn read_block_fresh(&mut self, lba: u64) -> io::Result<Vec<u8>> {
+        self.read_block(lba)
+    }
     fn write_block(&mut self, lba: u64, full_block: &[u8]) -> io::Result<()>;
     fn sync_blocks(&mut self) -> io::Result<()>;
 }
@@ -56,7 +60,7 @@ fn rollback(dev: &mut dyn NativeBlockDevice, originals: &[(u64, Vec<u8>)]) -> bo
         good = false;
     }
     for (lba, original) in originals {
-        match dev.read_block(*lba) {
+        match dev.read_block_fresh(*lba) {
             Ok(actual) if actual == *original => {}
             _ => good = false,
         }
@@ -133,8 +137,8 @@ pub fn execute_native_transaction(
         // A second full verification after sync catches deferred corruption.
         for write in &plan.writes {
             let actual = dev
-                .read_block(write.relative_lba)
-                .map_err(|e| format!("LBA{}同步后读取失败: {e}", write.relative_lba))?;
+                .read_block_fresh(write.relative_lba)
+                .map_err(|e| format!("LBA{}同步后独立读取失败: {e}", write.relative_lba))?;
             if actual != write.data {
                 return Err(format!("LBA{}同步后回读不一致", write.relative_lba));
             }
