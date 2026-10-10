@@ -20,9 +20,10 @@ impl AppState {
         self.provision_sync_cursor_to_end();
     }
 
-    pub(super) fn provision_total_sectors(&self) -> Option<u64> {
+    pub(crate) fn provision_total_sectors(&self) -> Option<u64> {
         self.selected_device()
-            .map(|row| row.size / crate::common::SECTOR as u64)
+            .and_then(|row| row.layout_geometry().ok())
+            .map(|geometry| geometry.native_sector_count)
     }
 
     pub(super) fn provision_field_descriptor(

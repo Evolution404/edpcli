@@ -200,6 +200,7 @@ impl AppState {
         }
 
         use crate::provision::CapacitySource;
+        let logical_sector_bytes = self.provision.form.logical_sector_bytes;
         let (unit, quick, exact, edited, source) = match role {
             crate::provision::PartitionRole::Boot => (
                 self.provision.form.boot_quick_unit,
@@ -226,7 +227,8 @@ impl AppState {
             crate::provision::PartitionRole::CompatibilityReserve => return false,
         };
         *exact = max_sectors.to_string();
-        *quick = ProvisionForm::format_sector_unit_3(max_sectors, unit);
+        *quick =
+            ProvisionForm::format_sector_unit_3_native(max_sectors, unit, logical_sector_bytes);
         *edited = false;
         *source = CapacitySource::UserEdited;
         self.provision.message = None;

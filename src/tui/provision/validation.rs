@@ -14,8 +14,9 @@ impl AppState {
     }
 
     /// Read-only layout projection uses the observed device-native geometry.
-    /// A 4Kn source may be previewed only with its confirmed LCE and mode.
-    /// This never authorizes a 4Kn write plan.
+    /// Source LCE is observed for registered EDP media; a Plain source may
+    /// show a provisional LCE reservation at disk end *only as a draft*.
+    /// Neither variant authorizes native physical writing.
     pub(super) fn provision_preview_geometry(&self) -> Result<(u64, u32, u64), String> {
         let row = self.selected_device().ok_or("目标 USB 已不存在")?;
         let geometry = row.layout_geometry()?;
@@ -24,19 +25,31 @@ impl AppState {
             crate::application::provision_geometry::verified_usb_compatibility_extent(total)
                 .ok_or("目标不符合已验证的512B制盘几何")?
                 .start_lba
-        } else if geometry.logical_sector_bytes == 4096 {
-            let lce = row.lce.as_ref().ok_or("4Kn 来源 LCE 几何尚未验证")?;
-            if lce.sector_count != 1
-                || lce
-                    .start_lba
-                    .checked_add(lce.sector_count)
-                    .is_none_or(|end| end > total)
-            {
-                return Err("4Kn 来源 LCE 指针或完整块范围无效".into());
+        } else if crate::domain::hardware::valid_native_sector_bytes(geometry.logical_sector_bytes)
+        {
+            let required_lce_blocks = 3072u64.div_ceil(u64::from(geometry.logical_sector_bytes));
+            if let Some(lce) = row.lce.as_ref() {
+                if lce.sector_count < required_lce_blocks
+                    || lce
+                        .start_lba
+                        .checked_add(lce.sector_count)
+                        .is_none_or(|end| end > total)
+                {
+                    return Err("来源LCE指针、大小或完整原生块范围无效".into());
+                }
+                lce.start_lba
+            } else if row.provision_kind == crate::provision::DiskProvisionKind::Plain {
+                // A *proposal*, not an observed source LCE. Usable only for
+                // read-only layout drafts, never credentials or physical writes.
+                total
+                    .checked_sub(required_lce_blocks)
+                    .filter(|start| *start > crate::provision::OFFICIAL_PARTITION_START_SECTOR)
+                    .ok_or("普通盘空间不足以预留目标LCE")?
+            } else {
+                return Err("来源EDP盘未提供可信LCE；禁止推断现有保密区边界".into());
             }
-            lce.start_lba
         } else {
-            return Err("当前逻辑扇区大小未经验证；拒绝规划".into());
+            return Err("当前逻辑扇区大小无效；拒绝规划".into());
         };
         Ok((total, geometry.logical_sector_bytes, lce_start))
     }
@@ -107,7 +120,14 @@ impl AppState {
                     CapacitySource::UserEdited,
                 )?,
                 CapacityInputMode::Quick => CapacityInput::from_quick_sectors(
-                    ProvisionForm::resolve_quick_sectors(quick, exact, unit, edited, label)?,
+                    ProvisionForm::resolve_quick_sectors_native(
+                        quick,
+                        exact,
+                        unit,
+                        edited,
+                        label,
+                        logical_bytes,
+                    )?,
                     CapacitySource::UserEdited,
                 )?,
             };
@@ -379,7 +399,14 @@ impl AppState {
             let sectors = if mode == exact {
                 parse_sectors(exact_value, label)?
             } else {
-                ProvisionForm::resolve_quick_sectors(quick, exact_value, unit, edited, label)?
+                ProvisionForm::resolve_quick_sectors_native(
+                    quick,
+                    exact_value,
+                    unit,
+                    edited,
+                    label,
+                    form.logical_sector_bytes,
+                )?
             };
             Ok(Some(sectors))
         };

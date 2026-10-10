@@ -118,6 +118,10 @@ fn native_4kn_mode0_requests_readonly_key_probe_and_independent_password_verific
     ));
     let mut state = AppState::new();
     state.replace_devices(vec![row]);
+    assert_eq!(
+        state.provision_total_sectors(),
+        Some(255_944_818_688 / 4096)
+    );
     assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
     let outcome = super::provision::dispatch_provision(&mut state, TuiAction::Activate, 20)
         .expect("scheme activation handled");
@@ -258,4 +262,158 @@ fn native_4kn_mode0_requests_readonly_key_probe_and_independent_password_verific
     state.provision_return_review_to_form();
     assert_eq!(state.provision().stage, ProvisionStage::Form);
     assert!(state.provision().native_readonly_review.is_none());
+
+    // Previously all 4Kn non-Mode0->Mode1 choices hit the special-source
+    // hard refusal. Plain targets now get an independent native-LBA draft.
+    state.provision_mut().scheme_selected = 4;
+    state.provision_begin_selected();
+    let draft = state.provision_native_geometry_readonly_plan().unwrap();
+    assert_eq!(draft.source_kind, DiskProvisionKind::Mode0);
+    assert_eq!(draft.target_kind, ProvisionKind::Plain);
+    assert_eq!(draft.total_sectors, 255_944_818_688 / 4096);
+    assert!(draft.lce_lba.is_none());
+    state.provision_set_planning();
+    state.provision_finish_native_geometry_readonly_plan(Ok(draft));
+    assert_eq!(state.provision().stage, ProvisionStage::Review);
+    assert!(state.provision().native_geometry_review.is_some());
+    assert!(state.provision().prepared.is_none());
+    for action in [TuiAction::Activate, TuiAction::Export] {
+        super::provision::dispatch_provision(&mut state, action, 20).unwrap();
+        assert_eq!(state.provision().stage, ProvisionStage::Review);
+        assert!(state.provision_take_for_write().is_none());
+        assert!(state.provision_take_export().is_none());
+    }
+    state.provision_return_review_to_form();
+
+    // Same-mode Mode1->Mode1 also has a native read-only draft, not a
+    // misleading requirement that its source must be Mode0.
+    let mut another = crate::disk_scan::Row {
+        disk: 6,
+        size: 255_944_818_688,
+        vid: "3535".into(),
+        pid: "0901".into(),
+        proto: "USB".into(),
+        serial: None,
+        hardware_model: None,
+        device_id: Some("disk&ven_test&prod_test".into()),
+        identity_pin: None,
+        onlyid: Some("1402259934".into()),
+        dept: None,
+        user: None,
+        label: None,
+        force_change_password: None,
+        cancel_password_complexity_check: None,
+        max_share_password_errors: None,
+        max_encrypt_password_errors: None,
+        n_baks: 0,
+        n_possible_baks: 0,
+        denied: false,
+        probe_error: None,
+        provision_kind: DiskProvisionKind::Mode1,
+        partitions: None,
+        partition_table: None,
+        partition_table_error: None,
+        lce: Some(crate::backup_metadata::Lba7CompatibilityGeometry {
+            start_lba: 62_476_561,
+            sector_count: 1,
+            lba7_pointer_entries: vec![],
+            official_partition_mode: Some("mode1".into()),
+            chs_expected_start_lba: None,
+        }),
+    };
+
+    let mut new_pin = crate::media_identity::MediaIdentitySnapshot::default();
+    new_pin.hardware.logical_sector_size = Some(4096);
+    new_pin.hardware.total_sectors = Some(another.size / 4096);
+    new_pin.protocol.provision_kind = Some(DiskProvisionKind::Mode1);
+    new_pin.protocol.device_id = another.device_id.clone();
+    new_pin.protocol.onlyid = another.onlyid.clone();
+    another.identity_pin = Some(crate::media_identity::MediaIdentityPin::new(
+        new_pin,
+        &[0u8; 512],
+    ));
+    state.replace_devices(vec![another]);
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(6));
+    state.provision_mut().scheme_selected = 1;
+    state.provision_begin_selected();
+    state.provision_enter_form_workspace();
+    let draft = state.provision_native_geometry_readonly_plan().unwrap();
+    assert_eq!(draft.source_kind, DiskProvisionKind::Mode1);
+    assert_eq!(draft.target_kind, ProvisionKind::Mode1);
+    assert!(draft.lce_is_source_verified);
+    assert_eq!(draft.sector_bytes, 4096);
+    assert!(!draft.partitions.is_empty());
+    state.provision_set_planning();
+    state.provision_finish_native_geometry_readonly_plan(Ok(draft));
+    assert!(state.provision().prepared.is_none());
+    assert_eq!(state.provision().stage, ProvisionStage::Review);
+    super::provision::dispatch_provision(&mut state, TuiAction::Activate, 20).unwrap();
+    assert_eq!(state.provision().stage, ProvisionStage::Review);
+}
+
+#[test]
+fn plain_source_can_review_native_edp_geometry_without_source_lce_or_write_permission() {
+    use crate::provision::DiskProvisionKind;
+    use crate::tui::state::{ProvisionKind, ProvisionStage};
+    let mut row = crate::disk_scan::Row {
+        disk: 7,
+        size: 255_944_818_688,
+        vid: "3535".into(),
+        pid: "0901".into(),
+        proto: "USB".into(),
+        serial: None,
+        hardware_model: None,
+        device_id: Some("disk&ven_test&prod_test".into()),
+        identity_pin: None,
+        onlyid: Some("1402259934".into()),
+        dept: None,
+        user: None,
+        label: None,
+        force_change_password: None,
+        cancel_password_complexity_check: None,
+        max_share_password_errors: None,
+        max_encrypt_password_errors: None,
+        n_baks: 0,
+        n_possible_baks: 0,
+        denied: false,
+        probe_error: None,
+        provision_kind: DiskProvisionKind::Plain,
+        partitions: None,
+        partition_table: None,
+        partition_table_error: None,
+        lce: None,
+    };
+
+    let mut snapshot = crate::media_identity::MediaIdentitySnapshot::default();
+    snapshot.hardware.logical_sector_size = Some(4096);
+    snapshot.hardware.total_sectors = Some(row.size / 4096);
+    snapshot.protocol.provision_kind = Some(DiskProvisionKind::Plain);
+    snapshot.protocol.device_id = row.device_id.clone();
+    snapshot.protocol.onlyid = row.onlyid.clone();
+    row.identity_pin = Some(crate::media_identity::MediaIdentityPin::new(
+        snapshot,
+        &[0u8; 512],
+    ));
+    let mut state = AppState::new();
+    state.replace_devices(vec![row]);
+    assert_eq!(state.begin_provision_for_selected_device(), Ok(7));
+    state.provision_mut().scheme_selected = 1;
+    state.provision_begin_selected();
+    state.provision_enter_form_workspace();
+    let draft = state.provision_native_geometry_readonly_plan().unwrap();
+    assert_eq!(draft.source_kind, DiskProvisionKind::Plain);
+    assert_eq!(draft.target_kind, ProvisionKind::Mode1);
+    assert!(!draft.lce_is_source_verified);
+    assert_eq!(draft.lce_lba, Some(draft.total_sectors - 1));
+    assert!(!draft.partitions.is_empty());
+    state.provision_set_planning();
+    state.provision_finish_native_geometry_readonly_plan(Ok(draft));
+    assert_eq!(state.provision().stage, ProvisionStage::Review);
+    assert!(state.provision().native_geometry_review.is_some());
+    assert!(state.provision().prepared.is_none());
+    for action in [TuiAction::Activate, TuiAction::Export] {
+        super::provision::dispatch_provision(&mut state, action, 20).unwrap();
+        assert_eq!(state.provision().stage, ProvisionStage::Review);
+        assert!(state.provision_take_for_write().is_none());
+    }
 }
