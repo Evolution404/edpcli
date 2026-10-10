@@ -93,6 +93,105 @@ fn native_edpb_evidence_virtual_wal_restore_and_fresh_readback() {
         Some(&identity),
     )
     .expect("native OS block evidence backup");
+    // A new v5 file is authored only by the HIL-only writer from the exact
+    // verified native evidence. It cannot upgrade the original v4 file,
+    // and no production restore path accepts this container for writing.
+    let v4_reader = edpcli::edpb::VerifiedBackupReader::open(&report.path).unwrap();
+    let v4 = &v4_reader.verified().manifest;
+    assert_eq!(v4.schema, "edpb.manifest.v4");
+    let native_protocol = v4_reader.read_raw_protocol().unwrap();
+    let v5_capture = edpcli::edpb::MetadataCapture {
+        core: edpcli::edpb::CoreCapture {
+            snapshot_id: format!("{}-hil-v5", v4.snapshot.snapshot_id),
+            created_epoch: v4.snapshot.created_epoch,
+            disk_number: v4.observation.disk_number,
+            vid: v4.device.vid.clone(),
+            pid: v4.device.pid.clone(),
+            device_id: v4.device.device_id.clone(),
+            onlyid: v4.device.onlyid.clone(),
+            total_sectors: v4.geometry.total_sectors,
+            logical_sector_size: sector,
+            edpcli_version: env!("CARGO_PKG_VERSION").into(),
+            device_state: v4.snapshot.device_state.clone(),
+            lba0_12: &native_protocol,
+        },
+        partitions: v4.partitions.clone(),
+        regions: v4
+            .regions
+            .iter()
+            .filter(|region| region.id != edpcli::edpb::PROTOCOL_REGION_ID)
+            .cloned()
+            .collect(),
+        extents: v4
+            .extents
+            .iter()
+            .filter(|extent| extent.id != edpcli::edpb::RAW_PROTOCOL_EXTENT_ID)
+            .cloned()
+            .collect(),
+        artifacts: v4
+            .artifacts
+            .iter()
+            .filter(|a| a.id != edpcli::edpb::RAW_PROTOCOL_ARTIFACT_ID)
+            .map(|a| edpcli::edpb::ArtifactInput {
+                id: a.id.clone(),
+                kind: a.kind.clone(),
+                media_type: a.media_type.clone(),
+                source_extent_ids: a.source_extent_ids.clone(),
+                derivation: a.derivation.clone(),
+                restore_policy: a.restore_policy,
+                completeness: a.completeness,
+                data: v4_reader.read_artifact(&a.id).unwrap().to_vec(),
+            })
+            .collect(),
+        notes: vec!["HIL-only v5 metadata; no real-device restore grant".into()],
+    };
+    let v5_path = scratch.join("native-v5-hil.edpb");
+    edpcli::edpb::write_native_restorable_metadata_for_hil(&v5_path, &v5_capture)
+        .expect("separately validated HIL-only v5 authoring");
+    let v5_reader = edpcli::edpb::VerifiedBackupReader::open(&v5_path).unwrap();
+    assert_eq!(v5_reader.verified().manifest.schema, "edpb.manifest.v5");
+    assert!(v5_reader
+        .verified()
+        .manifest
+        .artifacts
+        .iter()
+        .all(|a| a.kind == "raw_sectors"
+            && a.restore_policy == edpcli::edpb::RestorePolicy::Restorable));
+    for artifact in &v4.artifacts {
+        assert_eq!(
+            v4_reader.read_artifact(&artifact.id).unwrap(),
+            v5_reader.read_artifact(&artifact.id).unwrap(),
+            "v5 HIL evidence bytes must exactly match verified v4: {}",
+            artifact.id
+        );
+    }
+    assert!(plan_native_restore_readonly(&v5_path, &identity, geometry).is_err());
+    assert!(
+        edpcli::application::evidence::native_restore_preview::plan_native_restore_v5_readonly(
+            &report.path,
+            &identity,
+            geometry
+        )
+        .is_err(),
+        "v4 must never satisfy the v5 restorable-metadata contract"
+    );
+    let v4_plan = plan_native_restore_readonly(&report.path, &identity, geometry).unwrap();
+    let v5_plan =
+        edpcli::application::evidence::native_restore_preview::plan_native_restore_v5_readonly(
+            &v5_path, &identity, geometry,
+        )
+        .expect("verified v5 native metadata-only read-only preview");
+    assert_eq!(
+        v5_plan.proposed_lbas_in_write_order,
+        v4_plan.proposed_lbas_in_write_order
+    );
+    assert_eq!(v5_plan.proposed_write_sha256, v4_plan.proposed_write_sha256);
+    println!(
+        "[A03] PASS {sector}B v5 HIL-only metadata/hash/native write-plan digest readback; no production write grant"
+    );
+    drop(v5_reader);
+    drop(v4_reader);
+
     let preview = plan_native_restore_readonly(&report.path, &identity, geometry).unwrap();
     let restore = materialize_native_restore_evidence_for_hil(&report.path, &identity, geometry)
         .expect("verified raw native evidence only");
@@ -169,6 +268,7 @@ fn native_edpb_evidence_virtual_wal_restore_and_fresh_readback() {
     assert_eq!(fresh.read_block_fresh(0).unwrap(), unchanged_lba0);
     drop(fresh);
     std::fs::remove_file(&report.path).unwrap();
+    std::fs::remove_file(&v5_path).unwrap();
     std::fs::remove_file(&mutate_wal).unwrap();
     std::fs::remove_file(&restore_wal).unwrap();
     std::fs::remove_dir(&scratch).unwrap();
