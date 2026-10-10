@@ -1871,6 +1871,81 @@ mod tests {
     }
 
     #[test]
+    fn plain_exact_preserve_requires_same_geometry_and_untouched_source_blocks() {
+        use crate::filesystem::{FilesystemKind, NativeFilesystemWrite, NativeVirtualDiskPlan};
+        use crate::provision::RegionDisposition;
+
+        for sector in [512u32, 1024, 2048, 4096] {
+            let total = 536_870_912 / u64::from(sector);
+            let source = SourcePartition {
+                id: SourcePartitionId::PlainMbr { slot: 0 },
+                label: "普通分区P1".to_owned(),
+                role: None,
+                start_lba: 2048,
+                sector_count: total - 2048,
+                sector_bytes: sector,
+                filesystem: Some(FilesystemKind::ExFat),
+                physically_encrypted: false,
+            };
+            let target = NativePreviewPartition {
+                role: None,
+                start_lba: 2048,
+                sector_count: total - 2048,
+                filesystem: Some(FilesystemKind::ExFat),
+                formatted: false,
+                physically_encrypted: false,
+                disposition: Some(RegionDisposition::PreserveVerified),
+                password_disposition: None,
+            };
+            let plan = NativeVirtualDiskPlan {
+                sector_bytes: sector,
+                total_sectors: total,
+                writes: vec![NativeFilesystemWrite {
+                    relative_lba: 0,
+                    data: vec![0; sector as usize],
+                }],
+            };
+            let impact = project_native_impact(
+                vec![source.clone()],
+                std::slice::from_ref(&target),
+                &plan,
+            )
+            .unwrap();
+            assert_eq!(impact.source_retained, ["普通分区P1"], "sector={sector}");
+            assert!(impact.source_discarded.is_empty());
+            assert!(impact.target_formatted.is_empty());
+
+            let mut overlapping = plan.clone();
+            overlapping.writes.insert(
+                0,
+                NativeFilesystemWrite {
+                    relative_lba: 2048,
+                    data: vec![0; sector as usize],
+                },
+            );
+            assert!(
+                project_native_impact(vec![source.clone()], &[target.clone()], &overlapping)
+                    .is_err(),
+                "sector={sector}: preserved user bytes cannot be in the write set"
+            );
+
+            let mut changed_geometry = target.clone();
+            changed_geometry.sector_count -= 1;
+            assert!(
+                project_native_impact(vec![source.clone()], &[changed_geometry], &plan).is_err(),
+                "sector={sector}: changed size cannot claim preservation"
+            );
+
+            let mut formatted = target.clone();
+            formatted.formatted = true;
+            formatted.disposition = Some(RegionDisposition::Rebuild);
+            let impact = project_native_impact(vec![source], &[formatted], &plan).unwrap();
+            assert_eq!(impact.source_discarded, ["普通分区P1"]);
+            assert_eq!(impact.target_formatted, ["普通分区P1"]);
+        }
+    }
+
+    #[test]
     fn native_four_sector_sizes_cover_100_destructive_source_target_plans_offline() {
         // Planning-level matrix, not OS HIL: no physical or virtual block device
         // was opened. Each target is an explicit rebuild, not a Preserve claim.
