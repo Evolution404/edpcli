@@ -232,13 +232,21 @@ pub fn prefill_for_target_mode(
     });
     let encrypt = if matches!(mode, OfficialPartitionMode::IntranetExtranetDualPartition) {
         None
+    } else if let Some(old) = compatible_encrypt_old {
+        source_capacity(Some(old))?
     } else {
-        source_capacity(compatible_encrypt_old)?.or(Some(CapacityInput::from_quick_native(
-            1024,
-            QuickCapacityUnit::MiB,
-            CapacitySource::SystemDefault,
-            logical_bytes,
-        )?))
+        // A default 1024MiB encrypted area is too large for a 512MiB test
+        // disk (and some real small media). Only NEW areas may be fitted to
+        // the available native geometry. Never resize an existing area.
+        let available = usable_end_lba
+            .checked_sub(boot_end.max(first))
+            .ok_or("device too small for the boot partition")?;
+        let default_sectors = (1024u64 * 1024 * 1024).div_ceil(sector_size);
+        let proposed = default_sectors.min(available / 2);
+        if proposed == 0 {
+            return Err("device has no space for encrypted partition".into());
+        }
+        Some(exact(proposed, CapacitySource::SystemDefault)?)
     };
     let encrypt_start = if encrypt.is_none() {
         None

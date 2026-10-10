@@ -2910,6 +2910,49 @@ fn native_4kn_aes3_edpf_source_record_matches_real_u391_wrap_profile() {
     assert!(parse_existing_provision_native(&corrupted, &did, 16_777_216).is_err());
 }
 
+#[test]
+fn compact_native_media_fits_new_default_encrypted_partition_without_resizing_source() {
+    for sector_bytes in [512u32, 1024, 2048, 4096] {
+        let total = 536_870_912 / u64::from(sector_bytes);
+        for mode in [
+            OfficialPartitionMode::DefaultThreePartition,
+            OfficialPartitionMode::BootShareCombined,
+        ] {
+            let plan = prefill_for_target_mode(None, mode, total - 64, u64::from(sector_bytes))
+                .unwrap_or_else(|e| panic!("new {sector_bytes}B {mode:?}: {e}"));
+            let parts = plan.target_partitions(u64::from(sector_bytes)).unwrap();
+            assert!(parts.iter().any(|part| part.role == PartitionRole::Encrypt));
+            assert!(parts
+                .iter()
+                .all(|part| part.start_lba + part.sector_count <= total - 64));
+            let source = ExistingProvisionProfile {
+                source_mode: mode,
+                partitions: parts
+                    .into_iter()
+                    .map(|p| ExistingPartition {
+                        role: p.role,
+                        partition_type: p.partition_type,
+                        start_lba: p.start_lba,
+                        sector_count: p.sector_count,
+                        physically_encrypted: p.physically_encrypted,
+                        filesystem: p.filesystem,
+                    })
+                    .collect(),
+            };
+            let again =
+                prefill_for_target_mode(Some(&source), mode, total - 64, u64::from(sector_bytes))
+                    .unwrap();
+            assert_eq!(
+                again.encrypt.unwrap().sectors(),
+                source
+                    .partition(PartitionRole::Encrypt)
+                    .unwrap()
+                    .sector_count
+            );
+        }
+    }
+}
+
 /// Domain planning permits all five source kinds to request all five targets.
 /// These are *geometry* plans, not credential/format/physical-write grants.
 #[test]
